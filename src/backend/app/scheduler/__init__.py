@@ -12,17 +12,17 @@ def init_scheduler():
     try:
         scheduler = BackgroundScheduler()
         
-        # Add job for news fetching every 3 hours
+        # Add job for news fetching using interval from settings
         scheduler.add_job(
             fetch_and_process_news,
-            IntervalTrigger(hours=3),  # Changed from minutes to hours
+            IntervalTrigger(hours=settings.NEWS_FETCH_INTERVAL_HOURS),
             id="fetch_news",
             replace_existing=True
         )
         
         # Start the scheduler
         scheduler.start()
-        logger.info("Started background scheduler - fetching news every 3 hours")
+        logger.info(f"Started background scheduler - fetching news every {settings.NEWS_FETCH_INTERVAL_HOURS} hours")
         
         return scheduler
     except Exception as e:
