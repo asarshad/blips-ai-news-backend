@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 import logging
 from datetime import datetime, timedelta
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,11 @@ class NewsFetcher:
     def __init__(self, db: Session):
         self.db = db
         self.rss_feeds = settings.RSS_FEEDS
+        self.user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Safari/605.1.15",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
+        ]
 
     def fetch_latest_articles(self) -> List[Dict[str, Any]]:
         """Fetch latest articles from RSS feeds"""
@@ -22,6 +28,7 @@ class NewsFetcher:
         
         for feed_url in self.rss_feeds:
             try:
+                logger.info(f"Fetching feed: {feed_url}")
                 feed = feedparser.parse(feed_url)
                 
                 for entry in feed.entries[:10]:  # Get top 10 from each feed
@@ -38,37 +45,51 @@ class NewsFetcher:
                         "published_date": self._parse_date(entry)
                     }
                     
-                    articles.append(article_data)
+                    # Only add articles that have content
+                    if article_data["content"]:
+                        articles.append(article_data)
+                        logger.info(f"Added article: {article_data['title']}")
+                    else:
+                        logger.warning(f"Skipped article with no content: {article_data['title']}")
             except Exception as e:
                 logger.error(f"Error fetching feed {feed_url}: {str(e)}")
                 
+        logger.info(f"Total articles fetched: {len(articles)}")
         return articles
     
     def _extract_article_content(self, url: str) -> str:
         """Extract article content from URL"""
         try:
-            response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            # Rotate user agents to avoid blocking
+            headers = {"User-Agent": random.choice(self.user_agents)}
+            
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Remove script and style elements
-            for script in soup(["script", "style"]):
-                script.extract()
+            # Remove script, style, nav, and other non-content elements
+            for element in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'form', 'iframe']):
+                element.extract()
             
-            # Extract article content - this is site-specific and might need adjustments
+            # Try different content extraction methods
             article_content = ""
             
-            # Try common article container classes/ids
-            article_tags = soup.select("article, .article, #article, .post-content, .entry-content")
+            # 1. Look for common article containers
+            article_tags = soup.select("article, .article, #article, .post-content, .entry-content, .content, .post, .story")
             
             if article_tags:
-                article_content = article_tags[0].get_text(strip=True)
+                # Get the largest content block
+                largest_tag = max(article_tags, key=lambda tag: len(tag.get_text()))
+                paragraphs = largest_tag.find_all('p')
+                article_content = " ".join([p.get_text(strip=True) for p in paragraphs if len(p.get_text(strip=True)) > 50])
             else:
-                # Fallback to main paragraphs
+                # 2. Fallback to main paragraphs
                 paragraphs = soup.find_all('p')
-                article_content = " ".join([p.get_text(strip=True) for p in paragraphs])
+                article_content = " ".join([p.get_text(strip=True) for p in paragraphs if len(p.get_text(strip=True)) > 50])
             
-            # Limit to reasonable size
-            return article_content[:10000]
+            # Limit to reasonable size for GPT processing
+            return article_content[:8000] if article_content else ""
         except Exception as e:
             logger.error(f"Error extracting content from {url}: {str(e)}")
             return ""

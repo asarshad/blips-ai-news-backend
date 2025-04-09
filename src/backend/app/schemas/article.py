@@ -1,41 +1,37 @@
 
-from pydantic import BaseModel
 from typing import List, Optional
+from pydantic import BaseModel
 from datetime import datetime
 
-class TagBase(BaseModel):
+from app.schemas.conversation import Conversation
+
+class Tag(BaseModel):
     name: str
 
-class Tag(TagBase):
-    id: int
-    
     class Config:
         orm_mode = True
 
-class ArticleBase(BaseModel):
+class TagCount(BaseModel):
+    name: str
+    count: int
+
+class Article(BaseModel):
+    id: int
     title: str
     source_url: str
-    content: str
     summary: str
     image_url: Optional[str] = None
-
-class ArticleCreate(ArticleBase):
-    pass
-
-class Article(ArticleBase):
-    id: int
     created_at: datetime
-    tags: List[str] = []
-    
+    tags: List[Tag] = []
+
     class Config:
         orm_mode = True
 
 class ArticleWithConversation(Article):
-    conversations: List['ConversationOut'] = []
-    
+    conversations: List[Conversation] = []
+
     class Config:
         orm_mode = True
 
-# To avoid circular import
-from app.schemas.conversation import ConversationOut
-ArticleWithConversation.update_forward_refs()
+class ArticleList(BaseModel):
+    articles: List[Article]

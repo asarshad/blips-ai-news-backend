@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     MAX_MESSAGES_PER_ARTICLE: int = int(os.getenv("MAX_MESSAGES_PER_ARTICLE", "3"))
     
     # Scheduler settings
-    NEWS_FETCH_INTERVAL_MINUTES: int = int(os.getenv("NEWS_FETCH_INTERVAL_MINUTES", "30"))
+    NEWS_FETCH_INTERVAL_HOURS: int = int(os.getenv("NEWS_FETCH_INTERVAL_HOURS", "3"))
     
     # Cache settings
     ARTICLE_CACHE_COUNT: int = int(os.getenv("ARTICLE_CACHE_COUNT", "5"))
