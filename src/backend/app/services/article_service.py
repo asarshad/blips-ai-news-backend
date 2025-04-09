@@ -1,8 +1,8 @@
 
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
-from app.models.article import Article
-from typing import List, Dict, Any
+from sqlalchemy import desc, func
+from app.models.article import Article, Tag
+from typing import List, Dict, Any, Optional
 import redis
 import json
 from app.config import settings
@@ -16,7 +16,7 @@ class ArticleService:
         self.redis = redis_client
         self.cache_count = settings.ARTICLE_CACHE_COUNT
     
-    def get_next_article(self, current_id: int = None) -> Article:
+    def get_next_article(self, current_id: int = None) -> Optional[Article]:
         """Get next article after current_id, or the most recent if current_id is None"""
         try:
             if current_id:
@@ -38,7 +38,7 @@ class ArticleService:
             logger.error(f"Error getting next article: {str(e)}")
             return None
     
-    def get_article_by_id(self, article_id: int) -> Article:
+    def get_article_by_id(self, article_id: int) -> Optional[Article]:
         """Get article by ID with conversations"""
         try:
             article = self.db.query(Article).filter(Article.id == article_id).first()
@@ -46,6 +46,28 @@ class ArticleService:
         except Exception as e:
             logger.error(f"Error getting article by ID: {str(e)}")
             return None
+    
+    def get_articles_by_tag(self, tag_name: str, limit: int = 10) -> List[Article]:
+        """Get articles by tag"""
+        try:
+            tag = self.db.query(Tag).filter(Tag.name == tag_name).first()
+            if tag:
+                return tag.articles[:limit]
+            return []
+        except Exception as e:
+            logger.error(f"Error getting articles by tag: {str(e)}")
+            return []
+    
+    def get_recent_articles(self, limit: int = 5) -> List[Article]:
+        """Get most recent articles"""
+        try:
+            articles = self.db.query(Article).order_by(
+                desc(Article.created_at)
+            ).limit(limit).all()
+            return articles
+        except Exception as e:
+            logger.error(f"Error getting recent articles: {str(e)}")
+            return []
     
     def cache_articles(self) -> bool:
         """Cache the most recent articles for quick access"""
@@ -78,6 +100,7 @@ class ArticleService:
                 json.dumps(cached_articles)
             )
             
+            logger.info(f"Cached {len(cached_articles)} articles in Redis")
             return True
         
         except Exception as e:
@@ -100,4 +123,25 @@ class ArticleService:
             
         except Exception as e:
             logger.error(f"Error getting cached articles: {str(e)}")
+            return []
+    
+    def get_popular_tags(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get most popular tags with article counts"""
+        try:
+            # Get tags and their counts
+            tag_counts = self.db.query(
+                Tag.name, 
+                func.count(Article.id).label('count')
+            ).join(
+                Tag.articles
+            ).group_by(
+                Tag.name
+            ).order_by(
+                desc('count')
+            ).limit(limit).all()
+            
+            return [{"name": tag.name, "count": count} for tag, count in tag_counts]
+            
+        except Exception as e:
+            logger.error(f"Error getting popular tags: {str(e)}")
             return []
