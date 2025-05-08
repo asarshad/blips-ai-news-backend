@@ -6,8 +6,9 @@ from datetime import datetime
 class Tag(BaseModel):
     name: str
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True
+    }
 
 class TagCount(BaseModel):
     name: str
@@ -27,15 +28,17 @@ class Article(ArticleBase):
     created_at: datetime
     tags: List[Tag] = []
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True
+    }
 
 # Forward reference for conversations to avoid circular imports
 class ArticleWithConversation(Article):
     conversations: List["ConversationOut"] = []
 
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True
+    }
 
 class ArticleList(BaseModel):
     articles: List[Article]
