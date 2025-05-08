@@ -14,9 +14,9 @@ class ConversationOut(ConversationBase):
     id: int
     article_id: int
     timestamp: datetime
-    
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True
+    }
 
 class Conversation(ConversationOut):
     """Alias for ConversationOut to make imports more intuitive"""

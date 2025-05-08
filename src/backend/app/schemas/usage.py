@@ -15,8 +15,9 @@ class Usage(UsageBase):
     id: int
     timestamp: datetime
     
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True
+    }
 
 class UsageStats(BaseModel):
     remaining_daily_messages: int
