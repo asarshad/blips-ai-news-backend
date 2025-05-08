@@ -3,7 +3,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
 
-from app.schemas.conversation import Conversation
+from app.schemas.conversation import ConversationOut
 
 class Tag(BaseModel):
     name: str
@@ -28,7 +28,7 @@ class Article(BaseModel):
         orm_mode = True
 
 class ArticleWithConversation(Article):
-    conversations: List[Conversation] = []
+    conversations: List[ConversationOut] = []
 
     class Config:
         orm_mode = True
