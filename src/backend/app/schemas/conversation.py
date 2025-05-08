@@ -18,6 +18,10 @@ class ConversationOut(ConversationBase):
     class Config:
         orm_mode = True
 
+class Conversation(ConversationOut):
+    """Alias for ConversationOut to make imports more intuitive"""
+    pass
+
 class ConversationHistory(BaseModel):
     article_id: int
     conversations: List[ConversationOut]
