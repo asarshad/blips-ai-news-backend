@@ -2,6 +2,7 @@
 import feedparser
 import requests
 from bs4 import BeautifulSoup
+import html
 from app.config import settings
 from app.models.article import Article, Tag
 from sqlalchemy.orm import Session
@@ -11,6 +12,18 @@ from datetime import datetime, timedelta
 import random
 
 logger = logging.getLogger(__name__)
+
+
+def decode_html_entities(text: str) -> str:
+    """Decode HTML entities in text"""
+    if not text:
+        return text
+    # First pass: decode HTML entities like &#8217;
+    decoded = html.unescape(text)
+    # Second pass: use BeautifulSoup to handle any remaining entities
+    soup = BeautifulSoup(decoded, 'html.parser')
+    return soup.get_text()
+
 
 class NewsFetcher:
     def __init__(self, db: Session):
@@ -36,9 +49,12 @@ class NewsFetcher:
                     existing = self.db.query(Article).filter(Article.source_url == entry.link).first()
                     if existing:
                         continue
-                        
+                    
+                    # Decode HTML entities in title
+                    title = decode_html_entities(entry.title)
+                    
                     article_data = {
-                        "title": entry.title,
+                        "title": title,
                         "source_url": entry.link,
                         "content": self._extract_article_content(entry.link),
                         "image_url": self._extract_image_url(entry),
@@ -97,25 +113,86 @@ class NewsFetcher:
     def _extract_image_url(self, entry) -> str:
         """Extract featured image URL from feed entry"""
         # Check if media content is available
-        if 'media_content' in entry and entry.media_content:
+        if hasattr(entry, 'media_content') and entry.media_content:
             for media in entry.media_content:
                 if 'url' in media:
                     return media['url']
         
-        # Check for enclosures (common in RSS)
-        if 'enclosures' in entry and entry.enclosures:
-            for enclosure in entry.enclosures:
-                if 'url' in enclosure and enclosure.type and enclosure.type.startswith('image'):
-                    return enclosure.url
+        # Check media_thumbnail (common in many feeds)
+        if hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
+            for thumb in entry.media_thumbnail:
+                if 'url' in thumb:
+                    return thumb['url']
         
-        # Check for image in summary
-        if 'summary' in entry:
+        # Check for enclosures (common in RSS)
+        if hasattr(entry, 'enclosures') and entry.enclosures:
+            for enclosure in entry.enclosures:
+                if hasattr(enclosure, 'url') and hasattr(enclosure, 'type'):
+                    if enclosure.type and enclosure.type.startswith('image'):
+                        return enclosure.url
+        
+        # Check for image in summary/content
+        if hasattr(entry, 'summary') and entry.summary:
             soup = BeautifulSoup(entry.summary, 'html.parser')
             img_tag = soup.find('img')
             if img_tag and img_tag.get('src'):
                 return img_tag['src']
         
+        # Check content field
+        if hasattr(entry, 'content') and entry.content:
+            for content_item in entry.content:
+                if 'value' in content_item:
+                    soup = BeautifulSoup(content_item['value'], 'html.parser')
+                    img_tag = soup.find('img')
+                    if img_tag and img_tag.get('src'):
+                        return img_tag['src']
+        
+        # Try to fetch from the article page itself
+        try:
+            image_url = self._fetch_og_image(entry.link)
+            if image_url:
+                return image_url
+        except Exception as e:
+            logger.debug(f"Could not fetch OG image: {e}")
+        
         return ""
+    
+    def _fetch_og_image(self, url: str) -> str:
+        """Fetch Open Graph image from article page"""
+        try:
+            headers = {"User-Agent": random.choice(self.user_agents)}
+            response = requests.get(url, headers=headers, timeout=5)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Try Open Graph image
+            og_image = soup.find('meta', property='og:image')
+            if og_image and og_image.get('content'):
+                return og_image['content']
+            
+            # Try Twitter card image
+            twitter_image = soup.find('meta', attrs={'name': 'twitter:image'})
+            if twitter_image and twitter_image.get('content'):
+                return twitter_image['content']
+            
+            # Try the first large image in the article
+            article = soup.find('article') or soup.find('main') or soup
+            images = article.find_all('img')
+            for img in images:
+                src = img.get('src') or img.get('data-src')
+                if src and not any(x in src.lower() for x in ['logo', 'icon', 'avatar', 'button', 'pixel']):
+                    # Prefer larger images
+                    width = img.get('width')
+                    if width and int(width) >= 200:
+                        return src
+                    elif not width:
+                        return src  # No width specified, take the first one
+            
+            return ""
+        except Exception as e:
+            logger.debug(f"Error fetching OG image from {url}: {e}")
+            return ""
     
     def _parse_date(self, entry) -> datetime:
         """Parse and normalize publication date"""
