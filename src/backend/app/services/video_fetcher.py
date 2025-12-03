@@ -1,7 +1,7 @@
 
 import feedparser
 import requests
-from app.config import settings
+from app.core.config import settings
 from app.models.video import Video
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any

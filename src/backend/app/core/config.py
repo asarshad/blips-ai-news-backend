@@ -1,3 +1,7 @@
+"""
+Application configuration using Pydantic settings.
+All environment variables and configuration options are defined here.
+"""
 
 from pydantic_settings import BaseSettings
 from pydantic import Field
@@ -6,6 +10,7 @@ from dotenv import load_dotenv
 from typing import List
 
 load_dotenv()
+
 
 class Settings(BaseSettings):
     # API Settings
@@ -44,5 +49,6 @@ class Settings(BaseSettings):
         env_file = ".env"
         case_sensitive = True
         extra = "ignore"
+
 
 settings = Settings()

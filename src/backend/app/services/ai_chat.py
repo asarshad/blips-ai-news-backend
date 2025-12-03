@@ -1,6 +1,6 @@
 
 import openai
-from app.config import settings
+from app.core.config import settings
 from app.models.article import Article
 from app.models.conversation import Conversation
 from sqlalchemy.orm import Session

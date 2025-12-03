@@ -9,7 +9,7 @@ from app.models.article import Article
 from app.schemas.conversation import ConversationCreate
 from app.services.ai_chat import AiChatService
 from app.services.quota_manager import QuotaManager
-from app.config import settings
+from app.core.config import settings
 
 # Redis connection
 redis_client = redis.from_url(settings.REDIS_URL)

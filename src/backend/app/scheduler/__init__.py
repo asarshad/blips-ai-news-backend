@@ -2,7 +2,7 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from app.scheduler.tasks import fetch_and_process_news
-from app.config import settings
+from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)

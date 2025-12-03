@@ -5,7 +5,7 @@ from app.services.article_service import ArticleService
 from app.services.video_fetcher import VideoFetcher
 from app.db.base import SessionLocal
 import redis
-from app.config import settings
+from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
