@@ -8,8 +8,8 @@ from app.db.base import Base
 article_tag = Table(
     'article_tag',
     Base.metadata,
-    Column('article_id', Integer, ForeignKey('articles.id')),
-    Column('tag', String),
+    Column('article_id', Integer, ForeignKey('articles.id'), primary_key=True),
+    Column('tag_id', Integer, ForeignKey('tags.id'), primary_key=True),
 )
 
 class Article(Base):
@@ -17,7 +17,7 @@ class Article(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, index=True)
-    source_url = Column(String)
+    source_url = Column(String, unique=True, index=True)
     content = Column(Text)
     summary = Column(Text)
     image_url = Column(String, nullable=True)
