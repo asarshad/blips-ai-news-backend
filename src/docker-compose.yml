@@ -8,10 +8,11 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+    env_file:
+      - ./backend/.env
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/blips
       - REDIS_URL=redis://redis:6379/0
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
     depends_on:
       - db
       - redis

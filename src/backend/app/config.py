@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     
     # Scheduler settings
     NEWS_FETCH_INTERVAL_HOURS: int = int(os.getenv("NEWS_FETCH_INTERVAL_HOURS", "3"))
+    NEWS_FETCH_INTERVAL_MINUTES: int = int(os.getenv("NEWS_FETCH_INTERVAL_MINUTES", "30"))
     
     # Cache settings
     ARTICLE_CACHE_COUNT: int = int(os.getenv("ARTICLE_CACHE_COUNT", "5"))
@@ -42,5 +43,6 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"
 
 settings = Settings()
