@@ -8,7 +8,7 @@ from app.db.base import get_db
 from app.models.article import Article
 from app.schemas.article import Article as ArticleSchema, ArticleWithConversation, ArticleList, TagCount
 from app.services.article_service import ArticleService
-from app.config import settings
+from app.core.config import settings
 
 # Redis connection
 redis_client = redis.from_url(settings.REDIS_URL)

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import datetime, timedelta
 from app.models.usage import Usage
-from app.config import settings
+from app.core.config import settings
 import redis
 import json
 import logging

@@ -7,7 +7,7 @@ import redis
 from app.db.base import get_db
 from app.schemas.usage import UsageStats
 from app.services.quota_manager import QuotaManager
-from app.config import settings
+from app.core.config import settings
 
 # Redis connection
 redis_client = redis.from_url(settings.REDIS_URL)

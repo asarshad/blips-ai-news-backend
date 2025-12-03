@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 import redis
 import time
 
-from app.config import settings
+from app.core.config import settings
 from app.api import api_router
 from app.db.base import Base, engine
 from app.scheduler import init_scheduler

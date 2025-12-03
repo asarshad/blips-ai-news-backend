@@ -5,7 +5,7 @@ from app.models.article import Article, Tag
 from typing import List, Dict, Any, Optional
 import redis
 import json
-from app.config import settings
+from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
