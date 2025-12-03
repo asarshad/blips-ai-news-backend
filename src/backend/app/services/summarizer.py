@@ -78,6 +78,53 @@ class ArticleSummarizer:
                 "tags": []
             }
     
+    def regenerate_summaries(self, limit: int = 10) -> int:
+        """Regenerate summaries for articles that have placeholder summaries"""
+        try:
+            # Find articles with placeholder summaries
+            articles = self.db.query(Article).filter(
+                Article.summary == "Summary unavailable at the moment."
+            ).limit(limit).all()
+            
+            updated_count = 0
+            for article in articles:
+                try:
+                    article_data = {
+                        "title": article.title,
+                        "content": article.content or "",
+                        "source_url": article.source_url,
+                        "image_url": article.image_url
+                    }
+                    
+                    processed = self.summarize_article(article_data)
+                    
+                    # Only update if we got a real summary
+                    if processed["summary"] and processed["summary"] != "Summary unavailable at the moment.":
+                        article.summary = processed["summary"]
+                        
+                        # Add new tags
+                        for tag_name in processed.get("tags", []):
+                            tag = self.db.query(Tag).filter(Tag.name == tag_name).first()
+                            if not tag:
+                                tag = Tag(name=tag_name)
+                                self.db.add(tag)
+                            if tag not in article.tags:
+                                article.tags.append(tag)
+                        
+                        self.db.commit()
+                        updated_count += 1
+                        logger.info(f"Updated summary for: {article.title[:50]}")
+                        
+                except Exception as e:
+                    logger.error(f"Error regenerating summary for article {article.id}: {str(e)}")
+                    continue
+            
+            return updated_count
+            
+        except Exception as e:
+            logger.error(f"Error in regenerate_summaries: {str(e)}")
+            return 0
+    
     def save_article(self, article_data: Dict[str, Any]) -> Article:
         """Save processed article to database"""
         try:
