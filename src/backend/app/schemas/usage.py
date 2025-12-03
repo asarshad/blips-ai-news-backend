@@ -1,6 +1,7 @@
 
 from pydantic import BaseModel
 from datetime import datetime
+from typing import Optional
 
 class UsageBase(BaseModel):
     device_id: str
@@ -21,4 +22,4 @@ class Usage(UsageBase):
 
 class UsageStats(BaseModel):
     remaining_daily_messages: int
-    remaining_article_messages: int = None
+    remaining_article_messages: Optional[int] = None

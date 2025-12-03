@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 
-from app.db.base import get_db
+from app.core.dependencies import get_db
 from app.models.conversation import Conversation
 from app.schemas.conversation import ConversationOut, ConversationHistory
 from app.models.article import Article

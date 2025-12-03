@@ -4,15 +4,11 @@ from sqlalchemy.orm import Session
 from typing import Optional
 import redis
 
-from app.db.base import get_db
+from app.core.dependencies import get_db, get_redis
 from app.models.article import Article
 from app.schemas.conversation import ConversationCreate
 from app.services.ai_chat import AiChatService
 from app.services.quota_manager import QuotaManager
-from app.core.config import settings
-
-# Redis connection
-redis_client = redis.from_url(settings.REDIS_URL)
 
 router = APIRouter()
 
@@ -21,6 +17,7 @@ def get_ai_response(
     request: Request,
     message: ConversationCreate,
     db: Session = Depends(get_db),
+    redis_client: redis.Redis = Depends(get_redis),
     user_agent: Optional[str] = Header(None)
 ):
     # Get client IP for usage tracking

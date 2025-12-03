@@ -4,19 +4,17 @@ from app.services.summarizer import ArticleSummarizer
 from app.services.article_service import ArticleService
 from app.services.video_fetcher import VideoFetcher
 from app.db.base import SessionLocal
-import redis
-from app.core.config import settings
-import logging
+from app.core.dependencies import get_redis
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
-# Redis connection
-redis_client = redis.from_url(settings.REDIS_URL)
 
 def fetch_and_process_news():
     """Scheduled task to fetch, summarize, and store new articles"""
     logger.info("Starting scheduled news fetch and processing")
     
+    redis_client = get_redis()
     db = SessionLocal()
     try:
         # Fetch new articles
