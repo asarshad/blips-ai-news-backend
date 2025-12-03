@@ -4,13 +4,9 @@ from sqlalchemy.orm import Session
 from typing import Optional
 import redis
 
-from app.db.base import get_db
+from app.core.dependencies import get_db, get_redis
 from app.schemas.usage import UsageStats
 from app.services.quota_manager import QuotaManager
-from app.core.config import settings
-
-# Redis connection
-redis_client = redis.from_url(settings.REDIS_URL)
 
 router = APIRouter()
 
@@ -19,6 +15,7 @@ def get_usage_stats(
     request: Request,
     article_id: Optional[int] = None,
     db: Session = Depends(get_db),
+    redis_client: redis.Redis = Depends(get_redis),
     user_agent: Optional[str] = Header(None)
 ):
     # Get client IP for tracking

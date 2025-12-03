@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List
 
-from app.db.base import get_db
+from app.core.dependencies import get_db
 from app.models.video import Video
 from app.schemas.video import Video as VideoSchema, VideoList, VideoCreate
 from app.services.video_service import VideoService

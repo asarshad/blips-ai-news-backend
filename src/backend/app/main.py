@@ -1,28 +1,22 @@
 
-import logging
+import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import redis
-import time
 
 from app.core.config import settings
+from app.core.logging import setup_logging, get_logger
+from app.core.dependencies import get_redis
 from app.api import api_router
 from app.db.base import Base, engine
 from app.scheduler import init_scheduler
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+setup_logging()
+logger = get_logger(__name__)
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
-
-# Initialize Redis
-redis_client = redis.from_url(settings.REDIS_URL)
 
 # Create FastAPI app
 app = FastAPI(
@@ -72,6 +66,7 @@ def startup_event():
     
     # Check Redis connection
     try:
+        redis_client = get_redis()
         redis_client.ping()
         logger.info("Redis connection successful")
     except Exception as e:

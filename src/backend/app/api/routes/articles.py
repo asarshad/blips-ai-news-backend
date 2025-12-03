@@ -4,21 +4,18 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 import redis
 
-from app.db.base import get_db
+from app.core.dependencies import get_db, get_redis
 from app.models.article import Article
 from app.schemas.article import Article as ArticleSchema, ArticleWithConversation, ArticleList, TagCount
 from app.services.article_service import ArticleService
-from app.core.config import settings
-
-# Redis connection
-redis_client = redis.from_url(settings.REDIS_URL)
 
 router = APIRouter()
 
 @router.get("/next", response_model=ArticleSchema)
 def get_next_article(
     current_id: Optional[int] = Query(None, description="Current article ID"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    redis_client: redis.Redis = Depends(get_redis)
 ):
     """
     Get the next article after the current one, or the most recent if no current_id is provided.
@@ -34,7 +31,8 @@ def get_next_article(
 
 @router.get("/cache", response_model=List[ArticleSchema])
 def get_cached_articles(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    redis_client: redis.Redis = Depends(get_redis)
 ):
     """
     Get the pre-cached articles for quick access.
@@ -51,7 +49,8 @@ def get_cached_articles(
 @router.get("/recent", response_model=ArticleList)
 def get_recent_articles(
     limit: int = Query(5, description="Number of articles to return"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    redis_client: redis.Redis = Depends(get_redis)
 ):
     """
     Get the most recent articles.
@@ -69,7 +68,8 @@ def get_recent_articles(
 def get_articles_by_tag(
     tag_name: str,
     limit: int = Query(10, description="Number of articles to return"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    redis_client: redis.Redis = Depends(get_redis)
 ):
     """
     Get articles by tag.
@@ -86,7 +86,8 @@ def get_articles_by_tag(
 @router.get("/tags", response_model=List[TagCount])
 def get_popular_tags(
     limit: int = Query(10, description="Number of tags to return"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    redis_client: redis.Redis = Depends(get_redis)
 ):
     """
     Get the most popular tags with article counts.
@@ -143,7 +144,8 @@ def regenerate_summaries(
 @router.get("/{article_id}", response_model=ArticleWithConversation)
 def get_article(
     article_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    redis_client: redis.Redis = Depends(get_redis)
 ):
     """
     Get a specific article by ID, including its conversation history.
