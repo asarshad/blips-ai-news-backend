@@ -1,68 +1,37 @@
 
-import openai
-from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.article import Article
 from app.repositories.article_repo import ArticleRepository
-from typing import Dict, Any
+from app.integrations.openai_client import OpenAIClient
+from typing import Dict, Any, Optional
 
-openai.api_key = settings.OPENAI_API_KEY
 logger = get_logger(__name__)
 
 class ArticleSummarizer:
-    def __init__(self, article_repo: ArticleRepository):
+    def __init__(
+        self, 
+        article_repo: ArticleRepository,
+        openai_client: Optional[OpenAIClient] = None
+    ):
         self.article_repo = article_repo
+        self.openai_client = openai_client or OpenAIClient()
     
     def summarize_article(self, article_data: Dict[str, Any]) -> Dict[str, Any]:
         """Generate summary and tags for an article using GPT"""
         try:
-            # Create prompt for GPT
             title = article_data.get("title", "")
             content = article_data.get("content", "")
             
-            prompt = f"""
-            Article Title: {title}
-            
-            Article Content: {content[:4000]}
-            
-            Task 1: Write a concise summary of this tech article in 3-4 sentences.
-            
-            Task 2: Generate 5-7 relevant tags for this article, separated by commas.
-            
-            Format your response as:
-            SUMMARY: [your summary here]
-            TAGS: [tag1, tag2, tag3, etc.]
-            """
-            
-            response = openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are a tech journalist assistant that creates concise, informative summaries of tech news articles."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=500
-            )
-            
-            # Extract summary and tags from response
-            result = response.choices[0].message.content
-            
-            summary = ""
-            tags = []
-            
-            for line in result.split('\n'):
-                if line.startswith('SUMMARY:'):
-                    summary = line[8:].strip()
-                elif line.startswith('TAGS:'):
-                    tags_text = line[5:].strip()
-                    tags = [tag.strip() for tag in tags_text.split(',')]
+            # Use OpenAI client for summarization
+            result = self.openai_client.summarize_article(title, content)
             
             return {
                 "title": title,
                 "source_url": article_data.get("source_url", ""),
                 "content": content,
-                "summary": summary,
+                "summary": result.summary,
                 "image_url": article_data.get("image_url", ""),
-                "tags": tags
+                "tags": result.tags
             }
             
         except Exception as e:
