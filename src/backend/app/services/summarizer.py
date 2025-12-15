@@ -1,17 +1,17 @@
 
 import openai
 from app.core.config import settings
-from app.models.article import Article, Tag
-from sqlalchemy.orm import Session
-from typing import List, Dict, Any
-import logging
+from app.core.logging import get_logger
+from app.models.article import Article
+from app.repositories.article_repo import ArticleRepository
+from typing import Dict, Any
 
 openai.api_key = settings.OPENAI_API_KEY
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class ArticleSummarizer:
-    def __init__(self, db: Session):
-        self.db = db
+    def __init__(self, article_repo: ArticleRepository):
+        self.article_repo = article_repo
     
     def summarize_article(self, article_data: Dict[str, Any]) -> Dict[str, Any]:
         """Generate summary and tags for an article using GPT"""
@@ -82,9 +82,7 @@ class ArticleSummarizer:
         """Regenerate summaries for articles that have placeholder summaries"""
         try:
             # Find articles with placeholder summaries
-            articles = self.db.query(Article).filter(
-                Article.summary == "Summary unavailable at the moment."
-            ).limit(limit).all()
+            articles = self.article_repo.get_with_placeholder_summary(limit)
             
             updated_count = 0
             for article in articles:
@@ -100,18 +98,11 @@ class ArticleSummarizer:
                     
                     # Only update if we got a real summary
                     if processed["summary"] and processed["summary"] != "Summary unavailable at the moment.":
-                        article.summary = processed["summary"]
-                        
-                        # Add new tags
-                        for tag_name in processed.get("tags", []):
-                            tag = self.db.query(Tag).filter(Tag.name == tag_name).first()
-                            if not tag:
-                                tag = Tag(name=tag_name)
-                                self.db.add(tag)
-                            if tag not in article.tags:
-                                article.tags.append(tag)
-                        
-                        self.db.commit()
+                        self.article_repo.update_summary_and_tags(
+                            article.id,
+                            processed["summary"],
+                            processed.get("tags", [])
+                        )
                         updated_count += 1
                         logger.info(f"Updated summary for: {article.title[:50]}")
                         
@@ -128,33 +119,7 @@ class ArticleSummarizer:
     def save_article(self, article_data: Dict[str, Any]) -> Article:
         """Save processed article to database"""
         try:
-            # Create new article
-            article = Article(
-                title=article_data["title"],
-                source_url=article_data["source_url"],
-                content=article_data["content"],
-                summary=article_data["summary"],
-                image_url=article_data["image_url"]
-            )
-            
-            self.db.add(article)
-            self.db.commit()
-            self.db.refresh(article)
-            
-            # Add tags
-            for tag_name in article_data["tags"]:
-                # Check if tag exists
-                tag = self.db.query(Tag).filter(Tag.name == tag_name).first()
-                if not tag:
-                    tag = Tag(name=tag_name)
-                    self.db.add(tag)
-                
-                article.tags.append(tag)
-            
-            self.db.commit()
-            return article
-            
+            return self.article_repo.create_with_tags(article_data)
         except Exception as e:
-            self.db.rollback()
             logger.error(f"Error saving article: {str(e)}")
             raise

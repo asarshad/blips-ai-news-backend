@@ -4,14 +4,13 @@ import requests
 from bs4 import BeautifulSoup
 import html
 from app.core.config import settings
-from app.models.article import Article, Tag
-from sqlalchemy.orm import Session
+from app.core.logging import get_logger
+from app.repositories.article_repo import ArticleRepository
 from typing import List, Dict, Any
-import logging
 from datetime import datetime, timedelta
 import random
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def decode_html_entities(text: str) -> str:
@@ -26,8 +25,8 @@ def decode_html_entities(text: str) -> str:
 
 
 class NewsFetcher:
-    def __init__(self, db: Session):
-        self.db = db
+    def __init__(self, article_repo: ArticleRepository):
+        self.article_repo = article_repo
         self.rss_feeds = settings.RSS_FEEDS
         self.user_agents = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -46,7 +45,7 @@ class NewsFetcher:
                 
                 for entry in feed.entries[:10]:  # Get top 10 from each feed
                     # Check if article already exists in database
-                    existing = self.db.query(Article).filter(Article.source_url == entry.link).first()
+                    existing = self.article_repo.get_by_url(entry.link)
                     if existing:
                         continue
                     

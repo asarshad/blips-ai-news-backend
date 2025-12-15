@@ -1,26 +1,25 @@
 
-from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
 from typing import List, Optional
-import logging
 import random
 from itertools import zip_longest
 
+from app.core.logging import get_logger
 from app.models.video import Video
 from app.schemas.video import VideoCreate
+from app.repositories.video_repo import VideoRepository
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class VideoService:
-    def __init__(self, db: Session):
-        self.db = db
+    def __init__(self, video_repo: VideoRepository):
+        self.video_repo = video_repo
 
     def get_recent_videos(self, limit: int = 10) -> List[Video]:
         """Get most recent videos, interleaved by source for variety"""
         try:
             # Get all recent videos
-            all_videos = self.db.query(Video).order_by(desc(Video.created_at)).limit(limit * 2).all()
+            all_videos = self.video_repo.get_recent(limit * 2)
             
             # Group videos by source (channel)
             videos_by_source = {}
@@ -48,7 +47,7 @@ class VideoService:
     def get_video_by_id(self, video_id: int) -> Optional[Video]:
         """Get a video by ID"""
         try:
-            return self.db.query(Video).filter(Video.id == video_id).first()
+            return self.video_repo.get_by_id(video_id)
         except Exception as e:
             logger.error(f"Error getting video by id: {str(e)}")
             return None
@@ -57,19 +56,15 @@ class VideoService:
         """Create a new video"""
         try:
             db_video = Video(**video_data.model_dump())
-            self.db.add(db_video)
-            self.db.commit()
-            self.db.refresh(db_video)
-            return db_video
+            return self.video_repo.create(db_video)
         except Exception as e:
             logger.error(f"Error creating video: {str(e)}")
-            self.db.rollback()
             raise
 
     def video_exists(self, video_url: str) -> bool:
         """Check if a video already exists by URL"""
         try:
-            return self.db.query(Video).filter(Video.video_url == video_url).first() is not None
+            return self.video_repo.get_by_url(video_url) is not None
         except Exception as e:
             logger.error(f"Error checking video existence: {str(e)}")
             return False
