@@ -1,9 +1,29 @@
 """
-Core module - configuration, dependencies, exceptions, and logging.
+Core module - configuration, exceptions, and logging.
+
+Note: Dependencies (get_db, get_redis) are not exported here to avoid
+circular imports. Import them directly from app.core.dependencies.
 """
 
 from app.core.config import settings
 from app.core.logging import get_logger, setup_logging
-from app.core.dependencies import get_db, get_redis
+from app.core.exceptions import (
+    AppException,
+    NotFoundError,
+    QuotaExceededError,
+    ExternalServiceError,
+    ValidationError,
+)
 
-__all__ = ["settings", "get_logger", "setup_logging", "get_db", "get_redis"]
+__all__ = [
+    "settings",
+    "get_logger",
+    "setup_logging",
+    "AppException",
+    "NotFoundError",
+    "QuotaExceededError",
+    "ExternalServiceError",
+    "ValidationError",
+]
+
+

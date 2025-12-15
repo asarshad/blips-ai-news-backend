@@ -2,13 +2,13 @@
 import feedparser
 import requests
 from app.core.config import settings
+from app.core.logging import get_logger
 from app.models.video import Video
-from sqlalchemy.orm import Session
+from app.repositories.video_repo import VideoRepository
 from typing import List, Dict, Any
-import logging
 import re
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # YouTube channel RSS feeds for tech content
 YOUTUBE_CHANNEL_FEEDS = [
@@ -23,8 +23,8 @@ YOUTUBE_CHANNEL_FEEDS = [
 
 
 class VideoFetcher:
-    def __init__(self, db: Session):
-        self.db = db
+    def __init__(self, video_repo: VideoRepository):
+        self.video_repo = video_repo
         self.feeds = YOUTUBE_CHANNEL_FEEDS
 
     def fetch_latest_videos(self) -> List[Dict[str, Any]]:
@@ -49,7 +49,7 @@ class VideoFetcher:
                         continue
                     
                     # Check if video already exists
-                    existing = self.db.query(Video).filter(Video.video_url == video_url).first()
+                    existing = self.video_repo.get_by_url(video_url)
                     if existing:
                         logger.debug(f"Video already exists: {video_url}")
                         continue
@@ -137,7 +137,7 @@ class VideoFetcher:
         for video_data in videos:
             try:
                 # Double-check it doesn't exist
-                existing = self.db.query(Video).filter(Video.video_url == video_data["video_url"]).first()
+                existing = self.video_repo.get_by_url(video_data["video_url"])
                 if existing:
                     continue
                 
@@ -151,13 +151,11 @@ class VideoFetcher:
                     category=video_data.get("category", "Technology"),
                 )
                 
-                self.db.add(video)
-                self.db.commit()
+                self.video_repo.create(video)
                 saved_count += 1
                 logger.info(f"Saved video: {video.title}")
                 
             except Exception as e:
                 logger.error(f"Error saving video {video_data.get('title')}: {str(e)}")
-                self.db.rollback()
         
         return saved_count

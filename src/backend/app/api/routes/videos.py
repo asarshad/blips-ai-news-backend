@@ -8,6 +8,7 @@ from app.models.video import Video
 from app.schemas.video import Video as VideoSchema, VideoList, VideoCreate
 from app.services.video_service import VideoService
 from app.services.video_fetcher import VideoFetcher
+from app.repositories.video_repo import VideoRepository
 
 router = APIRouter()
 
@@ -20,7 +21,8 @@ def get_recent_videos(
     """
     Get the most recent videos.
     """
-    video_service = VideoService(db)
+    video_repo = VideoRepository(db)
+    video_service = VideoService(video_repo)
     videos = video_service.get_recent_videos(limit)
     return {"videos": videos}
 
@@ -31,7 +33,8 @@ def fetch_videos(db: Session = Depends(get_db)):
     Manually trigger fetching of new videos from YouTube channels.
     """
     try:
-        video_fetcher = VideoFetcher(db)
+        video_repo = VideoRepository(db)
+        video_fetcher = VideoFetcher(video_repo)
         videos = video_fetcher.fetch_latest_videos()
         
         if not videos:
@@ -51,7 +54,8 @@ def get_video(
     """
     Get a specific video by ID.
     """
-    video_service = VideoService(db)
+    video_repo = VideoRepository(db)
+    video_service = VideoService(video_repo)
     video = video_service.get_video_by_id(video_id)
     
     if not video:
@@ -68,7 +72,8 @@ def create_video(
     """
     Create a new video entry.
     """
-    video_service = VideoService(db)
+    video_repo = VideoRepository(db)
+    video_service = VideoService(video_repo)
     
     # Check if video already exists
     if video_service.video_exists(video.video_url):

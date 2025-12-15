@@ -1,18 +1,17 @@
 
-from sqlalchemy.orm import Session
-from sqlalchemy import func
 from datetime import datetime, timedelta
 from app.models.usage import Usage
 from app.core.config import settings
+from app.core.logging import get_logger
+from app.repositories.usage_repo import UsageRepository
 import redis
 import json
-import logging
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class QuotaManager:
-    def __init__(self, db: Session, redis_client: redis.Redis):
-        self.db = db
+    def __init__(self, usage_repo: UsageRepository, redis_client: redis.Redis):
+        self.usage_repo = usage_repo
         self.redis = redis_client
         self.max_per_day = settings.MAX_MESSAGES_PER_DAY
         self.max_per_article = settings.MAX_MESSAGES_PER_ARTICLE
@@ -29,26 +28,13 @@ class QuotaManager:
                 return quota_data
             
             # Calculate quota from database
-            today = datetime.utcnow().date()
-            tomorrow = today + timedelta(days=1)
-            
-            # Daily usage
-            daily_usage = self.db.query(func.sum(Usage.message_count)).filter(
-                Usage.device_id == device_id,
-                Usage.timestamp >= today,
-                Usage.timestamp < tomorrow
-            ).scalar() or 0
-            
+            daily_usage = self.usage_repo.get_daily_usage(device_id)
             remaining_daily = max(0, self.max_per_day - daily_usage)
             
             # Article specific usage (if applicable)
             remaining_article = None
             if article_id:
-                article_usage = self.db.query(func.sum(Usage.message_count)).filter(
-                    Usage.device_id == device_id,
-                    Usage.article_id == article_id
-                ).scalar() or 0
-                
+                article_usage = self.usage_repo.get_article_usage(device_id, article_id)
                 remaining_article = max(0, self.max_per_article - article_usage)
             
             # Cache the result
@@ -77,21 +63,11 @@ class QuotaManager:
         """Update usage after a successful interaction"""
         try:
             # Create new usage record
-            usage = Usage(
-                device_id=device_id,
-                article_id=article_id,
-                used_tokens=tokens,
-                message_count=1,
-                timestamp=datetime.utcnow()
-            )
-            
-            self.db.add(usage)
-            self.db.commit()
+            self.usage_repo.record_usage(device_id, article_id, tokens)
             
             # Invalidate cache
             cache_key = f"quota:{device_id}"
             self.redis.delete(cache_key)
             
         except Exception as e:
-            self.db.rollback()
             logger.error(f"Error updating usage: {str(e)}")

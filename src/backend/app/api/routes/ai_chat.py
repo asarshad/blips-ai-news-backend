@@ -5,10 +5,12 @@ from typing import Optional
 import redis
 
 from app.core.dependencies import get_db, get_redis
-from app.models.article import Article
 from app.schemas.conversation import ConversationCreate
 from app.services.ai_chat import AiChatService
 from app.services.quota_manager import QuotaManager
+from app.repositories.article_repo import ArticleRepository
+from app.repositories.conversation_repo import ConversationRepository
+from app.repositories.usage_repo import UsageRepository
 
 router = APIRouter()
 
@@ -20,12 +22,17 @@ def get_ai_response(
     redis_client: redis.Redis = Depends(get_redis),
     user_agent: Optional[str] = Header(None)
 ):
+    # Create repositories
+    article_repo = ArticleRepository(db)
+    conversation_repo = ConversationRepository(db)
+    usage_repo = UsageRepository(db)
+    
     # Get client IP for usage tracking
     client_ip = request.client.host
     device_id = f"{client_ip}_{user_agent[:50]}" if user_agent else client_ip
     
     # Check quota
-    quota_manager = QuotaManager(db, redis_client)
+    quota_manager = QuotaManager(usage_repo, redis_client)
     quota = quota_manager.check_quota(device_id, message.article_id)
     
     if quota["remaining_daily_messages"] <= 0:
@@ -35,12 +42,12 @@ def get_ai_response(
         raise HTTPException(status_code=429, detail="Article message quota exceeded")
     
     # Verify article exists
-    article = db.query(Article).filter(Article.id == message.article_id).first()
+    article = article_repo.get_by_id(message.article_id)
     if not article:
         raise HTTPException(status_code=404, detail="Article not found")
     
     # Get AI response
-    ai_service = AiChatService(db)
+    ai_service = AiChatService(article_repo, conversation_repo)
     response = ai_service.get_ai_response(message.article_id, message.message)
     
     if "error" in response:

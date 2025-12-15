@@ -1,34 +1,35 @@
 
 import openai
 from app.core.config import settings
+from app.core.logging import get_logger
 from app.models.article import Article
 from app.models.conversation import Conversation
-from sqlalchemy.orm import Session
-from typing import List, Dict, Any
-import logging
+from app.repositories.article_repo import ArticleRepository
+from app.repositories.conversation_repo import ConversationRepository
+from typing import Dict, Any
 
 openai.api_key = settings.OPENAI_API_KEY
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class AiChatService:
-    def __init__(self, db: Session):
-        self.db = db
+    def __init__(
+        self, 
+        article_repo: ArticleRepository, 
+        conversation_repo: ConversationRepository
+    ):
+        self.article_repo = article_repo
+        self.conversation_repo = conversation_repo
     
     def get_ai_response(self, article_id: int, user_message: str, history_limit: int = 3) -> Dict[str, Any]:
         """Generate AI response to user message with article context"""
         try:
             # Get article
-            article = self.db.query(Article).filter(Article.id == article_id).first()
+            article = self.article_repo.get_by_id(article_id)
             if not article:
                 return {"error": "Article not found"}
             
             # Get recent conversation history
-            history = self.db.query(Conversation).filter(
-                Conversation.article_id == article_id
-            ).order_by(Conversation.timestamp.desc()).limit(history_limit).all()
-            
-            # Reverse to get chronological order
-            history = history[::-1]
+            history = self.conversation_repo.get_recent_by_article(article_id, history_limit)
             
             # Build messages for OpenAI
             messages = [
@@ -80,23 +81,8 @@ class AiChatService:
     def save_conversation(self, article_id: int, user_message: str, ai_response: str) -> Dict[str, Any]:
         """Save user message and AI response to conversation history"""
         try:
-            # Save user message
-            user_conv = Conversation(
-                article_id=article_id,
-                message=user_message,
-                sender="user"
-            )
-            
-            # Save AI response
-            ai_conv = Conversation(
-                article_id=article_id,
-                message=ai_response,
-                sender="ai"
-            )
-            
-            self.db.add(user_conv)
-            self.db.add(ai_conv)
-            self.db.commit()
+            user_conv = self.conversation_repo.add_user_message(article_id, user_message)
+            ai_conv = self.conversation_repo.add_ai_message(article_id, ai_response)
             
             return {
                 "user_id": user_conv.id,
@@ -104,6 +90,5 @@ class AiChatService:
             }
             
         except Exception as e:
-            self.db.rollback()
             logger.error(f"Error saving conversation: {str(e)}")
             raise

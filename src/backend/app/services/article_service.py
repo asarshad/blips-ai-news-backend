@@ -1,18 +1,25 @@
 
-from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
-from app.models.article import Article, Tag
-from typing import List, Dict, Any, Optional
-import redis
-import json
-from app.core.config import settings
-import logging
+"""
+Article service for business logic related to articles.
+"""
 
-logger = logging.getLogger(__name__)
+from typing import List, Dict, Any, Optional
+import json
+import redis
+
+from app.core.config import settings
+from app.core.logging import get_logger
+from app.models.article import Article
+from app.repositories.article_repo import ArticleRepository
+
+logger = get_logger(__name__)
+
 
 class ArticleService:
-    def __init__(self, db: Session, redis_client: redis.Redis):
-        self.db = db
+    """Service for article-related business logic."""
+    
+    def __init__(self, article_repo: ArticleRepository, redis_client: redis.Redis):
+        self.repo = article_repo
         self.redis = redis_client
         self.cache_count = settings.ARTICLE_CACHE_COUNT
     
@@ -20,19 +27,12 @@ class ArticleService:
         """Get next article after current_id, or the most recent if current_id is None"""
         try:
             if current_id:
-                # Get current article to get its timestamp
-                current = self.db.query(Article).filter(Article.id == current_id).first()
-                if current:
-                    # Get next article by created_at
-                    next_article = self.db.query(Article).filter(
-                        Article.created_at < current.created_at
-                    ).order_by(desc(Article.created_at)).first()
-                    
-                    if next_article:
-                        return next_article
+                next_article = self.repo.get_next_after(current_id)
+                if next_article:
+                    return next_article
             
             # If no current_id or no next article, get most recent
-            return self.db.query(Article).order_by(desc(Article.created_at)).first()
+            return self.repo.get_most_recent()
             
         except Exception as e:
             logger.error(f"Error getting next article: {str(e)}")
@@ -41,8 +41,7 @@ class ArticleService:
     def get_article_by_id(self, article_id: int) -> Optional[Article]:
         """Get article by ID with conversations"""
         try:
-            article = self.db.query(Article).filter(Article.id == article_id).first()
-            return article
+            return self.repo.get_by_id(article_id)
         except Exception as e:
             logger.error(f"Error getting article by ID: {str(e)}")
             return None
@@ -50,10 +49,7 @@ class ArticleService:
     def get_articles_by_tag(self, tag_name: str, limit: int = 10) -> List[Article]:
         """Get articles by tag"""
         try:
-            tag = self.db.query(Tag).filter(Tag.name == tag_name).first()
-            if tag:
-                return tag.articles[:limit]
-            return []
+            return self.repo.get_by_tag(tag_name, limit)
         except Exception as e:
             logger.error(f"Error getting articles by tag: {str(e)}")
             return []
@@ -61,10 +57,7 @@ class ArticleService:
     def get_recent_articles(self, limit: int = 5) -> List[Article]:
         """Get most recent articles"""
         try:
-            articles = self.db.query(Article).order_by(
-                desc(Article.created_at)
-            ).limit(limit).all()
-            return articles
+            return self.repo.get_recent(limit)
         except Exception as e:
             logger.error(f"Error getting recent articles: {str(e)}")
             return []
@@ -72,10 +65,7 @@ class ArticleService:
     def cache_articles(self) -> bool:
         """Cache the most recent articles for quick access"""
         try:
-            # Get most recent articles
-            articles = self.db.query(Article).order_by(
-                desc(Article.created_at)
-            ).limit(self.cache_count).all()
+            articles = self.repo.get_recent(self.cache_count)
             
             # Convert to dictionaries for caching
             cached_articles = []
@@ -128,20 +118,7 @@ class ArticleService:
     def get_popular_tags(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get most popular tags with article counts"""
         try:
-            # Get tags and their counts
-            tag_counts = self.db.query(
-                Tag.name, 
-                func.count(Article.id).label('count')
-            ).join(
-                Tag.articles
-            ).group_by(
-                Tag.name
-            ).order_by(
-                desc('count')
-            ).limit(limit).all()
-            
-            return [{"name": tag.name, "count": count} for tag, count in tag_counts]
-            
+            return self.repo.get_popular_tags(limit)
         except Exception as e:
             logger.error(f"Error getting popular tags: {str(e)}")
             return []
