@@ -1,19 +1,17 @@
 
+"""News fetcher service for retrieving articles from RSS feeds."""
+
+from typing import List, Dict, Any, Optional
+
 from app.core.logging import get_logger
 from app.repositories.article_repo import ArticleRepository
 from app.integrations.rss_client import RSSClient, FeedEntry
-from typing import List, Dict, Any, Optional
 
 logger = get_logger(__name__)
 
 
 class NewsFetcher:
-    """
-    Service for fetching news articles from RSS feeds.
-    
-    Uses RSSClient for feed fetching and checks against repository
-    to avoid duplicate articles.
-    """
+    """Service for fetching news articles from RSS feeds."""
     
     def __init__(
         self, 
@@ -31,17 +29,13 @@ class NewsFetcher:
             List of article data dictionaries for new articles only
         """
         articles = []
-        
-        # Fetch all entries from RSS feeds
         feed_entries = self.rss_client.fetch_all_feeds(entries_per_feed=10)
         
         for entry in feed_entries:
-            # Check if article already exists in database
             if self.article_repo.get_by_url(entry.url):
                 logger.debug(f"Article already exists: {entry.title}")
                 continue
             
-            # Convert FeedEntry to article data dict
             article_data = self._entry_to_article_data(entry)
             articles.append(article_data)
             logger.info(f"Added new article: {entry.title}")

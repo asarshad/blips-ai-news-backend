@@ -35,6 +35,40 @@ class ValidationError(AppException):
     pass
 
 
+class ArticleNotFoundError(NotFoundError):
+    """Raised when an article is not found."""
+    
+    def __init__(self, article_id: int):
+        super().__init__(f"Article with id '{article_id}' not found")
+        self.article_id = article_id
+
+
+class VideoNotFoundError(NotFoundError):
+    """Raised when a video is not found."""
+    
+    def __init__(self, video_id: int):
+        super().__init__(f"Video with id '{video_id}' not found")
+        self.video_id = video_id
+
+
+class SummarizationError(ExternalServiceError):
+    """Raised when article summarization fails."""
+    pass
+
+
+class ChatGenerationError(ExternalServiceError):
+    """Raised when AI chat response generation fails."""
+    pass
+
+
+class FeedFetchError(ExternalServiceError):
+    """Raised when RSS/YouTube feed fetching fails."""
+    
+    def __init__(self, feed_url: str, details: str | None = None):
+        super().__init__(f"Failed to fetch feed: {feed_url}", details)
+        self.feed_url = feed_url
+
+
 # HTTP exception factories for consistent error responses
 def not_found_exception(resource: str, identifier: str | int) -> HTTPException:
     """Create a 404 Not Found exception."""
