@@ -13,6 +13,11 @@ from app.core.exceptions import (
     QuotaExceededError,
     ExternalServiceError,
     ValidationError,
+    ArticleNotFoundError,
+    VideoNotFoundError,
+    SummarizationError,
+    ChatGenerationError,
+    FeedFetchError,
 )
 
 __all__ = [
@@ -24,6 +29,10 @@ __all__ = [
     "QuotaExceededError",
     "ExternalServiceError",
     "ValidationError",
+    "ArticleNotFoundError",
+    "VideoNotFoundError",
+    "SummarizationError",
+    "ChatGenerationError",
+    "FeedFetchError",
 ]
-
 

@@ -1,4 +1,6 @@
 
+"""Scheduled tasks for fetching news articles and videos."""
+
 from app.services.news_fetcher import NewsFetcher
 from app.services.summarizer import ArticleSummarizer
 from app.services.article_service import ArticleService
@@ -13,15 +15,14 @@ logger = get_logger(__name__)
 
 
 def fetch_and_process_news():
-    """Scheduled task to fetch, summarize, and store new articles"""
+    """Scheduled task to fetch, summarize, and store new articles."""
     logger.info("Starting scheduled news fetch and processing")
     
     redis_client = get_redis()
     db = SessionLocal()
+    
     try:
-        # Create repositories
         article_repo = ArticleRepository(db)
-        video_repo = VideoRepository(db)
         
         # Fetch new articles
         news_fetcher = NewsFetcher(article_repo)
@@ -31,48 +32,42 @@ def fetch_and_process_news():
             logger.info("No new articles found")
         else:
             logger.info(f"Found {len(articles)} new articles to process")
-            
-            # Summarize and save articles
-            summarizer = ArticleSummarizer(article_repo)
-            
-            for article_data in articles:
-                try:
-                    # Summarize article
-                    processed_article = summarizer.summarize_article(article_data)
-                    
-                    # Save to database
-                    summarizer.save_article(processed_article)
-                    
-                except Exception as e:
-                    logger.error(f"Error processing article {article_data.get('title')}: {str(e)}")
+            _process_articles(db, article_repo, articles)
             
             # Update article cache
             article_service = ArticleService(article_repo, redis_client)
             article_service.cache_articles()
         
-        # Fetch videos
-        fetch_and_process_videos_task(video_repo)
+        # Fetch videos in a separate transaction
+        _fetch_videos(db)
         
         logger.info("Completed news fetch and processing")
         
     except Exception as e:
-        logger.error(f"Error in news fetch and processing task: {str(e)}")
+        logger.error(f"Error in news fetch task: {str(e)}")
+        db.rollback()
     finally:
         db.close()
 
 
-def fetch_and_process_videos_task(video_repo: VideoRepository = None):
-    """Fetch and store new videos from YouTube channels"""
-    logger.info("Starting video fetch")
+def _process_articles(db, article_repo: ArticleRepository, articles: list):
+    """Process and save articles with individual error handling."""
+    summarizer = ArticleSummarizer(article_repo)
     
-    db = None
-    close_db = False
-    if video_repo is None:
-        db = SessionLocal()
-        video_repo = VideoRepository(db)
-        close_db = True
-    
+    for article_data in articles:
+        try:
+            processed_article = summarizer.summarize_article(article_data)
+            summarizer.save_article(processed_article)
+            db.commit()
+        except Exception as e:
+            logger.error(f"Error processing article '{article_data.get('title')}': {str(e)}")
+            db.rollback()
+
+
+def _fetch_videos(db):
+    """Fetch and save videos with separate transaction handling."""
     try:
+        video_repo = VideoRepository(db)
         video_fetcher = VideoFetcher(video_repo)
         videos = video_fetcher.fetch_latest_videos()
         
@@ -85,6 +80,15 @@ def fetch_and_process_videos_task(video_repo: VideoRepository = None):
         
     except Exception as e:
         logger.error(f"Error in video fetch task: {str(e)}")
+        db.rollback()
+
+
+def fetch_and_process_videos():
+    """Standalone task for fetching videos (can be scheduled separately)."""
+    logger.info("Starting video fetch")
+    
+    db = SessionLocal()
+    try:
+        _fetch_videos(db)
     finally:
-        if close_db and db:
-            db.close()
+        db.close()
