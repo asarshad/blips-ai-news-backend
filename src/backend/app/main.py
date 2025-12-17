@@ -1,5 +1,17 @@
+"""
+FastAPI application entry point.
+
+This module configures and creates the FastAPI application with:
+- CORS middleware
+- Request timing middleware  
+- Global exception handling
+- API route registration
+- Background scheduler initialization
+"""
 
 import time
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -10,78 +22,100 @@ from app.core.dependencies import get_redis
 from app.api import api_router
 from app.db.base import Base, engine
 from app.scheduler import init_scheduler
+from app.scheduler.tasks import fetch_and_process_news
 
-# Configure logging
+# Configure logging first
 setup_logging()
 logger = get_logger(__name__)
 
+
+def _create_tables() -> None:
+    """Create database tables if they don't exist."""
+    Base.metadata.create_all(bind=engine)
+
+
+def _check_redis_connection() -> bool:
+    """Verify Redis connection is working."""
+    try:
+        redis_client = get_redis()
+        redis_client.ping()
+        logger.info("Redis connection successful")
+        return True
+    except Exception as e:
+        logger.error(f"Redis connection error: {str(e)}")
+        return False
+
+
+def _start_scheduler() -> None:
+    """Initialize background scheduler and run initial fetch."""
+    scheduler = init_scheduler()
+    if scheduler:
+        # Run initial news fetch immediately
+        fetch_and_process_news()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan handler for startup and shutdown."""
+    # Startup
+    logger.info("Starting up application")
+    _check_redis_connection()
+    _start_scheduler()
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down application")
+
+
 # Create database tables
-Base.metadata.create_all(bind=engine)
+_create_tables()
 
 # Create FastAPI app
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    lifespan=lifespan,
 )
 
-# Add CORS middleware
+# CORS middleware - allow all origins in development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For development only, restrict in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Add request timing middleware
+
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
+    """Add request processing time to response headers."""
     start_time = time.time()
     response = await call_next(request)
-    process_time = time.time() - start_time
-    response.headers["X-Process-Time"] = str(process_time)
+    response.headers["X-Process-Time"] = str(time.time() - start_time)
     return response
 
-# Handle errors globally
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    """Handle uncaught exceptions globally."""
     logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
     return JSONResponse(
         status_code=500,
         content={"detail": "An internal server error occurred"}
     )
 
-# Include API routes
+
+# Register API routes
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
-# Add a health check endpoint
+
 @app.get("/health")
 def health_check():
+    """Health check endpoint for monitoring."""
     return {"status": "healthy"}
 
-# Initialize scheduler on startup
-@app.on_event("startup")
-def startup_event():
-    logger.info("Starting up application")
-    
-    # Check Redis connection
-    try:
-        redis_client = get_redis()
-        redis_client.ping()
-        logger.info("Redis connection successful")
-    except Exception as e:
-        logger.error(f"Redis connection error: {str(e)}")
-    
-    # Start scheduler
-    scheduler = init_scheduler()
-    if scheduler:
-        # Run initial news fetch (not waiting for scheduled time)
-        from app.scheduler.tasks import fetch_and_process_news
-        fetch_and_process_news()
-
-@app.on_event("shutdown")
-def shutdown_event():
-    logger.info("Shutting down application")
 
 if __name__ == "__main__":
     import uvicorn
