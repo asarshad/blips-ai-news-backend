@@ -12,6 +12,13 @@ from app.repositories.video_repo import VideoRepository
 
 router = APIRouter()
 
+# Engagement action weights
+ACTION_WEIGHTS = {
+    "open": 1,
+    "dwell": 2,
+    "share": 3
+}
+
 
 def get_video_repo(db: Session = Depends(get_db)) -> VideoRepository:
     """Factory for VideoRepository."""
@@ -67,3 +74,26 @@ def create_video(
     if video_service.video_exists(video.video_url):
         raise HTTPException(status_code=400, detail="Video already exists")
     return video_service.create_video(video)
+
+
+@router.post("/{video_id}/engage")
+def engage_video(
+    video_id: int,
+    action: str = Query(..., regex="^(open|dwell|share)$"),
+    video_repo: VideoRepository = Depends(get_video_repo)
+):
+    """
+    Track user engagement with a video.
+    
+    Actions:
+    - open: User opened/viewed the video (weight: 1)
+    - dwell: User spent significant time watching (weight: 2)
+    - share: User shared the video (weight: 3)
+    """
+    weight = ACTION_WEIGHTS.get(action, 1)
+    video = video_repo.increment_hot_score(video_id, weight)
+    
+    if not video:
+        raise not_found_exception("Video", video_id)
+    
+    return {"success": True, "video_id": video_id, "action": action, "new_hot_score": video.hot_score}

@@ -122,7 +122,7 @@ class OpenAIClient:
             
             Article Content: {truncated_content}
             
-            Task 1: Write a concise summary of this tech article in 3-4 sentences.
+            Task 1: Write a concise summary of this tech article in exactly 60-65 words. Keep it informative and engaging.
             
             Task 2: Generate 5-7 relevant tags for this article, separated by commas.
             

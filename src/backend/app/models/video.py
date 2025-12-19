@@ -1,5 +1,5 @@
 
-from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy import Column, Integer, String, Text, DateTime, Date, func
 from datetime import datetime
 from app.db.base import Base
 
@@ -16,4 +16,6 @@ class Video(Base):
     source = Column(String, default="YouTube")
     category = Column(String, default="Technology")
     duration_seconds = Column(Integer, nullable=True)
+    hot_score = Column(Integer, default=0, index=True)
+    published_date = Column(Date, default=func.current_date(), index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
