@@ -1,7 +1,7 @@
 
 from typing import List, Optional
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, date
 
 class Tag(BaseModel):
     name: str
@@ -25,7 +25,9 @@ class ArticleCreate(ArticleBase):
 
 class Article(ArticleBase):
     id: int
+    published_date: Optional[date] = None  # Actual publish date from source
     created_at: datetime
+    read_time_minutes: int = 1  # Estimated read time in minutes
     tags: List[Tag] = []
 
     model_config = {

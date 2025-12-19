@@ -92,3 +92,27 @@ class VideoRepository(BaseRepository[Video]):
             self.db.commit()
             self.db.refresh(video)
         return video
+
+    def get_videos_last_n_days(self, days: int = 3) -> List[Video]:
+        """
+        Get videos from the last n days, ordered by published_date desc, then hot_score desc.
+        """
+        from datetime import timedelta
+        cutoff_date = datetime.utcnow().date() - timedelta(days=days - 1)
+        
+        return self.db.query(Video).filter(
+            Video.published_date >= cutoff_date
+        ).order_by(
+            desc(Video.published_date),
+            desc(Video.hot_score),
+            desc(Video.created_at)
+        ).all()
+
+    def increment_hot_score(self, video_id: int, amount: int = 1) -> Optional[Video]:
+        """Increment the hot_score of a video."""
+        video = self.get_by_id(video_id)
+        if video:
+            video.hot_score = (video.hot_score or 0) + amount
+            self.db.commit()
+            self.db.refresh(video)
+        return video

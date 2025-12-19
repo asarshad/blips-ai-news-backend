@@ -13,6 +13,7 @@ class VideoBase(BaseModel):
     source: str = "YouTube"
     category: str = "Technology"
     duration_seconds: Optional[int] = None
+    hot_score: Optional[int] = 0
 
 
 class VideoCreate(VideoBase):

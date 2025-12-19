@@ -1,5 +1,5 @@
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Table
+from sqlalchemy import Column, Integer, String, Text, DateTime, Date, ForeignKey, Table, func
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.db.base import Base
@@ -21,7 +21,10 @@ class Article(Base):
     content = Column(Text)
     summary = Column(Text)
     image_url = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    published_date = Column(Date, index=True)  # Actual publish date from RSS feed
+    created_at = Column(DateTime, default=datetime.utcnow)  # When we added it to DB
+    hot_score = Column(Integer, default=0, index=True)  # Higher score = more prominent
+    read_time_minutes = Column(Integer, default=1)  # Estimated read time based on content length
     
     # Relationships
     conversations = relationship("Conversation", back_populates="article", cascade="all, delete-orphan")

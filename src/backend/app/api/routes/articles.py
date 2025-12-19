@@ -139,3 +139,35 @@ def get_article(
         return article_service.get_article_by_id(article_id)
     except ArticleNotFoundError:
         raise not_found_exception("Article", article_id)
+
+
+# Action weights for hot score
+ACTION_WEIGHTS = {
+    "open": 1,
+    "dwell": 2,
+    "share": 3
+}
+
+
+@router.post("/{article_id}/engage", response_model=dict)
+def engage_article(
+    article_id: int,
+    action: str = Query(..., description="Action type: open, dwell, or share"),
+    article_repo: ArticleRepository = Depends(get_article_repo)
+):
+    """
+    Record an engagement action on an article.
+    Increments hot_score by action weight.
+    Actions: open (1), dwell (2), share (3)
+    """
+    if action not in ACTION_WEIGHTS:
+        raise HTTPException(status_code=400, detail=f"Invalid action. Must be one of: {list(ACTION_WEIGHTS.keys())}")
+    
+    article = article_repo.get_by_id(article_id)
+    if not article:
+        raise not_found_exception("Article", article_id)
+    
+    weight = ACTION_WEIGHTS[action]
+    article_repo.increment_hot_score(article_id, weight)
+    
+    return {"success": True, "action": action, "weight": weight}

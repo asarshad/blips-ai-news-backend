@@ -14,6 +14,7 @@ from app.repositories.article_repo import ArticleRepository
 logger = get_logger(__name__)
 
 CACHE_TTL_SECONDS = 60 * 15  # 15 minutes
+CACHE_DAYS = 3  # Cache articles from the last 3 days
 
 
 class ArticleService:
@@ -22,7 +23,6 @@ class ArticleService:
     def __init__(self, article_repo: ArticleRepository, redis_client: redis.Redis):
         self.repo = article_repo
         self.redis = redis_client
-        self.cache_count = settings.ARTICLE_CACHE_COUNT
     
     def get_next_article(self, current_id: Optional[int] = None) -> Optional[Article]:
         """
@@ -69,13 +69,14 @@ class ArticleService:
     
     def cache_articles(self) -> bool:
         """
-        Cache the most recent articles in Redis for quick access.
+        Cache articles from the last 3 days in Redis.
+        Ordered by date descending, then by hot_score within each date.
         
         Returns:
             True if caching succeeded, False otherwise
         """
         try:
-            articles = self.repo.get_recent(self.cache_count)
+            articles = self.repo.get_articles_last_n_days(CACHE_DAYS)
             
             cached_articles = [
                 {
@@ -84,8 +85,11 @@ class ArticleService:
                     "summary": article.summary,
                     "source_url": article.source_url,
                     "image_url": article.image_url,
+                    "published_date": article.published_date.isoformat() if article.published_date else None,
                     "created_at": article.created_at.isoformat(),
-                    "tags": [tag.name for tag in article.tags]
+                    "hot_score": article.hot_score or 0,
+                    "read_time_minutes": article.read_time_minutes or 1,
+                    "tags": [{"name": tag.name} for tag in article.tags]  # Format as Tag objects
                 }
                 for article in articles
             ]

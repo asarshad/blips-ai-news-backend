@@ -4,7 +4,8 @@ Article repository for database operations on articles.
 
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, cast, Date
+from datetime import datetime, timedelta
 
 from app.repositories.base import BaseRepository
 from app.models.article import Article, Tag
@@ -42,10 +43,26 @@ class ArticleRepository(BaseRepository[Article]):
         return self.db.query(Article).order_by(desc(Article.created_at)).first()
     
     def get_recent(self, limit: int = 10) -> List[Article]:
-        """Get most recent articles."""
+        """Get most recent articles by published date."""
         return self.db.query(Article).order_by(
+            desc(Article.published_date),
             desc(Article.created_at)
         ).limit(limit).all()
+    
+    def get_articles_last_n_days(self, days: int = 3) -> List[Article]:
+        """
+        Get articles from the last N days (including today).
+        Ordered by published_date descending, then by hot_score descending within each date.
+        """
+        cutoff_date = (datetime.utcnow() - timedelta(days=days)).date()
+        
+        return self.db.query(Article).filter(
+            Article.published_date >= cutoff_date
+        ).order_by(
+            desc(Article.published_date),             # Group by published date descending
+            desc(Article.hot_score),                  # Then by hot_score within date
+            desc(Article.created_at)                  # Then by exact time as tiebreaker
+        ).all()
     
     def get_by_tag(self, tag_name: str, limit: int = 10) -> List[Article]:
         """Get articles by tag name."""
@@ -84,6 +101,15 @@ class ArticleRepository(BaseRepository[Article]):
             self.db.refresh(article)
         return article
     
+    def increment_hot_score(self, article_id: int, amount: int = 1) -> Optional[Article]:
+        """Increment article hot_score by given amount."""
+        article = self.get_by_id(article_id)
+        if article:
+            article.hot_score = (article.hot_score or 0) + amount
+            self.db.commit()
+            self.db.refresh(article)
+        return article
+    
     def add_tag(self, article: Article, tag_name: str) -> None:
         """Add a tag to an article, creating the tag if it doesn't exist."""
         tag = self.db.query(Tag).filter(Tag.name == tag_name).first()
@@ -116,13 +142,29 @@ class ArticleRepository(BaseRepository[Article]):
     
     def create_with_tags(self, article_data: Dict[str, Any]) -> Article:
         """Create an article with its associated tags."""
+        from datetime import date
+        
+        # Extract published_date as a Date (not DateTime)
+        published_date = article_data.get("published_date")
+        if published_date and hasattr(published_date, 'date'):
+            published_date = published_date.date()  # Convert datetime to date
+        elif not published_date:
+            published_date = date.today()  # Default to today if not provided
+        
+        # Calculate read time from content (avg 200 words per minute)
+        content = article_data.get("content", "")
+        word_count = len(content.split()) if content else 0
+        read_time_minutes = max(1, round(word_count / 200))
+        
         # Create new article
         article = Article(
             title=article_data["title"],
             source_url=article_data["source_url"],
-            content=article_data.get("content", ""),
+            content=content,
             summary=article_data.get("summary", ""),
-            image_url=article_data.get("image_url", "")
+            image_url=article_data.get("image_url", ""),
+            published_date=published_date,
+            read_time_minutes=read_time_minutes
         )
         
         self.db.add(article)
