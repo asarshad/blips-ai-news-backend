@@ -46,6 +46,145 @@
 - **python-dotenv** - Environment variables
 - **Pydantic** - Data validation
 - **loguru** - Logging
+- **Pillow (PIL)** - Image processing for proxy endpoint
+
+---
+
+## Infrastructure Setup
+
+### Running the Backend
+
+**This project runs via Docker Compose - NO virtual environment (venv) needed.**
+
+#### Prerequisites
+- Docker Desktop installed
+- Docker Compose v2+
+
+#### Quick Start
+
+```bash
+# Navigate to source directory
+cd /path/to/blips-ai-news-backend/src
+
+# Start all services (API, PostgreSQL, Redis)
+docker compose up -d
+
+# View logs
+docker compose logs -f api
+
+# Stop services
+docker compose down
+```
+
+#### Container Services
+
+1. **api** - FastAPI application (port 8000)
+   - Built from `Dockerfile` with Python 3.11-slim
+   - Runs with Gunicorn + 4 Uvicorn workers
+   - Auto-restarts on failure
+   - Health checks every 30s
+
+2. **db** - PostgreSQL 14 (port 5432)
+   - Persistent volume for data
+   - Database: `blips_news`
+
+3. **redis** - Redis 7 (port 6379)
+   - In-memory cache
+   - No persistence (cache only)
+
+#### Making Code Changes
+
+```bash
+# After modifying Python code or requirements.txt
+cd /path/to/blips-ai-news-backend/src
+
+# Rebuild and restart API container
+docker compose build api
+docker compose up -d
+
+# Verify changes
+docker compose logs -f api
+```
+
+#### Database Migrations
+
+```bash
+# Run migrations inside container
+docker compose exec api alembic upgrade head
+
+# Create new migration
+docker compose exec api alembic revision --autogenerate -m "description"
+```
+
+#### Verifying Installation
+
+```bash
+# Check container status
+docker compose ps
+
+# Test API health
+curl http://localhost:8000/api/v1/health
+
+# Verify Pillow (for image proxy)
+docker compose exec api python -c "from PIL import Image; print(f'Pillow: {Image.__version__}')"
+```
+
+#### Environment Variables
+
+Create `.env` file in `src/` directory:
+
+```bash
+# Database
+DATABASE_URL=postgresql://postgres:postgres@db:5432/blips_news
+
+# Redis
+REDIS_URL=redis://redis:6379/0
+
+# OpenAI
+OPENAI_API_KEY=sk-...
+
+# App Settings
+CORS_ORIGINS=["http://localhost:5173","capacitor://localhost","ionic://localhost"]
+```
+
+#### Troubleshooting
+
+**Container won't start:**
+```bash
+docker compose logs api
+docker compose restart api
+```
+
+**Database connection errors:**
+```bash
+# Check if db container is healthy
+docker compose ps
+# Wait 10s for PostgreSQL to fully initialize
+```
+
+**Port conflicts:**
+```bash
+# Check what's using port 8000
+lsof -i :8000
+# Edit docker-compose.yml to use different port
+```
+
+### Development Without Docker (Optional)
+
+**Not recommended** - If you need local Python environment for IDE autocomplete:
+
+```bash
+# Create venv (for IDE only, not for running)
+python3 -m venv venv
+source venv/bin/activate
+pip install -r backend/requirements.txt
+
+# Run locally (requires PostgreSQL + Redis running)
+cd backend
+uvicorn app.main:app --reload
+```
+
+**Note:** The venv is in `.gitignore` and should NOT be committed.
 
 ---
 
