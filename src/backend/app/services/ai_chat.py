@@ -4,7 +4,7 @@ from app.core.exceptions import ArticleNotFoundError, ChatGenerationError
 from app.repositories.article_repo import ArticleRepository
 from app.repositories.conversation_repo import ConversationRepository
 from app.integrations.openai_client import OpenAIClient
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 logger = get_logger(__name__)
 
@@ -22,7 +22,13 @@ class AiChatService:
         self.conversation_repo = conversation_repo
         self.openai_client = openai_client or OpenAIClient()
     
-    def get_ai_response(self, article_id: int, user_message: str, history_limit: int = 3) -> Dict[str, Any]:
+    def get_ai_response(
+        self, 
+        article_id: int, 
+        user_message: str, 
+        history_limit: int = 3,
+        history: Optional[List[Dict[str, str]]] = None
+    ) -> Dict[str, Any]:
         """
         Generate AI response to user message with article context.
         
@@ -30,6 +36,7 @@ class AiChatService:
             article_id: ID of the article being discussed
             user_message: User's message/question
             history_limit: Number of recent messages to include for context
+            history: Optional list of previous messages. If provided, DB lookup is skipped.
             
         Returns:
             Dict with 'response' and 'tokens_used' keys
@@ -45,13 +52,16 @@ class AiChatService:
         
         try:
             # Get recent conversation history
-            history = self.conversation_repo.get_recent_by_article(article_id, history_limit)
-            
-            # Convert history to format expected by OpenAI client
-            history_dicts = [
-                {"sender": msg.sender, "message": msg.message}
-                for msg in history
-            ]
+            if history is not None:
+                history_dicts = history
+            else:
+                db_history = self.conversation_repo.get_recent_by_article(article_id, history_limit)
+                
+                # Convert history to format expected by OpenAI client
+                history_dicts = [
+                    {"sender": msg.sender, "message": msg.message}
+                    for msg in db_history
+                ]
             
             # Use OpenAI client for chat
             response = self.openai_client.generate_chat_response(
