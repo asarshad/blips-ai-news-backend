@@ -58,19 +58,30 @@ def get_ai_response(
     # Get AI response
     ai_service = AiChatService(article_repo, conversation_repo)
     
+    # Prepare history if provided
+    history_dicts = None
+    if message.history is not None:
+        history_dicts = [
+            {
+                "sender": "user" if msg.role == "user" else "ai",
+                "message": msg.content
+            }
+            for msg in message.history
+        ]
+    
     try:
-        response = ai_service.get_ai_response(message.article_id, message.message)
+        response = ai_service.get_ai_response(
+            message.article_id, 
+            message.message,
+            history=history_dicts
+        )
     except ArticleNotFoundError:
         raise not_found_exception("Article", message.article_id)
     except ChatGenerationError as e:
         raise internal_error_exception(f"Failed to generate response: {e.message}")
     
-    # Save conversation
-    ai_service.save_conversation(
-        message.article_id,
-        message.message,
-        response["response"]
-    )
+    # Note: Conversation persistence removed per requirement to keep chats device-only.
+    # Usage tracking is still preserved below.
     
     # Update usage
     quota_manager.update_usage(

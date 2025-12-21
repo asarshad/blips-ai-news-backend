@@ -1,7 +1,11 @@
 
 from pydantic import BaseModel
 from datetime import datetime
-from typing import List
+from typing import List, Optional
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
 
 class ConversationBase(BaseModel):
     message: str
@@ -9,6 +13,7 @@ class ConversationBase(BaseModel):
 
 class ConversationCreate(ConversationBase):
     article_id: int
+    history: Optional[List[ChatMessage]] = None
 
 class ConversationOut(ConversationBase):
     id: int

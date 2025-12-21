@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 from app.core.logging import get_logger
 from app.repositories.video_repo import VideoRepository
 from app.integrations.youtube_client import YouTubeClient, VideoEntry
+from app.integrations.openai_client import OpenAIClient
 
 logger = get_logger(__name__)
 
@@ -16,10 +17,12 @@ class VideoFetcher:
     def __init__(
         self, 
         video_repo: VideoRepository,
-        youtube_client: Optional[YouTubeClient] = None
+        youtube_client: Optional[YouTubeClient] = None,
+        openai_client: Optional[OpenAIClient] = None
     ):
         self.video_repo = video_repo
         self.youtube_client = youtube_client or YouTubeClient()
+        self.openai_client = openai_client or OpenAIClient()
 
     def fetch_latest_videos(self) -> List[Dict[str, Any]]:
         """
@@ -36,12 +39,69 @@ class VideoFetcher:
                 logger.debug(f"Video already exists: {entry.title}")
                 continue
             
+            # Summarize video description using AI
+            try:
+                summary = self.openai_client.summarize_video(entry.title, entry.summary)
+                entry.summary = summary
+            except Exception as e:
+                logger.error(f"Failed to summarize video {entry.title}: {e}")
+                # Fallback to original summary (already handled in summarize_video but good to be safe)
+            
             video_data = self._entry_to_video_data(entry)
             videos.append(video_data)
             logger.info(f"Added new video: {entry.title}")
         
         logger.info(f"Total new videos: {len(videos)}")
         return videos
+    
+    def regenerate_summaries(self, limit: int = 50) -> int:
+        """
+        Regenerate summaries for existing videos using AI.
+        
+        Args:
+            limit: Maximum number of videos to process
+            
+        Returns:
+            Number of videos updated
+        """
+        videos = self.video_repo.get_recent(limit)
+        updated_count = 0
+        
+        for video in videos:
+            try:
+                # Use current summary as description source
+                current_text = video.summary
+                
+                # Check if we need to fetch transcript (if summary is default or missing)
+                is_default_summary = not current_text or "Watch this video from" in current_text or len(current_text) < 50
+                
+                if is_default_summary:
+                    # Try to fetch transcript
+                    video_id = self.youtube_client._extract_video_id(video.video_url)
+                    if video_id:
+                        transcript = self.youtube_client.get_transcript(video_id)
+                        if transcript:
+                            current_text = transcript
+                            logger.info(f"Fetched transcript for video: {video.title}")
+                
+                if not current_text:
+                    continue
+
+                # Skip if it looks like it's already processed (optional heuristic)
+                # For now, we process everything to ensure consistency
+                
+                new_summary = self.openai_client.summarize_video(video.title, current_text)
+                
+                if new_summary and new_summary != video.summary:
+                    self.video_repo.update_summary(video.id, new_summary)
+                    updated_count += 1
+                    logger.info(f"Regenerated summary for video: {video.title}")
+                    
+            except Exception as e:
+                logger.error(f"Error regenerating summary for video {video.id}: {e}")
+                continue
+                
+        return updated_count
     
     def _entry_to_video_data(self, entry: VideoEntry) -> Dict[str, Any]:
         """Convert a VideoEntry to video data dictionary."""

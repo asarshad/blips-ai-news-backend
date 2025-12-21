@@ -8,6 +8,7 @@ import feedparser
 import re
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 
 from app.core.logging import get_logger
 
@@ -65,6 +66,28 @@ class YouTubeClient:
         """
         self.channel_feeds = channel_feeds or DEFAULT_CHANNEL_FEEDS
     
+    def get_transcript(self, video_id: str) -> Optional[str]:
+        """
+        Fetches the transcript for a YouTube video.
+        
+        Args:
+            video_id: The YouTube video ID.
+            
+        Returns:
+            The transcript text or None if not found/disabled.
+        """
+        try:
+            transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
+            # Combine all text parts
+            full_text = " ".join([item['text'] for item in transcript_list])
+            return full_text
+        except (TranscriptsDisabled, NoTranscriptFound):
+            logger.warning(f"No transcript available for video {video_id}")
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching transcript for video {video_id}: {e}")
+            return None
+
     def fetch_all_channels(self, videos_per_channel: int = 5) -> List[VideoEntry]:
         """
         Fetch videos from all configured channels.
@@ -161,7 +184,9 @@ class YouTubeClient:
     
     def _get_summary(self, entry) -> str:
         """Extract summary from feed entry."""
-        max_length = 500
+        max_length = 5000
+        
+        description = ""
         
         # Try media_group description
         if hasattr(entry, 'media_group') and entry.media_group:
@@ -169,15 +194,27 @@ class YouTubeClient:
                 if hasattr(media, 'media_description'):
                     desc = media.media_description
                     if desc:
-                        return desc[:max_length] + "..." if len(desc) > max_length else desc
+                        description = desc
+                        break
         
         # Try summary field
-        if hasattr(entry, 'summary') and entry.summary:
-            return entry.summary[:max_length] if len(entry.summary) > max_length else entry.summary
+        if not description and hasattr(entry, 'summary') and entry.summary:
+            description = entry.summary
         
         # Try description field
-        if hasattr(entry, 'description') and entry.description:
-            return entry.description[:max_length] if len(entry.description) > max_length else entry.description
+        if not description and hasattr(entry, 'description') and entry.description:
+            description = entry.description
+            
+        if description:
+            return description[:max_length]
+        
+        # Try to get transcript if description is missing
+        video_url = entry.get('link', '')
+        video_id = self._extract_video_id(video_url)
+        if video_id:
+            transcript = self.get_transcript(video_id)
+            if transcript:
+                return transcript[:max_length]
         
         # Default summary
         author = entry.get('author', 'YouTube')

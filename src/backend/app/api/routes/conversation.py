@@ -54,3 +54,18 @@ def save_message(
         raise HTTPException(status_code=400, detail="Invalid sender. Must be 'user' or 'ai'")
     
     return conversation_repo.add_message(article_id, sender, message)
+
+
+@router.delete("/{article_id}", status_code=204)
+def delete_conversation(
+    article_id: int,
+    article_repo: ArticleRepository = Depends(get_article_repo),
+    conversation_repo: ConversationRepository = Depends(get_conversation_repo)
+):
+    """Delete conversation history for an article."""
+    article = article_repo.get_by_id(article_id)
+    if not article:
+        raise not_found_exception("Article", article_id)
+    
+    conversation_repo.clear_conversation(article_id)
+    return None

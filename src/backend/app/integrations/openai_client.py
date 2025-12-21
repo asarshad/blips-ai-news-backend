@@ -122,7 +122,7 @@ class OpenAIClient:
             
             Article Content: {truncated_content}
             
-            Task 1: Write a concise summary of this tech article in exactly 60-65 words. Keep it informative and engaging.
+            Task 1: Write a concise summary of this tech article in exactly 85-90 words. Keep it informative and engaging.
             
             Task 2: Generate 5-7 relevant tags for this article, separated by commas.
             
@@ -160,6 +160,56 @@ class OpenAIClient:
                 summary="Summary unavailable at the moment.",
                 tags=[]
             )
+
+    def summarize_video(
+        self, 
+        title: str, 
+        description: str,
+        max_length: int = 4000
+    ) -> str:
+        """
+        Generate a summary for a video based on its description.
+        
+        Args:
+            title: Video title
+            description: Video description
+            max_length: Max chars of description to send
+            
+        Returns:
+            Summary string
+        """
+        try:
+            truncated_desc = description[:max_length]
+            
+            prompt = f"""
+            Video Title: {title}
+            
+            Video Description: {truncated_desc}
+            
+            Task: Write a concise summary of this video in exactly 85-90 words based on the description. 
+            Focus on the main topic and key points. Remove any channel promotion, "link in bio", or "subscribe" text.
+            
+            Format your response as just the summary text.
+            """
+            
+            messages = [
+                ChatMessage(
+                    role="system",
+                    content="You are a tech journalist assistant that creates concise, informative summaries of tech videos."
+                ),
+                ChatMessage(role="user", content=prompt)
+            ]
+            
+            response = self.chat(messages, max_tokens=200)
+            return response.content.strip()
+            
+        except Exception as e:
+            logger.error(f"Video summarization error: {str(e)}")
+            # Fallback to truncated description if AI fails
+            words = description.split()
+            if len(words) > 90:
+                return " ".join(words[:90]) + "..."
+            return description
     
     def generate_chat_response(
         self,

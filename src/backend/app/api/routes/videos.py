@@ -53,6 +53,17 @@ def fetch_videos(video_repo: VideoRepository = Depends(get_video_repo)):
     return {"message": f"Successfully fetched and saved {saved_count} new videos", "count": saved_count}
 
 
+@router.post("/regenerate-summaries", response_model=dict)
+def regenerate_video_summaries(
+    limit: int = Query(50, ge=1, le=200, description="Number of videos to process"),
+    video_repo: VideoRepository = Depends(get_video_repo)
+):
+    """Regenerate summaries for existing videos using AI."""
+    video_fetcher = VideoFetcher(video_repo)
+    updated_count = video_fetcher.regenerate_summaries(limit)
+    return {"message": f"Successfully regenerated summaries for {updated_count} videos", "count": updated_count}
+
+
 @router.get("/{video_id}", response_model=VideoSchema)
 def get_video(
     video_id: int,
