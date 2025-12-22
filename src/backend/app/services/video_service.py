@@ -20,17 +20,20 @@ class VideoService:
     def __init__(self, video_repo: VideoRepository):
         self.video_repo = video_repo
 
-    def get_recent_videos(self, limit: int = 10) -> List[Video]:
+    def get_recent_videos(self, limit: int = 10, page: int = 1) -> List[Video]:
         """
         Get most recent videos, interleaved by source for variety.
         
         Args:
             limit: Maximum number of videos to return
+            page: Page number for pagination
             
         Returns:
             List of videos interleaved by source
         """
-        all_videos = self.video_repo.get_recent(limit * 2)
+        skip = (page - 1) * limit
+        # Fetch more to allow for interleaving filtering
+        all_videos = self.video_repo.get_recent(limit * 2, skip)
         
         # Group by source for interleaving
         videos_by_source: dict[str, List[Video]] = {}
@@ -51,17 +54,19 @@ class VideoService:
         
         return interleaved[:limit]
 
-    def get_reels(self, limit: int = 10) -> List[Video]:
+    def get_reels(self, limit: int = 10, page: int = 1) -> List[Video]:
         """
         Get recent reels.
         
         Args:
             limit: Maximum number of reels to return
+            page: Page number for pagination
             
         Returns:
             List of reels
         """
-        return self.video_repo.get_reels(limit)
+        skip = (page - 1) * limit
+        return self.video_repo.get_reels(limit, skip)
 
     def get_video_by_id(self, video_id: int) -> Video:
         """

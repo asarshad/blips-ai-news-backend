@@ -63,9 +63,10 @@ class ArticleService:
         """Get articles by tag name."""
         return self.repo.get_by_tag(tag_name, limit)
     
-    def get_recent_articles(self, limit: int = 5) -> List[Article]:
+    def get_recent_articles(self, limit: int = 5, page: int = 1) -> List[Article]:
         """Get most recent articles."""
-        return self.repo.get_recent(limit)
+        skip = (page - 1) * limit
+        return self.repo.get_recent(limit, skip)
     
     def cache_articles(self) -> bool:
         """

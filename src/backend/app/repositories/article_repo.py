@@ -42,12 +42,12 @@ class ArticleRepository(BaseRepository[Article]):
         """Get the most recently created article."""
         return self.db.query(Article).order_by(desc(Article.created_at)).first()
     
-    def get_recent(self, limit: int = 10) -> List[Article]:
+    def get_recent(self, limit: int = 10, skip: int = 0) -> List[Article]:
         """Get most recent articles by published date."""
         return self.db.query(Article).order_by(
             desc(Article.published_date),
             desc(Article.created_at)
-        ).limit(limit).all()
+        ).offset(skip).limit(limit).all()
     
     def get_articles_last_n_days(self, days: int = 3) -> List[Article]:
         """

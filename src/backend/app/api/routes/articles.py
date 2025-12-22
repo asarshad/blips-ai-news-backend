@@ -64,11 +64,12 @@ def get_cached_articles(
 @router.get("/recent", response_model=ArticleList)
 def get_recent_articles(
     limit: int = Query(5, ge=1, le=50, description="Number of articles to return"),
+    page: int = Query(1, ge=1, description="Page number"),
     article_service: ArticleService = Depends(get_article_service)
 ):
     """Get the most recent articles."""
-    articles = article_service.get_recent_articles(limit)
-    if not articles:
+    articles = article_service.get_recent_articles(limit, page)
+    if not articles and page == 1:
         raise HTTPException(status_code=404, detail="No articles found")
     return {"articles": articles}
 

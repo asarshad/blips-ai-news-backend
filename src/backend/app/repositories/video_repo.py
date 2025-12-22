@@ -33,11 +33,11 @@ class VideoRepository(BaseRepository[Video]):
         """Check if video exists by video_id."""
         return self.get_by_video_id(video_id) is not None
     
-    def get_recent(self, limit: int = 10) -> List[Video]:
+    def get_recent(self, limit: int = 10, skip: int = 0) -> List[Video]:
         """Get most recent videos."""
         return self.db.query(Video).order_by(
             desc(Video.created_at)
-        ).limit(limit).all()
+        ).offset(skip).limit(limit).all()
     
     def get_published_since(self, since: datetime, limit: int = 50) -> List[Video]:
         """Get videos published since a given date."""
@@ -47,13 +47,13 @@ class VideoRepository(BaseRepository[Video]):
             desc(Video.published_at)
         ).limit(limit).all()
     
-    def get_reels(self, limit: int = 10) -> List[Video]:
+    def get_reels(self, limit: int = 10, skip: int = 0) -> List[Video]:
         """Get recent reels (videos <= 60 seconds)."""
         return self.db.query(Video).filter(
             Video.duration_seconds <= 60
         ).order_by(
             desc(Video.created_at)
-        ).limit(limit).all()
+        ).offset(skip).limit(limit).all()
     
     def get_most_recent(self) -> Optional[Video]:
         """Get the most recently created video."""
