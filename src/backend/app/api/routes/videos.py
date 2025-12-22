@@ -33,20 +33,22 @@ def get_video_service(video_repo: VideoRepository = Depends(get_video_repo)) -> 
 @router.get("/recent", response_model=VideoList)
 def get_recent_videos(
     limit: int = Query(10, ge=1, le=50, description="Number of videos to return"),
+    page: int = Query(1, ge=1, description="Page number"),
     video_service: VideoService = Depends(get_video_service)
 ):
     """Get the most recent videos."""
-    videos = video_service.get_recent_videos(limit)
+    videos = video_service.get_recent_videos(limit, page)
     return {"videos": videos}
 
 
 @router.get("/reels", response_model=VideoList)
 def get_reels(
     limit: int = Query(10, ge=1, le=50, description="Number of reels to return"),
+    page: int = Query(1, ge=1, description="Page number"),
     video_service: VideoService = Depends(get_video_service)
 ):
     """Get the most recent reels (short videos)."""
-    videos = video_service.get_reels(limit)
+    videos = video_service.get_reels(limit, page)
     return {"videos": videos}
 
 
