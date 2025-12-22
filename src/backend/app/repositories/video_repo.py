@@ -79,7 +79,7 @@ class VideoRepository(BaseRepository[Video]):
             thumbnail_url=thumbnail_url,
             channel_title=channel_title,
             published_at=published_at,
-            summary=summary or "Summary unavailable at the moment."
+            summary=summary or ""
         )
         self.db.add(video)
         self.db.commit()
@@ -89,7 +89,7 @@ class VideoRepository(BaseRepository[Video]):
     def get_with_placeholder_summary(self, limit: int = 10) -> List[Video]:
         """Get videos that have placeholder summaries."""
         return self.db.query(Video).filter(
-            Video.summary == "Summary unavailable at the moment."
+            Video.summary == ""
         ).limit(limit).all()
     
     def update_summary(self, video_id: int, summary: str) -> Optional[Video]:
