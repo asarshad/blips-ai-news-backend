@@ -3,13 +3,14 @@ Custom exception classes for the application.
 These provide semantic error handling across the codebase.
 """
 
+from typing import Optional, Union
 from fastapi import HTTPException, status
 
 
 class AppException(Exception):
     """Base exception for application errors."""
     
-    def __init__(self, message: str, details: str | None = None):
+    def __init__(self, message: str, details: Optional[str] = None):
         self.message = message
         self.details = details
         super().__init__(self.message)
@@ -64,13 +65,13 @@ class ChatGenerationError(ExternalServiceError):
 class FeedFetchError(ExternalServiceError):
     """Raised when RSS/YouTube feed fetching fails."""
     
-    def __init__(self, feed_url: str, details: str | None = None):
+    def __init__(self, feed_url: str, details: Optional[str] = None):
         super().__init__(f"Failed to fetch feed: {feed_url}", details)
         self.feed_url = feed_url
 
 
 # HTTP exception factories for consistent error responses
-def not_found_exception(resource: str, identifier: str | int) -> HTTPException:
+def not_found_exception(resource: str, identifier: Union[str, int]) -> HTTPException:
     """Create a 404 Not Found exception."""
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,

@@ -51,6 +51,18 @@ class VideoService:
         
         return interleaved[:limit]
 
+    def get_reels(self, limit: int = 10) -> List[Video]:
+        """
+        Get recent reels.
+        
+        Args:
+            limit: Maximum number of reels to return
+            
+        Returns:
+            List of reels
+        """
+        return self.video_repo.get_reels(limit)
+
     def get_video_by_id(self, video_id: int) -> Video:
         """
         Get a video by ID.

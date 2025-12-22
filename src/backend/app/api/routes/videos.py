@@ -40,6 +40,16 @@ def get_recent_videos(
     return {"videos": videos}
 
 
+@router.get("/reels", response_model=VideoList)
+def get_reels(
+    limit: int = Query(10, ge=1, le=50, description="Number of reels to return"),
+    video_service: VideoService = Depends(get_video_service)
+):
+    """Get the most recent reels (short videos)."""
+    videos = video_service.get_reels(limit)
+    return {"videos": videos}
+
+
 @router.post("/fetch", response_model=dict)
 def fetch_videos(video_repo: VideoRepository = Depends(get_video_repo)):
     """Manually trigger fetching of new videos from YouTube channels."""
