@@ -89,7 +89,7 @@ class ArticleRepository(BaseRepository[Article]):
     def get_with_placeholder_summary(self, limit: int = 10) -> List[Article]:
         """Get articles that have placeholder summaries."""
         return self.db.query(Article).filter(
-            Article.summary == "Summary unavailable at the moment."
+            Article.summary == ""
         ).limit(limit).all()
     
     def update_summary(self, article_id: int, summary: str) -> Optional[Article]:

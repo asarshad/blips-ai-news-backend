@@ -157,7 +157,7 @@ class OpenAIClient:
         except Exception as e:
             logger.error(f"Article summarization error: {str(e)}")
             return SummaryResult(
-                summary="Summary unavailable at the moment.",
+                summary="",
                 tags=[]
             )
 

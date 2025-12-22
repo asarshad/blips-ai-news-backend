@@ -52,7 +52,7 @@ class ArticleSummarizer:
                 "title": title,
                 "source_url": article_data.get("source_url", ""),
                 "content": content,
-                "summary": "Summary unavailable at the moment.",
+                "summary": "",
                 "image_url": article_data.get("image_url", ""),
                 "tags": []
             }
@@ -82,7 +82,7 @@ class ArticleSummarizer:
                 processed = self.summarize_article(article_data)
                 
                 # Only update if we got a real summary
-                if processed["summary"] != "Summary unavailable at the moment.":
+                if processed["summary"] != "":
                     self.article_repo.update_summary_and_tags(
                         article.id,
                         processed["summary"],
