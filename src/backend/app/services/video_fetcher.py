@@ -105,6 +105,10 @@ class VideoFetcher:
     
     def _entry_to_video_data(self, entry: VideoEntry) -> Dict[str, Any]:
         """Convert a VideoEntry to video data dictionary."""
+        # Heuristic for detecting Shorts if duration is not available
+        is_short = "#shorts" in entry.title.lower() or "#shorts" in entry.summary.lower()
+        duration = 59 if is_short else None
+
         return {
             "title": entry.title,
             "summary": entry.summary,
@@ -113,6 +117,7 @@ class VideoFetcher:
             "thumbnail_url": entry.thumbnail_url,
             "source": entry.source,
             "category": entry.category,
+            "duration_seconds": duration,
         }
 
     def save_videos(self, videos: List[Dict[str, Any]]) -> int:
@@ -141,6 +146,7 @@ class VideoFetcher:
                     "thumbnail_url": video_data.get("thumbnail_url"),
                     "source": video_data.get("source", "YouTube"),
                     "category": video_data.get("category", "Technology"),
+                    "duration_seconds": video_data.get("duration_seconds"),
                 }
                 
                 self.video_repo.create(db_video_data)

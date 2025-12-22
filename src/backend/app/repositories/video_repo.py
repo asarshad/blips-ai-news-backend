@@ -47,6 +47,14 @@ class VideoRepository(BaseRepository[Video]):
             desc(Video.published_at)
         ).limit(limit).all()
     
+    def get_reels(self, limit: int = 10) -> List[Video]:
+        """Get recent reels (videos <= 60 seconds)."""
+        return self.db.query(Video).filter(
+            Video.duration_seconds <= 60
+        ).order_by(
+            desc(Video.created_at)
+        ).limit(limit).all()
+    
     def get_most_recent(self) -> Optional[Video]:
         """Get the most recently created video."""
         return self.db.query(Video).order_by(desc(Video.created_at)).first()

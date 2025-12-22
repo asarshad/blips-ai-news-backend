@@ -6,6 +6,7 @@ Uses APScheduler to run periodic tasks like news fetching.
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from typing import Optional
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -14,7 +15,7 @@ from app.scheduler.tasks import fetch_and_process_news, fetch_and_process_videos
 logger = get_logger(__name__)
 
 
-def init_scheduler() -> BackgroundScheduler | None:
+def init_scheduler() -> Optional[BackgroundScheduler]:
     """
     Initialize and start the background scheduler.
     
