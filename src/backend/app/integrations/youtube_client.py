@@ -6,6 +6,7 @@ Handles fetching videos from YouTube channel RSS feeds.
 
 import feedparser
 import re
+import requests
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
@@ -87,6 +88,60 @@ class YouTubeClient:
         except Exception as e:
             logger.error(f"Error fetching transcript for video {video_id}: {e}")
             return None
+
+    def is_youtube_short(self, video_id: str) -> bool:
+        """
+        Check if a video is a YouTube Short.
+        
+        Args:
+            video_id: The YouTube video ID.
+            
+        Returns:
+            True if it's a Short, False otherwise.
+        """
+        url = f'https://www.youtube.com/shorts/{video_id}'
+        try:
+            # Send a HEAD request to avoid downloading the entire video content
+            # Use a browser-like user agent
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            response = requests.head(url, headers=headers, allow_redirects=False, timeout=5)
+            
+            # Check if the status code is 200 (OK) without redirection
+            return response.status_code == 200
+        except Exception as e:
+            logger.error(f"Error checking if video {video_id} is a Short: {e}")
+            return False
+
+    def get_video_duration(self, video_id: str) -> Optional[int]:
+        """
+        Get video duration in seconds by scraping the video page.
+        
+        Args:
+            video_id: The YouTube video ID.
+            
+        Returns:
+            Duration in seconds or None if not found.
+        """
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        try:
+            # Use a browser-like user agent to avoid being blocked
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            response = requests.get(url, headers=headers, timeout=5)
+            
+            if response.status_code == 200:
+                # Look for "approxDurationMs" in the page source
+                match = re.search(r'"approxDurationMs":"(\d+)"', response.text)
+                if match:
+                    ms = int(match.group(1))
+                    return ms // 1000
+        except Exception as e:
+            logger.error(f"Error fetching duration for video {video_id}: {e}")
+        
+        return None
 
     def fetch_all_channels(self, videos_per_channel: int = 5) -> List[VideoEntry]:
         """
