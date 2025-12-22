@@ -105,9 +105,17 @@ class VideoFetcher:
     
     def _entry_to_video_data(self, entry: VideoEntry) -> Dict[str, Any]:
         """Convert a VideoEntry to video data dictionary."""
-        # Heuristic for detecting Shorts if duration is not available
-        is_short = "#shorts" in entry.title.lower() or "#shorts" in entry.summary.lower()
-        duration = 59 if is_short else None
+        # Try to get exact duration
+        duration = self.youtube_client.get_video_duration(entry.video_id)
+        
+        if duration is None:
+            # Fallback heuristic: Check if it's a Short using URL check
+            is_short = self.youtube_client.is_youtube_short(entry.video_id)
+            if not is_short:
+                # Fallback to text heuristic
+                is_short = "#shorts" in entry.title.lower() or "#shorts" in entry.summary.lower()
+            
+            duration = 59 if is_short else None
 
         return {
             "title": entry.title,
