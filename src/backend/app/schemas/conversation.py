@@ -12,7 +12,8 @@ class ConversationBase(BaseModel):
     sender: str  # "user" or "ai"
 
 class ConversationCreate(ConversationBase):
-    article_id: int
+    article_id: Optional[int] = None
+    video_id: Optional[int] = None
     history: Optional[List[ChatMessage]] = None
 
 class ConversationOut(ConversationBase):

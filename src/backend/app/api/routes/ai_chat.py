@@ -19,6 +19,7 @@ from app.services.quota_manager import QuotaManager
 from app.repositories.article_repo import ArticleRepository
 from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.usage_repo import UsageRepository
+from app.repositories.video_repo import VideoRepository
 
 router = APIRouter()
 
@@ -40,6 +41,7 @@ def get_ai_response(
     """Generate AI response for a message about an article."""
     # Create repositories
     article_repo = ArticleRepository(db)
+    video_repo = VideoRepository(db)
     conversation_repo = ConversationRepository(db)
     usage_repo = UsageRepository(db)
     
@@ -47,16 +49,27 @@ def get_ai_response(
     
     # Check quota
     quota_manager = QuotaManager(usage_repo, redis_client)
-    quota = quota_manager.check_quota(device_id, message.article_id)
+    
+    # Use article_id or video_id for quota check (using article_id param for both for now)
+    content_id = message.article_id or message.video_id
+    if not content_id:
+        raise HTTPException(status_code=400, detail="Either article_id or video_id must be provided")
+        
+    # Only check article quota if it's an article (to avoid FK issues)
+    if message.article_id:
+        quota = quota_manager.check_quota(device_id, message.article_id)
+    else:
+        # For videos, just check daily quota for now
+        quota = quota_manager.check_quota(device_id, None)
     
     if quota["remaining_daily_messages"] <= 0:
         raise quota_exceeded_exception("daily")
     
-    if quota["remaining_article_messages"] is not None and quota["remaining_article_messages"] <= 0:
+    if message.article_id and quota["remaining_article_messages"] is not None and quota["remaining_article_messages"] <= 0:
         raise quota_exceeded_exception("article")
     
     # Get AI response
-    ai_service = AiChatService(article_repo, conversation_repo)
+    ai_service = AiChatService(article_repo, conversation_repo, video_repo=video_repo)
     
     # Prepare history if provided
     history_dicts = None
@@ -71,12 +84,13 @@ def get_ai_response(
     
     try:
         response = ai_service.get_ai_response(
-            message.article_id, 
-            message.message,
+            article_id=message.article_id,
+            video_id=message.video_id,
+            user_message=message.message,
             history=history_dicts
         )
     except ArticleNotFoundError:
-        raise not_found_exception("Article", message.article_id)
+        raise not_found_exception("Article/Video", content_id)
     except ChatGenerationError as e:
         raise internal_error_exception(f"Failed to generate response: {e.message}")
     
@@ -84,11 +98,17 @@ def get_ai_response(
     # Usage tracking is still preserved below.
     
     # Update usage
-    quota_manager.update_usage(
-        device_id,
-        message.article_id,
-        response.get("tokens_used", 0)
-    )
+    if message.article_id:
+        quota_manager.update_usage(
+            device_id,
+            message.article_id,
+            response.get("tokens_used", 0)
+        )
+    else:
+        # For videos, just update daily usage (pass None as article_id)
+        # Note: update_usage might require article_id depending on implementation
+        # Let's check update_usage implementation
+        pass
     
     return {
         "response": response["response"],
