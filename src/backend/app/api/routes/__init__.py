@@ -10,6 +10,7 @@ from app.api.routes.videos import router as videos_router
 from app.api.routes.ai_chat import router as ai_chat_router
 from app.api.routes.conversation import router as conversation_router
 from app.api.routes.usage import router as usage_router
+from app.api.routes.session import router as session_router
 
 __all__ = [
     "articles_router",
@@ -17,4 +18,5 @@ __all__ = [
     "ai_chat_router",
     "conversation_router",
     "usage_router",
+    "session_router",
 ]

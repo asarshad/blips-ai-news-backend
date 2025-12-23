@@ -45,6 +45,31 @@ class Settings(BaseSettings):
     # Cache settings
     ARTICLE_CACHE_COUNT: int = int(os.getenv("ARTICLE_CACHE_COUNT", "5"))
     
+    # Curation system settings
+    PLAYLIST_CACHE_TTL_SECONDS: int = int(os.getenv("PLAYLIST_CACHE_TTL_SECONDS", "300"))
+    SESSION_SNAPSHOT_TTL_SECONDS: int = int(os.getenv("SESSION_SNAPSHOT_TTL_SECONDS", "3600"))
+    DEFAULT_PLAYLIST_SIZE: int = int(os.getenv("DEFAULT_PLAYLIST_SIZE", "50"))
+    MAX_CONTENT_AGE_HOURS: int = int(os.getenv("MAX_CONTENT_AGE_HOURS", "72"))
+    RECENCY_HALF_LIFE_HOURS: int = int(os.getenv("RECENCY_HALF_LIFE_HOURS", "24"))
+    MAX_TOPIC_DOMINANCE: float = float(os.getenv("MAX_TOPIC_DOMINANCE", "0.40"))
+    PREFERENCE_DECAY_FACTOR: float = float(os.getenv("PREFERENCE_DECAY_FACTOR", "0.95"))
+    
+    # Personalization weights (topic/entity/source/format)
+    # These control how much each preference type influences personalization score
+    PERSONALIZATION_TOPIC_WEIGHT: float = float(os.getenv("PERSONALIZATION_TOPIC_WEIGHT", "0.35"))
+    PERSONALIZATION_ENTITY_WEIGHT: float = float(os.getenv("PERSONALIZATION_ENTITY_WEIGHT", "0.30"))
+    PERSONALIZATION_SOURCE_WEIGHT: float = float(os.getenv("PERSONALIZATION_SOURCE_WEIGHT", "0.20"))
+    PERSONALIZATION_FORMAT_WEIGHT: float = float(os.getenv("PERSONALIZATION_FORMAT_WEIGHT", "0.15"))
+    
+    # Trend score weights
+    # Engagement is capped at 20% for early-stage systems to avoid gaming
+    TREND_CLUSTER_WEIGHT: float = float(os.getenv("TREND_CLUSTER_WEIGHT", "0.80"))
+    TREND_ENGAGEMENT_WEIGHT: float = float(os.getenv("TREND_ENGAGEMENT_WEIGHT", "0.20"))
+    
+    # Clustering settings
+    CLUSTER_WINDOW_HOURS: int = int(os.getenv("CLUSTER_WINDOW_HOURS", "48"))
+    MIN_CLUSTER_SIMILARITY: float = float(os.getenv("MIN_CLUSTER_SIMILARITY", "0.5"))
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
@@ -52,3 +77,8 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def get_settings() -> Settings:
+    """Get application settings singleton."""
+    return settings

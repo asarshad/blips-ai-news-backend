@@ -10,6 +10,12 @@ from app.repositories.article_repo import ArticleRepository
 from app.repositories.video_repo import VideoRepository
 from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.usage_repo import UsageRepository
+from app.repositories.content_repo import ContentItemRepository
+from app.repositories.user_repo import (
+    UserProfileRepository,
+    UserPreferenceRepository,
+    InteractionEventRepository
+)
 
 __all__ = [
     "BaseRepository",
@@ -17,5 +23,8 @@ __all__ = [
     "VideoRepository",
     "ConversationRepository",
     "UsageRepository",
+    "ContentItemRepository",
+    "UserProfileRepository",
+    "UserPreferenceRepository",
+    "InteractionEventRepository",
 ]
-
