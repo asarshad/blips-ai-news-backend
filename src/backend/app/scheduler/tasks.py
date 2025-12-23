@@ -41,6 +41,9 @@ def fetch_and_process_news():
         # Fetch videos in a separate transaction
         _fetch_videos(db)
         
+        # Run curation ingestion after fetching
+        _run_curation_ingestion(db)
+        
         logger.info("Completed news fetch and processing")
         
     except Exception as e:
@@ -83,6 +86,20 @@ def _fetch_videos(db):
         db.rollback()
 
 
+def _run_curation_ingestion(db):
+    """Run ingestion pipeline to populate content_items from articles/videos."""
+    try:
+        from app.services.ingestion_pipeline import create_ingestion_pipeline
+        
+        pipeline = create_ingestion_pipeline(db)
+        stats = pipeline.run_backfill(hours_back=6, limit=100)
+        
+        logger.info(f"Curation ingestion: {stats}")
+        
+    except Exception as e:
+        logger.error(f"Error in curation ingestion: {str(e)}")
+
+
 def fetch_and_process_videos():
     """Standalone task for fetching videos (can be scheduled separately)."""
     logger.info("Starting video fetch")
@@ -90,5 +107,126 @@ def fetch_and_process_videos():
     db = SessionLocal()
     try:
         _fetch_videos(db)
+    finally:
+        db.close()
+
+
+# ============================================================================
+# Curation System Tasks
+# ============================================================================
+
+def run_scoring_job():
+    """
+    Scheduled task to update content scores.
+    
+    Should run hourly to keep scores fresh.
+    """
+    logger.info("Starting scoring job")
+    
+    db = SessionLocal()
+    
+    try:
+        from app.repositories.content_repo import ContentItemRepository
+        from app.repositories.user_repo import InteractionEventRepository
+        from app.services.scoring_service import ScoringService
+        
+        content_repo = ContentItemRepository(db)
+        event_repo = InteractionEventRepository(db)
+        
+        scoring = ScoringService(content_repo, event_repo)
+        stats = scoring.run_scoring_job(hours_back=72)
+        
+        logger.info(f"Scoring job complete: {stats}")
+        
+    except Exception as e:
+        logger.error(f"Error in scoring job: {str(e)}")
+    finally:
+        db.close()
+
+
+def run_clustering_job():
+    """
+    Scheduled task to cluster unclustered content.
+    
+    Should run every 15 minutes for fresh clustering.
+    """
+    logger.info("Starting clustering job")
+    
+    db = SessionLocal()
+    
+    try:
+        from app.repositories.content_repo import ContentItemRepository
+        from app.services.clustering_service import ClusteringService
+        
+        content_repo = ContentItemRepository(db)
+        
+        clustering = ClusteringService(content_repo)
+        stats = clustering.run_clustering_job()
+        
+        logger.info(f"Clustering job complete: {stats}")
+        
+    except Exception as e:
+        logger.error(f"Error in clustering job: {str(e)}")
+    finally:
+        db.close()
+
+
+def run_preference_decay_job():
+    """
+    Scheduled task to decay user preferences.
+    
+    Should run daily to keep preferences fresh.
+    """
+    logger.info("Starting preference decay job")
+    
+    db = SessionLocal()
+    
+    try:
+        from app.repositories.user_repo import (
+            UserProfileRepository,
+            UserPreferenceRepository,
+            InteractionEventRepository
+        )
+        from app.repositories.content_repo import ContentItemRepository
+        from app.services.personalization_service import PersonalizationService
+        
+        profile_repo = UserProfileRepository(db)
+        preference_repo = UserPreferenceRepository(db)
+        event_repo = InteractionEventRepository(db)
+        content_repo = ContentItemRepository(db)
+        
+        personalization = PersonalizationService(
+            profile_repo, preference_repo, event_repo, content_repo
+        )
+        
+        stats = personalization.run_decay_job()
+        logger.info(f"Preference decay job complete: {stats}")
+        
+    except Exception as e:
+        logger.error(f"Error in preference decay job: {str(e)}")
+    finally:
+        db.close()
+
+
+def run_backfill_job():
+    """
+    One-time task to backfill existing articles/videos into content_items.
+    
+    Run manually or on startup to initialize curation system.
+    """
+    logger.info("Starting backfill job")
+    
+    db = SessionLocal()
+    
+    try:
+        from app.services.ingestion_pipeline import create_ingestion_pipeline
+        
+        pipeline = create_ingestion_pipeline(db)
+        stats = pipeline.run_backfill(hours_back=168, limit=1000)  # 7 days
+        
+        logger.info(f"Backfill job complete: {stats}")
+        
+    except Exception as e:
+        logger.error(f"Error in backfill job: {str(e)}")
     finally:
         db.close()
