@@ -82,7 +82,7 @@ class PlaylistItem(BaseModel):
     entities: List[str]
     published_at: Optional[str]
     global_score: Optional[float]
-    cluster_id: Optional[int]
+    cluster_id: Optional[str]
 
 
 class PlaylistResponse(BaseModel):
