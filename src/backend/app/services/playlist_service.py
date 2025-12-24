@@ -189,26 +189,12 @@ class PlaylistService:
     
     def _get_candidates(self, content_type: ContentType) -> List[ContentItem]:
         """Get candidate items for playlist."""
-        # Get canonical items from clusters
-        canonical = self.content_repo.get_items_for_playlist(
+        # Get canonical items from clusters (repo already filters for canonical)
+        candidates = self.content_repo.get_items_for_playlist(
             content_type=content_type,
             hours_back=MAX_CONTENT_AGE_HOURS,
-            canonical_only=True,
             limit=500
         )
-        
-        # Get fresh unclustered items
-        fresh = self.content_repo.get_items_for_playlist(
-            content_type=content_type,
-            hours_back=24,  # Last 24 hours
-            canonical_only=False,
-            unclustered_only=True,
-            limit=100
-        )
-        
-        # Combine with weighting
-        candidates = list(canonical)
-        candidates.extend(fresh)
         
         # Deduplicate by ID
         seen = set()
@@ -340,7 +326,7 @@ class PlaylistService:
             "summary": item.summary,
             "image_url": item.image_url,
             "video_url": item.video_url,
-            "duration": item.duration,
+            "duration": item.duration_seconds,
             "topics": item.topics or [],
             "entities": item.entities or [],
             "published_at": item.published_at.isoformat() if item.published_at else None,

@@ -78,10 +78,9 @@ class IngestionPipeline:
             summary=article.summary,
             image_url=article.image_url,
             video_url=None,
-            duration=None,
+            duration_seconds=None,
             topics=topics,
             entities=entities,
-            raw_data={"article_id": article.id},
             dedupe_key=dedupe_key,
         )
         
@@ -113,11 +112,11 @@ class IngestionPipeline:
         Returns:
             Created ContentItem or None if duplicate
         """
-        if content_type == ContentType.VIDEO and video.duration:
-            if video.duration < 60:
+        if content_type == ContentType.VIDEO and video.duration_seconds:
+            if video.duration_seconds < 60:
                 content_type = ContentType.REEL
         
-        source = video.channel_name or "YouTube"
+        source = video.source or "YouTube"
         dedupe_key = compute_dedupe_key(video.title, source)
         
         existing = self.content_repo.get_by_dedupe_key(dedupe_key)
@@ -125,24 +124,26 @@ class IngestionPipeline:
             logger.debug(f"Video already ingested: {video.title}")
             return None
         
-        text = video.summary or video.description or ""
+        text = video.summary or ""
         topics = extract_topics(video.title, text)
         entities = extract_entities(video.title, text)
+        
+        # Convert date to datetime for published_at
+        published_at = datetime.combine(video.published_date, datetime.min.time()) if video.published_date else datetime.utcnow()
         
         content_item = ContentItem(
             type=content_type,
             source=source,
-            source_url=video.youtube_url,
-            published_at=video.published_at or datetime.utcnow(),
+            source_url=video.video_url,
+            published_at=published_at,
             title=video.title,
-            description=video.description[:500] if video.description else None,
+            description=video.summary[:500] if video.summary else None,
             summary=video.summary if content_type != ContentType.REEL else None,
             image_url=video.thumbnail_url,
-            video_url=video.youtube_url,
-            duration=video.duration,
+            video_url=video.video_url,
+            duration_seconds=video.duration_seconds,
             topics=topics,
             entities=entities,
-            raw_data={"video_id": video.id, "youtube_id": video.youtube_id},
             dedupe_key=dedupe_key,
         )
         
@@ -182,10 +183,11 @@ class IngestionPipeline:
             "errors": 0,
         }
         
-        cutoff = datetime.utcnow() - timedelta(hours=hours_back)
+        # Calculate days from hours for the existing repo method
+        days_back = max(1, hours_back // 24)
         
-        # Backfill articles
-        articles = self.article_repo.get_recent(since=cutoff, limit=limit)
+        # Backfill articles - use existing method that filters by date
+        articles = self.article_repo.get_articles_last_n_days(days=days_back)[:limit]
         logger.info(f"Backfilling {len(articles)} articles")
         
         for article in articles:
@@ -201,7 +203,7 @@ class IngestionPipeline:
         try:
             from app.repositories.video_repo import VideoRepository
             video_repo = VideoRepository(self.db)
-            videos = video_repo.get_recent(since=cutoff, limit=limit)
+            videos = video_repo.get_videos_last_n_days(days=days_back)[:limit]
             
             logger.info(f"Backfilling {len(videos)} videos")
             
@@ -228,6 +230,7 @@ class IngestionPipeline:
             quality_score=scores["quality"],
             trend_score=scores["trend"],
             recency_score=scores["recency"],
+            diversity_boost=scores["diversity"],
             global_score=scores["global"],
         )
 

@@ -50,17 +50,17 @@ def compute_similarity(
 
 
 def compute_entity_overlap(
-    entities1: List[Dict],
-    entities2: List[Dict],
+    entities1: List,
+    entities2: List,
 ) -> float:
     """
     Compute entity overlap using Jaccard index.
     
-    Entities are dicts with 'name' key.
+    Entities can be strings or dicts with 'name' key.
     
     Args:
-        entities1: List of entity dicts from first item
-        entities2: List of entity dicts from second item
+        entities1: List of entities from first item
+        entities2: List of entities from second item
         
     Returns:
         Jaccard index (0-1)
@@ -68,9 +68,20 @@ def compute_entity_overlap(
     if not entities1 or not entities2:
         return 0.0
     
-    # Extract normalized names
-    names1 = {e.get("name", "").lower().strip() for e in entities1 if e.get("name")}
-    names2 = {e.get("name", "").lower().strip() for e in entities2 if e.get("name")}
+    # Extract normalized names - handle both strings and dicts
+    def get_name(e):
+        if isinstance(e, str):
+            return e.lower().strip()
+        elif isinstance(e, dict):
+            return e.get("name", "").lower().strip()
+        return ""
+    
+    names1 = {get_name(e) for e in entities1}
+    names2 = {get_name(e) for e in entities2}
+    
+    # Remove empty strings
+    names1.discard("")
+    names2.discard("")
     
     if not names1 or not names2:
         return 0.0
