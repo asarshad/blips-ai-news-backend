@@ -1,73 +1,122 @@
-# Welcome to your Lovable project
+# Blips AI News
 
-## Project info
+An AI-powered tech news aggregator with a mobile-first experience. Fetches articles from RSS feeds and videos from YouTube channels, processes them with AI summarization, and serves them via API.
 
-**URL**: https://lovable.dev/projects/0a30b842-c192-43fc-8069-48bfb2977781
+## Overview
 
-## How can I edit this code?
+Blips aggregates tech news from multiple sources (RSS feeds, YouTube channels), clusters similar content to avoid duplicates, ranks items by quality and relevance, and serves them to a mobile app.
 
-There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/0a30b842-c192-43fc-8069-48bfb2977781) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  RSS Feeds  │────▶│             │────▶│   Mobile    │
+│  YouTube    │     │   Backend   │     │     App     │
+│  Channels   │     │   (FastAPI) │     │  (Flutter)  │
+└─────────────┘     └─────────────┘     └─────────────┘
+                           │
+                    ┌──────┴──────┐
+                    │             │
+               PostgreSQL      Redis
+                (data)        (cache)
 ```
 
-**Edit a file directly in GitHub**
+## Features
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+- 📰 **Multi-source ingestion** - RSS feeds + YouTube channels
+- 🤖 **AI Summarization** - GPT-powered article summaries
+- 🎯 **Smart Ranking** - Quality, recency, trend, and diversity factors
+- 🔗 **Content Clustering** - Deduplication of similar stories
+- 💬 **AI Chat** - Ask questions about any article
+- 📊 **Engagement Tracking** - Learn from user interactions
+- ⏰ **Background Jobs** - Automatic content refresh
 
-**Use GitHub Codespaces**
+## Tech Stack
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+| Component | Technology |
+|-----------|------------|
+| API | FastAPI (Python 3.11+) |
+| Database | PostgreSQL + SQLAlchemy |
+| Cache | Redis |
+| AI | OpenAI GPT-4 |
+| Scheduler | APScheduler |
+| Container | Docker + Docker Compose |
 
-## What technologies are used for this project?
+## Quick Start
 
-This project is built with:
+```bash
+cd src/backend
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+# Create environment file
+cp .env.example .env
+# Edit .env and add OPENAI_API_KEY
 
-## How can I deploy this project?
+# Start services
+docker-compose up -d
 
-Simply open [Lovable](https://lovable.dev/projects/0a30b842-c192-43fc-8069-48bfb2977781) and click on Share -> Publish.
+# Run migrations
+docker-compose exec api alembic upgrade head
 
-## Can I connect a custom domain to my Lovable project?
+# Verify
+curl http://localhost:8000/api/v1/health
+```
 
-Yes it is!
+## Project Structure
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+```
+src/backend/
+├── app/
+│   ├── api/routes/          # HTTP endpoints
+│   ├── models/              # SQLAlchemy models
+│   ├── repositories/        # Data access layer
+│   ├── services/            # Business logic
+│   │   ├── clustering.py    # Content deduplication
+│   │   ├── ranking.py       # Item scoring
+│   │   └── summarization.py # AI summaries
+│   ├── scheduler/           # Background jobs
+│   └── core/                # Config, settings
+├── alembic/                 # Database migrations
+└── docker-compose.yml
+```
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/health` | Health check |
+| GET | `/api/v1/articles/recent` | Get recent articles |
+| GET | `/api/v1/videos/recent` | Get recent videos |
+| GET | `/api/v1/videos/reels` | Get videos for reels player |
+| POST | `/api/v1/interactions` | Track user engagement |
+| POST | `/api/v1/ai/chat` | AI chat about content |
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/ARCHITECTURE.md) | System design and data flow |
+| [Backend Structure](docs/BACKEND_STRUCTURE.md) | Code organization and patterns |
+| [Configuration](docs/CONFIGURATION.md) | Environment variables and tuning |
+| [Development Guide](docs/DEVELOPMENT_GUIDE.md) | Local setup, testing, debugging |
+
+## Development
+
+```bash
+# View logs
+docker-compose logs -f api
+
+# Run tests
+docker-compose exec api pytest
+
+# Database shell
+docker-compose exec db psql -U postgres -d blips
+
+# Generate migration
+docker-compose exec api alembic revision --autogenerate -m "description"
+```
+
+## Related Projects
+
+- [blips-mobile](../blips-mobile) - Flutter mobile app
+
+## License
+
+MIT
