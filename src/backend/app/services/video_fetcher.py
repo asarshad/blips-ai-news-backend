@@ -108,14 +108,25 @@ class VideoFetcher:
         # Try to get exact duration
         duration = self.youtube_client.get_video_duration(entry.video_id)
         
+        # Check if it's a YouTube Short by URL pattern or title/description
+        is_short = False
         if duration is None:
             # Fallback heuristic: Check if it's a Short using URL check
             is_short = self.youtube_client.is_youtube_short(entry.video_id)
             if not is_short:
-                # Fallback to text heuristic
-                is_short = "#shorts" in entry.title.lower() or "#shorts" in entry.summary.lower()
+                # Fallback to text heuristic - check for #shorts or short-form indicators
+                text_lower = (entry.title + " " + entry.summary).lower()
+                is_short = "#shorts" in text_lower or "#short" in text_lower
             
+            # YouTube Shorts are typically under 60 seconds
             duration = 59 if is_short else None
+        else:
+            # Even with duration, classify as short if under 60 seconds
+            is_short = duration < 60
+        
+        # Log shorts detection for debugging
+        if is_short:
+            logger.info(f"Detected YouTube Short: {entry.title} (duration: {duration}s)")
 
         return {
             "title": entry.title,
@@ -126,6 +137,7 @@ class VideoFetcher:
             "source": entry.source,
             "category": entry.category,
             "duration_seconds": duration,
+            "is_short": is_short,
         }
 
     def save_videos(self, videos: List[Dict[str, Any]]) -> int:

@@ -117,8 +117,13 @@ class IngestionPipeline:
         Returns:
             Created ContentItem or None if duplicate
         """
-        if content_type == ContentType.VIDEO and video.duration_seconds:
-            if video.duration_seconds < 60:
+        # Classify as REEL if:
+        # 1. URL contains /shorts/ (YouTube Shorts URL pattern) - most reliable
+        # 2. Duration is under 180 seconds (3 minutes) - YouTube Shorts max length
+        if content_type == ContentType.VIDEO:
+            is_shorts_url = video.video_url and "/shorts/" in video.video_url
+            is_short_duration = video.duration_seconds and video.duration_seconds <= 180
+            if is_shorts_url or is_short_duration:
                 content_type = ContentType.REEL
         
         source = video.source or "YouTube"

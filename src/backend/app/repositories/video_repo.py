@@ -48,9 +48,9 @@ class VideoRepository(BaseRepository[Video]):
         ).limit(limit).all()
     
     def get_reels(self, limit: int = 10, skip: int = 0) -> List[Video]:
-        """Get recent reels (videos <= 60 seconds)."""
+        """Get recent reels (YouTube Shorts - videos <= 180 seconds or /shorts/ URLs)."""
         return self.db.query(Video).filter(
-            Video.duration_seconds <= 60
+            Video.duration_seconds <= 180
         ).order_by(
             desc(Video.created_at)
         ).offset(skip).limit(limit).all()

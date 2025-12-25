@@ -21,5 +21,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ .
 
 # Command to run the application
-# Using gunicorn for production
-CMD ["gunicorn", "app.main:app", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000"]
+# Using gunicorn for production (2 workers to reduce resource usage)
+# Scheduler only runs on one worker via Redis lock
+CMD ["gunicorn", "app.main:app", "--workers", "2", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000"]

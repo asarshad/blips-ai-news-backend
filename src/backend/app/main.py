@@ -46,12 +46,39 @@ def _check_redis_connection() -> bool:
         return False
 
 
+import os
+
+
 def _start_scheduler() -> None:
-    """Initialize background scheduler and run initial fetch."""
-    scheduler = init_scheduler()
-    if scheduler:
-        # Run initial news fetch immediately
-        fetch_and_process_news()
+    """Initialize background scheduler and run initial fetch.
+    
+    Uses Redis lock to ensure only one worker runs the scheduler
+    when running with multiple gunicorn workers.
+    """
+    try:
+        redis_client = get_redis()
+        
+        # Try to acquire a lock with 60 second expiry
+        lock_acquired = redis_client.set(
+            "scheduler_lock", 
+            "1", 
+            nx=True,  # Only set if doesn't exist
+            ex=60     # Expire after 60 seconds (will be refreshed by scheduler)
+        )
+        
+        if not lock_acquired:
+            logger.info("Scheduler already running on another worker - skipping init")
+            return
+        
+        logger.info("Acquired scheduler lock - initializing scheduler")
+        scheduler = init_scheduler()
+        if scheduler:
+            logger.info("Scheduler initialized - running initial fetch")
+            # Run initial news fetch immediately
+            fetch_and_process_news()
+            
+    except Exception as e:
+        logger.error(f"Error starting scheduler: {str(e)}")
 
 
 @asynccontextmanager
