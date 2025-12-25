@@ -52,10 +52,23 @@ class OpenAIClient:
         Args:
             api_key: OpenAI API key. Defaults to settings.OPENAI_API_KEY
             model: Model to use for completions. Defaults to gpt-4o-mini
+        
+        Raises:
+            ValueError: If API key is missing or empty
         """
         self.api_key = api_key or settings.OPENAI_API_KEY
+        
+        if not self.api_key or self.api_key.strip() == "" or self.api_key == "your-openai-api-key-here":
+            logger.warning("OpenAI API key is missing or invalid. AI features will be unavailable.")
+            self.api_key = None
+        
         self.model = model
-        openai.api_key = self.api_key
+        if self.api_key:
+            openai.api_key = self.api_key
+    
+    def is_configured(self) -> bool:
+        """Check if OpenAI client is properly configured with a valid API key."""
+        return self.api_key is not None and self.api_key.strip() != ""
     
     def chat(
         self, 
@@ -73,7 +86,13 @@ class OpenAIClient:
             
         Returns:
             ChatResponse with content and usage info
+            
+        Raises:
+            Exception: If API key is not configured or API call fails
         """
+        if not self.is_configured():
+            raise Exception("OpenAI API key is not configured. Please set OPENAI_API_KEY environment variable.")
+        
         try:
             api_messages = [
                 {"role": msg.role, "content": msg.content}
@@ -113,7 +132,13 @@ class OpenAIClient:
             
         Returns:
             SummaryResult with summary and tags
+            
+        Raises:
+            Exception: If API key is not configured or summarization fails
         """
+        if not self.is_configured():
+            raise Exception("OpenAI API key is not configured")
+        
         try:
             truncated_content = content[:max_content_length]
             
@@ -152,14 +177,14 @@ class OpenAIClient:
                     tags_text = line[5:].strip()
                     tags = [tag.strip() for tag in tags_text.split(',')]
             
+            if not summary:
+                raise Exception("Failed to parse summary from OpenAI response")
+            
             return SummaryResult(summary=summary, tags=tags)
             
         except Exception as e:
             logger.error(f"Article summarization error: {str(e)}")
-            return SummaryResult(
-                summary="",
-                tags=[]
-            )
+            raise
 
     def summarize_video(
         self, 
@@ -177,7 +202,13 @@ class OpenAIClient:
             
         Returns:
             Summary string
+            
+        Raises:
+            Exception: If API key is not configured or summarization fails
         """
+        if not self.is_configured():
+            raise Exception("OpenAI API key is not configured")
+        
         try:
             truncated_desc = description[:max_length]
             
@@ -201,15 +232,16 @@ class OpenAIClient:
             ]
             
             response = self.chat(messages, max_tokens=200)
-            return response.content.strip()
+            summary = response.content.strip()
+            
+            if not summary:
+                raise Exception("Empty summary returned from OpenAI")
+            
+            return summary
             
         except Exception as e:
             logger.error(f"Video summarization error: {str(e)}")
-            # Fallback to truncated description if AI fails
-            words = description.split()
-            if len(words) > 90:
-                return " ".join(words[:90]) + "..."
-            return description
+            raise
     
     def generate_chat_response(
         self,

@@ -68,6 +68,9 @@ class IngestionPipeline:
         topics = extract_topics(article.title, article.summary or "")
         entities = extract_entities(article.title, article.summary or "")
         
+        # Mark as AI processed if article has a proper summary (not empty/generic)
+        ai_processed = bool(article.summary and len(article.summary.strip()) > 50)
+        
         content_item = ContentItem(
             type=ContentType.ARTICLE,
             source=source,
@@ -82,6 +85,7 @@ class IngestionPipeline:
             topics=topics,
             entities=entities,
             dedupe_key=dedupe_key,
+            ai_processed=ai_processed,
         )
         
         content_item.quality_score = compute_source_weight(source)
@@ -94,7 +98,8 @@ class IngestionPipeline:
         self.clustering.cluster_new_item(content_item)
         self._update_scores(content_item)
         
-        logger.info(f"Ingested article: {article.title} -> {content_item.id}")
+        status = "with AI summary" if ai_processed else "without AI summary (will retry)"
+        logger.info(f"Ingested article {status}: {article.title} -> {content_item.id}")
         return content_item
     
     def ingest_video(
@@ -128,6 +133,11 @@ class IngestionPipeline:
         topics = extract_topics(video.title, text)
         entities = extract_entities(video.title, text)
         
+        # Mark as AI processed if video has a proper summary
+        # Detect if summary is just a generic YouTube description (not AI generated)
+        is_generic = text and ("Watch this video" in text or "Subscribe" in text.lower() or len(text.strip()) < 50)
+        ai_processed = bool(text and not is_generic and len(text.strip()) > 50)
+        
         # Convert date to datetime for published_at
         published_at = datetime.combine(video.published_date, datetime.min.time()) if video.published_date else datetime.utcnow()
         
@@ -145,6 +155,7 @@ class IngestionPipeline:
             topics=topics,
             entities=entities,
             dedupe_key=dedupe_key,
+            ai_processed=ai_processed,
         )
         
         content_item.quality_score = compute_source_weight(source)
@@ -157,7 +168,8 @@ class IngestionPipeline:
         self.clustering.cluster_new_item(content_item)
         self._update_scores(content_item)
         
-        logger.info(f"Ingested video: {video.title} -> {content_item.id}")
+        status = "with AI summary" if ai_processed else "without AI summary (will retry)"
+        logger.info(f"Ingested video {status}: {video.title} -> {content_item.id}")
         return content_item
     
     def run_backfill(

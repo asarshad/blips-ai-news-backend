@@ -18,6 +18,7 @@ from app.scheduler.tasks import (
     run_clustering_job,
     run_preference_decay_job,
     run_backfill_job,
+    retry_ai_processing,
 )
 
 logger = get_logger(__name__)
@@ -65,9 +66,17 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             replace_existing=True
         )
         
+        # Add AI processing retry job (every 2 hours)
+        scheduler.add_job(
+            retry_ai_processing,
+            IntervalTrigger(hours=2),
+            id="ai_retry_job",
+            replace_existing=True
+        )
+        
         scheduler.start()
         logger.info(f"Started background scheduler - fetching news every {settings.NEWS_FETCH_INTERVAL_HOURS} hours")
-        logger.info("Curation jobs: scoring (hourly), clustering (15min), decay (daily)")
+        logger.info("Curation jobs: scoring (hourly), clustering (15min), decay (daily), AI retry (2h)")
         
         return scheduler
         
@@ -76,6 +85,7 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
         return None
 
 
+    "retry_ai_processing",
 __all__ = [
     "init_scheduler",
     "fetch_and_process_news",

@@ -230,3 +230,78 @@ def run_backfill_job():
         logger.error(f"Error in backfill job: {str(e)}")
     finally:
         db.close()
+
+def retry_ai_processing():
+    """
+    Retry AI processing for content that failed previously.
+    
+    This runs periodically to reprocess content when OpenAI API becomes available.
+    Only processes articles and videos, not reels.
+    """
+    logger.info("Starting AI processing retry job")
+    
+    db = SessionLocal()
+    
+    try:
+        from app.repositories.content_repo import ContentItemRepository
+        from app.integrations.openai_client import OpenAIClient
+        from app.models.content import ContentType
+        
+        content_repo = ContentItemRepository(db)
+        openai_client = OpenAIClient()
+        
+        # Check if OpenAI is configured
+        if not openai_client.is_configured():
+            logger.warning("OpenAI API key not configured. Skipping AI retry job.")
+            return
+        
+        # Get content that needs AI processing
+        items = content_repo.get_unprocessed_by_ai(limit=50, hours_back=168)  # 7 days
+        
+        if not items:
+            logger.info("No content items need AI processing")
+            return
+        
+        processed = 0
+        failed = 0
+        
+        for item in items:
+            try:
+                # Skip reels - they don't need summaries
+                if item.type == ContentType.REEL:
+                    content_repo.mark_ai_processed(item.id, summary="", topics=item.topics or [])
+                    processed += 1
+                    continue
+                
+                # Get content for summarization
+                text = item.description or item.title
+                
+                # Generate AI summary
+                if item.type == ContentType.ARTICLE:
+                    result = openai_client.summarize_article(item.title, text)
+                    summary = result.summary
+                    topics = result.tags if result.tags else item.topics
+                else:  # VIDEO
+                    summary = openai_client.summarize_video(item.title, text)
+                    topics = item.topics
+                
+                # Update content item
+                if summary and len(summary.strip()) > 50:
+                    content_repo.mark_ai_processed(item.id, summary=summary, topics=topics)
+                    processed += 1
+                    logger.info(f"✓ AI processed: {item.title[:50]}...")
+                else:
+                    failed += 1
+                    logger.warning(f"✗ Empty summary for: {item.title[:50]}...")
+                
+            except Exception as e:
+                failed += 1
+                logger.error(f"✗ Failed to process {item.title[:50]}...: {str(e)}")
+                continue
+        
+        logger.info(f"AI retry job complete: {processed} processed, {failed} failed out of {len(items)} total")
+        
+    except Exception as e:
+        logger.error(f"Error in AI retry job: {str(e)}")
+    finally:
+        db.close()

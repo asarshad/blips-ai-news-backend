@@ -7,7 +7,7 @@ are normalized into a single content_items table.
 """
 
 from sqlalchemy import (
-    Column, Integer, String, Text, DateTime, Float, Date, Enum as SQLEnum,
+    Column, Integer, String, Text, DateTime, Float, Date, Boolean, Enum as SQLEnum,
     ForeignKey, Index, UniqueConstraint
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -74,6 +74,9 @@ class ContentItem(Base):
     
     # AI-generated content (nullable for reels)
     summary = Column(Text, nullable=True)
+    
+    # AI processing status
+    ai_processed = Column(Boolean, default=False, nullable=False, index=True)
     
     # Extracted metadata (JSONB arrays)
     topics = Column(JSONB, nullable=False, default=list)  # ["AI", "Machine Learning"]

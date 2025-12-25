@@ -36,7 +36,8 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         content_type: ContentType,
         limit: int = 50,
         offset: int = 0,
-        hours_back: int = 72
+        hours_back: int = 72,
+        ai_processed_only: bool = True
     ) -> List[ContentItem]:
         """
         Get recent content items of a specific type.
@@ -46,16 +47,22 @@ class ContentItemRepository(BaseRepository[ContentItem]):
             limit: Maximum number of items
             offset: Pagination offset
             hours_back: Only include items from the last N hours
+            ai_processed_only: Only return AI-processed content (default True)
             
         Returns:
             List of content items ordered by global_score
         """
         cutoff = datetime.utcnow() - timedelta(hours=hours_back)
         
-        return self.db.query(ContentItem).filter(
+        query = self.db.query(ContentItem).filter(
             ContentItem.type == content_type,
             ContentItem.published_at >= cutoff
-        ).order_by(
+        )
+        
+        if ai_processed_only:
+            query = query.filter(ContentItem.ai_processed == True)
+        
+        return query.order_by(
             desc(ContentItem.global_score),
             desc(ContentItem.published_at)
         ).offset(offset).limit(limit).all()
@@ -65,6 +72,50 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         return self.db.query(ContentItem).filter(
             ContentItem.global_score == 0.0
         ).limit(limit).all()
+    
+    def get_unprocessed_by_ai(self, limit: int = 100, hours_back: int = 168) -> List[ContentItem]:
+        """
+        Get content items that need AI processing.
+        
+        Args:
+            limit: Maximum number of items to return
+            hours_back: Only include items from the last N hours (default 7 days)
+            
+        Returns:
+            List of content items without AI processing
+        """
+        cutoff = datetime.utcnow() - timedelta(hours=hours_back)
+        return self.db.query(ContentItem).filter(
+            ContentItem.ai_processed == False,
+            ContentItem.published_at >= cutoff
+        ).order_by(desc(ContentItem.published_at)).limit(limit).all()
+    
+    def mark_ai_processed(self, item_id: int, summary: str, topics: List[str] = None) -> bool:
+        """
+        Mark a content item as AI processed and update its summary.
+        
+        Args:
+            item_id: ID of the content item
+            summary: AI-generated summary
+            topics: Optional updated topics list
+            
+        Returns:
+            True if update succeeded
+        """
+        update_dict = {
+            ContentItem.ai_processed: True,
+            ContentItem.summary: summary,
+            ContentItem.updated_at: datetime.utcnow()
+        }
+        
+        if topics is not None:
+            update_dict[ContentItem.topics] = topics
+        
+        result = self.db.query(ContentItem).filter(
+            ContentItem.id == item_id
+        ).update(update_dict)
+        self.db.commit()
+        return result > 0
     
     def get_unclustered(
         self,
@@ -167,13 +218,21 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         content_type: ContentType,
         hours_back: int = 72,
         limit: int = 100,
-        exclude_cluster_ids: Optional[List[str]] = None
+        exclude_cluster_ids: Optional[List[str]] = None,
+        ai_processed_only: bool = True
     ) -> List[ContentItem]:
         """
         Get content items for playlist generation.
         
         Returns canonical items only (for clustered content) or all items
         (for unclustered content), excluding specified clusters.
+        
+        Args:
+            content_type: Type of content to retrieve
+            hours_back: Time window in hours
+            limit: Maximum items to return
+            exclude_cluster_ids: Cluster IDs to exclude
+            ai_processed_only: Only return AI-processed content (default True)
         """
         cutoff = datetime.utcnow() - timedelta(hours=hours_back)
         
@@ -186,6 +245,10 @@ class ContentItemRepository(BaseRepository[ContentItem]):
                 ContentItem.is_cluster_canonical == 1
             )
         )
+        
+        # Filter for AI-processed content only (unless explicitly disabled)
+        if ai_processed_only:
+            query = query.filter(ContentItem.ai_processed == True)
         
         if exclude_cluster_ids:
             query = query.filter(
