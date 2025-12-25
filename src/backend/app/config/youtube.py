@@ -84,10 +84,25 @@ AI_CHANNELS: List[YouTubeChannel] = [
 ]
 
 # Shorts channels (for Reels)
+# Note: YouTube Shorts are served from the same channel RSS feeds as regular videos.
+# Videos under 60 seconds are automatically classified as REEL type during ingestion.
+# These channels typically produce more short-form content.
 SHORTS_CHANNELS: List[YouTubeChannel] = [
     YouTubeChannel(
-        name="MKBHD Shorts",
+        name="MKBHD",
         channel_id="UCBJycsmduvYEL83R_U4JriQ",
+        is_shorts_channel=True,
+        quality_weight=0.85,
+    ),
+    YouTubeChannel(
+        name="Linus Tech Tips",
+        channel_id="UCXuqSBlHAE6Xw-yeJA0Tunw",
+        is_shorts_channel=True,
+        quality_weight=0.80,
+    ),
+    YouTubeChannel(
+        name="The Verge",
+        channel_id="UCddiUEpeqJcYeBxX1IVBKvQ",
         is_shorts_channel=True,
         quality_weight=0.85,
     ),
@@ -95,9 +110,16 @@ SHORTS_CHANNELS: List[YouTubeChannel] = [
 
 
 def get_all_channels() -> List[YouTubeChannel]:
-    """Get all enabled YouTube channels."""
-    all_channels = PREMIUM_CHANNELS + GENERAL_CHANNELS + AI_CHANNELS
-    return [c for c in all_channels if c.enabled]
+    """Get all enabled YouTube channels including shorts-capable channels."""
+    all_channels = PREMIUM_CHANNELS + GENERAL_CHANNELS + AI_CHANNELS + SHORTS_CHANNELS
+    # Deduplicate by channel_id (some channels may appear in multiple lists)
+    seen = set()
+    unique = []
+    for c in all_channels:
+        if c.enabled and c.channel_id not in seen:
+            seen.add(c.channel_id)
+            unique.append(c)
+    return unique
 
 
 def get_shorts_channels() -> List[YouTubeChannel]:

@@ -226,10 +226,11 @@ class YouTubeClient:
         return videos
     
     def _extract_video_id(self, url: str) -> Optional[str]:
-        """Extract YouTube video ID from URL."""
+        """Extract YouTube video ID from URL including Shorts URLs."""
         patterns = [
             r'(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)',
             r'youtube\.com\/embed\/([^&\n?#]+)',
+            r'youtube\.com\/shorts\/([^&\n?#]+)',  # YouTube Shorts URL
         ]
         for pattern in patterns:
             match = re.search(pattern, url)
