@@ -446,8 +446,16 @@ Set up monitoring for:
 | Issue | Impact | Workaround | Status |
 |-------|--------|------------|--------|
 | ~~Legacy API serving old tables~~ | Critical - no AI summaries | Updated routes to use content_items | Fixed ✅ |
+| No REEL content ingested | Low - `/reels` returns empty | Need to add YouTube Shorts sources | Planned |
 | YouTube transcript fetch fails sometimes | Minor - some videos lack detailed summaries | Use video description as fallback | Open |
 | RSS feeds slow during holidays | Medium - less content | Increase feed sources | Planned |
+
+### 8.1 Reels Implementation Notes
+
+The `/api/v1/videos/reels` endpoint returns 0 results because:
+1. `ContentType.REEL` exists in the data model but no content is ingested with this type
+2. All current videos are 11+ minutes (full videos, not shorts)
+3. **Solution**: Add YouTube Shorts channels to video sources OR classify short videos (<60s) as REEL type during ingestion
 
 ---
 
