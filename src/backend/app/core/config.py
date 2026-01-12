@@ -32,6 +32,8 @@ class Settings(BaseSettings):
         "https://www.theverge.com/rss/index.xml",
         "https://www.wired.com/feed/rss",
         "https://feeds.arstechnica.com/arstechnica/technology-lab",
+        "https://www.engadget.com/rss.xml",
+        "https://www.cnet.com/rss/news/",
     ]
     
     # Quota settings

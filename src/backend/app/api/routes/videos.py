@@ -75,7 +75,7 @@ def get_recent_videos(
         ContentType.VIDEO,
         limit=limit,
         offset=offset,
-        hours_back=168,  # 7 days
+        hours_back=720,  # 30 days - ensure enough content available
         ai_processed_only=True
     )
     
@@ -94,6 +94,7 @@ def get_reels(
     """
     Get the most recent reels (short videos).
     REELs don't require AI summaries but must exist in content_items.
+    REELs have a longer time window (30 days) since they're evergreen content.
     """
     offset = (page - 1) * limit
     
@@ -101,7 +102,7 @@ def get_reels(
         ContentType.REEL,
         limit=limit,
         offset=offset,
-        hours_back=168,
+        hours_back=720,  # 30 days - REELs are more evergreen than articles
         ai_processed_only=False  # REELs don't need AI summaries
     )
     
