@@ -92,7 +92,7 @@ def _run_curation_ingestion(db):
         from app.services.ingestion_pipeline import create_ingestion_pipeline
         
         pipeline = create_ingestion_pipeline(db)
-        stats = pipeline.run_backfill(hours_back=6, limit=100)
+        stats = pipeline.run_backfill(hours_back=24, limit=500)
         
         logger.info(f"Curation ingestion: {stats}")
         

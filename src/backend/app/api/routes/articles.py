@@ -137,7 +137,7 @@ def get_recent_articles(
         ContentType.ARTICLE,
         limit=limit,
         offset=offset,
-        hours_back=168,  # 7 days
+        hours_back=720,  # 30 days - ensure enough content available
         ai_processed_only=True
     )
     

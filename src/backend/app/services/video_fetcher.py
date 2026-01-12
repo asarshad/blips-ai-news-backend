@@ -32,7 +32,7 @@ class VideoFetcher:
             List of video data dictionaries for new videos only
         """
         videos = []
-        video_entries = self.youtube_client.fetch_all_channels(videos_per_channel=5)
+        video_entries = self.youtube_client.fetch_all_channels(videos_per_channel=15)
         
         for entry in video_entries:
             if self.video_repo.get_by_url(entry.video_url):

@@ -29,7 +29,7 @@ class NewsFetcher:
             List of article data dictionaries for new articles only
         """
         articles = []
-        feed_entries = self.rss_client.fetch_all_feeds(entries_per_feed=10)
+        feed_entries = self.rss_client.fetch_all_feeds(entries_per_feed=50)
         
         for entry in feed_entries:
             if self.article_repo.get_by_url(entry.url):

@@ -24,6 +24,9 @@ DEFAULT_CHANNEL_FEEDS = [
     "https://www.youtube.com/feeds/videos.xml?channel_id=UCVYamHliCI9rw1tHR1xbkfw",  # Dave2D
     "https://www.youtube.com/feeds/videos.xml?channel_id=UCsTcErHg8oDvUnTzoqsYeNw",  # Unbox Therapy
     "https://www.youtube.com/feeds/videos.xml?channel_id=UCXGgrKt94gR6lmN4aN3mYTg",  # Austin Evans
+    "https://www.youtube.com/feeds/videos.xml?channel_id=UC7YOGHUfC1Tb6E4pudI9STA",  # Mental Outlaw
+    "https://www.youtube.com/feeds/videos.xml?channel_id=UCX0NnBmaIKk7CDQ_wTx0Fag",  # Fireship
+    "https://www.youtube.com/feeds/videos.xml?channel_id=UCMiJRAwDNSNzuYeN2uWa0pA",  # Mrwhosetheboss
 ]
 
 # Category keywords for video classification
