@@ -52,9 +52,15 @@ import os
 def _start_scheduler() -> None:
     """Initialize background scheduler and run initial fetch.
     
-    Uses Redis lock to ensure only one worker runs the scheduler
-    when running with multiple gunicorn workers.
+    IMPORTANT: In production, scheduler runs ONLY in the worker service.
+    The web API should have SCHEDULER_ENABLED=false to prevent duplicate jobs.
     """
+    # Check if scheduler is enabled (disabled on web service in production)
+    scheduler_enabled = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
+    if not scheduler_enabled:
+        logger.info("Scheduler disabled via SCHEDULER_ENABLED=false (running in worker)")
+        return
+    
     try:
         redis_client = get_redis()
         
