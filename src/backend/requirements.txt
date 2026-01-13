@@ -1,25 +1,25 @@
 
 # FastAPI and server
-fastapi==0.104.1
-uvicorn[standard]==0.23.2
-gunicorn==21.2.0
-python-multipart==0.0.6
+fastapi>=0.109.0
+uvicorn[standard]>=0.23.2
+gunicorn>=21.2.0
+python-multipart>=0.0.6
 
 # Database
-sqlalchemy==2.0.22
-psycopg2-binary==2.9.9
-alembic==1.12.1
+sqlalchemy>=2.0.22
+psycopg2-binary>=2.9.9
+alembic>=1.12.1
 
 # Environment variables
-python-dotenv==1.0.0
-pydantic==2.4.2
-pydantic-settings==2.0.3
+python-dotenv>=1.0.0
+pydantic>=2.10.0
+pydantic-settings>=2.0.3
 
 # Cache
-redis==5.0.1
+redis>=5.0.1
 
 # Scheduling
-apscheduler==3.10.4
+apscheduler>=3.10.4
 
 # LLM Providers
 openai>=1.40.0
