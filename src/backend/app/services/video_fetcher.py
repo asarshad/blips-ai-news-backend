@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 from app.core.logging import get_logger
 from app.repositories.video_repo import VideoRepository
 from app.integrations.youtube_client import YouTubeClient, VideoEntry
-from app.integrations.openai_client import OpenAIClient
+from app.integrations.llm_client import LLMClient
 
 logger = get_logger(__name__)
 
@@ -18,11 +18,11 @@ class VideoFetcher:
         self, 
         video_repo: VideoRepository,
         youtube_client: Optional[YouTubeClient] = None,
-        openai_client: Optional[OpenAIClient] = None
+        llm_client: Optional[LLMClient] = None
     ):
         self.video_repo = video_repo
         self.youtube_client = youtube_client or YouTubeClient()
-        self.openai_client = openai_client or OpenAIClient()
+        self.llm_client = llm_client or LLMClient()
 
     def fetch_latest_videos(self) -> List[Dict[str, Any]]:
         """
@@ -41,7 +41,7 @@ class VideoFetcher:
             
             # Summarize video description using AI
             try:
-                summary = self.openai_client.summarize_video(entry.title, entry.summary)
+                summary = self.llm_client.summarize_video(entry.title, entry.summary)
                 entry.summary = summary
             except Exception as e:
                 logger.error(f"Failed to summarize video {entry.title}: {e}")
@@ -90,7 +90,7 @@ class VideoFetcher:
                 # Skip if it looks like it's already processed (optional heuristic)
                 # For now, we process everything to ensure consistency
                 
-                new_summary = self.openai_client.summarize_video(video.title, current_text)
+                new_summary = self.llm_client.summarize_video(video.title, current_text)
                 
                 if new_summary and new_summary != video.summary:
                     self.video_repo.update_summary(video.id, new_summary)
