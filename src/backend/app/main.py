@@ -32,30 +32,28 @@ logger = get_logger(__name__)
 def _create_tables() -> None:
     """Create database tables if they don't exist.
     
-    Uses a Redis lock to prevent race conditions with multiple workers.
-    Handles existing enum types gracefully (common on redeployments).
+    In production (Render), we skip this because Alembic migrations handle schema.
+    In development, we create tables automatically for convenience.
     """
+    # Skip in production - Alembic handles migrations
+    if os.getenv("RENDER") or os.getenv("SKIP_CREATE_TABLES", "").lower() == "true":
+        logger.info("Skipping auto table creation (production mode - use Alembic migrations)")
+        return
+    
     try:
         redis_client = get_redis()
         # Try to get exclusive lock for table creation
         lock = redis_client.set("db_create_lock", "1", nx=True, ex=30)
         if lock:
-            logger.info("Creating database tables...")
-            # Use checkfirst=True to skip existing objects
+            logger.info("Creating database tables (dev mode)...")
             Base.metadata.create_all(bind=engine, checkfirst=True)
             logger.info("Database tables created")
         else:
             logger.info("Skipping table creation - another worker is handling it")
-            # Give the other worker time to finish
             import time
             time.sleep(2)
     except Exception as e:
-        # Ignore "already exists" errors (common on redeployments)
-        error_msg = str(e).lower()
-        if "already exists" in error_msg or "duplicate" in error_msg:
-            logger.info("Database objects already exist - skipping creation")
-        else:
-            logger.warning(f"Table creation error: {str(e)}")
+        logger.warning(f"Table creation error (non-fatal): {str(e)}")
 
 
 def _check_redis_connection() -> bool:
