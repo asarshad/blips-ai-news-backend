@@ -4,12 +4,16 @@ Revision ID: curation_system_001
 Revises: c539d69b3ccb
 Create Date: 2024-12-22 00:00:00.000000
 
+MIGRATION POLICY: ADDITIVE ONLY
 This migration adds the unified content curation system:
 - content_items: Unified table for articles, videos, and reels
 - content_clusters: Story clustering for deduplication
 - user_profiles: Device-based user profiles
 - user_preferences: Learned interest weights
 - interaction_events: Raw interaction signals
+
+WARNING: Downgrade function is for development only.
+Never run downgrade in production - it will destroy user data.
 """
 from alembic import op
 import sqlalchemy as sa
