@@ -102,3 +102,4 @@ services:
     plan: starter
     region: oregon
     maxmemoryPolicy: allkeys-lru
+    ipAllowList: []  # Allow only internal Render services
