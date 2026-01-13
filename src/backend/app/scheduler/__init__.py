@@ -85,7 +85,6 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
         return None
 
 
-    "retry_ai_processing",
 __all__ = [
     "init_scheduler",
     "fetch_and_process_news",
@@ -94,4 +93,5 @@ __all__ = [
     "run_clustering_job",
     "run_preference_decay_job",
     "run_backfill_job",
+    "retry_ai_processing",
 ]
