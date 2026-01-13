@@ -1,0 +1,209 @@
+# Render Blueprint Configuration
+# https://render.com/docs/blueprint-spec
+#
+# This file defines all services for the Blips backend.
+# Render will auto-deploy when this file is in the repo.
+
+# =============================================================================
+# DATABASES
+# =============================================================================
+
+databases:
+  # Development Database
+  - name: blips-db-dev
+    plan: starter
+    databaseName: blips_dev
+    user: blips_dev
+    region: oregon
+
+  # Production Database
+  - name: blips-db-prod
+    plan: starter
+    databaseName: blips_prod
+    user: blips_prod
+    region: oregon
+
+# =============================================================================
+# SERVICES
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # DEVELOPMENT ENVIRONMENT
+  # ---------------------------------------------------------------------------
+
+  # Dev API Service
+  - type: web
+    name: blips-api-dev
+    runtime: python
+    plan: starter
+    region: oregon
+    branch: develop
+    rootDir: src/backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
+    healthCheckPath: /health
+    envVars:
+      - key: ENV
+        value: dev
+      - key: LOG_LEVEL
+        value: DEBUG
+      - key: PYTHON_VERSION
+        value: 3.11.4
+      - key: DATABASE_URL
+        fromDatabase:
+          name: blips-db-dev
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: blips-redis-dev
+          type: redis
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false  # Must be set manually in Render dashboard
+      - key: MISTRAL_API_KEY
+        sync: false  # Must be set manually in Render dashboard
+      - key: NEWS_FETCH_INTERVAL_MINUTES
+        value: "30"
+      - key: MAX_ITEMS_PER_RUN
+        value: "100"
+      - key: SCHEDULER_ENABLED
+        value: "false"  # Disabled on web, runs on worker
+
+  # Dev Worker Service (Background Jobs)
+  - type: worker
+    name: blips-worker-dev
+    runtime: python
+    plan: starter
+    region: oregon
+    branch: develop
+    rootDir: src/backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.worker
+    envVars:
+      - key: ENV
+        value: dev
+      - key: LOG_LEVEL
+        value: DEBUG
+      - key: PYTHON_VERSION
+        value: 3.11.4
+      - key: DATABASE_URL
+        fromDatabase:
+          name: blips-db-dev
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: blips-redis-dev
+          type: redis
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      - key: NEWS_FETCH_INTERVAL_MINUTES
+        value: "30"
+      - key: MAX_ITEMS_PER_RUN
+        value: "100"
+      - key: PREFERENCE_DECAY_FACTOR
+        value: "0.95"
+
+  # ---------------------------------------------------------------------------
+  # PRODUCTION ENVIRONMENT
+  # ---------------------------------------------------------------------------
+
+  # Prod API Service
+  - type: web
+    name: blips-api-prod
+    runtime: python
+    plan: starter
+    region: oregon
+    branch: main
+    rootDir: src/backend
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
+    startCommand: gunicorn app.main:app --workers 4 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
+    healthCheckPath: /health
+    envVars:
+      - key: ENV
+        value: prod
+      - key: LOG_LEVEL
+        value: WARNING
+      - key: PYTHON_VERSION
+        value: 3.11.4
+      - key: DATABASE_URL
+        fromDatabase:
+          name: blips-db-prod
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: blips-redis-prod
+          type: redis
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: NEWS_FETCH_INTERVAL_MINUTES
+        value: "30"
+      - key: MAX_ITEMS_PER_RUN
+        value: "100"
+      - key: SCHEDULER_ENABLED
+        value: "false"
+
+  # Prod Worker Service (Background Jobs)
+  - type: worker
+    name: blips-worker-prod
+    runtime: python
+    plan: starter
+    region: oregon
+    branch: main
+    rootDir: src/backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.worker
+    envVars:
+      - key: ENV
+        value: prod
+      - key: LOG_LEVEL
+        value: INFO
+      - key: PYTHON_VERSION
+        value: 3.11.4
+      - key: DATABASE_URL
+        fromDatabase:
+          name: blips-db-prod
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: blips-redis-prod
+          type: redis
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      - key: NEWS_FETCH_INTERVAL_MINUTES
+        value: "30"
+      - key: MAX_ITEMS_PER_RUN
+        value: "100"
+      - key: PREFERENCE_DECAY_FACTOR
+        value: "0.95"
+
+  # ---------------------------------------------------------------------------
+  # REDIS SERVICES
+  # ---------------------------------------------------------------------------
+
+  # Dev Redis
+  - type: redis
+    name: blips-redis-dev
+    plan: starter
+    region: oregon
+    maxmemoryPolicy: allkeys-lru
+
+  # Prod Redis
+  - type: redis
+    name: blips-redis-prod
+    plan: starter
+    region: oregon
+    maxmemoryPolicy: allkeys-lru
