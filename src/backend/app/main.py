@@ -30,8 +30,25 @@ logger = get_logger(__name__)
 
 
 def _create_tables() -> None:
-    """Create database tables if they don't exist."""
-    Base.metadata.create_all(bind=engine)
+    """Create database tables if they don't exist.
+    
+    Uses a Redis lock to prevent race conditions with multiple workers.
+    """
+    try:
+        redis_client = get_redis()
+        # Try to get exclusive lock for table creation
+        lock = redis_client.set("db_create_lock", "1", nx=True, ex=30)
+        if lock:
+            logger.info("Creating database tables...")
+            Base.metadata.create_all(bind=engine)
+            logger.info("Database tables created")
+        else:
+            logger.info("Skipping table creation - another worker is handling it")
+            # Give the other worker time to finish
+            import time
+            time.sleep(2)
+    except Exception as e:
+        logger.warning(f"Table creation (may be race condition): {str(e)}")
 
 
 def _check_redis_connection() -> bool:
@@ -47,6 +64,18 @@ def _check_redis_connection() -> bool:
 
 
 import os
+import threading
+
+
+def _run_initial_fetch():
+    """Run the initial news fetch in background thread."""
+    import time
+    time.sleep(2)  # Give app time to fully start
+    logger.info("Running initial news fetch in background thread")
+    try:
+        fetch_and_process_news()
+    except Exception as e:
+        logger.error(f"Initial fetch error: {str(e)}")
 
 
 def _start_scheduler() -> None:
@@ -79,9 +108,10 @@ def _start_scheduler() -> None:
         logger.info("Acquired scheduler lock - initializing scheduler")
         scheduler = init_scheduler()
         if scheduler:
-            logger.info("Scheduler initialized - running initial fetch")
-            # Run initial news fetch immediately
-            fetch_and_process_news()
+            logger.info("Scheduler initialized - running initial fetch in background")
+            # Start background thread for initial fetch (doesn't block startup)
+            thread = threading.Thread(target=_run_initial_fetch, daemon=True)
+            thread.start()
             
     except Exception as e:
         logger.error(f"Error starting scheduler: {str(e)}")
