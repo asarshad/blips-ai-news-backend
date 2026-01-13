@@ -5,6 +5,10 @@ Revision ID: e021dbf2e9df
 Revises: 
 Create Date: 2023-04-10 00:00:00.000000
 
+MIGRATION POLICY: ADDITIVE ONLY
+- This is the initial schema creation
+- All subsequent migrations must be additive (no DROP TABLE/COLUMN in upgrade)
+- Downgrade functions are for development only, never run in production
 """
 from alembic import op
 import sqlalchemy as sa
