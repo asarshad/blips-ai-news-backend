@@ -47,6 +47,8 @@ services:
         sync: false  # Set manually in Render dashboard
       - key: MISTRAL_API_KEY
         sync: false  # Set manually in Render dashboard
+      - key: LLM_PROVIDER
+        sync: false  # Set to "openai" or "mistral" in dashboard
       - key: ENV
         sync: false  # Set to "dev" or "prod" in dashboard
       - key: LOG_LEVEL
@@ -83,6 +85,8 @@ services:
         sync: false
       - key: MISTRAL_API_KEY
         sync: false
+      - key: LLM_PROVIDER
+        sync: false  # Set to "openai" or "mistral" in dashboard
       - key: ENV
         sync: false
       - key: LOG_LEVEL
