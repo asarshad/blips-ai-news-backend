@@ -4,7 +4,7 @@ from app.core.exceptions import ArticleNotFoundError, ChatGenerationError
 from app.repositories.article_repo import ArticleRepository
 from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.video_repo import VideoRepository
-from app.integrations.openai_client import OpenAIClient
+from app.integrations.llm_client import LLMClient
 from typing import Dict, Any, Optional, List
 
 logger = get_logger(__name__)
@@ -18,12 +18,12 @@ class AiChatService:
         article_repo: ArticleRepository, 
         conversation_repo: ConversationRepository,
         video_repo: Optional[VideoRepository] = None,
-        openai_client: Optional[OpenAIClient] = None
+        llm_client: Optional[LLMClient] = None
     ):
         self.article_repo = article_repo
         self.conversation_repo = conversation_repo
         self.video_repo = video_repo
-        self.openai_client = openai_client or OpenAIClient()
+        self.llm_client = llm_client or LLMClient()
     
     def get_ai_response(
         self, 
@@ -85,8 +85,8 @@ class AiChatService:
                 else:
                     history_dicts = []
             
-            # Use OpenAI client for chat
-            response = self.openai_client.generate_chat_response(
+            # Use LLM client for chat
+            response = self.llm_client.generate_chat_response(
                 article_title=title,
                 article_summary=summary,
                 conversation_history=history_dicts,

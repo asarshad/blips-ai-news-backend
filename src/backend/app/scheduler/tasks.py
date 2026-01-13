@@ -347,15 +347,15 @@ def retry_ai_processing():
     
     try:
         from app.repositories.content_repo import ContentItemRepository
-        from app.integrations.openai_client import OpenAIClient
+        from app.integrations.llm_client import LLMClient
         from app.models.content import ContentType
         
         content_repo = ContentItemRepository(db)
-        openai_client = OpenAIClient()
+        llm_client = LLMClient()
         
-        # Check if OpenAI is configured
-        if not openai_client.is_configured():
-            logger.warning("[ai_retry] OpenAI API key not configured, skipping")
+        # Check if LLM is configured
+        if not llm_client.is_configured():
+            logger.warning(f"[ai_retry] {llm_client.get_provider()} API key not configured, skipping")
             return
         
         # Get content that needs AI processing
@@ -386,11 +386,11 @@ def retry_ai_processing():
                 
                 # Generate AI summary
                 if item.type == ContentType.ARTICLE:
-                    result = openai_client.summarize_article(item.title, text)
+                    result = llm_client.summarize_article(item.title, text)
                     summary = result.summary
                     topics = result.tags if result.tags else item.topics
                 else:  # VIDEO
-                    summary = openai_client.summarize_video(item.title, text)
+                    summary = llm_client.summarize_video(item.title, text)
                     topics = item.topics
                 
                 stats.llm_calls += 1

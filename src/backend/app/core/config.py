@@ -23,8 +23,17 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
     
+    # LLM Provider Configuration
+    # Supported: "openai", "mistral"
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai")
+    
     # OpenAI
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    
+    # Mistral
+    MISTRAL_API_KEY: str = os.getenv("MISTRAL_API_KEY", "")
+    MISTRAL_MODEL: str = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
     
     # News sources
     RSS_FEEDS: List[str] = [

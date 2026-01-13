@@ -21,8 +21,9 @@ redis==5.0.1
 # Scheduling
 apscheduler==3.10.4
 
-# OpenAI
+# LLM Providers
 openai>=1.40.0
+mistralai>=1.0.0
 
 # RSS processing
 feedparser==6.0.10

@@ -3,7 +3,7 @@ from app.core.logging import get_logger
 from app.core.exceptions import SummarizationError
 from app.models.article import Article
 from app.repositories.article_repo import ArticleRepository
-from app.integrations.openai_client import OpenAIClient
+from app.integrations.llm_client import LLMClient
 from typing import Dict, Any, Optional
 
 logger = get_logger(__name__)
@@ -15,14 +15,14 @@ class ArticleSummarizer:
     def __init__(
         self, 
         article_repo: ArticleRepository,
-        openai_client: Optional[OpenAIClient] = None
+        llm_client: Optional[LLMClient] = None
     ):
         self.article_repo = article_repo
-        self.openai_client = openai_client or OpenAIClient()
+        self.llm_client = llm_client or LLMClient()
     
     def summarize_article(self, article_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Generate summary and tags for an article using GPT.
+        Generate summary and tags for an article using LLM.
         
         Args:
             article_data: Dict with 'title', 'content', 'source_url', 'image_url'
@@ -34,7 +34,7 @@ class ArticleSummarizer:
         content = article_data.get("content", "")
         
         try:
-            result = self.openai_client.summarize_article(title, content)
+            result = self.llm_client.summarize_article(title, content)
             
             return {
                 "title": title,
