@@ -105,6 +105,7 @@ class ContentItem(Base):
     
     # Relationships
     interactions = relationship("InteractionEvent", back_populates="content_item", cascade="all, delete-orphan")
+    conversations = relationship("Conversation", back_populates="content_item", cascade="all, delete-orphan")
     
     # Composite indexes for efficient queries
     __table_args__ = (

@@ -33,7 +33,7 @@ def trigger_ingestion():
     print("=" * 60)
     
     # Check feature flags
-    print("\n[1/5] Checking feature flags...")
+    print("\n[1/3] Checking feature flags...")
     ingestion_enabled = feature_flags.is_enabled("ingestion")
     summarization_enabled = feature_flags.is_enabled("summarization")
     videos_enabled = feature_flags.is_enabled("videos")
@@ -48,79 +48,23 @@ def trigger_ingestion():
         return
     
     # Connect to database
-    print("\n[2/5] Connecting to database...")
+    print("\n[2/3] Connecting to database...")
     db = SessionLocal()
     
     try:
-        # Import services
-        from app.repositories.article_repo import ArticleRepository
-        from app.repositories.video_repo import VideoRepository
-        from app.services.news_fetcher import NewsFetcher
-        from app.services.video_fetcher import VideoFetcher
-        from app.services.summarizer import ArticleSummarizer
+        # Run ingestion pipeline
+        print("\n[3/3] Running ingestion pipeline...")
+        from app.ingestion.service import create_ingestion_pipeline
         
-        article_repo = ArticleRepository(db)
-        video_repo = VideoRepository(db)
+        pipeline = create_ingestion_pipeline(db)
+        result = pipeline.run_backfill(hours_back=24, limit=500)
         
-        # Fetch articles
-        print("\n[3/5] Fetching articles from RSS feeds...")
-        news_fetcher = NewsFetcher(article_repo)
-        articles = news_fetcher.fetch_latest_articles()
-        print(f"  Found {len(articles)} new articles")
-        
-        # Process articles
-        if articles:
-            print("\n[4/5] Processing articles...")
-            summarizer = ArticleSummarizer(article_repo)
-            processed = 0
-            failed = 0
-            
-            for i, article_data in enumerate(articles[:50]):  # Limit to 50 for manual run
-                try:
-                    # Skip summarization if disabled
-                    processed_article = summarizer.summarize_article(
-                        article_data,
-                        skip_summarization=not summarization_enabled
-                    )
-                    summarizer.save_article(processed_article)
-                    db.commit()
-                    processed += 1
-                    
-                    if (i + 1) % 10 == 0:
-                        print(f"  Processed {i + 1}/{min(len(articles), 50)} articles...")
-                        
-                except Exception as e:
-                    failed += 1
-                    logger.error(f"Failed to process article: {e}")
-                    db.rollback()
-            
-            print(f"  ✓ Processed: {processed}, Failed: {failed}")
-        else:
-            print("\n[4/5] No new articles to process")
-        
-        # Fetch videos
-        if videos_enabled:
-            print("\n[5/5] Fetching videos...")
-            video_fetcher = VideoFetcher(video_repo)
-            videos = video_fetcher.fetch_latest_videos()
-            
-            if videos:
-                saved_count = video_fetcher.save_videos(videos)
-                print(f"  ✓ Saved {saved_count} new videos")
-            else:
-                print("  No new videos found")
-        else:
-            print("\n[5/5] Video fetch skipped (feature disabled)")
-        
-        # Run curation ingestion
-        print("\n[BONUS] Running curation ingestion...")
-        try:
-            from app.services.ingestion_pipeline import create_ingestion_pipeline
-            pipeline = create_ingestion_pipeline(db)
-            result = pipeline.run_backfill(hours_back=24, limit=500)
-            print(f"  ✓ Curation result: {result}")
-        except Exception as e:
-            print(f"  ⚠ Curation failed: {e}")
+        print(f"\nIngestion results:")
+        print(f"  - Articles processed: {result['articles_processed']}")
+        print(f"  - Articles ingested: {result['articles_ingested']}")
+        print(f"  - Videos processed: {result['videos_processed']}")
+        print(f"  - Videos ingested: {result['videos_ingested']}")
+        print(f"  - Errors: {result['errors']}")
         
         print("\n" + "=" * 60)
         print("INGESTION COMPLETE")

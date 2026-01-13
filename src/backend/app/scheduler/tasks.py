@@ -42,37 +42,10 @@ def fetch_and_process_news():
     
     stats = log_job_start("fetch_news")
     
-    redis_client = get_redis()
     db = SessionLocal()
     
     try:
-        from app.repositories.article_repo import ArticleRepository
-        from app.services.news_fetcher import NewsFetcher
-        from app.services.article_service import ArticleService
-        
-        article_repo = ArticleRepository(db)
-        
-        # Fetch new articles (idempotent - skips existing by URL)
-        news_fetcher = NewsFetcher(article_repo)
-        articles = news_fetcher.fetch_latest_articles()
-        
-        if not articles:
-            logger.info("[fetch_news] No new articles found")
-        else:
-            logger.info(f"[fetch_news] Found {len(articles)} new articles")
-            _process_articles_with_stats(db, article_repo, articles, stats)
-            
-            # Update article cache
-            article_service = ArticleService(article_repo, redis_client)
-            article_service.cache_articles()
-        
-        # Fetch videos (if videos feature enabled)
-        if feature_flags.is_enabled("videos"):
-            _fetch_videos_with_stats(db, stats)
-        else:
-            logger.info("[fetch_news] Video fetch skipped - videos feature disabled")
-        
-        # Run curation ingestion
+        # Run curation ingestion (TODO: implement direct RSS/YouTube fetching)
         _run_curation_ingestion_with_stats(db, stats)
         
     except Exception as e:
@@ -83,68 +56,6 @@ def fetch_and_process_news():
         db.close()
         stats.complete()
         stats.log_summary()
-
-
-def _process_articles_with_stats(db, article_repo, articles: list, stats: JobStats):
-    """Process articles with LLM rate limiting and caps."""
-    from app.services.summarizer import ArticleSummarizer
-    
-    # Check summarization feature flag
-    summarization_enabled = feature_flags.is_enabled("summarization")
-    if not summarization_enabled:
-        logger.info("[fetch_news] Summarization disabled - saving articles without AI summary")
-    
-    summarizer = ArticleSummarizer(article_repo)
-    
-    for article_data in articles[:MAX_ITEMS_PER_RUN]:
-        # Check LLM cap (only if summarization enabled)
-        if summarization_enabled and stats.llm_calls >= MAX_LLM_CALLS_PER_RUN:
-            logger.warning(f"[fetch_news] LLM cap reached ({MAX_LLM_CALLS_PER_RUN}), skipping remaining")
-            stats.items_skipped += len(articles) - stats.items_processed - stats.items_failed
-            break
-        
-        try:
-            # Process article (summarize only if feature enabled)
-            processed_article = summarizer.summarize_article(
-                article_data, 
-                skip_summarization=not summarization_enabled
-            )
-            summarizer.save_article(processed_article)
-            db.commit()
-            stats.items_processed += 1
-            
-            if summarization_enabled:
-                stats.llm_calls += 1
-                # Rate limit delay only when making LLM calls
-                time.sleep(LLM_RATE_LIMIT_DELAY)
-            
-        except Exception as e:
-            stats.items_failed += 1
-            stats.errors.append(f"Article '{article_data.get('title', 'unknown')[:50]}': {str(e)}")
-            db.rollback()
-
-
-def _fetch_videos_with_stats(db, stats: JobStats):
-    """Fetch videos with error tracking."""
-    try:
-        from app.repositories.video_repo import VideoRepository
-        from app.services.video_fetcher import VideoFetcher
-        
-        video_repo = VideoRepository(db)
-        video_fetcher = VideoFetcher(video_repo)
-        videos = video_fetcher.fetch_latest_videos()
-        
-        if not videos:
-            logger.info("[fetch_news] No new videos found")
-            return
-        
-        saved_count = video_fetcher.save_videos(videos)
-        stats.items_processed += saved_count
-        logger.info(f"[fetch_news] Saved {saved_count} new videos")
-        
-    except Exception as e:
-        stats.errors.append(f"Video fetch: {str(e)}")
-        db.rollback()
 
 
 def _run_curation_ingestion_with_stats(db, stats: JobStats):
@@ -159,19 +70,6 @@ def _run_curation_ingestion_with_stats(db, stats: JobStats):
         
     except Exception as e:
         stats.errors.append(f"Curation ingestion: {str(e)}")
-
-
-def fetch_and_process_videos():
-    """Standalone video fetch task."""
-    stats = log_job_start("fetch_videos")
-    
-    db = SessionLocal()
-    try:
-        _fetch_videos_with_stats(db, stats)
-    finally:
-        db.close()
-        stats.complete()
-        stats.log_summary()
 
 
 # ============================================================================
