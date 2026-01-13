@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_db
+from app.core.feature_flags import get_feature_flags, FeatureFlags
 from app.core.exceptions import VideoNotFoundError, not_found_exception
 from app.core.logging import get_logger
 from app.schemas.video import Video as VideoSchema, VideoList, VideoCreate
@@ -63,12 +64,20 @@ def _content_item_to_video_schema(item) -> dict:
 def get_recent_videos(
     limit: int = Query(10, ge=1, le=50, description="Number of videos to return"),
     page: int = Query(1, ge=1, description="Page number"),
-    content_repo: ContentItemRepository = Depends(get_content_repo)
+    content_repo: ContentItemRepository = Depends(get_content_repo),
+    flags: FeatureFlags = Depends(get_feature_flags)
 ):
     """
     Get the most recent videos.
     Only returns AI-processed videos with valid summaries.
     """
+    # Check videos feature flag
+    if not flags.is_enabled("videos"):
+        raise HTTPException(
+            status_code=503,
+            detail="Videos feature is currently disabled"
+        )
+    
     offset = (page - 1) * limit
     
     items = content_repo.get_by_type(
@@ -89,13 +98,21 @@ def get_recent_videos(
 def get_reels(
     limit: int = Query(10, ge=1, le=50, description="Number of reels to return"),
     page: int = Query(1, ge=1, description="Page number"),
-    content_repo: ContentItemRepository = Depends(get_content_repo)
+    content_repo: ContentItemRepository = Depends(get_content_repo),
+    flags: FeatureFlags = Depends(get_feature_flags)
 ):
     """
     Get the most recent reels (short videos).
     REELs don't require AI summaries but must exist in content_items.
     REELs have a longer time window (30 days) since they're evergreen content.
     """
+    # Check reels feature flag
+    if not flags.is_enabled("reels"):
+        raise HTTPException(
+            status_code=503,
+            detail="Reels feature is currently disabled"
+        )
+    
     offset = (page - 1) * limit
     
     items = content_repo.get_by_type(

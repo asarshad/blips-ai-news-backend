@@ -6,6 +6,7 @@ from typing import Optional
 import redis
 
 from app.core.dependencies import get_db, get_redis
+from app.core.feature_flags import get_feature_flags, FeatureFlags
 from app.core.exceptions import (
     ArticleNotFoundError, 
     ChatGenerationError,
@@ -36,9 +37,17 @@ def get_ai_response(
     message: ConversationCreate,
     db: Session = Depends(get_db),
     redis_client: redis.Redis = Depends(get_redis),
+    flags: FeatureFlags = Depends(get_feature_flags),
     user_agent: Optional[str] = Header(None)
 ):
     """Generate AI response for a message about an article."""
+    # Check chat feature flag
+    if not flags.is_enabled("chat"):
+        raise HTTPException(
+            status_code=503,
+            detail="AI chat feature is currently disabled"
+        )
+    
     # Create repositories
     article_repo = ArticleRepository(db)
     video_repo = VideoRepository(db)
