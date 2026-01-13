@@ -7,6 +7,7 @@ Jobs are designed to be:
 - Rate-limited: respect external API limits  
 - LLM-capped: limit AI calls per run
 - Logged: comprehensive start/end/count/error logging
+- Feature-gated: respect feature flags
 """
 
 import time
@@ -14,6 +15,7 @@ import time
 from app.db.base import SessionLocal
 from app.core.dependencies import get_redis
 from app.core.logging import get_logger
+from app.core.feature_flags import feature_flags
 from app.scheduler.config import MAX_LLM_CALLS_PER_RUN, MAX_ITEMS_PER_RUN, LLM_RATE_LIMIT_DELAY
 from app.scheduler.job_stats import JobStats, log_job_start
 
@@ -28,10 +30,16 @@ def fetch_and_process_news():
     """
     Fetch, summarize, and store new articles.
     
+    Feature flags: ingestion, summarization, videos
     Idempotency: Uses source_url as dedupe key
     Rate limiting: Delays between LLM calls
     LLM cap: MAX_LLM_CALLS_PER_RUN per run
     """
+    # Check ingestion feature flag
+    if not feature_flags.is_enabled("ingestion"):
+        logger.info("[fetch_news] SKIPPED - ingestion feature is disabled")
+        return
+    
     stats = log_job_start("fetch_news")
     
     redis_client = get_redis()
@@ -58,8 +66,11 @@ def fetch_and_process_news():
             article_service = ArticleService(article_repo, redis_client)
             article_service.cache_articles()
         
-        # Fetch videos
-        _fetch_videos_with_stats(db, stats)
+        # Fetch videos (if videos feature enabled)
+        if feature_flags.is_enabled("videos"):
+            _fetch_videos_with_stats(db, stats)
+        else:
+            logger.info("[fetch_news] Video fetch skipped - videos feature disabled")
         
         # Run curation ingestion
         _run_curation_ingestion_with_stats(db, stats)
@@ -78,24 +89,34 @@ def _process_articles_with_stats(db, article_repo, articles: list, stats: JobSta
     """Process articles with LLM rate limiting and caps."""
     from app.services.summarizer import ArticleSummarizer
     
+    # Check summarization feature flag
+    summarization_enabled = feature_flags.is_enabled("summarization")
+    if not summarization_enabled:
+        logger.info("[fetch_news] Summarization disabled - saving articles without AI summary")
+    
     summarizer = ArticleSummarizer(article_repo)
     
     for article_data in articles[:MAX_ITEMS_PER_RUN]:
-        # Check LLM cap
-        if stats.llm_calls >= MAX_LLM_CALLS_PER_RUN:
+        # Check LLM cap (only if summarization enabled)
+        if summarization_enabled and stats.llm_calls >= MAX_LLM_CALLS_PER_RUN:
             logger.warning(f"[fetch_news] LLM cap reached ({MAX_LLM_CALLS_PER_RUN}), skipping remaining")
             stats.items_skipped += len(articles) - stats.items_processed - stats.items_failed
             break
         
         try:
-            processed_article = summarizer.summarize_article(article_data)
+            # Process article (summarize only if feature enabled)
+            processed_article = summarizer.summarize_article(
+                article_data, 
+                skip_summarization=not summarization_enabled
+            )
             summarizer.save_article(processed_article)
             db.commit()
             stats.items_processed += 1
-            stats.llm_calls += 1
             
-            # Rate limit delay
-            time.sleep(LLM_RATE_LIMIT_DELAY)
+            if summarization_enabled:
+                stats.llm_calls += 1
+                # Rate limit delay only when making LLM calls
+                time.sleep(LLM_RATE_LIMIT_DELAY)
             
         except Exception as e:
             stats.items_failed += 1
@@ -195,9 +216,15 @@ def run_clustering_job():
     """
     Cluster unclustered content.
     
+    Feature flag: clustering
     Idempotency: Processes only unclustered items
     No LLM calls: Uses embedding similarity
     """
+    # Check clustering feature flag
+    if not feature_flags.is_enabled("clustering"):
+        logger.info("[clustering] SKIPPED - clustering feature is disabled")
+        return
+    
     stats = log_job_start("clustering")
     
     db = SessionLocal()
@@ -227,9 +254,15 @@ def run_preference_decay_job():
     """
     Decay user preferences over time.
     
+    Feature flag: personalization
     Idempotency: Applies decay factor to current values
     No LLM calls: Pure computation
     """
+    # Check personalization feature flag
+    if not feature_flags.is_enabled("personalization"):
+        logger.info("[preference_decay] SKIPPED - personalization feature is disabled")
+        return
+    
     stats = log_job_start("preference_decay")
     
     db = SessionLocal()
@@ -298,10 +331,16 @@ def retry_ai_processing():
     """
     Retry AI processing for content that failed previously.
     
+    Feature flag: summarization
     Idempotency: Only processes items marked as unprocessed
     Rate limiting: Delays between LLM calls
     LLM cap: MAX_LLM_CALLS_PER_RUN per run
     """
+    # Check summarization feature flag
+    if not feature_flags.is_enabled("summarization"):
+        logger.info("[ai_retry] SKIPPED - summarization feature is disabled")
+        return
+    
     stats = log_job_start("ai_retry")
     
     db = SessionLocal()
