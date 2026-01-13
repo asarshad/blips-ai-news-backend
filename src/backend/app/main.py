@@ -33,6 +33,7 @@ def _create_tables() -> None:
     """Create database tables if they don't exist.
     
     Uses a Redis lock to prevent race conditions with multiple workers.
+    Handles existing enum types gracefully (common on redeployments).
     """
     try:
         redis_client = get_redis()
@@ -40,7 +41,8 @@ def _create_tables() -> None:
         lock = redis_client.set("db_create_lock", "1", nx=True, ex=30)
         if lock:
             logger.info("Creating database tables...")
-            Base.metadata.create_all(bind=engine)
+            # Use checkfirst=True to skip existing objects
+            Base.metadata.create_all(bind=engine, checkfirst=True)
             logger.info("Database tables created")
         else:
             logger.info("Skipping table creation - another worker is handling it")
@@ -48,7 +50,12 @@ def _create_tables() -> None:
             import time
             time.sleep(2)
     except Exception as e:
-        logger.warning(f"Table creation (may be race condition): {str(e)}")
+        # Ignore "already exists" errors (common on redeployments)
+        error_msg = str(e).lower()
+        if "already exists" in error_msg or "duplicate" in error_msg:
+            logger.info("Database objects already exist - skipping creation")
+        else:
+            logger.warning(f"Table creation error: {str(e)}")
 
 
 def _check_redis_connection() -> bool:
