@@ -52,11 +52,14 @@ def upgrade() -> None:
         # Table exists, skip creation
         pass
     else:
+        # Use postgresql.ENUM with create_type=False to avoid recreating existing enums
+        contenttype_enum = postgresql.ENUM('ARTICLE', 'VIDEO', 'REEL', name='contenttype', create_type=False)
+        
         # Create content_items table
         op.create_table(
             'content_items',
             sa.Column('id', sa.Integer(), nullable=False),
-            sa.Column('type', sa.Enum('ARTICLE', 'VIDEO', 'REEL', name='contenttype', create_type=False), nullable=False),
+            sa.Column('type', contenttype_enum, nullable=False),
             sa.Column('source', sa.String(255), nullable=False),
             sa.Column('source_url', sa.String(2048), nullable=False),
             sa.Column('canonical_url', sa.String(2048), nullable=True),
@@ -130,11 +133,13 @@ def upgrade() -> None:
     
     # Create user_preferences table (if not exists)
     if 'user_preferences' not in inspector.get_table_names():
+        preftype_enum = postgresql.ENUM('TOPIC', 'ENTITY', 'SOURCE', 'FORMAT', name='preftype', create_type=False)
+        
         op.create_table(
             'user_preferences',
             sa.Column('id', sa.Integer(), nullable=False),
             sa.Column('device_id', sa.String(255), nullable=False),
-            sa.Column('pref_type', sa.Enum('TOPIC', 'ENTITY', 'SOURCE', 'FORMAT', name='preftype', create_type=False), nullable=False),
+            sa.Column('pref_type', preftype_enum, nullable=False),
             sa.Column('key', sa.String(255), nullable=False),
             sa.Column('weight', sa.Float(), nullable=False, server_default='0.0'),
             sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=sa.text('NOW()')),
@@ -148,12 +153,14 @@ def upgrade() -> None:
     
     # Create interaction_events table (if not exists)
     if 'interaction_events' not in inspector.get_table_names():
+        eventtype_enum = postgresql.ENUM('VIEW_10S', 'OPEN_SOURCE', 'SHARE', 'SAVE', 'CHAT_START', 'CHAT_MESSAGE', name='eventtype', create_type=False)
+        
         op.create_table(
             'interaction_events',
             sa.Column('id', sa.Integer(), nullable=False),
             sa.Column('device_id', sa.String(255), nullable=False),
             sa.Column('content_item_id', sa.Integer(), nullable=False),
-            sa.Column('event_type', sa.Enum('VIEW_10S', 'OPEN_SOURCE', 'SHARE', 'SAVE', 'CHAT_START', 'CHAT_MESSAGE', name='eventtype', create_type=False), nullable=False),
+            sa.Column('event_type', eventtype_enum, nullable=False),
             sa.Column('event_value', sa.String(255), nullable=True),
             sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.text('NOW()')),
             sa.ForeignKeyConstraint(['device_id'], ['user_profiles.device_id'], ondelete='CASCADE'),
