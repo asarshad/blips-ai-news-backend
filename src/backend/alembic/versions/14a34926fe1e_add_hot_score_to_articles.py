@@ -27,7 +27,7 @@ def upgrade() -> None:
     # NOTE: This drops a constraint but immediately recreates it as an index.
     # The unique constraint on source_url is preserved, just in a different form.
     # This is safe because we're not removing uniqueness protection.
-    op.drop_constraint('articles_source_url_unique', 'articles', type_='unique')
+    op.drop_constraint('articles_source_url_unique', 'articles', type_='unique', if_exists=True)
     
     op.create_index(op.f('ix_articles_hot_score'), 'articles', ['hot_score'], unique=False)
     op.create_index(op.f('ix_articles_source_url'), 'articles', ['source_url'], unique=True)
