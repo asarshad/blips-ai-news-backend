@@ -5,7 +5,7 @@ Provides data access methods for the unified content_items table.
 """
 
 from typing import List, Optional, Tuple, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func, and_, or_
 
@@ -30,6 +30,23 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         return self.db.query(ContentItem).filter(
             ContentItem.dedupe_key == dedupe_key
         ).first()
+
+    def count_created_on_date(
+        self,
+        content_type: ContentType,
+        day_utc: date,
+    ) -> int:
+        """Count items of a type created within the given UTC date."""
+        start = datetime.combine(day_utc, datetime.min.time())
+        end = start + timedelta(days=1)
+        return int(
+            self.db.query(func.count(ContentItem.id)).filter(
+                ContentItem.type == content_type,
+                ContentItem.created_at >= start,
+                ContentItem.created_at < end,
+            ).scalar()
+            or 0
+        )
     
     def get_by_type(
         self,

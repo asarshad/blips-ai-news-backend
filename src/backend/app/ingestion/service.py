@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
+from app.core.config import get_settings
 from app.models.content import ContentItem, ContentType
 from app.repositories.content_repo import ContentItemRepository
 
@@ -27,11 +28,16 @@ from app.integrations.llm_client import LLMClient
 
 logger = get_logger(__name__)
 
-# Content limits per type
-ARTICLE_LIMIT = 30
-VIDEO_LIMIT = 30
-ENTRIES_PER_FEED = 10
-VIDEOS_PER_CHANNEL = 5
+settings = get_settings()
+
+# Source fetch depth (larger batches help work around duplicates)
+ENTRIES_PER_FEED = settings.RSS_ENTRIES_PER_FEED
+VIDEOS_PER_CHANNEL = settings.YT_VIDEOS_PER_CHANNEL
+
+# Daily ingestion targets (per UTC day)
+DAILY_TARGET_ARTICLES = settings.DAILY_TARGET_ARTICLES
+DAILY_TARGET_VIDEOS = settings.DAILY_TARGET_VIDEOS
+DAILY_TARGET_REELS = settings.DAILY_TARGET_REELS
 
 
 class IngestionPipeline:
@@ -153,7 +159,8 @@ class IngestionPipeline:
                 content_type = ContentType.REEL
         
         source = entry.source or "YouTube"
-        dedupe_key = compute_dedupe_key(entry.title, source)
+        # YouTube titles repeat frequently (series/weekly formats). Use video_id for stable dedupe.
+        dedupe_key = f"yt:{entry.video_id}" if entry.video_id else compute_dedupe_key(entry.title, source)
         
         existing = self.content_repo.get_by_dedupe_key(dedupe_key)
         if existing:
@@ -187,7 +194,8 @@ class IngestionPipeline:
             type=content_type,
             source=source,
             source_url=entry.video_url,
-            published_at=datetime.utcnow(),  # YouTube RSS doesn't provide reliable dates
+            # YouTube RSS dates can be inconsistent; created_at is the ingestion date.
+            published_at=datetime.utcnow(),
             title=entry.title,
             description=summary[:500] if summary else None,
             summary=summary if content_type != ContentType.REEL else None,
@@ -232,6 +240,16 @@ class IngestionPipeline:
         Returns:
             Statistics about the ingestion
         """
+        # Enforce per-day quotas based on items created today (UTC).
+        today = datetime.utcnow().date()
+        existing_articles = self.content_repo.count_created_on_date(ContentType.ARTICLE, today)
+        existing_videos = self.content_repo.count_created_on_date(ContentType.VIDEO, today)
+        existing_reels = self.content_repo.count_created_on_date(ContentType.REEL, today)
+
+        remaining_articles = max(0, DAILY_TARGET_ARTICLES - existing_articles)
+        remaining_videos = max(0, DAILY_TARGET_VIDEOS - existing_videos)
+        remaining_reels = max(0, DAILY_TARGET_REELS - existing_reels)
+
         stats = {
             "articles_processed": 0,
             "articles_ingested": 0,
@@ -239,8 +257,21 @@ class IngestionPipeline:
             "videos_processed": 0,
             "videos_ingested": 0,
             "videos_skipped_duplicates": 0,
+            "reels_processed": 0,
+            "reels_ingested": 0,
+            "reels_skipped_duplicates": 0,
             "errors": 0,
         }
+
+        if remaining_articles == 0 and remaining_videos == 0 and remaining_reels == 0:
+            logger.info(
+                "Daily targets already met (UTC %s): articles=%s, videos=%s, reels=%s",
+                today,
+                existing_articles,
+                existing_videos,
+                existing_reels,
+            )
+            return stats
         
         # Fetch articles and videos in parallel
         logger.info("Fetching content from RSS feeds and YouTube channels in parallel...")
@@ -274,10 +305,16 @@ class IngestionPipeline:
                 logger.error(f"Error fetching YouTube channels: {e}")
                 stats["errors"] += 1
         
-        # Process articles until we have ARTICLE_LIMIT new ones (or run out of entries)
-        logger.info(f"Processing articles until we have {ARTICLE_LIMIT} new ones...")
+        # Process articles until we hit the remaining daily target
+        logger.info(
+            "Processing articles for UTC %s: existing=%s target=%s remaining=%s",
+            today,
+            existing_articles,
+            DAILY_TARGET_ARTICLES,
+            remaining_articles,
+        )
         for entry in feed_entries:
-            if stats["articles_ingested"] >= ARTICLE_LIMIT:
+            if stats["articles_ingested"] >= remaining_articles:
                 break
             stats["articles_processed"] += 1
             try:
@@ -290,18 +327,48 @@ class IngestionPipeline:
                 logger.error(f"Error ingesting article {entry.title}: {e}")
                 stats["errors"] += 1
         
-        # Process videos until we have VIDEO_LIMIT new ones (or run out of entries)
-        logger.info(f"Processing videos until we have {VIDEO_LIMIT} new ones...")
+        # Process YouTube entries until we hit remaining daily targets for VIDEO and REEL.
+        logger.info(
+            "Processing YouTube for UTC %s: videos existing=%s target=%s remaining=%s | reels existing=%s target=%s remaining=%s",
+            today,
+            existing_videos,
+            DAILY_TARGET_VIDEOS,
+            remaining_videos,
+            existing_reels,
+            DAILY_TARGET_REELS,
+            remaining_reels,
+        )
         for entry in video_entries:
-            if stats["videos_ingested"] >= VIDEO_LIMIT:
+            if remaining_videos == 0 and remaining_reels == 0:
                 break
-            stats["videos_processed"] += 1
+
+            # Cheap skip when one bucket is already satisfied.
+            is_shorts_url = bool(entry.video_url and "/shorts/" in entry.video_url)
+            if is_shorts_url and remaining_reels == 0:
+                continue
+            if (not is_shorts_url) and remaining_videos == 0:
+                continue
+
+            if is_shorts_url:
+                stats["reels_processed"] += 1
+            else:
+                stats["videos_processed"] += 1
             try:
                 result = self.ingest_youtube_entry(entry)
-                if result:
-                    stats["videos_ingested"] += 1
+                if not result:
+                    # Count duplicate skip into the best-effort bucket
+                    if is_shorts_url:
+                        stats["reels_skipped_duplicates"] += 1
+                    else:
+                        stats["videos_skipped_duplicates"] += 1
+                    continue
+
+                if result.type == ContentType.REEL:
+                    stats["reels_ingested"] += 1
+                    remaining_reels = max(0, remaining_reels - 1)
                 else:
-                    stats["videos_skipped_duplicates"] += 1
+                    stats["videos_ingested"] += 1
+                    remaining_videos = max(0, remaining_videos - 1)
             except Exception as e:
                 logger.error(f"Error ingesting video {entry.title}: {e}")
                 stats["errors"] += 1
