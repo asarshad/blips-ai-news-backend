@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     RECENCY_HALF_LIFE_HOURS: int = int(os.getenv("RECENCY_HALF_LIFE_HOURS", "24"))
     MAX_TOPIC_DOMINANCE: float = float(os.getenv("MAX_TOPIC_DOMINANCE", "0.40"))
     PREFERENCE_DECAY_FACTOR: float = float(os.getenv("PREFERENCE_DECAY_FACTOR", "0.95"))
+
+    # Daily ingestion targets (per UTC day)
+    DAILY_TARGET_ARTICLES: int = int(os.getenv("DAILY_TARGET_ARTICLES", "50"))
+    DAILY_TARGET_VIDEOS: int = int(os.getenv("DAILY_TARGET_VIDEOS", "50"))
+    DAILY_TARGET_REELS: int = int(os.getenv("DAILY_TARGET_REELS", "50"))
+
+    # Source fetch depth (larger batches help backfill around duplicates)
+    RSS_ENTRIES_PER_FEED: int = int(os.getenv("RSS_ENTRIES_PER_FEED", "50"))
+    YT_VIDEOS_PER_CHANNEL: int = int(os.getenv("YT_VIDEOS_PER_CHANNEL", "20"))
     
     # Personalization weights (topic/entity/source/format)
     # These control how much each preference type influences personalization score
