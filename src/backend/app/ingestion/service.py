@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.logging import get_logger
 from app.core.config import get_settings
@@ -76,6 +77,13 @@ class IngestionPipeline:
         Returns:
             Created ContentItem or None if duplicate
         """
+        # Strong idempotency: source_url is unique in DB.
+        if entry.url:
+            existing_by_url = self.content_repo.get_by_source_url(entry.url)
+            if existing_by_url:
+                logger.debug(f"Article already ingested (source_url): {entry.title}")
+                return None
+
         source = extract_source(entry.url)
         dedupe_key = compute_dedupe_key(entry.title, source)
         
@@ -119,8 +127,17 @@ class IngestionPipeline:
         content_item.recency_score = 1.0
         
         self.db.add(content_item)
-        self.db.commit()
-        self.db.refresh(content_item)
+        try:
+            self.db.commit()
+            self.db.refresh(content_item)
+        except IntegrityError:
+            # Common on multi-feed overlaps. Roll back so the session can keep processing.
+            self.db.rollback()
+            logger.debug(f"Article insert skipped (integrity/duplicate): {entry.title}")
+            return None
+        except Exception:
+            self.db.rollback()
+            raise
         
         self.clustering.cluster_new_item(content_item)
         self._update_scores(content_item)
@@ -161,6 +178,13 @@ class IngestionPipeline:
         source = entry.source or "YouTube"
         # YouTube titles repeat frequently (series/weekly formats). Use video_id for stable dedupe.
         dedupe_key = f"yt:{entry.video_id}" if entry.video_id else compute_dedupe_key(entry.title, source)
+
+        # Strong idempotency: source_url is unique in DB.
+        if entry.video_url:
+            existing_by_url = self.content_repo.get_by_source_url(entry.video_url)
+            if existing_by_url:
+                logger.debug(f"Video already ingested (source_url): {entry.title}")
+                return None
         
         existing = self.content_repo.get_by_dedupe_key(dedupe_key)
         if existing:
@@ -212,8 +236,16 @@ class IngestionPipeline:
         content_item.recency_score = 1.0
         
         self.db.add(content_item)
-        self.db.commit()
-        self.db.refresh(content_item)
+        try:
+            self.db.commit()
+            self.db.refresh(content_item)
+        except IntegrityError:
+            self.db.rollback()
+            logger.debug(f"Video insert skipped (integrity/duplicate): {entry.title}")
+            return None
+        except Exception:
+            self.db.rollback()
+            raise
         
         self.clustering.cluster_new_item(content_item)
         self._update_scores(content_item)
@@ -325,6 +357,7 @@ class IngestionPipeline:
                     stats["articles_skipped_duplicates"] += 1
             except Exception as e:
                 logger.error(f"Error ingesting article {entry.title}: {e}")
+                self.db.rollback()
                 stats["errors"] += 1
         
         # Process YouTube entries until we hit remaining daily targets for VIDEO and REEL.
@@ -371,6 +404,7 @@ class IngestionPipeline:
                     remaining_videos = max(0, remaining_videos - 1)
             except Exception as e:
                 logger.error(f"Error ingesting video {entry.title}: {e}")
+                self.db.rollback()
                 stats["errors"] += 1
         
         logger.info(f"Ingestion complete: {stats}")
