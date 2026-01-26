@@ -3,6 +3,9 @@ RSS feed client.
 
 Handles fetching and parsing RSS feeds, with support for
 content extraction from linked articles.
+
+Enhanced with role-based feed configuration for diverse,
+high-quality content ingestion.
 """
 
 import feedparser
@@ -12,22 +15,43 @@ import html
 import random
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.integrations.rss_feeds import (
+    FeedConfig,
+    FeedRole,
+    QualityTier,
+    DecayProfile,
+    get_enabled_feeds,
+    get_feed_by_url,
+    get_quality_modifier,
+    get_decay_half_life,
+)
 
 logger = get_logger(__name__)
 
 
 @dataclass
 class FeedEntry:
-    """Represents a parsed RSS feed entry."""
+    """
+    Represents a parsed RSS feed entry with role metadata.
+    
+    Enhanced to include feed configuration metadata for
+    role-based ranking and decay.
+    """
     title: str
     url: str
     content: str
     image_url: str
     published_date: datetime
+    # Role-based metadata
+    feed_name: str = ""
+    feed_role: Optional[FeedRole] = None
+    quality_tier: Optional[QualityTier] = None
+    decay_profile: Optional[DecayProfile] = None
+    base_quality_weight: Optional[float] = None
 
 
 def decode_html_entities(text: str) -> str:
@@ -45,7 +69,9 @@ class RSSClient:
     """
     Client for fetching and parsing RSS feeds.
     
-    Handles feed parsing, content extraction, and image discovery.
+    Enhanced with role-based feed configuration for diverse,
+    balanced content ingestion. Uses the new FeedConfig system
+    to track metadata through the pipeline.
     """
     
     # User agents for rotation to avoid blocking
@@ -55,35 +81,57 @@ class RSSClient:
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
     ]
     
-    def __init__(self, feed_urls: Optional[List[str]] = None):
+    def __init__(self, feed_configs: Optional[List[FeedConfig]] = None):
         """
-        Initialize RSS client.
+        Initialize RSS client with feed configurations.
         
         Args:
-            feed_urls: List of RSS feed URLs. Defaults to settings.RSS_FEEDS
+            feed_configs: List of FeedConfig objects. Defaults to enabled feeds from registry.
         """
-        self.feed_urls = feed_urls or settings.RSS_FEEDS
+        self.feed_configs = feed_configs or get_enabled_feeds()
+        # Build URL -> config lookup
+        self._config_by_url = {f.url: f for f in self.feed_configs}
     
     def fetch_all_feeds(self, entries_per_feed: int = 10) -> List[FeedEntry]:
         """
-        Fetch entries from all configured feeds.
+        Fetch entries from all configured feeds with role metadata.
         
         Args:
             entries_per_feed: Maximum entries to fetch per feed
             
         Returns:
-            List of FeedEntry objects
+            List of FeedEntry objects with role metadata
         """
         entries = []
+        entries_by_role: Dict[str, int] = {}
         
-        for feed_url in self.feed_urls:
+        for feed_config in self.feed_configs:
             try:
-                feed_entries = self.fetch_feed(feed_url, entries_per_feed)
+                # Use feed's daily_cap as max entries
+                max_entries = min(entries_per_feed, feed_config.daily_cap * 3)
+                feed_entries = self.fetch_feed(feed_config.url, max_entries)
+                
+                # Attach role metadata to entries
+                for entry in feed_entries:
+                    entry.feed_name = feed_config.name
+                    entry.feed_role = feed_config.role
+                    entry.quality_tier = feed_config.quality_tier
+                    entry.decay_profile = feed_config.decay_profile
+                    entry.base_quality_weight = feed_config.base_quality_weight
+                
                 entries.extend(feed_entries)
+                
+                # Track by role
+                role_key = feed_config.role.value
+                entries_by_role[role_key] = entries_by_role.get(role_key, 0) + len(feed_entries)
+                
             except Exception as e:
-                logger.error(f"Error fetching feed {feed_url}: {str(e)}")
+                logger.error(f"Error fetching feed {feed_config.name}: {str(e)}")
         
-        logger.info(f"Total entries fetched: {len(entries)}")
+        logger.info(f"Total RSS entries fetched: {len(entries)}")
+        for role, count in sorted(entries_by_role.items()):
+            logger.info(f"  {role}: {count} entries")
+        
         return entries
     
     def fetch_feed(self, feed_url: str, max_entries: int = 10) -> List[FeedEntry]:
