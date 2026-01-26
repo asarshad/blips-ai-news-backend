@@ -322,19 +322,25 @@ class IngestionPipeline:
                 videos_per_channel=VIDEOS_PER_CHANNEL
             )
             
-            # Collect results
+            # Collect results - RSS fetching can take a while due to content extraction
             try:
-                feed_entries = article_future.result(timeout=120)
+                feed_entries = article_future.result(timeout=300)  # 5 minutes for RSS
                 logger.info(f"Fetched {len(feed_entries)} RSS entries")
+            except TimeoutError:
+                logger.error("RSS feed fetching timed out after 300 seconds")
+                stats["errors"] += 1
             except Exception as e:
-                logger.error(f"Error fetching RSS feeds: {e}")
+                logger.error(f"Error fetching RSS feeds: {type(e).__name__}: {e}")
                 stats["errors"] += 1
             
             try:
-                video_entries = video_future.result(timeout=120)
+                video_entries = video_future.result(timeout=180)  # 3 minutes for YouTube
                 logger.info(f"Fetched {len(video_entries)} YouTube videos")
+            except TimeoutError:
+                logger.error("YouTube channel fetching timed out after 180 seconds")
+                stats["errors"] += 1
             except Exception as e:
-                logger.error(f"Error fetching YouTube channels: {e}")
+                logger.error(f"Error fetching YouTube channels: {type(e).__name__}: {e}")
                 stats["errors"] += 1
         
         # Process articles until we hit the remaining daily target
