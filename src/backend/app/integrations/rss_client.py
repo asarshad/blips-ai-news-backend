@@ -109,11 +109,16 @@ class RSSClient:
                     title = decode_html_entities(entry.title)
                     url = entry.link
                     
-                    # Extract content
+                    # Extract content - try full page extraction first, fallback to RSS description
                     content = self._extract_article_content(url)
                     if not content:
-                        logger.warning(f"Skipped article with no content: {title}")
-                        continue
+                        # Fallback: use RSS feed's description/summary
+                        content = self._get_rss_description(entry)
+                        if content:
+                            logger.info(f"Using RSS description for article: {title}")
+                        else:
+                            logger.warning(f"Skipped article with no content: {title}")
+                            continue
                     
                     # Get image
                     image_url = self._extract_image_url(entry, url)
@@ -175,6 +180,29 @@ class RSSClient:
         except Exception as e:
             logger.error(f"Error extracting content from {url}: {str(e)}")
             return ""
+    
+    def _get_rss_description(self, entry) -> str:
+        """Extract content from RSS feed's description/summary fields."""
+        content = ""
+        
+        # Try content:encoded first (full content in some feeds)
+        if hasattr(entry, 'content') and entry.content:
+            for c in entry.content:
+                if c.get('value'):
+                    content = c.get('value', '')
+                    break
+        
+        # Fallback to summary/description
+        if not content:
+            content = getattr(entry, 'summary', '') or getattr(entry, 'description', '')
+        
+        if content:
+            # Strip HTML tags and clean up
+            soup = BeautifulSoup(content, 'html.parser')
+            text = soup.get_text(separator=' ', strip=True)
+            return text[:8000] if text else ""
+        
+        return ""
     
     def _extract_image_url(self, entry, article_url: str) -> str:
         """Extract featured image URL from feed entry or article page."""
