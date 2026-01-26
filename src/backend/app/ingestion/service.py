@@ -2,12 +2,13 @@
 Ingestion service.
 
 Orchestrates the ingestion of articles and videos into the content system.
-Fetches directly from RSS feeds and YouTube channels.
+Fetches directly from RSS feeds and YouTube channels with role-based quotas.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Set
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import defaultdict
 
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -25,6 +26,12 @@ from app.ingestion.extractors import extract_topics, extract_entities, extract_s
 
 from app.integrations.rss_client import RSSClient, FeedEntry
 from app.integrations.youtube_client import YouTubeClient, VideoEntry
+from app.integrations.youtube_channels import (
+    ChannelRole,
+    QualityTier,
+    get_role_quotas,
+    get_quality_weight_modifier,
+)
 from app.integrations.llm_client import LLMClient
 
 logger = get_logger(__name__)
@@ -154,25 +161,30 @@ class IngestionPipeline:
         """
         Ingest a YouTube video entry directly into content_items.
         
+        Uses enhanced metadata from the new channel configuration system
+        for better classification and quality scoring.
+        
         Args:
-            entry: VideoEntry from YouTube client
-            content_type: VIDEO or REEL (determined by duration if not specified)
+            entry: VideoEntry from YouTube client (with role metadata)
+            content_type: VIDEO or REEL (can be overridden by entry.is_short)
             
         Returns:
             Created ContentItem or None if duplicate
         """
-        # Get video duration and check if it's a Short
+        # Get video duration
         duration_seconds = None
         try:
             duration_seconds = self.youtube_client.get_video_duration(entry.video_id)
         except Exception as e:
             logger.warning(f"Failed to get duration for video {entry.title}: {e}")
         
-        # Classify as REEL if it's a Short
+        # Classify as REEL if it's a Short (use entry metadata first)
         if content_type == ContentType.VIDEO:
+            # Use the is_short flag from enhanced metadata if available
+            is_short = getattr(entry, 'is_short', False)
             is_shorts_url = entry.video_url and "/shorts/" in entry.video_url
             is_short_duration = duration_seconds and duration_seconds <= 180
-            if is_shorts_url or is_short_duration:
+            if is_short or is_shorts_url or is_short_duration:
                 content_type = ContentType.REEL
         
         source = entry.source or "YouTube"
@@ -191,25 +203,37 @@ class IngestionPipeline:
             logger.debug(f"Video already ingested: {entry.title}")
             return None
         
-        # Generate AI summary
+        # Generate AI summary (skip for reels - metadata only)
         summary = entry.summary
         ai_processed = False
-        try:
-            if self.llm_client.is_configured() and summary:
-                # Check if summary is generic
-                is_generic = "Watch this video" in summary or "Subscribe" in summary.lower() or len(summary.strip()) < 50
-                if is_generic:
-                    # Try to get transcript
-                    transcript = self.youtube_client.get_transcript(entry.video_id)
-                    if transcript:
-                        summary = transcript[:5000]
-                
-                ai_summary = self.llm_client.summarize_video(entry.title, summary)
-                if ai_summary and len(ai_summary.strip()) > 50:
-                    summary = ai_summary
-                    ai_processed = True
-        except Exception as e:
-            logger.warning(f"Failed to summarize video {entry.title}: {e}")
+        
+        # Skip AI summarization for REEL content type
+        if content_type == ContentType.REEL:
+            # Reels use metadata only, no summarization
+            ai_processed = False
+        else:
+            try:
+                if self.llm_client.is_configured() and summary:
+                    # Check if summary is generic
+                    is_generic = "Watch this video" in summary or "Subscribe" in summary.lower() or len(summary.strip()) < 50
+                    if is_generic:
+                        # Try to get transcript
+                        transcript = self.youtube_client.get_transcript(entry.video_id)
+                        if transcript:
+                            summary = transcript[:5000]
+                    
+                    ai_summary = self.llm_client.summarize_video(entry.title, summary)
+                    if ai_summary and len(ai_summary.strip()) > 50:
+                        summary = ai_summary
+                        ai_processed = True
+            except Exception as e:
+                logger.warning(f"Failed to summarize video {entry.title}: {e}")
+        
+        # Apply quality tier modifier from channel config
+        channel_quality_tier = getattr(entry, 'quality_tier', None)
+        quality_modifier = 1.0
+        if channel_quality_tier:
+            quality_modifier = get_quality_weight_modifier(channel_quality_tier)
         
         topics = extract_topics(entry.title, summary or "")
         entities = extract_entities(entry.title, summary or "")
@@ -232,7 +256,9 @@ class IngestionPipeline:
             ai_processed=ai_processed,
         )
         
-        content_item.quality_score = compute_source_weight(source)
+        # Apply quality modifier from channel tier
+        base_quality = compute_source_weight(source)
+        content_item.quality_score = base_quality * quality_modifier
         content_item.recency_score = 1.0
         
         self.db.add(content_item)
@@ -250,8 +276,14 @@ class IngestionPipeline:
         self.clustering.cluster_new_item(content_item)
         self._update_scores(content_item)
         
+        # Log role info if available
+        role_info = ""
+        channel_role = getattr(entry, 'channel_role', None)
+        if channel_role:
+            role_info = f" [{channel_role.value}]"
+        
         status = "with AI summary" if ai_processed else "without AI summary"
-        logger.info(f"Ingested {content_type.value} {status}: {entry.title} -> {content_item.id}")
+        logger.info(f"Ingested {content_type.value}{role_info} {status}: {entry.title} -> {content_item.id}")
         return content_item
     
     def run_backfill(
@@ -367,6 +399,10 @@ class IngestionPipeline:
                 stats["errors"] += 1
         
         # Process YouTube entries until we hit remaining daily targets for VIDEO and REEL.
+        # Track channels and topics to prevent excessive repetition
+        channel_video_counts: Dict[str, int] = defaultdict(int)
+        channel_reel_counts: Dict[str, int] = defaultdict(int)
+        
         logger.info(
             "Processing YouTube for UTC %s: videos existing=%s target=%s remaining=%s | reels existing=%s target=%s remaining=%s",
             today,
@@ -381,14 +417,26 @@ class IngestionPipeline:
             if remaining_videos == 0 and remaining_reels == 0:
                 break
 
-            # Cheap skip when one bucket is already satisfied.
+            # Use enhanced metadata for shorts detection
+            is_short = getattr(entry, 'is_short', False)
             is_shorts_url = bool(entry.video_url and "/shorts/" in entry.video_url)
-            if is_shorts_url and remaining_reels == 0:
+            is_reel = is_short or is_shorts_url
+            
+            if is_reel and remaining_reels == 0:
                 continue
-            if (not is_shorts_url) and remaining_videos == 0:
+            if (not is_reel) and remaining_videos == 0:
                 continue
 
-            if is_shorts_url:
+            # Apply per-channel caps to prevent creator fatigue
+            channel_id = getattr(entry, 'channel_id', '') or entry.source
+            if is_reel:
+                if channel_reel_counts[channel_id] >= 4:  # Max 4 reels per channel
+                    continue
+            else:
+                if channel_video_counts[channel_id] >= 2:  # Max 2 videos per channel
+                    continue
+
+            if is_reel:
                 stats["reels_processed"] += 1
             else:
                 stats["videos_processed"] += 1
@@ -396,18 +444,21 @@ class IngestionPipeline:
                 result = self.ingest_youtube_entry(entry)
                 if not result:
                     # Count duplicate skip into the best-effort bucket
-                    if is_shorts_url:
+                    if is_reel:
                         stats["reels_skipped_duplicates"] += 1
                     else:
                         stats["videos_skipped_duplicates"] += 1
                     continue
 
+                # Update channel counts
                 if result.type == ContentType.REEL:
                     stats["reels_ingested"] += 1
                     remaining_reels = max(0, remaining_reels - 1)
+                    channel_reel_counts[channel_id] += 1
                 else:
                     stats["videos_ingested"] += 1
                     remaining_videos = max(0, remaining_videos - 1)
+                    channel_video_counts[channel_id] += 1
             except Exception as e:
                 logger.error(f"Error ingesting video {entry.title}: {e}")
                 self.db.rollback()
