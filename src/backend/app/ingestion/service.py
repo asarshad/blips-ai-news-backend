@@ -25,6 +25,15 @@ from app.ranking.quality import compute_source_weight
 from app.ingestion.extractors import extract_topics, extract_entities, extract_source
 
 from app.integrations.rss_client import RSSClient, FeedEntry
+from app.integrations.rss_feeds import (
+    FeedRole,
+    QualityTier as RSSQualityTier,
+    DecayProfile,
+    get_quality_modifier as get_rss_quality_modifier,
+    get_decay_half_life,
+    get_role_quota,
+    get_feed_stats,
+)
 from app.integrations.youtube_client import YouTubeClient, VideoEntry
 from app.integrations.youtube_channels import (
     ChannelRole,
@@ -78,8 +87,11 @@ class IngestionPipeline:
         """
         Ingest an RSS feed entry directly into content_items.
         
+        Uses enhanced metadata from the new feed configuration system
+        for better quality scoring and role-based ranking.
+        
         Args:
-            entry: FeedEntry from RSS client
+            entry: FeedEntry from RSS client (with role metadata)
             
         Returns:
             Created ContentItem or None if duplicate
@@ -130,7 +142,16 @@ class IngestionPipeline:
             ai_processed=ai_processed,
         )
         
-        content_item.quality_score = compute_source_weight(source)
+        # Apply quality scoring with role-based modifiers
+        # Use base_quality_weight from feed config if available, else compute from source
+        base_quality = entry.base_quality_weight or compute_source_weight(source)
+        
+        # Apply quality tier modifier
+        quality_modifier = 1.0
+        if entry.quality_tier:
+            quality_modifier = get_rss_quality_modifier(entry.quality_tier)
+        
+        content_item.quality_score = base_quality * quality_modifier
         content_item.recency_score = 1.0
         
         self.db.add(content_item)
@@ -149,8 +170,13 @@ class IngestionPipeline:
         self.clustering.cluster_new_item(content_item)
         self._update_scores(content_item)
         
+        # Log role info if available
+        role_info = ""
+        if entry.feed_role:
+            role_info = f" [{entry.feed_role.value}]"
+        
         status = "with AI summary" if ai_processed else "without AI summary"
-        logger.info(f"Ingested article {status}: {entry.title} -> {content_item.id}")
+        logger.info(f"Ingested article{role_info} {status}: {entry.title} -> {content_item.id}")
         return content_item
     
     def ingest_youtube_entry(
@@ -376,6 +402,9 @@ class IngestionPipeline:
                 stats["errors"] += 1
         
         # Process articles until we hit the remaining daily target
+        # Track per-feed counts to enforce daily caps
+        feed_article_counts: Dict[str, int] = defaultdict(int)
+        
         logger.info(
             "Processing articles for UTC %s: existing=%s target=%s remaining=%s",
             today,
@@ -386,17 +415,36 @@ class IngestionPipeline:
         for entry in feed_entries:
             if stats["articles_ingested"] >= remaining_articles:
                 break
+            
+            # Apply per-feed daily caps
+            feed_name = getattr(entry, 'feed_name', '') or 'unknown'
+            feed_daily_cap = 3  # Default cap
+            if hasattr(entry, 'quality_tier') and entry.quality_tier:
+                # Premium feeds get slightly higher effective caps
+                feed_daily_cap = 4 if entry.quality_tier.value == 'premium' else 3
+            
+            if feed_article_counts[feed_name] >= feed_daily_cap:
+                logger.debug(f"Feed {feed_name} hit daily cap ({feed_daily_cap}), skipping")
+                continue
+            
             stats["articles_processed"] += 1
             try:
                 result = self.ingest_rss_entry(entry)
                 if result:
                     stats["articles_ingested"] += 1
+                    feed_article_counts[feed_name] += 1
                 else:
                     stats["articles_skipped_duplicates"] += 1
             except Exception as e:
                 logger.error(f"Error ingesting article {entry.title}: {e}")
                 self.db.rollback()
                 stats["errors"] += 1
+        
+        # Log feed distribution
+        if feed_article_counts:
+            logger.info("Articles ingested by feed:")
+            for feed, count in sorted(feed_article_counts.items(), key=lambda x: -x[1]):
+                logger.info(f"  {feed}: {count}")
         
         # Process YouTube entries until we hit remaining daily targets for VIDEO and REEL.
         # Track channels and topics to prevent excessive repetition

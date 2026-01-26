@@ -140,28 +140,44 @@ class TrendConfig(BaseSettings):
 # Source Quality Weights
 # 0.0 = lowest quality, 1.0 = highest quality
 # These influence the quality_score component
+# Note: RSS feeds now use base_quality_weight from FeedConfig,
+# but these remain as fallback for legacy code paths.
 SOURCE_QUALITY_WEIGHTS: Dict[str, float] = {
     # Premium tech publications (0.85-0.95)
     "mit technology review": 0.95,
+    "ieee spectrum": 0.92,
+    "krebs on security": 0.92,
     "ars technica": 0.90,
     "techcrunch": 0.90,
     "the verge": 0.90,
+    "the atlantic": 0.88,
     "wired": 0.85,
+    "the new stack": 0.85,
+    "infoq": 0.85,
     
-    # Company official blogs (0.90-0.95)
-    "google": 0.95,
-    "microsoft": 0.95,
-    "apple": 0.95,
-    "openai": 0.95,
-    "anthropic": 0.95,
-    "meta": 0.90,
+    # Company official blogs (0.70-0.95 - down-ranked for primary sources)
+    "google": 0.70,
+    "microsoft": 0.70,
+    "apple": 0.70,
+    "openai": 0.70,
+    "anthropic": 0.70,
+    "meta": 0.70,
+    "aws": 0.80,
+    "google cloud": 0.80,
     
     # Major tech outlets (0.70-0.80)
+    "venturebeat": 0.80,
+    "smashing magazine": 0.80,
+    "css-tricks": 0.78,
+    "the hacker news": 0.78,
     "engadget": 0.75,
     "cnet": 0.75,
     "zdnet": 0.75,
+    "crunchbase": 0.75,
+    "pitchbook": 0.75,
+    "dark reading": 0.75,
+    "hacker news": 0.70,
     "mashable": 0.70,
-    "venturebeat": 0.80,
     
     # YouTube creators (quality varies, 0.70-0.90)
     "mkbhd": 0.90,
