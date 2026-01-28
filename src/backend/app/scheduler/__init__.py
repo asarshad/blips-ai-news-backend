@@ -13,7 +13,6 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.scheduler.tasks import (
     fetch_and_process_news,
-    fetch_and_process_videos,
     run_scoring_job,
     run_clustering_job,
     run_preference_decay_job,
@@ -85,13 +84,12 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
         return None
 
 
-    "retry_ai_processing",
 __all__ = [
     "init_scheduler",
     "fetch_and_process_news",
-    "fetch_and_process_videos",
     "run_scoring_job",
     "run_clustering_job",
     "run_preference_decay_job",
     "run_backfill_job",
+    "retry_ai_processing",
 ]

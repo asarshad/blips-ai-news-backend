@@ -30,8 +30,30 @@ logger = get_logger(__name__)
 
 
 def _create_tables() -> None:
-    """Create database tables if they don't exist."""
-    Base.metadata.create_all(bind=engine)
+    """Create database tables if they don't exist.
+    
+    In production (Render), we skip this because Alembic migrations handle schema.
+    In development, we create tables automatically for convenience.
+    """
+    # Skip in production - Alembic handles migrations
+    if os.getenv("RENDER") or os.getenv("SKIP_CREATE_TABLES", "").lower() == "true":
+        logger.info("Skipping auto table creation (production mode - use Alembic migrations)")
+        return
+    
+    try:
+        redis_client = get_redis()
+        # Try to get exclusive lock for table creation
+        lock = redis_client.set("db_create_lock", "1", nx=True, ex=30)
+        if lock:
+            logger.info("Creating database tables (dev mode)...")
+            Base.metadata.create_all(bind=engine, checkfirst=True)
+            logger.info("Database tables created")
+        else:
+            logger.info("Skipping table creation - another worker is handling it")
+            import time
+            time.sleep(2)
+    except Exception as e:
+        logger.warning(f"Table creation error (non-fatal): {str(e)}")
 
 
 def _check_redis_connection() -> bool:
@@ -47,14 +69,32 @@ def _check_redis_connection() -> bool:
 
 
 import os
+import threading
+
+
+def _run_initial_fetch():
+    """Run the initial news fetch in background thread."""
+    import time
+    time.sleep(2)  # Give app time to fully start
+    logger.info("Running initial news fetch in background thread")
+    try:
+        fetch_and_process_news()
+    except Exception as e:
+        logger.error(f"Initial fetch error: {str(e)}")
 
 
 def _start_scheduler() -> None:
     """Initialize background scheduler and run initial fetch.
     
-    Uses Redis lock to ensure only one worker runs the scheduler
-    when running with multiple gunicorn workers.
+    IMPORTANT: In production, scheduler runs ONLY in the worker service.
+    The web API should have SCHEDULER_ENABLED=false to prevent duplicate jobs.
     """
+    # Check if scheduler is enabled (disabled on web service in production)
+    scheduler_enabled = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
+    if not scheduler_enabled:
+        logger.info("Scheduler disabled via SCHEDULER_ENABLED=false (running in worker)")
+        return
+    
     try:
         redis_client = get_redis()
         
@@ -73,9 +113,10 @@ def _start_scheduler() -> None:
         logger.info("Acquired scheduler lock - initializing scheduler")
         scheduler = init_scheduler()
         if scheduler:
-            logger.info("Scheduler initialized - running initial fetch")
-            # Run initial news fetch immediately
-            fetch_and_process_news()
+            logger.info("Scheduler initialized - running initial fetch in background")
+            # Start background thread for initial fetch (doesn't block startup)
+            thread = threading.Thread(target=_run_initial_fetch, daemon=True)
+            thread.start()
             
     except Exception as e:
         logger.error(f"Error starting scheduler: {str(e)}")

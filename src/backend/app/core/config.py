@@ -23,8 +23,17 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
     
+    # LLM Provider Configuration
+    # Supported: "openai", "mistral"
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai")
+    
     # OpenAI
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    
+    # Mistral
+    MISTRAL_API_KEY: str = os.getenv("MISTRAL_API_KEY", "")
+    MISTRAL_MODEL: str = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
     
     # News sources
     RSS_FEEDS: List[str] = [
@@ -32,6 +41,8 @@ class Settings(BaseSettings):
         "https://www.theverge.com/rss/index.xml",
         "https://www.wired.com/feed/rss",
         "https://feeds.arstechnica.com/arstechnica/technology-lab",
+        "https://www.engadget.com/rss.xml",
+        "https://www.cnet.com/rss/news/",
     ]
     
     # Quota settings
@@ -53,6 +64,15 @@ class Settings(BaseSettings):
     RECENCY_HALF_LIFE_HOURS: int = int(os.getenv("RECENCY_HALF_LIFE_HOURS", "24"))
     MAX_TOPIC_DOMINANCE: float = float(os.getenv("MAX_TOPIC_DOMINANCE", "0.40"))
     PREFERENCE_DECAY_FACTOR: float = float(os.getenv("PREFERENCE_DECAY_FACTOR", "0.95"))
+
+    # Daily ingestion targets (per UTC day)
+    DAILY_TARGET_ARTICLES: int = int(os.getenv("DAILY_TARGET_ARTICLES", "40"))
+    DAILY_TARGET_VIDEOS: int = int(os.getenv("DAILY_TARGET_VIDEOS", "30"))
+    DAILY_TARGET_REELS: int = int(os.getenv("DAILY_TARGET_REELS", "30"))
+
+    # Source fetch depth (larger batches help backfill around duplicates)
+    RSS_ENTRIES_PER_FEED: int = int(os.getenv("RSS_ENTRIES_PER_FEED", "50"))
+    YT_VIDEOS_PER_CHANNEL: int = int(os.getenv("YT_VIDEOS_PER_CHANNEL", "30"))
     
     # Personalization weights (topic/entity/source/format)
     # These control how much each preference type influences personalization score

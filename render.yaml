@@ -1,0 +1,109 @@
+# Render Blueprint Configuration
+# https://render.com/docs/blueprint-spec
+#
+# This file defines a SINGLE environment template.
+# Deploy this blueprint separately for dev and prod environments.
+# Set environment-specific values in Render dashboard after deployment.
+
+# =============================================================================
+# DATABASE
+# =============================================================================
+
+databases:
+  - name: blips-db
+    plan: starter
+    databaseName: blips
+    user: blips
+    region: oregon
+
+# =============================================================================
+# SERVICES
+# =============================================================================
+
+services:
+  # API Service (Web)
+  - type: web
+    name: blips-api
+    runtime: python
+    plan: starter
+    region: oregon
+    rootDir: src/backend
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
+    startCommand: gunicorn app.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.4
+      - key: DATABASE_URL
+        fromDatabase:
+          name: blips-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: blips-redis
+          type: redis
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false  # Set manually in Render dashboard
+      - key: MISTRAL_API_KEY
+        sync: false  # Set manually in Render dashboard
+      - key: LLM_PROVIDER
+        sync: false  # Set to "openai" or "mistral" in dashboard
+      - key: ENV
+        sync: false  # Set to "dev" or "prod" in dashboard
+      - key: LOG_LEVEL
+        sync: false  # Set to "DEBUG" or "WARNING" in dashboard
+      - key: SCHEDULER_ENABLED
+        value: "false"  # Always false on web service
+      - key: NEWS_FETCH_INTERVAL_MINUTES
+        value: "30"
+      - key: MAX_ITEMS_PER_RUN
+        value: "100"
+
+  # Worker Service (Background Jobs)
+  - type: worker
+    name: blips-worker
+    runtime: python
+    plan: starter
+    region: oregon
+    rootDir: src/backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.worker
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.4
+      - key: DATABASE_URL
+        fromDatabase:
+          name: blips-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: blips-redis
+          type: redis
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: LLM_PROVIDER
+        sync: false  # Set to "openai" or "mistral" in dashboard
+      - key: ENV
+        sync: false
+      - key: LOG_LEVEL
+        sync: false
+      - key: SCHEDULER_ENABLED
+        value: "true"  # Always true on worker service
+      - key: NEWS_FETCH_INTERVAL_MINUTES
+        value: "30"
+      - key: MAX_ITEMS_PER_RUN
+        value: "100"
+      - key: PREFERENCE_DECAY_FACTOR
+        value: "0.95"
+
+  # Redis
+  - type: redis
+    name: blips-redis
+    plan: starter
+    region: oregon
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []  # Allow only internal Render services
