@@ -22,7 +22,7 @@ def _get_device_id(request: Request, user_agent: Optional[str]) -> str:
 @router.get("", response_model=UsageStats)
 def get_usage_stats(
     request: Request,
-    article_id: Optional[int] = None,
+    content_item_id: Optional[int] = None,
     db: Session = Depends(get_db),
     redis_client: redis.Redis = Depends(get_redis),
     user_agent: Optional[str] = Header(None)
@@ -32,4 +32,4 @@ def get_usage_stats(
     device_id = _get_device_id(request, user_agent)
     
     quota_manager = QuotaManager(usage_repo, redis_client)
-    return quota_manager.check_quota(device_id, article_id)
+    return quota_manager.check_quota(device_id, content_item_id)

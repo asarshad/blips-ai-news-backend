@@ -1,15 +1,15 @@
 """Article routes for the REST API.
 
 Updated to serve content from the unified content_items table with AI filtering.
+Includes diversity mixing to ensure varied source distribution.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List, Optional
-import redis
 
-from app.core.dependencies import get_db, get_redis
-from app.core.exceptions import ArticleNotFoundError, not_found_exception
+from app.core.dependencies import get_db
+from app.core.exceptions import not_found_exception
 from app.core.logging import get_logger
 from app.schemas.article import (
     Article as ArticleSchema, 
@@ -17,12 +17,9 @@ from app.schemas.article import (
     ArticleList, 
     TagCount
 )
-from app.services.article_service import ArticleService
-from app.services.news_fetcher import NewsFetcher
-from app.services.summarizer import ArticleSummarizer
-from app.repositories.article_repo import ArticleRepository
 from app.repositories.content_repo import ContentItemRepository
 from app.models.content import ContentType
+from app.services.diversity_mixer import mix_feed
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -31,20 +28,6 @@ router = APIRouter()
 def get_content_repo(db: Session = Depends(get_db)) -> ContentItemRepository:
     """Factory for ContentItemRepository."""
     return ContentItemRepository(db)
-
-
-def get_article_service(
-    db: Session = Depends(get_db),
-    redis_client: redis.Redis = Depends(get_redis)
-) -> ArticleService:
-    """Factory for ArticleService with dependencies."""
-    article_repo = ArticleRepository(db)
-    return ArticleService(article_repo, redis_client)
-
-
-def get_article_repo(db: Session = Depends(get_db)) -> ArticleRepository:
-    """Factory for ArticleRepository."""
-    return ArticleRepository(db)
 
 
 def _content_item_to_article_schema(item) -> dict:
@@ -130,22 +113,29 @@ def get_recent_articles(
     """
     Get the most recent articles.
     Only returns AI-processed articles with valid summaries.
+    Results are diversity-mixed to ensure varied source distribution.
     """
     offset = (page - 1) * limit
     
+    # Fetch more candidates for diversity mixing (2x target + buffer)
+    fetch_limit = min(limit * 3, 100)
+    
     items = content_repo.get_by_type(
         ContentType.ARTICLE,
-        limit=limit,
+        limit=fetch_limit,
         offset=offset,
-        hours_back=168,  # 7 days
+        hours_back=720,  # 30 days - ensure enough content available
         ai_processed_only=True
     )
     
     if not items and page == 1:
         raise HTTPException(status_code=404, detail="No articles found")
     
-    articles = [_content_item_to_article_schema(item) for item in items]
-    logger.info(f"Returning {len(articles)} AI-processed articles (page {page})")
+    # Apply diversity mixing
+    mixed_items = mix_feed(items, surface="articles", target_size=limit)
+    
+    articles = [_content_item_to_article_schema(item) for item in mixed_items]
+    logger.info(f"Returning {len(articles)} diversity-mixed articles (page {page})")
     
     return {"articles": articles}
 
@@ -191,88 +181,16 @@ def get_popular_tags(
     return [{"name": topic, "count": count} for topic, count in distribution[:limit]]
 
 
-@router.post("/fetch", response_model=dict)
-def fetch_articles(article_repo: ArticleRepository = Depends(get_article_repo)):
-    """Manually trigger fetching of new articles from RSS feeds."""
-    news_fetcher = NewsFetcher(article_repo)
-    articles = news_fetcher.fetch_latest_articles()
-    
-    if not articles:
-        return {"message": "No new articles found", "count": 0}
-    
-    summarizer = ArticleSummarizer(article_repo)
-    saved_count = 0
-    
-    for article_data in articles:
-        try:
-            processed = summarizer.summarize_article(article_data)
-            summarizer.save_article(processed)
-            saved_count += 1
-        except Exception:
-            continue
-    
-    return {"message": f"Fetched and processed {saved_count} articles", "count": saved_count}
-
-
-@router.post("/regenerate-summaries", response_model=dict)
-def regenerate_summaries(
-    limit: int = Query(10, ge=1, le=100, description="Number of articles to process"),
-    article_repo: ArticleRepository = Depends(get_article_repo)
-):
-    """Regenerate summaries for articles that have placeholder summaries."""
-    summarizer = ArticleSummarizer(article_repo)
-    updated_count = summarizer.regenerate_summaries(limit)
-    return {"message": f"Regenerated summaries for {updated_count} articles", "count": updated_count}
-
-
 @router.get("/{article_id}", response_model=ArticleWithConversation)
 def get_article(
     article_id: int,
-    content_repo: ContentItemRepository = Depends(get_content_repo),
-    article_service: ArticleService = Depends(get_article_service)
+    content_repo: ContentItemRepository = Depends(get_content_repo)
 ):
     """Get a specific article by ID, including conversation history."""
-    # Try content_items first
     item = content_repo.get_by_id(article_id)
-    if item and item.type == ContentType.ARTICLE:
-        article_data = _content_item_to_article_schema(item)
-        article_data["conversations"] = []
-        return article_data
-    
-    # Fallback to legacy articles table
-    try:
-        return article_service.get_article_by_id(article_id)
-    except ArticleNotFoundError:
-        raise not_found_exception("Article", article_id)
-
-
-# Action weights for hot score
-ACTION_WEIGHTS = {
-    "open": 1,
-    "dwell": 2,
-    "share": 3
-}
-
-
-@router.post("/{article_id}/engage", response_model=dict)
-def engage_article(
-    article_id: int,
-    action: str = Query(..., description="Action type: open, dwell, or share"),
-    article_repo: ArticleRepository = Depends(get_article_repo)
-):
-    """
-    Record an engagement action on an article.
-    Increments hot_score by action weight.
-    Actions: open (1), dwell (2), share (3)
-    """
-    if action not in ACTION_WEIGHTS:
-        raise HTTPException(status_code=400, detail=f"Invalid action. Must be one of: {list(ACTION_WEIGHTS.keys())}")
-    
-    article = article_repo.get_by_id(article_id)
-    if not article:
+    if not item or item.type != ContentType.ARTICLE:
         raise not_found_exception("Article", article_id)
     
-    weight = ACTION_WEIGHTS[action]
-    article_repo.increment_hot_score(article_id, weight)
-    
-    return {"success": True, "action": action, "weight": weight}
+    article_data = _content_item_to_article_schema(item)
+    article_data["conversations"] = []
+    return article_data

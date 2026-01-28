@@ -11,7 +11,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from app.models import Article, Tag, Conversation, Usage, Video
+from app.models import Conversation, Usage
 from app.models import ContentItem, UserProfile, UserPreference, InteractionEvent
 from app.db.base import Base
 from app.core.config import settings

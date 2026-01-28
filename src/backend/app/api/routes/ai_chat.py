@@ -6,6 +6,7 @@ from typing import Optional
 import redis
 
 from app.core.dependencies import get_db, get_redis
+from app.core.feature_flags import get_feature_flags, FeatureFlags
 from app.core.exceptions import (
     ArticleNotFoundError, 
     ChatGenerationError,
@@ -16,10 +17,9 @@ from app.core.exceptions import (
 from app.schemas.conversation import ConversationCreate
 from app.services.ai_chat import AiChatService
 from app.services.quota_manager import QuotaManager
-from app.repositories.article_repo import ArticleRepository
+from app.repositories.content_repo import ContentItemRepository
 from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.usage_repo import UsageRepository
-from app.repositories.video_repo import VideoRepository
 
 router = APIRouter()
 
@@ -36,12 +36,19 @@ def get_ai_response(
     message: ConversationCreate,
     db: Session = Depends(get_db),
     redis_client: redis.Redis = Depends(get_redis),
+    flags: FeatureFlags = Depends(get_feature_flags),
     user_agent: Optional[str] = Header(None)
 ):
-    """Generate AI response for a message about an article."""
+    """Generate AI response for a message about a content item."""
+    # Check chat feature flag
+    if not flags.is_enabled("chat"):
+        raise HTTPException(
+            status_code=503,
+            detail="AI chat feature is currently disabled"
+        )
+    
     # Create repositories
-    article_repo = ArticleRepository(db)
-    video_repo = VideoRepository(db)
+    content_repo = ContentItemRepository(db)
     conversation_repo = ConversationRepository(db)
     usage_repo = UsageRepository(db)
     
@@ -50,26 +57,17 @@ def get_ai_response(
     # Check quota
     quota_manager = QuotaManager(usage_repo, redis_client)
     
-    # Use article_id or video_id for quota check (using article_id param for both for now)
-    content_id = message.article_id or message.video_id
-    if not content_id:
-        raise HTTPException(status_code=400, detail="Either article_id or video_id must be provided")
-        
-    # Only check article quota if it's an article (to avoid FK issues)
-    if message.article_id:
-        quota = quota_manager.check_quota(device_id, message.article_id)
-    else:
-        # For videos, just check daily quota for now
-        quota = quota_manager.check_quota(device_id, None)
+    content_id = message.content_item_id
+    quota = quota_manager.check_quota(device_id, content_id)
     
     if quota["remaining_daily_messages"] <= 0:
         raise quota_exceeded_exception("daily")
     
-    if message.article_id and quota["remaining_article_messages"] is not None and quota["remaining_article_messages"] <= 0:
+    if quota["remaining_article_messages"] is not None and quota["remaining_article_messages"] <= 0:
         raise quota_exceeded_exception("article")
     
     # Get AI response
-    ai_service = AiChatService(article_repo, conversation_repo, video_repo=video_repo)
+    ai_service = AiChatService(content_repo, conversation_repo)
     
     # Prepare history if provided
     history_dicts = None
@@ -84,13 +82,12 @@ def get_ai_response(
     
     try:
         response = ai_service.get_ai_response(
-            article_id=message.article_id,
-            video_id=message.video_id,
+            content_item_id=message.content_item_id,
             user_message=message.message,
             history=history_dicts
         )
     except ArticleNotFoundError:
-        raise not_found_exception("Article/Video", content_id)
+        raise not_found_exception("Content item", content_id)
     except ChatGenerationError as e:
         raise internal_error_exception(f"Failed to generate response: {e.message}")
     
@@ -98,17 +95,11 @@ def get_ai_response(
     # Usage tracking is still preserved below.
     
     # Update usage
-    if message.article_id:
-        quota_manager.update_usage(
-            device_id,
-            message.article_id,
-            response.get("tokens_used", 0)
-        )
-    else:
-        # For videos, just update daily usage (pass None as article_id)
-        # Note: update_usage might require article_id depending on implementation
-        # Let's check update_usage implementation
-        pass
+    quota_manager.update_usage(
+        device_id,
+        message.content_item_id,
+        response.get("tokens_used", 0)
+    )
     
     return {
         "response": response["response"],

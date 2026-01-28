@@ -8,7 +8,7 @@ class Usage(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     device_id = Column(String, index=True)  # IP address or token
-    article_id = Column(Integer, ForeignKey("articles.id"), nullable=True)
+    content_item_id = Column(Integer, ForeignKey("content_items.id"), nullable=True)
     used_tokens = Column(Integer, default=0)
     message_count = Column(Integer, default=0)
     timestamp = Column(DateTime, default=datetime.utcnow)

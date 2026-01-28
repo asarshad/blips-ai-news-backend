@@ -1,12 +1,17 @@
-"""Drop content_clusters table - clusters now implicit via cluster_id
+"""Deprecate content_clusters table - clusters now implicit via cluster_id
 
 Revision ID: curation_system_002
 Revises: curation_system_001
 Create Date: 2024-12-23 00:00:00.000000
 
-This migration removes the content_clusters table.
-Clusters are now implicit via the cluster_id field on content_items.
-Cluster metadata is computed on-the-fly via aggregation queries.
+This migration was originally designed to drop the content_clusters table.
+However, to follow ADDITIVE-ONLY migration policy, we now keep the table
+but mark it as deprecated. Clusters are computed on-the-fly via aggregation.
+
+MIGRATION POLICY: ADDITIVE ONLY
+- Never drop tables in production
+- Never drop columns with data
+- Deprecated tables can be cleaned up manually after verification
 """
 from alembic import op
 import sqlalchemy as sa
@@ -21,13 +26,17 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Drop content_clusters table indexes
-    op.drop_index('ix_content_clusters_primary_topic', table_name='content_clusters')
-    op.drop_index('ix_content_clusters_window_start', table_name='content_clusters')
-    op.drop_index('ix_content_clusters_window_end', table_name='content_clusters')
-    
-    # Drop content_clusters table
-    op.drop_table('content_clusters')
+    # MIGRATION POLICY: ADDITIVE ONLY
+    # The content_clusters table is now deprecated but NOT dropped.
+    # Cluster metadata is computed on-the-fly via aggregation queries.
+    # The table will be cleaned up manually after verifying no dependencies.
+    #
+    # Original destructive operations (DISABLED):
+    # op.drop_index('ix_content_clusters_primary_topic', table_name='content_clusters')
+    # op.drop_index('ix_content_clusters_window_start', table_name='content_clusters')
+    # op.drop_index('ix_content_clusters_window_end', table_name='content_clusters')
+    # op.drop_table('content_clusters')
+    pass
 
 
 def downgrade() -> None:

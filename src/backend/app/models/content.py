@@ -10,7 +10,7 @@ from sqlalchemy import (
     Column, Integer, String, Text, DateTime, Float, Date, Boolean, Enum as SQLEnum,
     ForeignKey, Index, UniqueConstraint
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, ENUM as PgEnum
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -43,6 +43,13 @@ class EventType(enum.Enum):
     CHAT_MESSAGE = "CHAT_MESSAGE"  # Sent message in chat
 
 
+# Define PostgreSQL enums with create_type=False to avoid recreation errors
+# These types are created by Alembic migrations, not by SQLAlchemy
+ContentTypeEnum = PgEnum(ContentType, name='contenttype', create_type=False)
+PrefTypeEnum = PgEnum(PrefType, name='preftype', create_type=False)
+EventTypeEnum = PgEnum(EventType, name='eventtype', create_type=False)
+
+
 class ContentItem(Base):
     """
     Unified table for all content types.
@@ -55,8 +62,8 @@ class ContentItem(Base):
     # Primary key
     id = Column(Integer, primary_key=True, index=True)
     
-    # Content type
-    type = Column(SQLEnum(ContentType), nullable=False, index=True)
+    # Content type - use pre-defined enum to avoid create_type issues
+    type = Column(ContentTypeEnum, nullable=False, index=True)
     
     # Source information
     source = Column(String(255), nullable=False, index=True)
@@ -105,6 +112,7 @@ class ContentItem(Base):
     
     # Relationships
     interactions = relationship("InteractionEvent", back_populates="content_item", cascade="all, delete-orphan")
+    conversations = relationship("Conversation", back_populates="content_item", cascade="all, delete-orphan")
     
     # Composite indexes for efficient queries
     __table_args__ = (
@@ -151,8 +159,8 @@ class UserPreference(Base):
     id = Column(Integer, primary_key=True, index=True)
     device_id = Column(String(255), ForeignKey("user_profiles.device_id", ondelete="CASCADE"), nullable=False, index=True)
     
-    # Preference type and key
-    pref_type = Column(SQLEnum(PrefType), nullable=False)
+    # Preference type and key - use pre-defined enum to avoid create_type issues
+    pref_type = Column(PrefTypeEnum, nullable=False)
     key = Column(String(255), nullable=False)  # e.g., "AI", "OpenAI", "TechCrunch", "VIDEO"
     
     # Weight (higher = more interest)
@@ -187,8 +195,8 @@ class InteractionEvent(Base):
     device_id = Column(String(255), ForeignKey("user_profiles.device_id", ondelete="CASCADE"), nullable=False, index=True)
     content_item_id = Column(Integer, ForeignKey("content_items.id", ondelete="CASCADE"), nullable=False, index=True)
     
-    # Event type and value
-    event_type = Column(SQLEnum(EventType), nullable=False)
+    # Event type and value - use pre-defined enum to avoid create_type issues
+    event_type = Column(EventTypeEnum, nullable=False)
     event_value = Column(String(255), nullable=True)  # Optional metadata (e.g., dwell time)
     
     # Timestamp

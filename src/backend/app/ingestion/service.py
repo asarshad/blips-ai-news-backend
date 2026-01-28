@@ -2,19 +2,21 @@
 Ingestion service.
 
 Orchestrates the ingestion of articles and videos into the content system.
+Fetches directly from RSS feeds and YouTube channels with role-based quotas.
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Set
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import defaultdict
 
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.logging import get_logger
-from app.models.article import Article
-from app.models.video import Video
+from app.core.config import get_settings
 from app.models.content import ContentItem, ContentType
 from app.repositories.content_repo import ContentItemRepository
-from app.repositories.article_repo import ArticleRepository
 
 from app.clustering.dedupe import compute_dedupe_key
 from app.clustering.service import ClusteringService
@@ -22,14 +24,44 @@ from app.ranking.service import ScoringService
 from app.ranking.quality import compute_source_weight
 from app.ingestion.extractors import extract_topics, extract_entities, extract_source
 
+from app.integrations.rss_client import RSSClient, FeedEntry
+from app.integrations.rss_feeds import (
+    FeedRole,
+    QualityTier as RSSQualityTier,
+    DecayProfile,
+    get_quality_modifier as get_rss_quality_modifier,
+    get_decay_half_life,
+    get_role_quota,
+    get_feed_stats,
+)
+from app.integrations.youtube_client import YouTubeClient, VideoEntry
+from app.integrations.youtube_channels import (
+    ChannelRole,
+    QualityTier,
+    get_role_quotas,
+    get_quality_weight_modifier,
+)
+from app.integrations.llm_client import LLMClient
+
 logger = get_logger(__name__)
+
+settings = get_settings()
+
+# Source fetch depth (larger batches help work around duplicates)
+ENTRIES_PER_FEED = settings.RSS_ENTRIES_PER_FEED
+VIDEOS_PER_CHANNEL = settings.YT_VIDEOS_PER_CHANNEL
+
+# Daily ingestion targets (per UTC day)
+DAILY_TARGET_ARTICLES = settings.DAILY_TARGET_ARTICLES
+DAILY_TARGET_VIDEOS = settings.DAILY_TARGET_VIDEOS
+DAILY_TARGET_REELS = settings.DAILY_TARGET_REELS
 
 
 class IngestionPipeline:
     """
     Pipeline for ingesting content into the curation system.
     
-    Converts articles and videos into unified content_items,
+    Fetches directly from RSS feeds and YouTube channels,
     extracts metadata, and triggers clustering/scoring.
     """
     
@@ -37,49 +69,71 @@ class IngestionPipeline:
         self,
         db: Session,
         content_repo: ContentItemRepository,
-        article_repo: ArticleRepository,
         clustering_service: ClusteringService,
         scoring_service: ScoringService,
+        rss_client: Optional[RSSClient] = None,
+        youtube_client: Optional[YouTubeClient] = None,
+        llm_client: Optional[LLMClient] = None,
     ):
         self.db = db
         self.content_repo = content_repo
-        self.article_repo = article_repo
         self.clustering = clustering_service
         self.scoring = scoring_service
+        self.rss_client = rss_client or RSSClient()
+        self.youtube_client = youtube_client or YouTubeClient()
+        self.llm_client = llm_client or LLMClient()
     
-    def ingest_article(self, article: Article) -> Optional[ContentItem]:
+    def ingest_rss_entry(self, entry: FeedEntry) -> Optional[ContentItem]:
         """
-        Ingest an article into the content_items table.
+        Ingest an RSS feed entry directly into content_items.
+        
+        Uses enhanced metadata from the new feed configuration system
+        for better quality scoring and role-based ranking.
         
         Args:
-            article: Article model instance
+            entry: FeedEntry from RSS client (with role metadata)
             
         Returns:
             Created ContentItem or None if duplicate
         """
-        source = extract_source(article.source_url)
-        dedupe_key = compute_dedupe_key(article.title, source)
+        # Strong idempotency: source_url is unique in DB.
+        if entry.url:
+            existing_by_url = self.content_repo.get_by_source_url(entry.url)
+            if existing_by_url:
+                logger.debug(f"Article already ingested (source_url): {entry.title}")
+                return None
+
+        source = extract_source(entry.url)
+        dedupe_key = compute_dedupe_key(entry.title, source)
         
         existing = self.content_repo.get_by_dedupe_key(dedupe_key)
         if existing:
-            logger.debug(f"Article already ingested: {article.title}")
+            logger.debug(f"Article already ingested: {entry.title}")
             return None
         
-        topics = extract_topics(article.title, article.summary or "")
-        entities = extract_entities(article.title, article.summary or "")
+        # Generate AI summary
+        summary = None
+        ai_processed = False
+        try:
+            if self.llm_client.is_configured() and entry.content:
+                result = self.llm_client.summarize_article(entry.title, entry.content)
+                summary = result.summary
+                ai_processed = bool(summary and len(summary.strip()) > 50)
+        except Exception as e:
+            logger.warning(f"Failed to summarize article {entry.title}: {e}")
         
-        # Mark as AI processed if article has a proper summary (not empty/generic)
-        ai_processed = bool(article.summary and len(article.summary.strip()) > 50)
+        topics = extract_topics(entry.title, summary or entry.content[:500] if entry.content else "")
+        entities = extract_entities(entry.title, summary or "")
         
         content_item = ContentItem(
             type=ContentType.ARTICLE,
             source=source,
-            source_url=article.source_url,
-            published_at=article.published_date or datetime.utcnow(),
-            title=article.title,
-            description=article.content[:500] if article.content else None,
-            summary=article.summary,
-            image_url=article.image_url,
+            source_url=entry.url,
+            published_at=entry.published_date or datetime.utcnow(),
+            title=entry.title,
+            description=entry.content[:500] if entry.content else None,
+            summary=summary,
+            image_url=entry.image_url,
             video_url=None,
             duration_seconds=None,
             topics=topics,
@@ -88,93 +142,174 @@ class IngestionPipeline:
             ai_processed=ai_processed,
         )
         
-        content_item.quality_score = compute_source_weight(source)
+        # Apply quality scoring with role-based modifiers
+        # Use base_quality_weight from feed config if available, else compute from source
+        base_quality = entry.base_quality_weight or compute_source_weight(source)
+        
+        # Apply quality tier modifier
+        quality_modifier = 1.0
+        if entry.quality_tier:
+            quality_modifier = get_rss_quality_modifier(entry.quality_tier)
+        
+        content_item.quality_score = base_quality * quality_modifier
         content_item.recency_score = 1.0
         
         self.db.add(content_item)
-        self.db.commit()
-        self.db.refresh(content_item)
+        try:
+            self.db.commit()
+            self.db.refresh(content_item)
+        except IntegrityError:
+            # Common on multi-feed overlaps. Roll back so the session can keep processing.
+            self.db.rollback()
+            logger.debug(f"Article insert skipped (integrity/duplicate): {entry.title}")
+            return None
+        except Exception:
+            self.db.rollback()
+            raise
         
         self.clustering.cluster_new_item(content_item)
         self._update_scores(content_item)
         
-        status = "with AI summary" if ai_processed else "without AI summary (will retry)"
-        logger.info(f"Ingested article {status}: {article.title} -> {content_item.id}")
+        # Log role info if available
+        role_info = ""
+        if entry.feed_role:
+            role_info = f" [{entry.feed_role.value}]"
+        
+        status = "with AI summary" if ai_processed else "without AI summary"
+        logger.info(f"Ingested article{role_info} {status}: {entry.title} -> {content_item.id}")
         return content_item
     
-    def ingest_video(
+    def ingest_youtube_entry(
         self,
-        video: Video,
+        entry: VideoEntry,
         content_type: ContentType = ContentType.VIDEO,
     ) -> Optional[ContentItem]:
         """
-        Ingest a video into the content_items table.
+        Ingest a YouTube video entry directly into content_items.
+        
+        Uses enhanced metadata from the new channel configuration system
+        for better classification and quality scoring.
         
         Args:
-            video: Video model instance
-            content_type: VIDEO or REEL (determined by duration if not specified)
+            entry: VideoEntry from YouTube client (with role metadata)
+            content_type: VIDEO or REEL (can be overridden by entry.is_short)
             
         Returns:
             Created ContentItem or None if duplicate
         """
-        # Classify as REEL if:
-        # 1. URL contains /shorts/ (YouTube Shorts URL pattern) - most reliable
-        # 2. Duration is under 180 seconds (3 minutes) - YouTube Shorts max length
+        # Get video duration
+        duration_seconds = None
+        try:
+            duration_seconds = self.youtube_client.get_video_duration(entry.video_id)
+        except Exception as e:
+            logger.warning(f"Failed to get duration for video {entry.title}: {e}")
+        
+        # Classify as REEL if it's a Short (use entry metadata first)
         if content_type == ContentType.VIDEO:
-            is_shorts_url = video.video_url and "/shorts/" in video.video_url
-            is_short_duration = video.duration_seconds and video.duration_seconds <= 180
-            if is_shorts_url or is_short_duration:
+            # Use the is_short flag from enhanced metadata if available
+            is_short = getattr(entry, 'is_short', False)
+            is_shorts_url = entry.video_url and "/shorts/" in entry.video_url
+            is_short_duration = duration_seconds and duration_seconds <= 180
+            if is_short or is_shorts_url or is_short_duration:
                 content_type = ContentType.REEL
         
-        source = video.source or "YouTube"
-        dedupe_key = compute_dedupe_key(video.title, source)
+        source = entry.source or "YouTube"
+        # YouTube titles repeat frequently (series/weekly formats). Use video_id for stable dedupe.
+        dedupe_key = f"yt:{entry.video_id}" if entry.video_id else compute_dedupe_key(entry.title, source)
+
+        # Strong idempotency: source_url is unique in DB.
+        if entry.video_url:
+            existing_by_url = self.content_repo.get_by_source_url(entry.video_url)
+            if existing_by_url:
+                logger.debug(f"Video already ingested (source_url): {entry.title}")
+                return None
         
         existing = self.content_repo.get_by_dedupe_key(dedupe_key)
         if existing:
-            logger.debug(f"Video already ingested: {video.title}")
+            logger.debug(f"Video already ingested: {entry.title}")
             return None
         
-        text = video.summary or ""
-        topics = extract_topics(video.title, text)
-        entities = extract_entities(video.title, text)
+        # Generate AI summary (skip for reels - metadata only)
+        summary = entry.summary
+        ai_processed = False
         
-        # Mark as AI processed if video has a proper summary
-        # Detect if summary is just a generic YouTube description (not AI generated)
-        is_generic = text and ("Watch this video" in text or "Subscribe" in text.lower() or len(text.strip()) < 50)
-        ai_processed = bool(text and not is_generic and len(text.strip()) > 50)
+        # Skip AI summarization for REEL content type
+        if content_type == ContentType.REEL:
+            # Reels use metadata only, no summarization
+            ai_processed = False
+        else:
+            try:
+                if self.llm_client.is_configured() and summary:
+                    # Check if summary is generic
+                    is_generic = "Watch this video" in summary or "Subscribe" in summary.lower() or len(summary.strip()) < 50
+                    if is_generic:
+                        # Try to get transcript
+                        transcript = self.youtube_client.get_transcript(entry.video_id)
+                        if transcript:
+                            summary = transcript[:5000]
+                    
+                    ai_summary = self.llm_client.summarize_video(entry.title, summary)
+                    if ai_summary and len(ai_summary.strip()) > 50:
+                        summary = ai_summary
+                        ai_processed = True
+            except Exception as e:
+                logger.warning(f"Failed to summarize video {entry.title}: {e}")
         
-        # Convert date to datetime for published_at
-        published_at = datetime.combine(video.published_date, datetime.min.time()) if video.published_date else datetime.utcnow()
+        # Apply quality tier modifier from channel config
+        channel_quality_tier = getattr(entry, 'quality_tier', None)
+        quality_modifier = 1.0
+        if channel_quality_tier:
+            quality_modifier = get_quality_weight_modifier(channel_quality_tier)
+        
+        topics = extract_topics(entry.title, summary or "")
+        entities = extract_entities(entry.title, summary or "")
         
         content_item = ContentItem(
             type=content_type,
             source=source,
-            source_url=video.video_url,
-            published_at=published_at,
-            title=video.title,
-            description=video.summary[:500] if video.summary else None,
-            summary=video.summary if content_type != ContentType.REEL else None,
-            image_url=video.thumbnail_url,
-            video_url=video.video_url,
-            duration_seconds=video.duration_seconds,
+            source_url=entry.video_url,
+            # YouTube RSS dates can be inconsistent; created_at is the ingestion date.
+            published_at=datetime.utcnow(),
+            title=entry.title,
+            description=summary[:500] if summary else None,
+            summary=summary if content_type != ContentType.REEL else None,
+            image_url=entry.thumbnail_url,
+            video_url=entry.video_url,
+            duration_seconds=duration_seconds,
             topics=topics,
             entities=entities,
             dedupe_key=dedupe_key,
             ai_processed=ai_processed,
         )
         
-        content_item.quality_score = compute_source_weight(source)
+        # Apply quality modifier from channel tier
+        base_quality = compute_source_weight(source)
+        content_item.quality_score = base_quality * quality_modifier
         content_item.recency_score = 1.0
         
         self.db.add(content_item)
-        self.db.commit()
-        self.db.refresh(content_item)
+        try:
+            self.db.commit()
+            self.db.refresh(content_item)
+        except IntegrityError:
+            self.db.rollback()
+            logger.debug(f"Video insert skipped (integrity/duplicate): {entry.title}")
+            return None
+        except Exception:
+            self.db.rollback()
+            raise
         
         self.clustering.cluster_new_item(content_item)
         self._update_scores(content_item)
         
-        status = "with AI summary" if ai_processed else "without AI summary (will retry)"
-        logger.info(f"Ingested video {status}: {video.title} -> {content_item.id}")
+        # Log role info if available
+        role_info = ""
+        channel_role = getattr(entry, 'channel_role', None)
+        if channel_role:
+            role_info = f" [{channel_role.value}]"
+        
+        status = "with AI summary" if ai_processed else "without AI summary"
+        logger.info(f"Ingested {content_type.value}{role_info} {status}: {entry.title} -> {content_item.id}")
         return content_item
     
     def run_backfill(
@@ -183,60 +318,201 @@ class IngestionPipeline:
         limit: int = 500,
     ) -> Dict[str, int]:
         """
-        Backfill existing articles and videos into content_items.
+        Fetch and ingest content from RSS feeds and YouTube channels in parallel.
+        
+        Continues processing until we have ARTICLE_LIMIT new articles and
+        VIDEO_LIMIT new videos (skipping duplicates).
         
         Args:
-            hours_back: How far back to look
-            limit: Maximum items per type
+            hours_back: Not used (kept for API compatibility)
+            limit: Not used (uses per-type limits instead)
             
         Returns:
-            Statistics about the backfill
+            Statistics about the ingestion
         """
+        # Enforce per-day quotas based on items created today (UTC).
+        today = datetime.utcnow().date()
+        existing_articles = self.content_repo.count_created_on_date(ContentType.ARTICLE, today)
+        existing_videos = self.content_repo.count_created_on_date(ContentType.VIDEO, today)
+        existing_reels = self.content_repo.count_created_on_date(ContentType.REEL, today)
+
+        remaining_articles = max(0, DAILY_TARGET_ARTICLES - existing_articles)
+        remaining_videos = max(0, DAILY_TARGET_VIDEOS - existing_videos)
+        remaining_reels = max(0, DAILY_TARGET_REELS - existing_reels)
+
         stats = {
             "articles_processed": 0,
             "articles_ingested": 0,
+            "articles_skipped_duplicates": 0,
             "videos_processed": 0,
             "videos_ingested": 0,
+            "videos_skipped_duplicates": 0,
+            "reels_processed": 0,
+            "reels_ingested": 0,
+            "reels_skipped_duplicates": 0,
             "errors": 0,
         }
+
+        if remaining_articles == 0 and remaining_videos == 0 and remaining_reels == 0:
+            logger.info(
+                "Daily targets already met (UTC %s): articles=%s, videos=%s, reels=%s",
+                today,
+                existing_articles,
+                existing_videos,
+                existing_reels,
+            )
+            return stats
         
-        # Calculate days from hours for the existing repo method
-        days_back = max(1, hours_back // 24)
+        # Fetch articles and videos in parallel
+        logger.info("Fetching content from RSS feeds and YouTube channels in parallel...")
         
-        # Backfill articles - use existing method that filters by date
-        articles = self.article_repo.get_articles_last_n_days(days=days_back)[:limit]
-        logger.info(f"Backfilling {len(articles)} articles")
+        feed_entries: List[FeedEntry] = []
+        video_entries: List[VideoEntry] = []
         
-        for article in articles:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            # Submit both fetch tasks
+            article_future = executor.submit(
+                self.rss_client.fetch_all_feeds, 
+                entries_per_feed=ENTRIES_PER_FEED
+            )
+            video_future = executor.submit(
+                self.youtube_client.fetch_all_channels, 
+                videos_per_channel=VIDEOS_PER_CHANNEL
+            )
+            
+            # Collect results - RSS fetching can take a while due to content extraction
             try:
-                stats["articles_processed"] += 1
-                if self.ingest_article(article):
-                    stats["articles_ingested"] += 1
+                feed_entries = article_future.result(timeout=300)  # 5 minutes for RSS
+                logger.info(f"Fetched {len(feed_entries)} RSS entries")
+            except TimeoutError:
+                logger.error("RSS feed fetching timed out after 300 seconds")
+                stats["errors"] += 1
             except Exception as e:
-                logger.error(f"Error ingesting article {article.id}: {e}")
+                logger.error(f"Error fetching RSS feeds: {type(e).__name__}: {e}")
+                stats["errors"] += 1
+            
+            try:
+                video_entries = video_future.result(timeout=180)  # 3 minutes for YouTube
+                logger.info(f"Fetched {len(video_entries)} YouTube videos")
+            except TimeoutError:
+                logger.error("YouTube channel fetching timed out after 180 seconds")
+                stats["errors"] += 1
+            except Exception as e:
+                logger.error(f"Error fetching YouTube channels: {type(e).__name__}: {e}")
                 stats["errors"] += 1
         
-        # Backfill videos
-        try:
-            from app.repositories.video_repo import VideoRepository
-            video_repo = VideoRepository(self.db)
-            videos = video_repo.get_videos_last_n_days(days=days_back)[:limit]
-            
-            logger.info(f"Backfilling {len(videos)} videos")
-            
-            for video in videos:
-                try:
-                    stats["videos_processed"] += 1
-                    if self.ingest_video(video):
-                        stats["videos_ingested"] += 1
-                except Exception as e:
-                    logger.error(f"Error ingesting video {video.id}: {e}")
-                    stats["errors"] += 1
-        except Exception as e:
-            logger.error(f"Error backfilling videos: {e}")
-            stats["errors"] += 1
+        # Process articles until we hit the remaining daily target
+        # Track per-feed counts to enforce daily caps
+        feed_article_counts: Dict[str, int] = defaultdict(int)
         
-        logger.info(f"Backfill complete: {stats}")
+        logger.info(
+            "Processing articles for UTC %s: existing=%s target=%s remaining=%s",
+            today,
+            existing_articles,
+            DAILY_TARGET_ARTICLES,
+            remaining_articles,
+        )
+        for entry in feed_entries:
+            if stats["articles_ingested"] >= remaining_articles:
+                break
+            
+            # Apply per-feed daily caps
+            feed_name = getattr(entry, 'feed_name', '') or 'unknown'
+            feed_daily_cap = 3  # Default cap
+            if hasattr(entry, 'quality_tier') and entry.quality_tier:
+                # Premium feeds get slightly higher effective caps
+                feed_daily_cap = 4 if entry.quality_tier.value == 'premium' else 3
+            
+            if feed_article_counts[feed_name] >= feed_daily_cap:
+                logger.debug(f"Feed {feed_name} hit daily cap ({feed_daily_cap}), skipping")
+                continue
+            
+            stats["articles_processed"] += 1
+            try:
+                result = self.ingest_rss_entry(entry)
+                if result:
+                    stats["articles_ingested"] += 1
+                    feed_article_counts[feed_name] += 1
+                else:
+                    stats["articles_skipped_duplicates"] += 1
+            except Exception as e:
+                logger.error(f"Error ingesting article {entry.title}: {e}")
+                self.db.rollback()
+                stats["errors"] += 1
+        
+        # Log feed distribution
+        if feed_article_counts:
+            logger.info("Articles ingested by feed:")
+            for feed, count in sorted(feed_article_counts.items(), key=lambda x: -x[1]):
+                logger.info(f"  {feed}: {count}")
+        
+        # Process YouTube entries until we hit remaining daily targets for VIDEO and REEL.
+        # Track channels and topics to prevent excessive repetition
+        channel_video_counts: Dict[str, int] = defaultdict(int)
+        channel_reel_counts: Dict[str, int] = defaultdict(int)
+        
+        logger.info(
+            "Processing YouTube for UTC %s: videos existing=%s target=%s remaining=%s | reels existing=%s target=%s remaining=%s",
+            today,
+            existing_videos,
+            DAILY_TARGET_VIDEOS,
+            remaining_videos,
+            existing_reels,
+            DAILY_TARGET_REELS,
+            remaining_reels,
+        )
+        for entry in video_entries:
+            if remaining_videos == 0 and remaining_reels == 0:
+                break
+
+            # Use enhanced metadata for shorts detection
+            is_short = getattr(entry, 'is_short', False)
+            is_shorts_url = bool(entry.video_url and "/shorts/" in entry.video_url)
+            is_reel = is_short or is_shorts_url
+            
+            if is_reel and remaining_reels == 0:
+                continue
+            if (not is_reel) and remaining_videos == 0:
+                continue
+
+            # Apply per-channel caps to prevent creator fatigue
+            channel_id = getattr(entry, 'channel_id', '') or entry.source
+            if is_reel:
+                if channel_reel_counts[channel_id] >= 4:  # Max 4 reels per channel
+                    continue
+            else:
+                if channel_video_counts[channel_id] >= 2:  # Max 2 videos per channel
+                    continue
+
+            if is_reel:
+                stats["reels_processed"] += 1
+            else:
+                stats["videos_processed"] += 1
+            try:
+                result = self.ingest_youtube_entry(entry)
+                if not result:
+                    # Count duplicate skip into the best-effort bucket
+                    if is_reel:
+                        stats["reels_skipped_duplicates"] += 1
+                    else:
+                        stats["videos_skipped_duplicates"] += 1
+                    continue
+
+                # Update channel counts
+                if result.type == ContentType.REEL:
+                    stats["reels_ingested"] += 1
+                    remaining_reels = max(0, remaining_reels - 1)
+                    channel_reel_counts[channel_id] += 1
+                else:
+                    stats["videos_ingested"] += 1
+                    remaining_videos = max(0, remaining_videos - 1)
+                    channel_video_counts[channel_id] += 1
+            except Exception as e:
+                logger.error(f"Error ingesting video {entry.title}: {e}")
+                self.db.rollback()
+                stats["errors"] += 1
+        
+        logger.info(f"Ingestion complete: {stats}")
         return stats
     
     def _update_scores(self, content_item: ContentItem) -> None:
@@ -255,13 +531,11 @@ class IngestionPipeline:
 def create_ingestion_pipeline(db: Session) -> IngestionPipeline:
     """Factory function to create IngestionPipeline with dependencies."""
     from app.repositories.content_repo import ContentItemRepository
-    from app.repositories.article_repo import ArticleRepository
     from app.repositories.user_repo import InteractionEventRepository
     from app.clustering.service import ClusteringService
     from app.ranking.service import ScoringService
     
     content_repo = ContentItemRepository(db)
-    article_repo = ArticleRepository(db)
     event_repo = InteractionEventRepository(db)
     
     clustering = ClusteringService(content_repo)
@@ -270,7 +544,6 @@ def create_ingestion_pipeline(db: Session) -> IngestionPipeline:
     return IngestionPipeline(
         db=db,
         content_repo=content_repo,
-        article_repo=article_repo,
         clustering_service=clustering,
         scoring_service=scoring,
     )

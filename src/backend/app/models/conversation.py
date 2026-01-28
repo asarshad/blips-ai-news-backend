@@ -8,10 +8,10 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id = Column(Integer, primary_key=True, index=True)
-    article_id = Column(Integer, ForeignKey("articles.id"))
+    content_item_id = Column(Integer, ForeignKey("content_items.id"))
     message = Column(Text)
     sender = Column(String)  # "user" or "ai"
     timestamp = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
-    article = relationship("Article", back_populates="conversations")
+    content_item = relationship("ContentItem", back_populates="conversations")
