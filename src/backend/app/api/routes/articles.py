@@ -1,6 +1,7 @@
 """Article routes for the REST API.
 
 Updated to serve content from the unified content_items table with AI filtering.
+Includes diversity mixing to ensure varied source distribution.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -18,6 +19,7 @@ from app.schemas.article import (
 )
 from app.repositories.content_repo import ContentItemRepository
 from app.models.content import ContentType
+from app.services.diversity_mixer import mix_feed
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -111,12 +113,16 @@ def get_recent_articles(
     """
     Get the most recent articles.
     Only returns AI-processed articles with valid summaries.
+    Results are diversity-mixed to ensure varied source distribution.
     """
     offset = (page - 1) * limit
     
+    # Fetch more candidates for diversity mixing (2x target + buffer)
+    fetch_limit = min(limit * 3, 100)
+    
     items = content_repo.get_by_type(
         ContentType.ARTICLE,
-        limit=limit,
+        limit=fetch_limit,
         offset=offset,
         hours_back=720,  # 30 days - ensure enough content available
         ai_processed_only=True
@@ -125,8 +131,11 @@ def get_recent_articles(
     if not items and page == 1:
         raise HTTPException(status_code=404, detail="No articles found")
     
-    articles = [_content_item_to_article_schema(item) for item in items]
-    logger.info(f"Returning {len(articles)} AI-processed articles (page {page})")
+    # Apply diversity mixing
+    mixed_items = mix_feed(items, surface="articles", target_size=limit)
+    
+    articles = [_content_item_to_article_schema(item) for item in mixed_items]
+    logger.info(f"Returning {len(articles)} diversity-mixed articles (page {page})")
     
     return {"articles": articles}
 

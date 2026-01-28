@@ -1,6 +1,7 @@
 """Video routes for the REST API.
 
 Updated to serve content from the unified content_items table with AI filtering.
+Includes diversity mixing to ensure varied source distribution.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,6 +14,7 @@ from app.core.logging import get_logger
 from app.schemas.video import Video as VideoSchema, VideoList
 from app.repositories.content_repo import ContentItemRepository
 from app.models.content import ContentType
+from app.services.diversity_mixer import mix_feed
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -50,6 +52,7 @@ def get_recent_videos(
     """
     Get the most recent videos.
     Only returns AI-processed videos with valid summaries.
+    Results are diversity-mixed to ensure varied source distribution.
     """
     # Check videos feature flag
     if not flags.is_enabled("videos"):
@@ -60,16 +63,22 @@ def get_recent_videos(
     
     offset = (page - 1) * limit
     
+    # Fetch more candidates for diversity mixing
+    fetch_limit = min(limit * 3, 100)
+    
     items = content_repo.get_by_type(
         ContentType.VIDEO,
-        limit=limit,
+        limit=fetch_limit,
         offset=offset,
         hours_back=720,  # 30 days - ensure enough content available
         ai_processed_only=True
     )
     
-    videos = [_content_item_to_video_schema(item) for item in items]
-    logger.info(f"Returning {len(videos)} AI-processed videos (page {page})")
+    # Apply diversity mixing
+    mixed_items = mix_feed(items, surface="videos", target_size=limit)
+    
+    videos = [_content_item_to_video_schema(item) for item in mixed_items]
+    logger.info(f"Returning {len(videos)} diversity-mixed videos (page {page})")
     
     return {"videos": videos}
 
@@ -84,7 +93,8 @@ def get_reels(
     """
     Get the most recent reels (short videos).
     REELs don't require AI summaries but must exist in content_items.
-    REELs have a longer time window (30 days) since they're evergreen content.
+    Results are diversity-mixed to ensure varied source distribution.
+    This is especially important for reels which can be dominated by one source.
     """
     # Check reels feature flag
     if not flags.is_enabled("reels"):
@@ -95,15 +105,23 @@ def get_reels(
     
     offset = (page - 1) * limit
     
+    # Fetch more candidates for diversity mixing (important for reels)
+    fetch_limit = min(limit * 4, 150)  # Larger pool for reels diversity
+    
     items = content_repo.get_by_type(
         ContentType.REEL,
-        limit=limit,
+        limit=fetch_limit,
         offset=offset,
         hours_back=720,  # 30 days - REELs are more evergreen than articles
         ai_processed_only=False  # REELs don't need AI summaries
     )
     
-    videos = [_content_item_to_video_schema(item) for item in items]
+    # Apply diversity mixing with stricter reels constraints
+    mixed_items = mix_feed(items, surface="reels", target_size=limit)
+    
+    videos = [_content_item_to_video_schema(item) for item in mixed_items]
+    logger.info(f"Returning {len(videos)} diversity-mixed reels (page {page})")
+    
     return {"videos": videos}
 
 
