@@ -1,7 +1,9 @@
-"""
-Scheduled tasks for the Blips worker service.
+"""Scheduled tasks for Blips.
 
-All background jobs run here - NEVER in the web API process.
+Preferred architecture: run these in a dedicated worker service.
+Free-tier / single-service deployments may run ingestion from the API service when
+`SCHEDULER_ENABLED=true` (guarded by a Redis leader lock).
+
 Jobs are designed to be:
 - Idempotent: safe to run multiple times
 - Rate-limited: respect external API limits  
@@ -10,6 +12,7 @@ Jobs are designed to be:
 - Feature-gated: respect feature flags
 """
 
+import os
 import time
 
 from app.db.base import SessionLocal
@@ -61,10 +64,15 @@ def fetch_and_process_news():
 def _run_curation_ingestion_with_stats(db, stats: JobStats):
     """Run curation ingestion with error tracking."""
     try:
-        from app.services.ingestion_pipeline import create_ingestion_pipeline
-        
-        pipeline = create_ingestion_pipeline(db)
-        result = pipeline.run_backfill(hours_back=24, limit=500)
+        from app.ingestion.checkpointing import run_checkpointed_ingestion
+
+        redis_client = None
+        try:
+            redis_client = get_redis()
+        except Exception:
+            redis_client = None
+
+        result = run_checkpointed_ingestion(db, redis_client=redis_client)
         
         logger.info(f"[fetch_news] Curation ingestion: {result}")
         

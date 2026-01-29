@@ -54,9 +54,23 @@ services:
       - key: LOG_LEVEL
         sync: false  # Set to "DEBUG" or "WARNING" in dashboard
       - key: SCHEDULER_ENABLED
-        value: "false"  # Always false on web service
+        value: "true"  # Set to "false" once you have a dedicated worker service
       - key: NEWS_FETCH_INTERVAL_MINUTES
         value: "30"
+      - key: INGEST_UNTIL_TARGETS
+        value: "true"  # Keep ingesting (within limits) until daily targets are met
+      - key: INGEST_CATCHUP_MAX_SECONDS
+        value: "600"
+      - key: INGESTION_ENABLED
+        value: "true"
+      - key: INGESTION_CRON_DISABLED
+        value: "false"
+      - key: INGESTION_MAX_WORKERS
+        value: "1"
+      - key: INGESTION_POLL_SECONDS
+        value: "5"
+      - key: INGESTION_LEASE_TTL_MS
+        value: "60000"
       - key: MAX_ITEMS_PER_RUN
         value: "100"
 

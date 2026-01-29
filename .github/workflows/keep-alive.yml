@@ -1,0 +1,40 @@
+name: Keep Alive (Render)
+
+on:
+  schedule:
+    # GitHub scheduled workflows run at best-effort intervals.
+    # 5 minutes keeps free-tier instances warm.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: keep-alive
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Validate URL
+        env:
+          KEEPALIVE_URL: ${{ secrets.KEEPALIVE_URL }}
+        run: |
+          if [ -z "${KEEPALIVE_URL}" ]; then
+            echo "KEEPALIVE_URL is not set. Configure it as a GitHub Actions secret." >&2
+            exit 1
+          fi
+
+      - name: Ping /health
+        env:
+          KEEPALIVE_URL: ${{ secrets.KEEPALIVE_URL }}
+        run: |
+          set -euo pipefail
+          url="${KEEPALIVE_URL}"
+          # Allow secrets to be either the base URL or the full /health URL.
+          if [[ "$url" != *"/health" ]]; then
+            url="$url/health"
+          fi
+          echo "Pinging: $url"
+          curl -fsS --retry 3 --retry-delay 2 --max-time 20 "$url" | cat

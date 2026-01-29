@@ -4,7 +4,7 @@ This guide covers setting up and developing the Blips backend.
 
 ## Prerequisites
 
-- Python 3.11+
+- Python 3.11 or 3.12 (Python 3.13+ currently unsupported due to `feedparser` depending on the removed stdlib `cgi` module)
 - PostgreSQL 14+
 - Redis 7+
 - Docker & Docker Compose (recommended)

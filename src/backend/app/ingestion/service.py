@@ -8,6 +8,8 @@ Fetches directly from RSS feeds and YouTube channels with role-based quotas.
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+import os
+import time
 from typing import Dict, List, Optional
 
 from sqlalchemy.exc import IntegrityError
@@ -310,31 +312,41 @@ class IngestionPipeline:
         self,
         hours_back: int = 72,
         limit: int = 500,
+        *,
+        ingest_until_targets: bool = False,
+        max_catchup_attempts: int = 5,
+        max_catchup_seconds: int = 600,
+        catchup_sleep_seconds: float = 5.0,
     ) -> Dict[str, int]:
-        """
-        Fetch and ingest content from RSS feeds and YouTube channels in parallel.
-        
-        Continues processing until we have ARTICLE_LIMIT new articles and
-        VIDEO_LIMIT new videos (skipping duplicates).
-        
+        """Fetch and ingest content from RSS feeds and YouTube channels.
+
+        This enforces per-day quotas (UTC day) based on items created today.
+
+        By default, this runs a single pass. When `ingest_until_targets=True`, it will
+        keep attempting (with gradually deeper source fetches) until daily targets are met
+        or a time/attempt budget is reached.
+
         Args:
             hours_back: Not used (kept for API compatibility)
-            limit: Not used (uses per-type limits instead)
-            
+            limit: Not used (kept for API compatibility)
+            ingest_until_targets: Keep retrying until daily targets are met
+            max_catchup_attempts: Maximum number of attempts in a single call
+            max_catchup_seconds: Time budget for catch-up loop
+            catchup_sleep_seconds: Sleep between attempts
+
         Returns:
             Statistics about the ingestion
         """
-        # Enforce per-day quotas based on items created today (UTC).
-        today = datetime.utcnow().date()
-        existing_articles = self.content_repo.count_created_on_date(ContentType.ARTICLE, today)
-        existing_videos = self.content_repo.count_created_on_date(ContentType.VIDEO, today)
-        existing_reels = self.content_repo.count_created_on_date(ContentType.REEL, today)
 
-        remaining_articles = max(0, DAILY_TARGET_ARTICLES - existing_articles)
-        remaining_videos = max(0, DAILY_TARGET_VIDEOS - existing_videos)
-        remaining_reels = max(0, DAILY_TARGET_REELS - existing_reels)
+        # Allow environment override without changing all call sites.
+        env_ingest_until = os.getenv("INGEST_UNTIL_TARGETS")
+        if env_ingest_until is not None:
+            ingest_until_targets = env_ingest_until.lower() in ("true", "1", "yes", "on")
 
-        stats = {
+        start_time = time.monotonic()
+        attempts = 0
+
+        aggregate = {
             "articles_processed": 0,
             "articles_ingested": 0,
             "articles_skipped_duplicates": 0,
@@ -345,169 +357,255 @@ class IngestionPipeline:
             "reels_ingested": 0,
             "reels_skipped_duplicates": 0,
             "errors": 0,
+            "attempts": 0,
+            "daily_targets_met": False,
         }
 
-        if remaining_articles == 0 and remaining_videos == 0 and remaining_reels == 0:
+        while True:
+            # Enforce per-day quotas based on items created today (UTC).
+            today = datetime.utcnow().date()
+            existing_articles = self.content_repo.count_created_on_date(ContentType.ARTICLE, today)
+            existing_videos = self.content_repo.count_created_on_date(ContentType.VIDEO, today)
+            existing_reels = self.content_repo.count_created_on_date(ContentType.REEL, today)
+
+            remaining_articles = max(0, DAILY_TARGET_ARTICLES - existing_articles)
+            remaining_videos = max(0, DAILY_TARGET_VIDEOS - existing_videos)
+            remaining_reels = max(0, DAILY_TARGET_REELS - existing_reels)
+
+            if remaining_articles == 0 and remaining_videos == 0 and remaining_reels == 0:
+                logger.info(
+                    "Daily targets already met (UTC %s): articles=%s, videos=%s, reels=%s",
+                    today,
+                    existing_articles,
+                    existing_videos,
+                    existing_reels,
+                )
+                aggregate["daily_targets_met"] = True
+                return aggregate
+
+            # If we aren't in catch-up mode, we only do one attempt.
+            if attempts > 0 and not ingest_until_targets:
+                aggregate["attempts"] = attempts
+                return aggregate
+
+            if attempts >= max_catchup_attempts:
+                logger.warning(
+                    "Catch-up attempt limit reached (%s) with remaining targets: articles=%s videos=%s reels=%s",
+                    max_catchup_attempts,
+                    remaining_articles,
+                    remaining_videos,
+                    remaining_reels,
+                )
+                aggregate["attempts"] = attempts
+                return aggregate
+
+            elapsed = time.monotonic() - start_time
+            if elapsed >= max_catchup_seconds:
+                logger.warning(
+                    "Catch-up time budget reached (%ss) with remaining targets: articles=%s videos=%s reels=%s",
+                    int(max_catchup_seconds),
+                    remaining_articles,
+                    remaining_videos,
+                    remaining_reels,
+                )
+                aggregate["attempts"] = attempts
+                return aggregate
+
+            attempt_num = attempts + 1
+            # Fetch deeper on later attempts to work around duplicates.
+            entries_per_feed = min(int(ENTRIES_PER_FEED * attempt_num), 100)
+            videos_per_channel = min(int(VIDEOS_PER_CHANNEL * attempt_num), 50)
+
             logger.info(
-                "Daily targets already met (UTC %s): articles=%s, videos=%s, reels=%s",
+                "Ingestion attempt %s (UTC %s): remaining articles=%s videos=%s reels=%s (fetch depth: rss=%s/channel=%s)",
+                attempt_num,
+                today,
+                remaining_articles,
+                remaining_videos,
+                remaining_reels,
+                entries_per_feed,
+                videos_per_channel,
+            )
+
+            stats = {
+                "articles_processed": 0,
+                "articles_ingested": 0,
+                "articles_skipped_duplicates": 0,
+                "videos_processed": 0,
+                "videos_ingested": 0,
+                "videos_skipped_duplicates": 0,
+                "reels_processed": 0,
+                "reels_ingested": 0,
+                "reels_skipped_duplicates": 0,
+                "errors": 0,
+            }
+
+            # Fetch articles and videos in parallel
+            logger.info("Fetching content from RSS feeds and YouTube channels in parallel...")
+
+            feed_entries: List[FeedEntry] = []
+            video_entries: List[VideoEntry] = []
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                # Submit both fetch tasks
+                article_future = executor.submit(
+                    self.rss_client.fetch_all_feeds,
+                    entries_per_feed=entries_per_feed,
+                )
+                video_future = executor.submit(
+                    self.youtube_client.fetch_all_channels,
+                    videos_per_channel=videos_per_channel,
+                )
+
+                # Collect results - RSS fetching can take a while due to content extraction
+                try:
+                    feed_entries = article_future.result(timeout=300)  # 5 minutes for RSS
+                    logger.info(f"Fetched {len(feed_entries)} RSS entries")
+                except TimeoutError:
+                    logger.error("RSS feed fetching timed out after 300 seconds")
+                    stats["errors"] += 1
+                except Exception as e:
+                    logger.error(f"Error fetching RSS feeds: {type(e).__name__}: {e}")
+                    stats["errors"] += 1
+
+                try:
+                    video_entries = video_future.result(timeout=180)  # 3 minutes for YouTube
+                    logger.info(f"Fetched {len(video_entries)} YouTube videos")
+                except TimeoutError:
+                    logger.error("YouTube channel fetching timed out after 180 seconds")
+                    stats["errors"] += 1
+                except Exception as e:
+                    logger.error(f"Error fetching YouTube channels: {type(e).__name__}: {e}")
+                    stats["errors"] += 1
+
+            # Process articles until we hit the remaining daily target
+            # Track per-feed counts to enforce daily caps
+            feed_article_counts: Dict[str, int] = defaultdict(int)
+
+            logger.info(
+                "Processing articles for UTC %s: existing=%s target=%s remaining=%s",
                 today,
                 existing_articles,
-                existing_videos,
-                existing_reels,
+                DAILY_TARGET_ARTICLES,
+                remaining_articles,
             )
-            return stats
-        
-        # Fetch articles and videos in parallel
-        logger.info("Fetching content from RSS feeds and YouTube channels in parallel...")
-        
-        feed_entries: List[FeedEntry] = []
-        video_entries: List[VideoEntry] = []
-        
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            # Submit both fetch tasks
-            article_future = executor.submit(
-                self.rss_client.fetch_all_feeds, 
-                entries_per_feed=ENTRIES_PER_FEED
-            )
-            video_future = executor.submit(
-                self.youtube_client.fetch_all_channels, 
-                videos_per_channel=VIDEOS_PER_CHANNEL
-            )
-            
-            # Collect results - RSS fetching can take a while due to content extraction
-            try:
-                feed_entries = article_future.result(timeout=300)  # 5 minutes for RSS
-                logger.info(f"Fetched {len(feed_entries)} RSS entries")
-            except TimeoutError:
-                logger.error("RSS feed fetching timed out after 300 seconds")
-                stats["errors"] += 1
-            except Exception as e:
-                logger.error(f"Error fetching RSS feeds: {type(e).__name__}: {e}")
-                stats["errors"] += 1
-            
-            try:
-                video_entries = video_future.result(timeout=180)  # 3 minutes for YouTube
-                logger.info(f"Fetched {len(video_entries)} YouTube videos")
-            except TimeoutError:
-                logger.error("YouTube channel fetching timed out after 180 seconds")
-                stats["errors"] += 1
-            except Exception as e:
-                logger.error(f"Error fetching YouTube channels: {type(e).__name__}: {e}")
-                stats["errors"] += 1
-        
-        # Process articles until we hit the remaining daily target
-        # Track per-feed counts to enforce daily caps
-        feed_article_counts: Dict[str, int] = defaultdict(int)
-        
-        logger.info(
-            "Processing articles for UTC %s: existing=%s target=%s remaining=%s",
-            today,
-            existing_articles,
-            DAILY_TARGET_ARTICLES,
-            remaining_articles,
-        )
-        for entry in feed_entries:
-            if stats["articles_ingested"] >= remaining_articles:
-                break
-            
-            # Apply per-feed daily caps
-            feed_name = getattr(entry, 'feed_name', '') or 'unknown'
-            feed_daily_cap = 3  # Default cap
-            if hasattr(entry, 'quality_tier') and entry.quality_tier:
-                # Premium feeds get slightly higher effective caps
-                feed_daily_cap = 4 if entry.quality_tier.value == 'premium' else 3
-            
-            if feed_article_counts[feed_name] >= feed_daily_cap:
-                logger.debug(f"Feed {feed_name} hit daily cap ({feed_daily_cap}), skipping")
-                continue
-            
-            stats["articles_processed"] += 1
-            try:
-                result = self.ingest_rss_entry(entry)
-                if result:
-                    stats["articles_ingested"] += 1
-                    feed_article_counts[feed_name] += 1
-                else:
-                    stats["articles_skipped_duplicates"] += 1
-            except Exception as e:
-                logger.error(f"Error ingesting article {entry.title}: {e}")
-                self.db.rollback()
-                stats["errors"] += 1
-        
-        # Log feed distribution
-        if feed_article_counts:
-            logger.info("Articles ingested by feed:")
-            for feed, count in sorted(feed_article_counts.items(), key=lambda x: -x[1]):
-                logger.info(f"  {feed}: {count}")
-        
-        # Process YouTube entries until we hit remaining daily targets for VIDEO and REEL.
-        # Track channels and topics to prevent excessive repetition
-        channel_video_counts: Dict[str, int] = defaultdict(int)
-        channel_reel_counts: Dict[str, int] = defaultdict(int)
-        
-        logger.info(
-            "Processing YouTube for UTC %s: videos existing=%s target=%s remaining=%s | reels existing=%s target=%s remaining=%s",
-            today,
-            existing_videos,
-            DAILY_TARGET_VIDEOS,
-            remaining_videos,
-            existing_reels,
-            DAILY_TARGET_REELS,
-            remaining_reels,
-        )
-        for entry in video_entries:
-            if remaining_videos == 0 and remaining_reels == 0:
-                break
+            for entry in feed_entries:
+                if stats["articles_ingested"] >= remaining_articles:
+                    break
 
-            # Use enhanced metadata for shorts detection
-            is_short = getattr(entry, 'is_short', False)
-            is_shorts_url = bool(entry.video_url and "/shorts/" in entry.video_url)
-            is_reel = is_short or is_shorts_url
-            
-            if is_reel and remaining_reels == 0:
-                continue
-            if (not is_reel) and remaining_videos == 0:
-                continue
+                # Apply per-feed daily caps
+                feed_name = getattr(entry, "feed_name", "") or "unknown"
+                feed_daily_cap = 3  # Default cap
+                if hasattr(entry, "quality_tier") and entry.quality_tier:
+                    # Premium feeds get slightly higher effective caps
+                    feed_daily_cap = 4 if entry.quality_tier.value == "premium" else 3
 
-            # Apply per-channel caps to prevent creator fatigue
-            channel_id = getattr(entry, 'channel_id', '') or entry.source
-            if is_reel:
-                if channel_reel_counts[channel_id] >= 4:  # Max 4 reels per channel
-                    continue
-            else:
-                if channel_video_counts[channel_id] >= 2:  # Max 2 videos per channel
+                if feed_article_counts[feed_name] >= feed_daily_cap:
+                    logger.debug(f"Feed {feed_name} hit daily cap ({feed_daily_cap}), skipping")
                     continue
 
-            if is_reel:
-                stats["reels_processed"] += 1
-            else:
-                stats["videos_processed"] += 1
-            try:
-                result = self.ingest_youtube_entry(entry)
-                if not result:
-                    # Count duplicate skip into the best-effort bucket
-                    if is_reel:
-                        stats["reels_skipped_duplicates"] += 1
+                stats["articles_processed"] += 1
+                try:
+                    result = self.ingest_rss_entry(entry)
+                    if result:
+                        stats["articles_ingested"] += 1
+                        feed_article_counts[feed_name] += 1
                     else:
-                        stats["videos_skipped_duplicates"] += 1
+                        stats["articles_skipped_duplicates"] += 1
+                except Exception as e:
+                    logger.error(f"Error ingesting article {entry.title}: {e}")
+                    self.db.rollback()
+                    stats["errors"] += 1
+
+            # Log feed distribution
+            if feed_article_counts:
+                logger.info("Articles ingested by feed:")
+                for feed, count in sorted(feed_article_counts.items(), key=lambda x: -x[1]):
+                    logger.info(f"  {feed}: {count}")
+
+            # Process YouTube entries until we hit remaining daily targets for VIDEO and REEL.
+            # Track channels to prevent excessive repetition
+            channel_video_counts: Dict[str, int] = defaultdict(int)
+            channel_reel_counts: Dict[str, int] = defaultdict(int)
+
+            logger.info(
+                "Processing YouTube for UTC %s: videos existing=%s target=%s remaining=%s | reels existing=%s target=%s remaining=%s",
+                today,
+                existing_videos,
+                DAILY_TARGET_VIDEOS,
+                remaining_videos,
+                existing_reels,
+                DAILY_TARGET_REELS,
+                remaining_reels,
+            )
+            for entry in video_entries:
+                if remaining_videos == 0 and remaining_reels == 0:
+                    break
+
+                # Use enhanced metadata for shorts detection
+                is_short = getattr(entry, "is_short", False)
+                is_shorts_url = bool(entry.video_url and "/shorts/" in entry.video_url)
+                is_reel = is_short or is_shorts_url
+
+                if is_reel and remaining_reels == 0:
+                    continue
+                if (not is_reel) and remaining_videos == 0:
                     continue
 
-                # Update channel counts
-                if result.type == ContentType.REEL:
-                    stats["reels_ingested"] += 1
-                    remaining_reels = max(0, remaining_reels - 1)
-                    channel_reel_counts[channel_id] += 1
+                # Apply per-channel caps to prevent creator fatigue
+                channel_id = getattr(entry, "channel_id", "") or entry.source
+                if is_reel:
+                    if channel_reel_counts[channel_id] >= 4:  # Max 4 reels per channel
+                        continue
                 else:
-                    stats["videos_ingested"] += 1
-                    remaining_videos = max(0, remaining_videos - 1)
-                    channel_video_counts[channel_id] += 1
-            except Exception as e:
-                logger.error(f"Error ingesting video {entry.title}: {e}")
-                self.db.rollback()
-                stats["errors"] += 1
-        
-        logger.info(f"Ingestion complete: {stats}")
-        return stats
+                    if channel_video_counts[channel_id] >= 2:  # Max 2 videos per channel
+                        continue
+
+                if is_reel:
+                    stats["reels_processed"] += 1
+                else:
+                    stats["videos_processed"] += 1
+                try:
+                    result = self.ingest_youtube_entry(entry)
+                    if not result:
+                        # Count duplicate skip into the best-effort bucket
+                        if is_reel:
+                            stats["reels_skipped_duplicates"] += 1
+                        else:
+                            stats["videos_skipped_duplicates"] += 1
+                        continue
+
+                    # Update channel counts
+                    if result.type == ContentType.REEL:
+                        stats["reels_ingested"] += 1
+                        remaining_reels = max(0, remaining_reels - 1)
+                        channel_reel_counts[channel_id] += 1
+                    else:
+                        stats["videos_ingested"] += 1
+                        remaining_videos = max(0, remaining_videos - 1)
+                        channel_video_counts[channel_id] += 1
+                except Exception as e:
+                    logger.error(f"Error ingesting video {entry.title}: {e}")
+                    self.db.rollback()
+                    stats["errors"] += 1
+
+            for key, value in stats.items():
+                aggregate[key] += value
+
+            attempts += 1
+            aggregate["attempts"] = attempts
+            logger.info(f"Ingestion attempt {attempt_num} complete: {stats}")
+
+            # If we didn't ingest anything new, don't spin forever.
+            if (stats["articles_ingested"] + stats["videos_ingested"] + stats["reels_ingested"]) == 0:
+                logger.warning(
+                    "No new items ingested in attempt %s; stopping early (remaining targets may not be reachable with current sources)",
+                    attempt_num,
+                )
+                return aggregate
+
+            if ingest_until_targets and catchup_sleep_seconds > 0:
+                time.sleep(catchup_sleep_seconds)
     
     def _update_scores(self, content_item: ContentItem) -> None:
         """Update scores for a newly ingested item."""
