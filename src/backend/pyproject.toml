@@ -1,0 +1,17 @@
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = [
+  "E", "F", "I", "B"
+]
+ignore = [
+  "E501"  # line length handled pragmatically
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.pytest.ini_options]
+# Keep this minimal; pytest.ini is the primary config.

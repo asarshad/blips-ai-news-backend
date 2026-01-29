@@ -1,0 +1,2128 @@
+{
+  "components": {
+    "schemas": {
+      "Article": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "published_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Date"
+          },
+          "read_time_minutes": {
+            "default": 1,
+            "title": "Read Time Minutes",
+            "type": "integer"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Tag"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "source_url",
+          "summary",
+          "id",
+          "created_at"
+        ],
+        "title": "Article",
+        "type": "object"
+      },
+      "ArticleList": {
+        "properties": {
+          "articles": {
+            "items": {
+              "$ref": "#/components/schemas/Article"
+            },
+            "title": "Articles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "articles"
+        ],
+        "title": "ArticleList",
+        "type": "object"
+      },
+      "ArticleWithConversation": {
+        "properties": {
+          "conversations": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ConversationOut"
+            },
+            "title": "Conversations",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "published_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Date"
+          },
+          "read_time_minutes": {
+            "default": 1,
+            "title": "Read Time Minutes",
+            "type": "integer"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Tag"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "source_url",
+          "summary",
+          "id",
+          "created_at"
+        ],
+        "title": "ArticleWithConversation",
+        "type": "object"
+      },
+      "ChatMessage": {
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ChatMessage",
+        "type": "object"
+      },
+      "ContentTypeParam": {
+        "description": "Content type parameter for API.",
+        "enum": [
+          "ARTICLE",
+          "VIDEO",
+          "REEL"
+        ],
+        "title": "ContentTypeParam",
+        "type": "string"
+      },
+      "ConversationCreate": {
+        "properties": {
+          "content_item_id": {
+            "title": "Content Item Id",
+            "type": "integer"
+          },
+          "history": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ChatMessage"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "sender": {
+            "title": "Sender",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "sender",
+          "content_item_id"
+        ],
+        "title": "ConversationCreate",
+        "type": "object"
+      },
+      "ConversationHistory": {
+        "properties": {
+          "content_item_id": {
+            "title": "Content Item Id",
+            "type": "integer"
+          },
+          "conversations": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationOut"
+            },
+            "title": "Conversations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "content_item_id",
+          "conversations"
+        ],
+        "title": "ConversationHistory",
+        "type": "object"
+      },
+      "ConversationOut": {
+        "properties": {
+          "content_item_id": {
+            "title": "Content Item Id",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "sender": {
+            "title": "Sender",
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "sender",
+          "id",
+          "content_item_id",
+          "timestamp"
+        ],
+        "title": "ConversationOut",
+        "type": "object"
+      },
+      "EventTypeParam": {
+        "description": "Event type parameter for API.",
+        "enum": [
+          "VIEW_10S",
+          "OPEN_SOURCE",
+          "SHARE",
+          "SAVE",
+          "CHAT_START",
+          "CHAT_MESSAGE"
+        ],
+        "title": "EventTypeParam",
+        "type": "string"
+      },
+      "FeatureFlagResponse": {
+        "description": "Response for a single feature flag.",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "feature": {
+            "title": "Feature",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature",
+          "enabled",
+          "source"
+        ],
+        "title": "FeatureFlagResponse",
+        "type": "object"
+      },
+      "FeatureFlagUpdate": {
+        "description": "Request body for updating a feature flag.",
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "FeatureFlagUpdate",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "InteractionRequest": {
+        "description": "Request body for recording an interaction.",
+        "properties": {
+          "content_item_id": {
+            "title": "Content Item Id",
+            "type": "integer"
+          },
+          "event_type": {
+            "$ref": "#/components/schemas/EventTypeParam"
+          },
+          "extra_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extra Data"
+          }
+        },
+        "required": [
+          "content_item_id",
+          "event_type"
+        ],
+        "title": "InteractionRequest",
+        "type": "object"
+      },
+      "InteractionResponse": {
+        "description": "Response for interaction recording.",
+        "properties": {
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ],
+        "title": "InteractionResponse",
+        "type": "object"
+      },
+      "PlaylistItem": {
+        "description": "Single item in playlist response.",
+        "properties": {
+          "cluster_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "duration": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration"
+          },
+          "entities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Entities",
+            "type": "array"
+          },
+          "global_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Global Score"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Topics",
+            "type": "array"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "video_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Url"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "source",
+          "source_url",
+          "title",
+          "description",
+          "summary",
+          "image_url",
+          "video_url",
+          "duration",
+          "topics",
+          "entities",
+          "published_at",
+          "global_score",
+          "cluster_id"
+        ],
+        "title": "PlaylistItem",
+        "type": "object"
+      },
+      "PlaylistResponse": {
+        "description": "Response for playlist endpoint.",
+        "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlaylistItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "total_items": {
+            "title": "Total Items",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "session_id",
+          "cursor",
+          "has_more",
+          "total_items"
+        ],
+        "title": "PlaylistResponse",
+        "type": "object"
+      },
+      "PreferencesResponse": {
+        "description": "Response for preferences endpoint.",
+        "properties": {
+          "entities": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Entities",
+            "type": "array"
+          },
+          "formats": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Formats",
+            "type": "array"
+          },
+          "sources": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "topics": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Topics",
+            "type": "array"
+          }
+        },
+        "required": [
+          "topics",
+          "entities",
+          "sources",
+          "formats"
+        ],
+        "title": "PreferencesResponse",
+        "type": "object"
+      },
+      "Tag": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "Tag",
+        "type": "object"
+      },
+      "TagCount": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "count"
+        ],
+        "title": "TagCount",
+        "type": "object"
+      },
+      "UsageStats": {
+        "properties": {
+          "remaining_article_messages": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining Article Messages"
+          },
+          "remaining_daily_messages": {
+            "title": "Remaining Daily Messages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "remaining_daily_messages"
+        ],
+        "title": "UsageStats",
+        "type": "object"
+      },
+      "UserStatsResponse": {
+        "description": "Response for user stats endpoint.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "engagement_7d": {
+            "additionalProperties": true,
+            "title": "Engagement 7D",
+            "type": "object"
+          },
+          "preference_counts": {
+            "additionalProperties": true,
+            "title": "Preference Counts",
+            "type": "object"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "device_id",
+          "user_id",
+          "created_at",
+          "preference_counts",
+          "engagement_7d"
+        ],
+        "title": "UserStatsResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "Video": {
+        "properties": {
+          "category": {
+            "default": "Technology",
+            "title": "Category",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "hot_score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 0,
+            "title": "Hot Score"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "source": {
+            "default": "YouTube",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "video_url": {
+            "title": "Video Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "summary",
+          "video_url",
+          "source_url",
+          "id",
+          "created_at"
+        ],
+        "title": "Video",
+        "type": "object"
+      },
+      "VideoList": {
+        "properties": {
+          "videos": {
+            "items": {
+              "$ref": "#/components/schemas/Video"
+            },
+            "title": "Videos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "videos"
+        ],
+        "title": "VideoList",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "blips-ai-news",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/admin/flags": {
+      "get": {
+        "description": "Get status of all feature flags.\n\nReturns dict with each feature's current status and source (redis/env/default).",
+        "operationId": "get_all_feature_flags_api_v1_admin_flags_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get All Feature Flags Api V1 Admin Flags Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get All Feature Flags",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/flags/{feature}": {
+      "delete": {
+        "description": "Reset a feature flag to its default value (removes Redis override).\n\nArgs:\n    feature: Feature name",
+        "operationId": "reset_feature_flag_api_v1_admin_flags__feature__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature",
+            "required": true,
+            "schema": {
+              "title": "Feature",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset Feature Flag",
+        "tags": [
+          "admin"
+        ]
+      },
+      "get": {
+        "description": "Get status of a specific feature flag.\n\nArgs:\n    feature: Feature name (e.g., \"chat\", \"ingestion\")",
+        "operationId": "get_feature_flag_api_v1_admin_flags__feature__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature",
+            "required": true,
+            "schema": {
+              "title": "Feature",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureFlagResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Feature Flag",
+        "tags": [
+          "admin"
+        ]
+      },
+      "put": {
+        "description": "Update a feature flag (stored in Redis for instant effect).\n\nArgs:\n    feature: Feature name (e.g., \"chat\", \"ingestion\")\n    update: New enabled status",
+        "operationId": "update_feature_flag_api_v1_admin_flags__feature__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature",
+            "required": true,
+            "schema": {
+              "title": "Feature",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureFlagUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureFlagResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Feature Flag",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/stats/content": {
+      "get": {
+        "description": "Get content statistics for monitoring.",
+        "operationId": "get_content_stats_api_v1_admin_stats_content_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Content Stats",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/ai/respond": {
+      "post": {
+        "description": "Generate AI response for a message about a content item.",
+        "operationId": "get_ai_response_api_v1_ai_respond_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "user-agent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User-Agent"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Ai Response",
+        "tags": [
+          "ai"
+        ]
+      }
+    },
+    "/api/v1/articles/cache": {
+      "get": {
+        "description": "Get pre-cached articles for quick access.",
+        "operationId": "get_cached_articles_api_v1_articles_cache_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Article"
+                  },
+                  "title": "Response Get Cached Articles Api V1 Articles Cache Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Cached Articles",
+        "tags": [
+          "articles"
+        ]
+      }
+    },
+    "/api/v1/articles/next": {
+      "get": {
+        "description": "Get the next article after the current one.\nReturns the most recent article if no current_id is provided.\nOnly returns AI-processed articles with valid summaries.",
+        "operationId": "get_next_article_api_v1_articles_next_get",
+        "parameters": [
+          {
+            "description": "Current article ID",
+            "in": "query",
+            "name": "current_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Current article ID",
+              "title": "Current Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Article"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Next Article",
+        "tags": [
+          "articles"
+        ]
+      }
+    },
+    "/api/v1/articles/recent": {
+      "get": {
+        "description": "Get the most recent articles.\nOnly returns AI-processed articles with valid summaries.\nResults are diversity-mixed to ensure varied source distribution.",
+        "operationId": "get_recent_articles_api_v1_articles_recent_get",
+        "parameters": [
+          {
+            "description": "Number of articles to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "description": "Number of articles to return",
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArticleList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Recent Articles",
+        "tags": [
+          "articles"
+        ]
+      }
+    },
+    "/api/v1/articles/tags": {
+      "get": {
+        "description": "Get the most popular tags with article counts.",
+        "operationId": "get_popular_tags_api_v1_articles_tags_get",
+        "parameters": [
+          {
+            "description": "Number of tags to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Number of tags to return",
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TagCount"
+                  },
+                  "title": "Response Get Popular Tags Api V1 Articles Tags Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Popular Tags",
+        "tags": [
+          "articles"
+        ]
+      }
+    },
+    "/api/v1/articles/tags/{tag_name}": {
+      "get": {
+        "description": "Get articles by tag/topic name.",
+        "operationId": "get_articles_by_tag_api_v1_articles_tags__tag_name__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_name",
+            "required": true,
+            "schema": {
+              "title": "Tag Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Number of articles to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Number of articles to return",
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArticleList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Articles By Tag",
+        "tags": [
+          "articles"
+        ]
+      }
+    },
+    "/api/v1/articles/{article_id}": {
+      "get": {
+        "description": "Get a specific article by ID, including conversation history.",
+        "operationId": "get_article_api_v1_articles__article_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "article_id",
+            "required": true,
+            "schema": {
+              "title": "Article Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArticleWithConversation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Article",
+        "tags": [
+          "articles"
+        ]
+      }
+    },
+    "/api/v1/conversations/{content_item_id}": {
+      "delete": {
+        "description": "Delete conversation history for a content item.",
+        "operationId": "delete_conversation_api_v1_conversations__content_item_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_item_id",
+            "required": true,
+            "schema": {
+              "title": "Content Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Conversation",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "get": {
+        "description": "Get conversation history for a content item.",
+        "operationId": "get_conversations_api_v1_conversations__content_item_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_item_id",
+            "required": true,
+            "schema": {
+              "title": "Content Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationHistory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Conversations",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "post": {
+        "description": "Save a new message to the conversation history.",
+        "operationId": "save_message_api_v1_conversations__content_item_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_item_id",
+            "required": true,
+            "schema": {
+              "title": "Content Item Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "message",
+            "required": true,
+            "schema": {
+              "title": "Message",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sender",
+            "required": true,
+            "schema": {
+              "title": "Sender",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Message",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/api/v1/session/cache": {
+      "delete": {
+        "description": "Invalidate user's playlist cache (debug endpoint).",
+        "operationId": "invalidate_cache_api_v1_session_cache_delete",
+        "parameters": [
+          {
+            "description": "Device identifier",
+            "in": "header",
+            "name": "x-device-id",
+            "required": true,
+            "schema": {
+              "description": "Device identifier",
+              "title": "X-Device-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Invalidate Cache",
+        "tags": [
+          "session"
+        ]
+      }
+    },
+    "/api/v1/session/interactions": {
+      "post": {
+        "description": "Record a user interaction with content.\n\nInteraction types:\n- VIEW_10S: Viewed content for 10+ seconds\n- OPEN_SOURCE: Clicked to open source article/video\n- SHARE: Shared content\n- SAVE: Saved/bookmarked content\n- CHAT_START: Started AI chat about content\n- CHAT_MESSAGE: Sent message in AI chat\n\nUpdates user preferences based on interaction signals.",
+        "operationId": "record_interaction_api_v1_session_interactions_post",
+        "parameters": [
+          {
+            "description": "Device identifier",
+            "in": "header",
+            "name": "x-device-id",
+            "required": true,
+            "schema": {
+              "description": "Device identifier",
+              "title": "X-Device-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InteractionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InteractionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Interaction",
+        "tags": [
+          "session"
+        ]
+      }
+    },
+    "/api/v1/session/playlist": {
+      "get": {
+        "description": "Get a personalized playlist for the user session.\n\nUses session snapshots: once generated, a playlist is immutable\nfor that session. Use cursor-based continuation for swipe feeds.\n\nReturns ranked content items with diversity constraints:\n- No repeated stories (cluster_id)\n- Topic diversity (max 40% per topic)\n- Source rotation\n\nSession snapshot cached for 1 hour.",
+        "operationId": "get_playlist_api_v1_session_playlist_get",
+        "parameters": [
+          {
+            "description": "Content type",
+            "in": "query",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ContentTypeParam",
+              "description": "Content type"
+            }
+          },
+          {
+            "description": "Items per request",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Items per request",
+              "maximum": 100,
+              "minimum": 10,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Session ID for continuity",
+            "in": "query",
+            "name": "session_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Session ID for continuity",
+              "title": "Session Id"
+            }
+          },
+          {
+            "description": "Cursor position to continue from",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor position to continue from",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Force refresh playlist (new session)",
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Force refresh playlist (new session)",
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Device identifier",
+            "in": "header",
+            "name": "x-device-id",
+            "required": true,
+            "schema": {
+              "description": "Device identifier",
+              "title": "X-Device-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaylistResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Playlist",
+        "tags": [
+          "session"
+        ]
+      }
+    },
+    "/api/v1/session/playlist-stats": {
+      "get": {
+        "description": "Get playlist generation statistics (admin endpoint).\n\nReturns candidate counts and diversity metrics per content type.",
+        "operationId": "get_playlist_stats_api_v1_session_playlist_stats_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Playlist Stats",
+        "tags": [
+          "session"
+        ]
+      }
+    },
+    "/api/v1/session/preferences": {
+      "get": {
+        "description": "Get user's current preferences (debug endpoint).\n\nReturns learned preferences across topics, entities, sources, and formats.",
+        "operationId": "get_preferences_api_v1_session_preferences_get",
+        "parameters": [
+          {
+            "description": "Device identifier",
+            "in": "header",
+            "name": "x-device-id",
+            "required": true,
+            "schema": {
+              "description": "Device identifier",
+              "title": "X-Device-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferencesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Preferences",
+        "tags": [
+          "session"
+        ]
+      }
+    },
+    "/api/v1/session/stats": {
+      "get": {
+        "description": "Get user statistics (debug endpoint).\n\nReturns preference counts and engagement metrics.",
+        "operationId": "get_user_stats_api_v1_session_stats_get",
+        "parameters": [
+          {
+            "description": "Device identifier",
+            "in": "header",
+            "name": "x-device-id",
+            "required": true,
+            "schema": {
+              "description": "Device identifier",
+              "title": "X-Device-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserStatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get User Stats",
+        "tags": [
+          "session"
+        ]
+      }
+    },
+    "/api/v1/usage": {
+      "get": {
+        "description": "Get current quota usage statistics for the device.",
+        "operationId": "get_usage_stats_api_v1_usage_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "content_item_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Content Item Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "user-agent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User-Agent"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageStats"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Usage Stats",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/api/v1/videos/recent": {
+      "get": {
+        "description": "Get the most recent videos.\nOnly returns AI-processed videos with valid summaries.\nResults are diversity-mixed to ensure varied source distribution.",
+        "operationId": "get_recent_videos_api_v1_videos_recent_get",
+        "parameters": [
+          {
+            "description": "Number of videos to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Number of videos to return",
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Recent Videos",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/api/v1/videos/reels": {
+      "get": {
+        "description": "Get the most recent reels (short videos).\nREELs don't require AI summaries but must exist in content_items.\nResults are diversity-mixed to ensure varied source distribution.\nThis is especially important for reels which can be dominated by one source.",
+        "operationId": "get_reels_api_v1_videos_reels_get",
+        "parameters": [
+          {
+            "description": "Number of reels to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Number of reels to return",
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page number",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Page number",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Reels",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/api/v1/videos/{video_id}": {
+      "get": {
+        "description": "Get a specific video by ID.",
+        "operationId": "get_video_api_v1_videos__video_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "video_id",
+            "required": true,
+            "schema": {
+              "title": "Video Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Video"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Video",
+        "tags": [
+          "videos"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Health check endpoint for monitoring.",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Check"
+      }
+    }
+  }
+}
