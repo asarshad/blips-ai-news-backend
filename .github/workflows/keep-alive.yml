@@ -14,27 +14,28 @@ concurrency:
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
-      - name: Validate URL
-        env:
-          KEEPALIVE_URL: ${{ secrets.KEEPALIVE_URL }}
-        run: |
-          if [ -z "${KEEPALIVE_URL}" ]; then
-            echo "KEEPALIVE_URL is not set. Configure it as a GitHub Actions secret." >&2
-            exit 1
-          fi
+      - uses: actions/checkout@v4
 
-      - name: Ping /health
-        env:
-          KEEPALIVE_URL: ${{ secrets.KEEPALIVE_URL }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
         run: |
-          set -euo pipefail
-          url="${KEEPALIVE_URL}"
-          # Allow secrets to be either the base URL or the full /health URL.
-          if [[ "$url" != *"/health" ]]; then
-            url="$url/health"
-          fi
-          echo "Pinging: $url"
-          curl -fsS --retry 3 --retry-delay 2 --max-time 20 "$url" | cat
+          python -m pip install --upgrade pip
+          python -m pip install requests
+
+      - name: Keep alive pings
+        env:
+          # Prefer repo variable; allow secret fallback for convenience.
+          HEALTH_URL: ${{ vars.HEALTH_URL || secrets.KEEPALIVE_URL }}
+          # Defaults are safe; set vars to override.
+          INTERVAL_SECONDS: ${{ vars.KEEPALIVE_INTERVAL_SECONDS }}
+          DURATION_SECONDS: ${{ vars.KEEPALIVE_DURATION_SECONDS }}
+          TIMEOUT_SECONDS: ${{ vars.KEEPALIVE_TIMEOUT_SECONDS }}
+          FAIL_ON_ERROR: ${{ vars.KEEPALIVE_FAIL_ON_ERROR }}
+        run: |
+          python .github/scripts/keep_alive_ping.py
