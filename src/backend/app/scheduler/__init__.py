@@ -4,20 +4,21 @@ Scheduler module for background task scheduling.
 Uses APScheduler to run periodic tasks like news fetching.
 """
 
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.interval import IntervalTrigger
-from apscheduler.triggers.cron import CronTrigger
 from typing import Optional
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.scheduler.tasks import (
     fetch_and_process_news,
-    run_scoring_job,
+    retry_ai_processing,
+    run_backfill_job,
     run_clustering_job,
     run_preference_decay_job,
-    run_backfill_job,
-    retry_ai_processing,
+    run_scoring_job,
 )
 
 logger = get_logger(__name__)
@@ -32,11 +33,22 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
     """
     try:
         scheduler = BackgroundScheduler()
-        
+
+        # Fetch cadence: prefer minutes (Render sets NEWS_FETCH_INTERVAL_MINUTES).
+        fetch_minutes = int(getattr(settings, "NEWS_FETCH_INTERVAL_MINUTES", 0) or 0)
+        fetch_hours = int(getattr(settings, "NEWS_FETCH_INTERVAL_HOURS", 0) or 0)
+        if fetch_minutes > 0:
+            fetch_trigger = IntervalTrigger(minutes=fetch_minutes)
+            fetch_human = f"{fetch_minutes} minutes"
+        else:
+            # Backward-compatible fallback.
+            fetch_trigger = IntervalTrigger(hours=max(fetch_hours, 1))
+            fetch_human = f"{max(fetch_hours, 1)} hours"
+
         # Add job for news and video fetching
         scheduler.add_job(
             fetch_and_process_news,
-            IntervalTrigger(hours=settings.NEWS_FETCH_INTERVAL_HOURS),
+            fetch_trigger,
             id="fetch_news",
             replace_existing=True
         )
@@ -74,7 +86,7 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
         )
         
         scheduler.start()
-        logger.info(f"Started background scheduler - fetching news every {settings.NEWS_FETCH_INTERVAL_HOURS} hours")
+        logger.info(f"Started background scheduler - fetching news every {fetch_human}")
         logger.info("Curation jobs: scoring (hourly), clustering (15min), decay (daily), AI retry (2h)")
         
         return scheduler
