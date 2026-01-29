@@ -1,5 +1,5 @@
-from datetime import date
 import threading
+from datetime import date
 
 from app.ingestion import checkpointing
 
