@@ -1,9 +1,9 @@
-
 """Quota management service for tracking user API usage."""
 
+import json
 from datetime import timedelta
 from typing import Optional
-import json
+
 import redis
 
 from app.core.config import settings
@@ -87,6 +87,10 @@ class QuotaManager:
     def _cache_quota(self, cache_key: str, quota_data: dict) -> None:
         """Cache quota data."""
         try:
-            self.redis.setex(cache_key, QUOTA_CACHE_TTL, json.dumps(quota_data))
+            # redis-py `setex` expects an integer number of seconds.
+            # Passing a timedelta is not consistently supported (e.g., fakeredis),
+            # which can silently disable caching in tests.
+            ttl_seconds = int(QUOTA_CACHE_TTL.total_seconds())
+            self.redis.setex(cache_key, ttl_seconds, json.dumps(quota_data))
         except Exception as e:
             logger.warning(f"Cache write error: {str(e)}")

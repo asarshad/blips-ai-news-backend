@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns="http://www.w3.org/2005/Atom">
+  <title>Example Channel</title>
+  <entry>
+    <title>iPhone 16 Review: AI features explained</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"/>
+    <author><name>Example Channel</name></author>
+    <summary>We review the new iPhone and talk about machine learning.</summary>
+  </entry>
+  <entry>
+    <title>Shorts: quick tip</title>
+    <link rel="alternate" href="https://www.youtube.com/shorts/abc123DEF45"/>
+    <author><name>Example Channel</name></author>
+    <summary>Short-form content.</summary>
+  </entry>
+</feed>

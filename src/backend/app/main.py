@@ -9,6 +9,8 @@ This module configures and creates the FastAPI application with:
 - Background scheduler initialization
 """
 
+import os
+import threading
 import time
 from contextlib import asynccontextmanager
 
@@ -16,10 +18,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.core.config import settings
-from app.core.logging import setup_logging, get_logger
-from app.core.dependencies import get_redis
 from app.api import api_router
+from app.core.config import settings
+from app.core.dependencies import get_redis
+from app.core.logging import get_logger, setup_logging
 from app.db.base import Base, engine
 from app.scheduler import init_scheduler
 from app.scheduler.tasks import fetch_and_process_news
@@ -50,7 +52,6 @@ def _create_tables() -> None:
             logger.info("Database tables created")
         else:
             logger.info("Skipping table creation - another worker is handling it")
-            import time
             time.sleep(2)
     except Exception as e:
         logger.warning(f"Table creation error (non-fatal): {str(e)}")
@@ -67,14 +68,8 @@ def _check_redis_connection() -> bool:
         logger.error(f"Redis connection error: {str(e)}")
         return False
 
-
-import os
-import threading
-
-
 def _run_initial_fetch():
     """Run the initial news fetch in background thread."""
-    import time
     time.sleep(2)  # Give app time to fully start
     logger.info("Running initial news fetch in background thread")
     try:
@@ -127,6 +122,13 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler for startup and shutdown."""
     # Startup
     logger.info("Starting up application")
+
+    if os.getenv("SKIP_STARTUP_CHECKS", "").lower() == "true":
+        yield
+        logger.info("Shutting down application")
+        return
+
+    _create_tables()
     _check_redis_connection()
     _start_scheduler()
     
@@ -135,9 +137,6 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down application")
 
-
-# Create database tables
-_create_tables()
 
 # Create FastAPI app
 app = FastAPI(

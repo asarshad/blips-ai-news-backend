@@ -5,43 +5,33 @@ Orchestrates the ingestion of articles and videos into the content system.
 Fetches directly from RSS feeds and YouTube channels with role-based quotas.
 """
 
-from typing import Dict, List, Optional, Tuple, Set
-from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from typing import Dict, List, Optional
 
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-
-from app.core.logging import get_logger
-from app.core.config import get_settings
-from app.models.content import ContentItem, ContentType
-from app.repositories.content_repo import ContentItemRepository
+from sqlalchemy.orm import Session
 
 from app.clustering.dedupe import compute_dedupe_key
 from app.clustering.service import ClusteringService
-from app.ranking.service import ScoringService
-from app.ranking.quality import compute_source_weight
-from app.ingestion.extractors import extract_topics, extract_entities, extract_source
-
-from app.integrations.rss_client import RSSClient, FeedEntry
+from app.core.config import get_settings
+from app.core.logging import get_logger
+from app.ingestion.extractors import extract_entities, extract_source, extract_topics
+from app.ingestion.url_normalizer import normalize_url
+from app.integrations.llm_client import LLMClient
+from app.integrations.rss_client import FeedEntry, RSSClient
 from app.integrations.rss_feeds import (
-    FeedRole,
-    QualityTier as RSSQualityTier,
-    DecayProfile,
     get_quality_modifier as get_rss_quality_modifier,
-    get_decay_half_life,
-    get_role_quota,
-    get_feed_stats,
 )
-from app.integrations.youtube_client import YouTubeClient, VideoEntry
 from app.integrations.youtube_channels import (
-    ChannelRole,
-    QualityTier,
-    get_role_quotas,
     get_quality_weight_modifier,
 )
-from app.integrations.llm_client import LLMClient
+from app.integrations.youtube_client import VideoEntry, YouTubeClient
+from app.models.content import ContentItem, ContentType
+from app.ranking.quality import compute_source_weight
+from app.ranking.service import ScoringService
+from app.repositories.content_repo import ContentItemRepository
 
 logger = get_logger(__name__)
 
@@ -96,14 +86,16 @@ class IngestionPipeline:
         Returns:
             Created ContentItem or None if duplicate
         """
+        normalized_url = normalize_url(entry.url) if entry.url else entry.url
+
         # Strong idempotency: source_url is unique in DB.
-        if entry.url:
-            existing_by_url = self.content_repo.get_by_source_url(entry.url)
+        if normalized_url:
+            existing_by_url = self.content_repo.get_by_source_url(normalized_url)
             if existing_by_url:
                 logger.debug(f"Article already ingested (source_url): {entry.title}")
                 return None
 
-        source = extract_source(entry.url)
+        source = extract_source(normalized_url or entry.url)
         dedupe_key = compute_dedupe_key(entry.title, source)
         
         existing = self.content_repo.get_by_dedupe_key(dedupe_key)
@@ -128,7 +120,7 @@ class IngestionPipeline:
         content_item = ContentItem(
             type=ContentType.ARTICLE,
             source=source,
-            source_url=entry.url,
+            source_url=normalized_url or entry.url,
             published_at=entry.published_date or datetime.utcnow(),
             title=entry.title,
             description=entry.content[:500] if entry.content else None,
@@ -217,9 +209,11 @@ class IngestionPipeline:
         # YouTube titles repeat frequently (series/weekly formats). Use video_id for stable dedupe.
         dedupe_key = f"yt:{entry.video_id}" if entry.video_id else compute_dedupe_key(entry.title, source)
 
+        normalized_video_url = normalize_url(entry.video_url) if entry.video_url else entry.video_url
+
         # Strong idempotency: source_url is unique in DB.
-        if entry.video_url:
-            existing_by_url = self.content_repo.get_by_source_url(entry.video_url)
+        if normalized_video_url:
+            existing_by_url = self.content_repo.get_by_source_url(normalized_video_url)
             if existing_by_url:
                 logger.debug(f"Video already ingested (source_url): {entry.title}")
                 return None
@@ -267,14 +261,14 @@ class IngestionPipeline:
         content_item = ContentItem(
             type=content_type,
             source=source,
-            source_url=entry.video_url,
+            source_url=normalized_video_url or entry.video_url,
             # YouTube RSS dates can be inconsistent; created_at is the ingestion date.
             published_at=datetime.utcnow(),
             title=entry.title,
             description=summary[:500] if summary else None,
             summary=summary if content_type != ContentType.REEL else None,
             image_url=entry.thumbnail_url,
-            video_url=entry.video_url,
+            video_url=normalized_video_url or entry.video_url,
             duration_seconds=duration_seconds,
             topics=topics,
             entities=entities,
@@ -530,10 +524,10 @@ class IngestionPipeline:
 
 def create_ingestion_pipeline(db: Session) -> IngestionPipeline:
     """Factory function to create IngestionPipeline with dependencies."""
-    from app.repositories.content_repo import ContentItemRepository
-    from app.repositories.user_repo import InteractionEventRepository
     from app.clustering.service import ClusteringService
     from app.ranking.service import ScoringService
+    from app.repositories.content_repo import ContentItemRepository
+    from app.repositories.user_repo import InteractionEventRepository
     
     content_repo = ContentItemRepository(db)
     event_repo = InteractionEventRepository(db)
