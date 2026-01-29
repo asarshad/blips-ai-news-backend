@@ -24,11 +24,9 @@ from app.api import api_router
 from app.core.config import settings
 from app.core.dependencies import get_redis
 from app.core.logging import get_logger, setup_logging
-from app.db.base import Base, engine
-from app.db.base import SessionLocal
+from app.db.base import Base, SessionLocal, engine
 from app.scheduler import init_scheduler
 from app.scheduler.tasks import fetch_and_process_news
-from sqlalchemy import text
 
 # Configure logging first
 setup_logging()
@@ -254,17 +252,8 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 def health_check():
     """Health check endpoint for monitoring.
 
-    Returns 200 only when the app and DB are reachable.
+    Must stay lightweight for keep-alive pings (no heavy DB queries).
     """
-    try:
-        db = SessionLocal()
-        try:
-            db.execute(text("SELECT 1"))
-        finally:
-            db.close()
-    except Exception as e:
-        return JSONResponse(status_code=503, content={"status": "unhealthy", "error": str(e)})
-
     return {"status": "healthy"}
 
 
