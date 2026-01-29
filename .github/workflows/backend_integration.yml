@@ -36,5 +36,6 @@ jobs:
       - name: Integration tests (Docker)
         env:
           PYTHONWARNINGS: "ignore:urllib3 v2 only supports OpenSSL.*"
+          PYTHONPATH: ${{ github.workspace }}/src/backend
         run: |
           pytest tests/integration --force-enable-socket

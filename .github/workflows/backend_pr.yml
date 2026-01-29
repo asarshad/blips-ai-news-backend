@@ -35,11 +35,14 @@ jobs:
           pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Lint (ruff)
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src/backend
         run: |
           ruff check app/ingestion/url_normalizer.py app/services/quota_manager.py tests/unit tests/contract tests/integration
 
       - name: Unit + contract tests
         env:
           PYTHONWARNINGS: "ignore:urllib3 v2 only supports OpenSSL.*"
+          PYTHONPATH: ${{ github.workspace }}/src/backend
         run: |
           pytest tests/unit tests/contract
