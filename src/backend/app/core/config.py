@@ -70,6 +70,24 @@ class Settings(BaseSettings):
     DAILY_TARGET_VIDEOS: int = int(os.getenv("DAILY_TARGET_VIDEOS", "30"))
     DAILY_TARGET_REELS: int = int(os.getenv("DAILY_TARGET_REELS", "30"))
 
+    # Ingestion durability controls
+    INGESTION_ENABLED: bool = os.getenv("INGESTION_ENABLED", "true").lower() in ("true", "1", "yes", "on")
+    INGESTION_CRON_DISABLED: bool = os.getenv("INGESTION_CRON_DISABLED", "false").lower() in (
+        "true",
+        "1",
+        "yes",
+        "on",
+    )
+    INGESTION_MAX_WORKERS: int = int(os.getenv("INGESTION_MAX_WORKERS", "1"))
+    # JSON mapping: "{source_type}:{feed_name}" -> int
+    INGESTION_TARGET_DEFAULTS: str = os.getenv("INGESTION_TARGET_DEFAULTS", "")
+    INGESTION_POLL_SECONDS: int = int(os.getenv("INGESTION_POLL_SECONDS", "30"))
+    INGESTION_LEASE_TTL_MS: int = int(os.getenv("INGESTION_LEASE_TTL_MS", "60000"))
+
+    # Catch-up loop controls
+    INGEST_UNTIL_TARGETS: bool = os.getenv("INGEST_UNTIL_TARGETS", "true").lower() in ("true", "1", "yes", "on")
+    INGEST_CATCHUP_MAX_SECONDS: int = int(os.getenv("INGEST_CATCHUP_MAX_SECONDS", "600"))
+
     # Source fetch depth (larger batches help backfill around duplicates)
     RSS_ENTRIES_PER_FEED: int = int(os.getenv("RSS_ENTRIES_PER_FEED", "50"))
     YT_VIDEOS_PER_CHANNEL: int = int(os.getenv("YT_VIDEOS_PER_CHANNEL", "30"))
