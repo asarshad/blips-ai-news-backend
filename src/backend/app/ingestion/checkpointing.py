@@ -309,8 +309,10 @@ def _process_progress_row(
                     }
                 )
 
-            with db.begin():
+            # Commit inserts + progress update atomically.
+            try:
                 inserted = _insert_content_items_postgres(db, values=values)
+
                 # Progress update in same transaction as inserts
                 from app.models.ingestion_progress import IngestionProgress
 
@@ -324,6 +326,10 @@ def _process_progress_row(
                         IngestionProgress.updated_at: datetime.utcnow(),
                     }
                 )
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
 
         elif progress.source_type in ("youtube_video", "youtube_reel"):
             cfg = _yt_channel_config(yt, progress.feed_name)
@@ -385,7 +391,8 @@ def _process_progress_row(
                     }
                 )
 
-            with db.begin():
+            # Commit inserts + progress update atomically.
+            try:
                 inserted = _insert_content_items_postgres(db, values=values)
                 from app.models.ingestion_progress import IngestionProgress
 
@@ -399,6 +406,10 @@ def _process_progress_row(
                         IngestionProgress.updated_at: datetime.utcnow(),
                     }
                 )
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
 
         else:
             repo.mark_failed(row_id, f"Unknown source_type: {progress.source_type}")
