@@ -1,33 +1,28 @@
 # Keep-alive for free Render instances
 
-Free-tier Render services can spin down due to inactivity. This repo includes an optional GitHub Actions workflow that periodically pings the service to keep it warm.
+Free-tier Render services can spin down due to inactivity.
 
-## GitHub Action
+GitHub Actions scheduled workflows are best-effort and can be delayed (often by a lot) due to quota / scheduling. For more reliable keep-alive behavior, this repo now recommends running keep-alive locally.
 
-Workflow: `.github/workflows/keep-alive.yml`
+## Recommended: local keep-alive (macOS)
 
-- Schedule: every 5 minutes
-- Inner loop: within each run, pings about every ~45 seconds for several minutes (7–8 calls)
-- Endpoint: `/health` (intentionally lightweight)
+See [docs/KEEPALIVE_LOCAL_MACOS.md](docs/KEEPALIVE_LOCAL_MACOS.md).
 
-### Setup
+## GitHub Actions (disabled)
 
-1. In GitHub repo settings → **Secrets and variables** → **Actions**, add:
-   - Recommended (repo variable): `HEALTH_URL` = `https://YOUR-SERVICE.onrender.com/health`
-     - You can also set `HEALTH_URL` to the base URL (the script will still work if it includes `/health`).
-   - Optional fallback (secret): `KEEPALIVE_URL` if you prefer storing the URL as a secret.
-
-2. Confirm the workflow is enabled.
+The workflow file still exists at `.github/workflows/keep-alive.yml`, but the cron schedule has been removed. You can run it manually via `workflow_dispatch`, but it is no longer relied upon for keeping Render warm.
 
 ## Configuration
 
-The workflow reads these variables (with safe defaults in the script):
+The pinger script reads these env vars (with safe defaults):
 
 - `HEALTH_URL` (required to actually ping)
-- `KEEPALIVE_INTERVAL_SECONDS` (default: `45`)
-- `KEEPALIVE_DURATION_SECONDS` (default: `360`)
-- `KEEPALIVE_TIMEOUT_SECONDS` (default: `10`)
-- `KEEPALIVE_FAIL_ON_ERROR` (default: `false`) — by default the job stays green even if pings fail
+- `INTERVAL_SECONDS` (default: `45`)
+- `DURATION_SECONDS` (default: `360`)
+- `TIMEOUT_SECONDS` (default: `10`)
+- `FAIL_ON_ERROR` (default: `false`) — by default the process exits 0 even if pings fail
+
+If you manually run the (disabled) GitHub workflow, it supports repo variables named `KEEPALIVE_INTERVAL_SECONDS`, `KEEPALIVE_DURATION_SECONDS`, `KEEPALIVE_TIMEOUT_SECONDS`, `KEEPALIVE_FAIL_ON_ERROR` and maps them to the script env vars above.
 
 Guardrails:
 
@@ -37,9 +32,9 @@ Guardrails:
 
 ## Disable
 
-- Disable the workflow in GitHub Actions UI, or
-- Remove the cron trigger in `.github/workflows/keep-alive.yml`, or
-- Unset `HEALTH_URL` (the script will log a warning and exit 0).
+- For local macOS keep-alive: run `bash tools/keepalive/macos/uninstall_keepalive_macos.sh`.
+- For manual script runs: unset `HEALTH_URL` (the script will log a warning and exit 0).
+- For GitHub Actions: it is already not scheduled (manual only).
 
 ## Local testing
 
@@ -55,14 +50,6 @@ export INTERVAL_SECONDS=45
 export DURATION_SECONDS=360
 export TIMEOUT_SECONDS=10
 python3 .github/scripts/keep_alive_ping.py
-```
-
-### Lower frequency
-
-If you prefer lower frequency, change the cron to every 10 minutes:
-
-```yaml
-- cron: "*/10 * * * *"
 ```
 
 ## Alternatives
