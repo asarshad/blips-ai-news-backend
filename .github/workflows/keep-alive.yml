@@ -1,11 +1,11 @@
 name: Keep Alive (Render)
 
 on:
-  schedule:
-    # GitHub scheduled workflows run at best-effort intervals.
-    # 5 minutes keeps free-tier instances warm.
-    - cron: "*/5 * * * *"
   workflow_dispatch:
+
+# NOTE: Scheduled keep-alive is disabled because GitHub-hosted runners can be
+# delayed due to quota / scheduling. Use the local macOS keep-alive service
+# described in docs/DEPLOY_KEEPALIVE.md instead.
 
 concurrency:
   group: keep-alive
