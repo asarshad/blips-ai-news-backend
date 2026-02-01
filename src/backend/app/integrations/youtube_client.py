@@ -6,6 +6,7 @@ channel configuration for balanced content ingestion.
 """
 
 import feedparser
+import os
 import re
 import requests
 from typing import List, Dict, Any, Optional
@@ -131,6 +132,9 @@ class YouTubeClient:
         # Track ingestion counts per channel per day
         self._daily_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: {"videos": 0, "shorts": 0})
         self._last_reset: datetime = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # Best-effort cache to avoid repeated scraping.
+        self._duration_cache_seconds: Dict[str, Optional[int]] = {}
     
     def _reset_daily_counts_if_needed(self):
         """Reset daily counts at UTC midnight."""
@@ -191,6 +195,9 @@ class YouTubeClient:
         Returns:
             Duration in seconds or None if not found.
         """
+        if video_id in self._duration_cache_seconds:
+            return self._duration_cache_seconds[video_id]
+
         url = f"https://www.youtube.com/watch?v={video_id}"
         try:
             headers = {
@@ -202,10 +209,13 @@ class YouTubeClient:
                 match = re.search(r'"approxDurationMs":"(\d+)"', response.text)
                 if match:
                     ms = int(match.group(1))
-                    return ms // 1000
+                    seconds = ms // 1000
+                    self._duration_cache_seconds[video_id] = seconds
+                    return seconds
         except Exception as e:
             logger.debug(f"Error fetching duration for video {video_id}: {e}")
-        
+
+        self._duration_cache_seconds[video_id] = None
         return None
 
     def fetch_all_channels(self, videos_per_channel: int = 10) -> List[VideoEntry]:
@@ -397,9 +407,15 @@ class YouTubeClient:
         if config.content_format == ContentFormat.SHORTS:
             return True
         
-        # For mixed channels, check the shorts URL
+        # For mixed channels, fall back to duration heuristic.
+        # YouTube RSS links are commonly /watch?v=... for both videos and Shorts,
+        # so URL-only detection is unreliable.
         if config.content_format == ContentFormat.MIXED:
-            return self.is_youtube_short(video_id)
+            short_max_seconds = int(os.getenv("YT_SHORT_MAX_SECONDS", "75"))
+            duration = self.get_video_duration(video_id)
+            if duration is not None and duration <= short_max_seconds:
+                return True
+            return False
         
         return False
     

@@ -17,7 +17,7 @@ import socket
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import signal
 import threading
 from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Tuple
@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_logger
 from app.ingestion.extractors import extract_entities, extract_source, extract_topics
 from app.ingestion.leases import claim_lease, lease_key, release_lease
+from app.ingestion.time import get_ingestion_day
 from app.ingestion.url_normalizer import normalize_url
 from app.models.content import ContentItem, ContentType
 from app.repositories.ingestion_progress_repo import IngestionProgressRepository
@@ -177,8 +178,11 @@ def _cursor_from_yt_entry(entry) -> str:
     return entry.video_id or ""
 
 
-def _should_stop_at_cursor(entry_cursor: str, last_cursor: Optional[str]) -> bool:
-    return bool(last_cursor and entry_cursor and entry_cursor == last_cursor)
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except Exception:
+        return default
 
 
 def _insert_content_items_postgres(
@@ -199,15 +203,18 @@ def _insert_content_items_postgres(
     return len(rows)
 
 
-def _process_progress_row(
+def _process_progress_row_batch(
     *,
     row_id: int,
     day_utc: date,
     redis_client,
     owner_token: str,
     ttl_ms: int,
+    batch_size: int,
+    retry_base_seconds: int,
+    retry_max_seconds: int,
 ) -> Dict[str, object]:
-    """Process a single progress row in its own session."""
+    """Process a single progress row for one batch in its own session."""
     from app.db.base import SessionLocal
     from app.integrations.rss_client import RSSClient
     from app.integrations.youtube_client import YouTubeClient
@@ -222,8 +229,13 @@ def _process_progress_row(
 
     progress = db.query(IngestionProgress).filter(IngestionProgress.id == row_id).one()
 
+    # Respect backoff.
+    now = datetime.utcnow()
+    if progress.retry_at is not None and progress.retry_at > now:
+        return {"row_id": row_id, "status": "skipped_backoff", "inserted": 0, "attempted": 0}
+
     if progress.status == "complete" or int(progress.items_ingested) >= int(progress.target):
-        return {"row_id": row_id, "status": "complete", "inserted": 0}
+        return {"row_id": row_id, "status": "complete", "inserted": 0, "attempted": 0}
 
     scope_key = f"{day_utc.isoformat()}:{progress.source_type}:{progress.feed_name}"
     redis_key = lease_key(day_utc.isoformat(), progress.source_type, progress.feed_name)
@@ -243,10 +255,11 @@ def _process_progress_row(
             logger.info("Advisory lock claimed: %s", scope_key)
 
     if not acquired:
-        return {"row_id": row_id, "status": "skipped_locked", "inserted": 0}
+        return {"row_id": row_id, "status": "skipped_locked", "inserted": 0, "attempted": 0}
 
     try:
         inserted = 0
+        attempted = 0
 
         if progress.source_type == "rss":
             cfg = _rss_feed_config(rss, progress.feed_name)
@@ -257,28 +270,30 @@ def _process_progress_row(
             max_entries = int(os.getenv("RSS_ENTRIES_PER_FEED", "50"))
             entries = rss.fetch_feed(cfg.url, max_entries=max_entries)
             if not entries:
-                return {"row_id": row_id, "status": "no_entries", "inserted": 0}
+                return {"row_id": row_id, "status": "no_entries", "inserted": 0, "attempted": 0}
 
-            # Newest-first feeds: store the newest entry cursor to avoid reprocessing.
-            new_cursor = _cursor_from_rss_entry(entries[0])
-
-            # Build values until cursor or remaining target.
+            # Build candidates from newest + backfill, with a multiplier to overcome duplicates.
             remaining = max(0, int(progress.target) - int(progress.items_ingested))
-            values: List[dict] = []
-            for entry in entries:
-                entry_cursor = _cursor_from_rss_entry(entry)
-                if _should_stop_at_cursor(entry_cursor, progress.last_item_cursor):
-                    break
-                if len(values) >= remaining:
-                    break
+            new_window = min(batch_size, max(1, remaining))
+            multiplier = max(1, _int_env("INGESTION_CANDIDATE_MULTIPLIER", 5))
+            candidate_limit = max(new_window, batch_size * multiplier)
 
-                source_url = normalize_url(entry.url) if entry.url else entry.url
+            values: List[dict] = []
+            last_scanned_cursor: Optional[str] = progress.last_item_cursor
+
+            def _add_entry(e) -> None:
+                nonlocal last_scanned_cursor
+                ec = _cursor_from_rss_entry(e)
+                if ec:
+                    last_scanned_cursor = ec
+
+                source_url = normalize_url(e.url) if e.url else e.url
                 if not source_url:
-                    continue
+                    return
 
                 source = extract_source(source_url)
-                topics = extract_topics(entry.title, (entry.content or "")[:500])
-                entities = extract_entities(entry.title, "")
+                topics = extract_topics(e.title, (e.content or "")[:500])
+                entities = extract_entities(e.title, "")
 
                 values.append(
                     {
@@ -286,10 +301,10 @@ def _process_progress_row(
                         "source": source,
                         "source_url": source_url,
                         "canonical_url": None,
-                        "published_at": entry.published_date or datetime.utcnow(),
-                        "title": entry.title,
-                        "description": (entry.content or "")[:500] if entry.content else None,
-                        "image_url": entry.image_url,
+                        "published_at": e.published_date or datetime.utcnow(),
+                        "title": e.title,
+                        "description": (e.content or "")[:500] if e.content else None,
+                        "image_url": e.image_url,
                         "video_url": None,
                         "summary": None,
                         "ai_processed": False,
@@ -309,9 +324,34 @@ def _process_progress_row(
                     }
                 )
 
+            # Pass 1: always consider newest items.
+            for entry in entries:
+                if len(values) >= new_window:
+                    break
+                _add_entry(entry)
+
+            # Pass 2: backfill beyond the saved cursor to reach candidate_limit.
+            if len(values) < candidate_limit:
+                start_idx = -1
+                if progress.last_item_cursor:
+                    for i, e in enumerate(entries):
+                        if _cursor_from_rss_entry(e) == progress.last_item_cursor:
+                            start_idx = i
+                            break
+                # If cursor not found, start after the newest window.
+                if start_idx < 0:
+                    start_idx = new_window - 1
+                for e in entries[start_idx + 1 :]:
+                    if len(values) >= candidate_limit:
+                        break
+                    _add_entry(e)
+
+            new_cursor = last_scanned_cursor
+
             # Commit inserts + progress update atomically.
             try:
                 inserted = _insert_content_items_postgres(db, values=values)
+                attempted = len(values)
 
                 # Progress update in same transaction as inserts
                 from app.models.ingestion_progress import IngestionProgress
@@ -319,10 +359,12 @@ def _process_progress_row(
                 db.query(IngestionProgress).filter(IngestionProgress.id == row_id).update(
                     {
                         IngestionProgress.items_ingested: IngestionProgress.items_ingested + inserted,
+                        IngestionProgress.items_attempted: IngestionProgress.items_attempted + attempted,
                         IngestionProgress.last_item_cursor: new_cursor,
                         IngestionProgress.status: "complete"
                         if (int(progress.items_ingested) + inserted) >= int(progress.target)
                         else "running",
+                        IngestionProgress.retry_at: None,
                         IngestionProgress.updated_at: datetime.utcnow(),
                     }
                 )
@@ -340,43 +382,46 @@ def _process_progress_row(
             max_videos = int(os.getenv("YT_VIDEOS_PER_CHANNEL", "30"))
             entries = yt._fetch_channel_with_config(cfg, max_videos=max_videos)  # noqa: SLF001
             if not entries:
-                return {"row_id": row_id, "status": "no_entries", "inserted": 0}
-
-            new_cursor = _cursor_from_yt_entry(entries[0])
+                return {"row_id": row_id, "status": "no_entries", "inserted": 0, "attempted": 0}
             want_reel = progress.source_type == "youtube_reel"
 
             remaining = max(0, int(progress.target) - int(progress.items_ingested))
+            new_window = min(batch_size, max(1, remaining))
+            multiplier = max(1, _int_env("INGESTION_CANDIDATE_MULTIPLIER", 5))
+            candidate_limit = max(new_window, batch_size * multiplier)
+
             values = []
-            for entry in entries:
-                entry_cursor = _cursor_from_yt_entry(entry)
-                if _should_stop_at_cursor(entry_cursor, progress.last_item_cursor):
-                    break
+            last_scanned_cursor: Optional[str] = progress.last_item_cursor
 
-                is_reel = bool(entry.is_short or (entry.video_url and "/shorts/" in entry.video_url))
+            def _add_entry(e) -> None:
+                nonlocal last_scanned_cursor
+                entry_cursor = _cursor_from_yt_entry(e)
+                if entry_cursor:
+                    last_scanned_cursor = entry_cursor
+
+                is_reel = bool(e.is_short or (e.video_url and "/shorts/" in e.video_url))
                 if want_reel != is_reel:
-                    continue
-                if len(values) >= remaining:
-                    break
+                    return
 
-                source_url = normalize_url(entry.video_url) if entry.video_url else entry.video_url
+                source_url = normalize_url(e.video_url) if e.video_url else e.video_url
                 if not source_url:
-                    continue
+                    return
 
                 values.append(
                     {
                         "type": ContentType.REEL if is_reel else ContentType.VIDEO,
-                        "source": entry.source or "YouTube",
+                        "source": e.source or "YouTube",
                         "source_url": source_url,
                         "canonical_url": None,
                         "published_at": datetime.utcnow(),
-                        "title": entry.title,
-                        "description": (entry.summary or "")[:500] if entry.summary else None,
-                        "image_url": entry.thumbnail_url,
+                        "title": e.title,
+                        "description": (e.summary or "")[:500] if e.summary else None,
+                        "image_url": e.thumbnail_url,
                         "video_url": source_url,
                         "summary": None,
                         "ai_processed": False,
-                        "topics": extract_topics(entry.title, (entry.summary or "")[:500]) or [],
-                        "entities": extract_entities(entry.title, "") or [],
+                        "topics": extract_topics(e.title, (e.summary or "")[:500]) or [],
+                        "entities": extract_entities(e.title, "") or [],
                         "quality_score": 0.5,
                         "trend_score": 0.0,
                         "recency_score": 1.0,
@@ -384,25 +429,51 @@ def _process_progress_row(
                         "global_score": 0.0,
                         "cluster_id": None,
                         "is_cluster_canonical": 0,
-                        "dedupe_key": f"yt:{entry.video_id}" if entry.video_id else None,
+                        "dedupe_key": f"yt:{e.video_id}" if e.video_id else None,
                         "duration_seconds": None,
                         "created_at": datetime.utcnow(),
                         "updated_at": datetime.utcnow(),
                     }
                 )
 
+            # Pass 1: always consider newest items.
+            for entry in entries:
+                if len(values) >= new_window:
+                    break
+                _add_entry(entry)
+
+            # Pass 2: backfill beyond cursor to reach candidate_limit.
+            if len(values) < candidate_limit:
+                start_idx = -1
+                if progress.last_item_cursor:
+                    for i, e in enumerate(entries):
+                        if _cursor_from_yt_entry(e) == progress.last_item_cursor:
+                            start_idx = i
+                            break
+                if start_idx < 0:
+                    start_idx = new_window - 1
+                for e in entries[start_idx + 1 :]:
+                    if len(values) >= candidate_limit:
+                        break
+                    _add_entry(e)
+
+            new_cursor = last_scanned_cursor
+
             # Commit inserts + progress update atomically.
             try:
                 inserted = _insert_content_items_postgres(db, values=values)
+                attempted = len(values)
                 from app.models.ingestion_progress import IngestionProgress
 
                 db.query(IngestionProgress).filter(IngestionProgress.id == row_id).update(
                     {
                         IngestionProgress.items_ingested: IngestionProgress.items_ingested + inserted,
+                        IngestionProgress.items_attempted: IngestionProgress.items_attempted + attempted,
                         IngestionProgress.last_item_cursor: new_cursor,
                         IngestionProgress.status: "complete"
                         if (int(progress.items_ingested) + inserted) >= int(progress.target)
                         else "running",
+                        IngestionProgress.retry_at: None,
                         IngestionProgress.updated_at: datetime.utcnow(),
                     }
                 )
@@ -415,17 +486,21 @@ def _process_progress_row(
             repo.mark_failed(row_id, f"Unknown source_type: {progress.source_type}")
             return {"row_id": row_id, "status": "failed", "inserted": 0}
 
-        if inserted:
-            logger.info("Progress persisted: %s inserted=%s", scope_key, inserted)
-        return {"row_id": row_id, "status": "ok", "inserted": inserted}
+        if inserted or attempted:
+            logger.info("Progress persisted: %s attempted=%s inserted=%s", scope_key, attempted, inserted)
+        return {"row_id": row_id, "status": "ok", "inserted": inserted, "attempted": attempted}
 
     except Exception as e:
         logger.exception("Ingestion failed for %s", scope_key)
         try:
-            repo.mark_failed(row_id, str(e))
+            # Retry/backoff scheduling (cap at retry_max_seconds)
+            retry_count = int(progress.retry_count or 0)
+            delay = min(retry_max_seconds, max(retry_base_seconds, retry_base_seconds * (2 ** retry_count)))
+            retry_at = datetime.utcnow() + timedelta(seconds=int(delay))
+            repo.schedule_retry(row_id=row_id, error=str(e), retry_at=retry_at)
         except Exception:
             pass
-        return {"row_id": row_id, "status": "failed", "inserted": 0, "error": str(e)}
+        return {"row_id": row_id, "status": "failed", "inserted": 0, "attempted": 0, "error": str(e)}
 
     finally:
         if redis_client is not None:
@@ -451,7 +526,7 @@ def run_checkpointed_ingestion(
     if os.getenv("INGESTION_CRON_DISABLED", "false").lower() in ("true", "1", "yes", "on"):
         return {"status": "cron_disabled"}
 
-    day = datetime.utcnow().date()
+    day = get_ingestion_day()
     repo = IngestionProgressRepository(db)
 
     defaults = _build_defaults()
@@ -466,25 +541,66 @@ def run_checkpointed_ingestion(
     poll_seconds = float(os.getenv("INGESTION_POLL_SECONDS", "30"))
     max_seconds = int(os.getenv("INGEST_CATCHUP_MAX_SECONDS", "600"))
     max_workers = int(os.getenv("INGESTION_MAX_WORKERS", "1"))
+    batch_size = int(os.getenv("INGESTION_BATCH_SIZE", "10"))
+    loop_sleep_seconds = float(os.getenv("INGESTION_LOOP_SLEEP_SECONDS", "10"))
+    retry_base_seconds = int(os.getenv("INGESTION_RETRY_BASE_SECONDS", "5"))
+    retry_max_seconds = int(os.getenv("INGESTION_RETRY_MAX_SECONDS", "300"))
 
-    def _process(row_id: int) -> Dict[str, object]:
-        return _process_progress_row(
+    def _process_batch(row_id: int, batch: int) -> Dict[str, object]:
+        return _process_progress_row_batch(
             row_id=row_id,
             day_utc=day,
             redis_client=redis_client,
             owner_token=owner,
             ttl_ms=ttl_ms,
+            batch_size=batch,
+            retry_base_seconds=retry_base_seconds,
+            retry_max_seconds=retry_max_seconds,
         )
 
-    return _run_checkpoint_loop(
-        day=day,
-        repo=repo,
-        process_row=_process,
-        ingest_until_targets=ingest_until_targets,
-        poll_seconds=poll_seconds,
-        max_seconds=max_seconds,
-        max_workers=max_workers,
+    if max_workers <= 1:
+        return _run_checkpoint_loop(
+            day=day,
+            repo=repo,
+            process_row=lambda rid: _process_batch(int(rid), batch_size),
+            ingest_until_targets=ingest_until_targets,
+            poll_seconds=poll_seconds,
+            max_seconds=max_seconds,
+            max_workers=max_workers,
+            stop_event=STOP_EVENT,
+        )
+
+    # Parallel fair scheduler
+    from app.ingestion.runtime_state import set_scheduler_snapshot
+    from app.ingestion.scheduler import IngestionScheduler, TaskRef
+
+    scheduler = IngestionScheduler(day_utc=day, redis_client=redis_client)
+
+    def _fetch_tasks() -> List[TaskRef]:
+        # Separate DB session in scheduler thread.
+        from app.db.base import SessionLocal
+
+        sdb = SessionLocal()
+        try:
+            srepo = IngestionProgressRepository(sdb)
+            rows = srepo.list_eligible(day_utc=day, limit=200)
+            return [TaskRef(row_id=int(r.id), source_type=r.source_type, feed_name=r.feed_name) for r in rows]
+        finally:
+            sdb.close()
+
+    def _on_stats(stats):
+        try:
+            set_scheduler_snapshot(stats.__dict__)
+        except Exception:
+            return
+
+    return scheduler.run(
+        fetch_tasks=_fetch_tasks,
+        process_task_batch=lambda row_id, bsz: _process_batch(int(row_id), int(bsz)),
         stop_event=STOP_EVENT,
+        max_seconds=max_seconds,
+        sleep_seconds=loop_sleep_seconds,
+        on_stats=_on_stats,
     )
 
 

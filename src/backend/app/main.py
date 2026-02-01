@@ -260,11 +260,12 @@ def health_check():
 @app.get("/metrics")
 def metrics():
     """Lightweight JSON metrics for ingestion progress."""
-    from datetime import datetime
-
     from app.models.ingestion_progress import IngestionProgress
+    from app.ingestion.runtime_state import get_scheduler_snapshot
 
-    today = datetime.utcnow().date()
+    from app.ingestion.time import get_ingestion_day
+
+    today = get_ingestion_day()
 
     db = SessionLocal()
     try:
@@ -275,28 +276,63 @@ def metrics():
             .all()
         )
 
+        scheduler_snapshot = get_scheduler_snapshot()
+
         feeds = [
             {
                 "source_type": r.source_type,
                 "feed_name": r.feed_name,
                 "status": r.status,
                 "items_ingested": int(r.items_ingested or 0),
+                "items_attempted": int(getattr(r, "items_attempted", 0) or 0),
                 "target": int(r.target or 0),
                 "last_item_cursor": r.last_item_cursor,
+                "retry_count": int(getattr(r, "retry_count", 0) or 0),
+                "retry_at": r.retry_at.isoformat() if getattr(r, "retry_at", None) else None,
                 "updated_at": r.updated_at.isoformat() if r.updated_at else None,
                 "last_error": r.last_error,
             }
             for r in rows
         ]
 
+        totals_by_type = {"ARTICLE": 0, "VIDEO": 0, "REEL": 0}
+        attempted_by_type = {"ARTICLE": 0, "VIDEO": 0, "REEL": 0}
+        target_by_type = {"ARTICLE": 0, "VIDEO": 0, "REEL": 0}
+
+        for f in feeds:
+            st = f["source_type"]
+            if st == "rss":
+                ct = "ARTICLE"
+            elif st == "youtube_video":
+                ct = "VIDEO"
+            elif st == "youtube_reel":
+                ct = "REEL"
+            else:
+                ct = st
+
+            totals_by_type.setdefault(ct, 0)
+            attempted_by_type.setdefault(ct, 0)
+            target_by_type.setdefault(ct, 0)
+            totals_by_type[ct] += int(f["items_ingested"])
+            attempted_by_type[ct] += int(f["items_attempted"])
+            target_by_type[ct] += int(f["target"])
+
         return {
+            "ingestion_day": today.isoformat(),
             "day_utc": today.isoformat(),
             "feeds": feeds,
+            "scheduler": scheduler_snapshot,
             "totals": {
                 "items_ingested": sum(f["items_ingested"] for f in feeds),
+                "items_attempted": sum(f["items_attempted"] for f in feeds),
                 "target": sum(f["target"] for f in feeds),
                 "feeds_complete": sum(1 for f in feeds if f["status"] == "complete"),
                 "feeds_total": len(feeds),
+                "by_content_type": {
+                    "items_ingested": totals_by_type,
+                    "items_attempted": attempted_by_type,
+                    "target": target_by_type,
+                },
             },
         }
     finally:

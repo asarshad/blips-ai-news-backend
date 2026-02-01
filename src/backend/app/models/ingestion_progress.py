@@ -29,6 +29,7 @@ class IngestionProgress(Base):
     # Targets / counters
     target = Column(Integer, nullable=False)
     items_ingested = Column(Integer, nullable=False, default=0)
+    items_attempted = Column(Integer, nullable=False, default=0)
 
     # Cursor checkpoint (feed-dependent; newest-first feeds store last seen item key)
     last_item_cursor = Column(String(2048), nullable=True)
@@ -36,6 +37,10 @@ class IngestionProgress(Base):
     # Status
     status = Column(String(32), nullable=False, default="running")  # running | complete | failed | disabled
     last_error = Column(Text, nullable=True)
+
+    # Retry/backoff (scheduler should skip rows until retry_at)
+    retry_count = Column(Integer, nullable=False, default=0)
+    retry_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -48,4 +53,5 @@ class IngestionProgress(Base):
             name="uq_ingestion_progress_day_source_feed",
         ),
         Index("ix_ingestion_progress_scope", "day_utc", "source_type", "feed_name"),
+        Index("ix_ingestion_progress_retry_at", "day_utc", "retry_at"),
     )
