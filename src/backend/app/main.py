@@ -80,13 +80,32 @@ def _check_redis_connection() -> bool:
         return False
 
 def _run_initial_fetch():
-    """Run the initial news fetch in background thread."""
-    time.sleep(2)  # Give app time to fully start
-    logger.info("Running initial news fetch in background thread")
+    """Run the initial news fetch in background thread if targets not met."""
+    time.sleep(3)  # Give app time to fully start
+    logger.info("=" * 50)
+    logger.info("INITIAL FETCH: Checking if ingestion needed...")
     try:
-        fetch_and_process_news()
+        from app.db.base import SessionLocal
+        from app.ingestion.time import get_ingestion_day
+        from app.repositories.ingestion_progress_repo import IngestionProgressRepository
+        
+        db = SessionLocal()
+        try:
+            day = get_ingestion_day()
+            repo = IngestionProgressRepository(db)
+            incomplete = repo.list_incomplete(day_utc=day)
+            
+            if incomplete:
+                logger.info(f"INITIAL FETCH: {len(incomplete)} feeds incomplete - running ingestion now")
+                fetch_and_process_news()
+                logger.info("INITIAL FETCH: Completed")
+            else:
+                logger.info("INITIAL FETCH: All targets met - skipping")
+        finally:
+            db.close()
     except Exception as e:
-        logger.error(f"Initial fetch error: {str(e)}")
+        logger.error(f"INITIAL FETCH: Error - {str(e)}", exc_info=True)
+    logger.info("=" * 50)
 
 
 def _start_scheduler() -> None:
