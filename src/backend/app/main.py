@@ -93,9 +93,17 @@ def _run_initial_fetch():
         try:
             day = get_ingestion_day()
             repo = IngestionProgressRepository(db)
+            
+            # Check if any progress rows exist for today
+            all_rows = repo.list_for_day(day_utc=day)
             incomplete = repo.list_incomplete(day_utc=day)
             
-            if incomplete:
+            if not all_rows:
+                # Fresh start - no rows exist yet, run ingestion to create them
+                logger.info("INITIAL FETCH: No progress rows exist - running initial ingestion")
+                fetch_and_process_news()
+                logger.info("INITIAL FETCH: Completed")
+            elif incomplete:
                 logger.info(f"INITIAL FETCH: {len(incomplete)} feeds incomplete - running ingestion now")
                 fetch_and_process_news()
                 logger.info("INITIAL FETCH: Completed")
