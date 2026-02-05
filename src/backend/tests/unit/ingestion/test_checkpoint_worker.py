@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from types import ModuleType, SimpleNamespace
 
-from app.ingestion import checkpointing
+from app.ingestion import checkpoint_worker
 
 
 class _FakeBudgetRepo:
@@ -116,9 +116,9 @@ def test_worker_skips_when_retry_at_in_future(monkeypatch):
     monkeypatch.setattr("app.db.base.SessionLocal", lambda: _FakeSession(progress))
 
     # Stub budgets (should not be hit due to early backoff).
-    monkeypatch.setattr(checkpointing, "IngestionBudgetRepository", _FakeBudgetRepo)
+    monkeypatch.setattr(checkpoint_worker, "IngestionBudgetRepository", _FakeBudgetRepo)
 
-    result = checkpointing._process_progress_row_batch(
+    result = checkpoint_worker.process_progress_row_batch(
         row_id=1,
         day_utc=datetime.utcnow().date(),
         redis_client=None,
@@ -166,16 +166,16 @@ def test_worker_reports_attempted_when_inserted_zero(monkeypatch):
     monkeypatch.setattr("app.db.base.SessionLocal", lambda: _FakeSession(progress))
 
     # Stub budgets to allow reservation.
-    monkeypatch.setattr(checkpointing, "IngestionBudgetRepository", _FakeBudgetRepo)
+    monkeypatch.setattr(checkpoint_worker, "IngestionBudgetRepository", _FakeBudgetRepo)
 
     # Avoid Redis and Postgres lock paths.
-    monkeypatch.setattr(checkpointing, "claim_lease", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(checkpointing, "release_lease", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(checkpoint_worker, "claim_lease", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(checkpoint_worker, "release_lease", lambda *_args, **_kwargs: True)
 
     # Avoid real DB insert; force 0 inserted to validate attempted behavior.
-    monkeypatch.setattr(checkpointing, "_insert_content_items_postgres", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(checkpoint_worker, "_insert_content_items_postgres", lambda *_args, **_kwargs: 0)
 
-    result = checkpointing._process_progress_row_batch(
+    result = checkpoint_worker.process_progress_row_batch(
         row_id=1,
         day_utc=datetime.utcnow().date(),
         redis_client=object(),

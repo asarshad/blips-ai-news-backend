@@ -1,7 +1,7 @@
 import threading
 from datetime import date
 
-from app.ingestion import checkpointing
+from app.ingestion import checkpoint_loop
 
 
 class _Row:
@@ -30,9 +30,9 @@ def test_resume_loop_processes_incomplete_then_completes(monkeypatch):
         return {"row_id": row_id, "status": "ok", "inserted": 2}
 
     # Avoid sleeping in tests
-    monkeypatch.setattr(checkpointing.time, "sleep", lambda _: None)
+    monkeypatch.setattr(checkpoint_loop.time, "sleep", lambda _: None)
 
-    result = checkpointing._run_checkpoint_loop(
+    result = checkpoint_loop.run_checkpoint_loop(
         day=date(2026, 1, 29),
         repo=repo,
         process_row=process_row,
