@@ -109,6 +109,12 @@ services:
         value: "true"  # Always true on worker service
       - key: NEWS_FETCH_INTERVAL_MINUTES
         value: "30"
+      - key: INGESTION_ENABLED
+        value: "true"
+      - key: INGESTION_CRON_DISABLED
+        value: "false"
+      - key: FEATURE_INGESTION_ENABLED
+        value: "true"
       - key: INGESTION_MAX_WORKERS
         value: "4"
       - key: MAX_ITEMS_PER_RUN
