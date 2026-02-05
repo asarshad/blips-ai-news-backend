@@ -77,6 +77,9 @@ def run_worker():
     logger.info("Blips Worker Starting")
     logger.info(f"Environment: {os.getenv('ENV', 'dev')}")
     logger.info(f"Scheduler enabled: {os.getenv('SCHEDULER_ENABLED', 'true')}")
+    logger.info(f"Ingestion enabled: {os.getenv('INGESTION_ENABLED', 'true')}")
+    logger.info(f"Feature ingestion: {os.getenv('FEATURE_INGESTION_ENABLED', 'not set')}")
+    logger.info(f"Fetch interval: {os.getenv('NEWS_FETCH_INTERVAL_MINUTES', '30')} minutes")
     logger.info("=" * 60)
     
     # Check if scheduler is enabled
