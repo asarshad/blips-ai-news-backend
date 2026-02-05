@@ -4,13 +4,14 @@ Repository for content items.
 Provides data access methods for the unified content_items table.
 """
 
-from typing import List, Optional, Tuple, Dict, Any
-from datetime import datetime, timedelta, date
-from sqlalchemy.orm import Session
-from sqlalchemy import desc, func, and_, or_
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
-from app.repositories.base import BaseRepository
+from sqlalchemy import desc, func, or_
+from sqlalchemy.orm import Session
+
 from app.models.content import ContentItem, ContentType
+from app.repositories.base import BaseRepository
 
 
 class ContentItemRepository(BaseRepository[ContentItem]):
@@ -73,11 +74,12 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         
         query = self.db.query(ContentItem).filter(
             ContentItem.type == content_type,
-            ContentItem.published_at >= cutoff
+            ContentItem.published_at >= cutoff,
+            ContentItem.is_suppressed.is_(False),
         )
         
         if ai_processed_only:
-            query = query.filter(ContentItem.ai_processed == True)
+            query = query.filter(ContentItem.ai_processed.is_(True))
         
         return query.order_by(
             desc(ContentItem.global_score),
@@ -103,8 +105,9 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         """
         cutoff = datetime.utcnow() - timedelta(hours=hours_back)
         return self.db.query(ContentItem).filter(
-            ContentItem.ai_processed == False,
-            ContentItem.published_at >= cutoff
+            ContentItem.ai_processed.is_(False),
+            ContentItem.published_at >= cutoff,
+            ContentItem.is_suppressed.is_(False),
         ).order_by(desc(ContentItem.published_at)).limit(limit).all()
     
     def mark_ai_processed(self, item_id: int, summary: str, topics: List[str] = None) -> bool:
@@ -265,7 +268,7 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         
         # Filter for AI-processed content only (unless explicitly disabled)
         if ai_processed_only:
-            query = query.filter(ContentItem.ai_processed == True)
+            query = query.filter(ContentItem.ai_processed.is_(True))
         
         if exclude_cluster_ids:
             query = query.filter(

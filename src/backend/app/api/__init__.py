@@ -1,6 +1,7 @@
 
 from fastapi import APIRouter
-from app.api.routes import articles, ai_chat, conversation, usage, videos, session, admin
+
+from app.api.routes import admin, ai_chat, articles, conversation, quality, session, usage, videos
 
 api_router = APIRouter()
 
@@ -11,4 +12,5 @@ api_router.include_router(usage.router, prefix="/usage", tags=["usage"])
 api_router.include_router(videos.router, prefix="/videos", tags=["videos"])
 api_router.include_router(session.router, prefix="/session", tags=["session"])
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
+api_router.include_router(quality.router, prefix="/quality", tags=["quality"])
 

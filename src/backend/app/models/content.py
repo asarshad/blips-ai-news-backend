@@ -6,14 +6,26 @@ content curation system. All content types (ARTICLE, VIDEO, REEL)
 are normalized into a single content_items table.
 """
 
-from sqlalchemy import (
-    Column, Integer, String, Text, DateTime, Float, Date, Boolean, Enum as SQLEnum,
-    ForeignKey, Index, UniqueConstraint
-)
-from sqlalchemy.dialects.postgresql import JSONB, ENUM as PgEnum
-from sqlalchemy.orm import relationship
-from datetime import datetime
 import enum
+from datetime import datetime
+
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import ENUM as PgEnum
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import relationship
 
 from app.db.base import Base
 
@@ -69,6 +81,17 @@ class ContentItem(Base):
     source = Column(String(255), nullable=False, index=True)
     source_url = Column(String(2048), unique=True, nullable=False, index=True)
     canonical_url = Column(String(2048), nullable=True)
+
+    # Canonical identity (hard-dedupe)
+    # - ARTICLE: sha256(normalized canonical URL)
+    # - VIDEO/REEL: YouTube video_id when available
+    canonical_key = Column(String(64), nullable=True, index=True)
+
+    # Ingestion day for strict target accounting (timezone-aware at write time)
+    ingestion_day = Column(Date, nullable=True, index=True)
+
+    # Suppression flag (hidden from default feeds)
+    is_suppressed = Column(Boolean, default=False, nullable=False, index=True)
     
     # Timing
     published_at = Column(DateTime, nullable=False, index=True)
@@ -76,6 +99,7 @@ class ContentItem(Base):
     # Content
     title = Column(String(1024), nullable=False, index=True)
     description = Column(Text, nullable=True)
+    content_text = Column(Text, nullable=True)
     image_url = Column(String(2048), nullable=True)
     video_url = Column(String(2048), nullable=True)
     
@@ -99,6 +123,9 @@ class ContentItem(Base):
     # Clustering
     cluster_id = Column(String(64), nullable=True, index=True)
     is_cluster_canonical = Column(Integer, default=0)  # 1 if canonical for its cluster+type
+
+    # Near-duplicate signature (articles)
+    simhash = Column(BigInteger, nullable=True, index=True)
     
     # Deduplication
     dedupe_key = Column(String(128), nullable=True, index=True)
