@@ -66,7 +66,7 @@ services:
       - key: INGESTION_CRON_DISABLED
         value: "false"
       - key: INGESTION_MAX_WORKERS
-        value: "1"
+        value: "4"
       - key: INGESTION_POLL_SECONDS
         value: "5"
       - key: INGESTION_LEASE_TTL_MS
@@ -109,6 +109,8 @@ services:
         value: "true"  # Always true on worker service
       - key: NEWS_FETCH_INTERVAL_MINUTES
         value: "30"
+      - key: INGESTION_MAX_WORKERS
+        value: "4"
       - key: MAX_ITEMS_PER_RUN
         value: "100"
       - key: PREFERENCE_DECAY_FACTOR

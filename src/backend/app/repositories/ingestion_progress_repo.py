@@ -2,13 +2,38 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, datetime
+from itertools import zip_longest
 from typing import Iterable, List, Optional, Tuple
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.ingestion_progress import IngestionProgress
+
+
+def _interleave_by_source_type(rows: List[IngestionProgress]) -> List[IngestionProgress]:
+    """Interleave rows by source_type for fair round-robin processing.
+    
+    This ensures rss, youtube_video, and youtube_reel are processed fairly
+    instead of all rss first, then all youtube_video, etc.
+    """
+    by_type: dict[str, list[IngestionProgress]] = defaultdict(list)
+    for row in rows:
+        by_type[row.source_type].append(row)
+    
+    # Sort type keys for deterministic ordering
+    type_keys = sorted(by_type.keys())
+    type_lists = [by_type[k] for k in type_keys]
+    
+    # Interleave: take one from each type in round-robin fashion
+    result: List[IngestionProgress] = []
+    for batch in zip_longest(*type_lists):
+        for item in batch:
+            if item is not None:
+                result.append(item)
+    return result
 
 
 class IngestionProgressRepository:
@@ -35,16 +60,18 @@ class IngestionProgressRepository:
         )
 
     def list_incomplete(self, *, day_utc: date) -> List[IngestionProgress]:
-        return (
+        """List incomplete rows, interleaved by source type for fair processing."""
+        rows = (
             self.db.query(IngestionProgress)
             .filter(
                 IngestionProgress.day_utc == day_utc,
                 IngestionProgress.status != "complete",
                 IngestionProgress.items_ingested < IngestionProgress.target,
             )
-            .order_by(IngestionProgress.source_type.asc(), IngestionProgress.feed_name.asc())
+            .order_by(IngestionProgress.feed_name.asc())
             .all()
         )
+        return _interleave_by_source_type(rows)
 
     def list_eligible(
         self,
@@ -54,28 +81,29 @@ class IngestionProgressRepository:
         source_types: Optional[List[str]] = None,
         limit: int = 50,
     ) -> List[IngestionProgress]:
-        """List rows eligible to be worked.
+        """List rows eligible to be worked, interleaved by source type.
 
         Eligibility rules:
         - not complete
         - below target
         - retry_at is null or <= now
+        
+        Results are interleaved by source_type for fair processing.
         """
 
         current = now or datetime.utcnow()
-        q = (
-            self.db.query(IngestionProgress)
-            .filter(
-                IngestionProgress.day_utc == day_utc,
-                IngestionProgress.status != "complete",
-                IngestionProgress.items_ingested < IngestionProgress.target,
-                or_(IngestionProgress.retry_at.is_(None), IngestionProgress.retry_at <= current),
-            )
-            .order_by(IngestionProgress.source_type.asc(), IngestionProgress.feed_name.asc())
+        q = self.db.query(IngestionProgress).filter(
+            IngestionProgress.day_utc == day_utc,
+            IngestionProgress.status != "complete",
+            IngestionProgress.items_ingested < IngestionProgress.target,
+            or_(IngestionProgress.retry_at.is_(None), IngestionProgress.retry_at <= current),
         )
         if source_types:
             q = q.filter(IngestionProgress.source_type.in_(list(source_types)))
-        return q.limit(int(limit)).all()
+        
+        rows = q.order_by(IngestionProgress.feed_name.asc()).all()
+        interleaved = _interleave_by_source_type(rows)
+        return interleaved[:limit]
 
     def ensure_rows(
         self,

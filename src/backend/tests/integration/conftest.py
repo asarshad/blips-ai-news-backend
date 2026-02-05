@@ -9,7 +9,9 @@ from testcontainers.redis import RedisContainer
 
 from alembic import command as alembic_command
 
-BACKEND_ROOT = Path(__file__).resolve().parents[3]
+# Repository layout: <repo>/src/backend/tests/integration/conftest.py
+# We want <repo>/src/backend as the backend root (contains alembic.ini).
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _require_docker() -> None:
@@ -67,6 +69,9 @@ def _run_migrations(postgres_url: str) -> None:
     """Apply Alembic migrations against the ephemeral Postgres container."""
     alembic_ini = BACKEND_ROOT / "alembic.ini"
     alembic_cfg = AlembicConfig(str(alembic_ini))
+
+    # Ensure script_location is absolute (relative paths break when cwd != ini dir).
+    alembic_cfg.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
 
     # Ensure the DB URL is the container URL.
     alembic_cfg.set_main_option("sqlalchemy.url", postgres_url)
