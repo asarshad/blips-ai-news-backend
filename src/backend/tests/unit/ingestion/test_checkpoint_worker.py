@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-import sys
-from types import ModuleType
-from types import SimpleNamespace
-
-import pytest
+from types import ModuleType, SimpleNamespace
 
 from app.ingestion import checkpointing
+
+
+class _FakeBudgetRepo:
+    def __init__(self, _db):  # noqa: D401, ARG002
+        pass
+
+    def reserve(self, *, day, content_type, want: int) -> int:  # noqa: ARG002
+        return int(want)
+
+    def finalize_batch(self, **_kwargs):
+        return
 
 
 @dataclass
@@ -107,6 +115,9 @@ def test_worker_skips_when_retry_at_in_future(monkeypatch):
 
     monkeypatch.setattr("app.db.base.SessionLocal", lambda: _FakeSession(progress))
 
+    # Stub budgets (should not be hit due to early backoff).
+    monkeypatch.setattr(checkpointing, "IngestionBudgetRepository", _FakeBudgetRepo)
+
     result = checkpointing._process_progress_row_batch(
         row_id=1,
         day_utc=datetime.utcnow().date(),
@@ -153,6 +164,9 @@ def test_worker_reports_attempted_when_inserted_zero(monkeypatch):
     monkeypatch.setitem(sys.modules, "app.integrations.youtube_client", yt_mod)
 
     monkeypatch.setattr("app.db.base.SessionLocal", lambda: _FakeSession(progress))
+
+    # Stub budgets to allow reservation.
+    monkeypatch.setattr(checkpointing, "IngestionBudgetRepository", _FakeBudgetRepo)
 
     # Avoid Redis and Postgres lock paths.
     monkeypatch.setattr(checkpointing, "claim_lease", lambda *_args, **_kwargs: True)

@@ -260,10 +260,9 @@ def health_check():
 @app.get("/metrics")
 def metrics():
     """Lightweight JSON metrics for ingestion progress."""
-    from app.models.ingestion_progress import IngestionProgress
     from app.ingestion.runtime_state import get_scheduler_snapshot
-
     from app.ingestion.time import get_ingestion_day
+    from app.models.ingestion_progress import IngestionProgress
 
     today = get_ingestion_day()
 
@@ -277,6 +276,19 @@ def metrics():
         )
 
         scheduler_snapshot = get_scheduler_snapshot()
+
+        budgets = []
+        try:
+            from app.models.ingestion_budget import IngestionBudget
+
+            budgets = (
+                db.query(IngestionBudget)
+                .filter(IngestionBudget.day == today)
+                .order_by(IngestionBudget.content_type.asc())
+                .all()
+            )
+        except Exception:
+            budgets = []
 
         feeds = [
             {
@@ -322,6 +334,21 @@ def metrics():
             "day_utc": today.isoformat(),
             "feeds": feeds,
             "scheduler": scheduler_snapshot,
+            "budgets": [
+                {
+                    "day": b.day.isoformat(),
+                    "content_type": b.content_type.value,
+                    "target": int(b.target or 0),
+                    "reserved": int(b.reserved or 0),
+                    "inserted": int(b.inserted or 0),
+                    "remaining": max(0, int(b.target or 0) - int(b.inserted or 0) - int(b.reserved or 0)),
+                    "seen": int(b.seen or 0),
+                    "suppressed": int(b.suppressed or 0),
+                    "attempts": int(b.attempts or 0),
+                    "updated_at": b.updated_at.isoformat() if b.updated_at else None,
+                }
+                for b in budgets
+            ],
             "totals": {
                 "items_ingested": sum(f["items_ingested"] for f in feeds),
                 "items_attempted": sum(f["items_attempted"] for f in feeds),
