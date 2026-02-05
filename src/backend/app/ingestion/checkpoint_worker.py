@@ -276,6 +276,7 @@ def process_progress_row_batch(
             max_videos = int(os.getenv("YT_VIDEOS_PER_CHANNEL", "30"))
             entries = yt._fetch_channel_with_config(cfg, max_videos=max_videos)  # noqa: SLF001
             if not entries:
+                logger.info("YT fetch: no entries from %s", progress.feed_name)
                 return {"row_id": row_id, "status": "no_entries", "inserted": 0, "attempted": 0}
             want_reel = progress.source_type == "youtube_reel"
 
@@ -284,6 +285,7 @@ def process_progress_row_batch(
             budget_type = ContentType.REEL if want_reel else ContentType.VIDEO
             reserved = budget_repo.reserve(day=day_utc, content_type=budget_type, want=min(batch_size, remaining))
             if reserved <= 0:
+                logger.info("YT budget full for %s (type=%s)", progress.feed_name, budget_type)
                 return {"row_id": row_id, "status": "skipped_type_full", "inserted": 0, "attempted": 0}
 
             new_window = min(batch_size, max(1, remaining))
@@ -365,6 +367,17 @@ def process_progress_row_batch(
                     _add_entry(e)
 
             new_cursor = last_scanned_cursor
+
+            # Debug logging for video/reel ingestion
+            logger.info(
+                "YT ingestion: type=%s feed=%s entries=%d values=%d want_reel=%s reserved=%d",
+                progress.source_type,
+                progress.feed_name,
+                len(entries),
+                len(values),
+                want_reel,
+                reserved,
+            )
 
             try:
                 inserted = 0
