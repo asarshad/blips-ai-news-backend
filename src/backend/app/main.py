@@ -142,7 +142,10 @@ def _start_scheduler() -> None:
         )
         
         if not lock_acquired:
-            logger.info("Scheduler already running on another worker - skipping init")
+            logger.info("Scheduler already running on another worker - skipping scheduler init")
+            # Still run initial fetch - important for resuming after restarts
+            logger.info("Starting initial fetch check in background (non-leader)")
+            threading.Thread(target=_run_initial_fetch, daemon=True).start()
             return
         
         logger.info("Acquired scheduler lock - initializing scheduler")
