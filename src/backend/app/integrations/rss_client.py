@@ -149,7 +149,25 @@ class RSSClient:
         
         try:
             logger.info(f"Fetching feed: {feed_url}")
-            feed = feedparser.parse(feed_url)
+            
+            # Use requests with user-agent to avoid blocking
+            headers = {"User-Agent": random.choice(self.USER_AGENTS)}
+            try:
+                response = requests.get(feed_url, headers=headers, timeout=15)
+                response.raise_for_status()
+                feed = feedparser.parse(response.content)
+            except requests.RequestException as e:
+                logger.warning(f"Direct fetch failed for {feed_url}, trying feedparser: {e}")
+                feed = feedparser.parse(feed_url)
+            
+            if feed.bozo and feed.bozo_exception:
+                logger.warning(f"Feed parse warning for {feed_url}: {feed.bozo_exception}")
+            
+            if not feed.entries:
+                logger.warning(f"Feed returned 0 entries: {feed_url} (status={getattr(feed, 'status', 'unknown')})")
+                return []
+            
+            logger.info(f"Feed {feed_url} returned {len(feed.entries)} entries")
             
             for entry in feed.entries[:max_entries]:
                 try:

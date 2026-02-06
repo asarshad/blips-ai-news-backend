@@ -274,7 +274,7 @@ FEED_REGISTRY: List[FeedConfig] = [
         notes="AWS announcements and tutorials",
     ),
     FeedConfig(
-        url="https://cloud.google.com/blog/rss",
+        url="https://cloudblog.withgoogle.com/rss/",
         name="Google Cloud Blog",
         role=FeedRole.INFRA,
         quality_tier=QualityTier.STANDARD,
@@ -309,16 +309,17 @@ FEED_REGISTRY: List[FeedConfig] = [
         base_quality_weight=0.75,
         notes="Startup funding, valuations, M&A",
     ),
-    FeedConfig(
-        url="https://pitchbook.com/news/rss",
-        name="PitchBook",
-        role=FeedRole.BUSINESS,
-        quality_tier=QualityTier.STANDARD,
-        daily_cap=2,
-        decay_profile=DecayProfile.NORMAL,
-        base_quality_weight=0.75,
-        notes="VC/PE deals, market data",
-    ),
+    # NOTE: PitchBook has Cloudflare protection that blocks automated requests
+    # FeedConfig(
+    #     url="https://pitchbook.com/news/rss",
+    #     name="PitchBook",
+    #     role=FeedRole.BUSINESS,
+    #     quality_tier=QualityTier.STANDARD,
+    #     daily_cap=2,
+    #     decay_profile=DecayProfile.NORMAL,
+    #     base_quality_weight=0.75,
+    #     notes="VC/PE deals, market data",
+    # ),
 
     # =========================================================================
     # SECURITY & PRIVACY
@@ -398,7 +399,7 @@ FEED_REGISTRY: List[FeedConfig] = [
     # Target: 2-3 articles/day
     # =========================================================================
     FeedConfig(
-        url="https://openai.com/blog/rss/",
+        url="https://openai.com/blog/rss.xml",
         name="OpenAI Blog",
         role=FeedRole.PRIMARY,
         quality_tier=QualityTier.SUPPLEMENTAL,
