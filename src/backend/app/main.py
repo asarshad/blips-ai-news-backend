@@ -80,7 +80,10 @@ def _check_redis_connection() -> bool:
         return False
 
 def _run_initial_fetch():
-    """Run the initial news fetch in background thread if targets not met."""
+    """Run the initial news fetch in background thread if targets not met.
+    
+    Also checks inventory health and triggers top-up if needed.
+    """
     time.sleep(3)  # Give app time to fully start
     logger.info("=" * 50)
     logger.info("INITIAL FETCH: Checking if ingestion needed...")
@@ -90,6 +93,11 @@ def _run_initial_fetch():
         from app.repositories.ingestion_progress_repo import IngestionProgressRepository
         from app.repositories.ingestion_budget_repo import IngestionBudgetRepository
         from app.models.ingestion_budget import IngestionBudget
+        from app.services.topup_service import startup_inventory_check
+        
+        # First: check inventory health and trigger top-up if needed
+        logger.info("INITIAL FETCH: Running inventory health check...")
+        startup_inventory_check(SessionLocal)
         
         db = SessionLocal()
         try:

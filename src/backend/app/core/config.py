@@ -109,6 +109,44 @@ class Settings(BaseSettings):
     CLUSTER_WINDOW_HOURS: int = int(os.getenv("CLUSTER_WINDOW_HOURS", "48"))
     MIN_CLUSTER_SIMILARITY: float = float(os.getenv("MIN_CLUSTER_SIMILARITY", "0.5"))
     
+    # ==========================================================================
+    # Rolling Freshness + Reservoir Strategy
+    # ==========================================================================
+    # Tiered content windows:
+    #   Tier A (Fresh): published_at within rolling window
+    #   Tier B (Backfill): created_at within short window even if published_at older
+    #   Tier C (Evergreen): older high-quality items
+    
+    # Articles: fast news cycle
+    ARTICLES_FRESH_PUBLISHED_HOURS: int = int(os.getenv("ARTICLES_FRESH_PUBLISHED_HOURS", "36"))
+    ARTICLES_BACKFILL_CREATED_HOURS: int = int(os.getenv("ARTICLES_BACKFILL_CREATED_HOURS", "24"))
+    ARTICLES_EVERGREEN_MAX_DAYS: int = int(os.getenv("ARTICLES_EVERGREEN_MAX_DAYS", "14"))
+    
+    # Videos: medium cycle
+    VIDEOS_FRESH_PUBLISHED_HOURS: int = int(os.getenv("VIDEOS_FRESH_PUBLISHED_HOURS", "72"))
+    VIDEOS_BACKFILL_CREATED_HOURS: int = int(os.getenv("VIDEOS_BACKFILL_CREATED_HOURS", "48"))
+    VIDEOS_EVERGREEN_MAX_DAYS: int = int(os.getenv("VIDEOS_EVERGREEN_MAX_DAYS", "30"))
+    
+    # Reels: long evergreen window (shorts stay relevant longer)
+    REELS_FRESH_PUBLISHED_HOURS: int = int(os.getenv("REELS_FRESH_PUBLISHED_HOURS", "168"))  # 7 days
+    REELS_BACKFILL_CREATED_HOURS: int = int(os.getenv("REELS_BACKFILL_CREATED_HOURS", "72"))
+    REELS_EVERGREEN_MAX_DAYS: int = int(os.getenv("REELS_EVERGREEN_MAX_DAYS", "45"))
+    
+    # Minimum fresh counts per surface (triggers top-up if below)
+    MIN_FRESH_ARTICLES: int = int(os.getenv("MIN_FRESH_ARTICLES", "30"))
+    MIN_FRESH_VIDEOS: int = int(os.getenv("MIN_FRESH_VIDEOS", "25"))
+    MIN_FRESH_REELS: int = int(os.getenv("MIN_FRESH_REELS", "20"))
+    
+    # Reservoir sizes: total inventory cached for browsing
+    RESERVOIR_ARTICLES: int = int(os.getenv("RESERVOIR_ARTICLES", "200"))
+    RESERVOIR_VIDEOS: int = int(os.getenv("RESERVOIR_VIDEOS", "150"))
+    RESERVOIR_REELS: int = int(os.getenv("RESERVOIR_REELS", "300"))
+    
+    # Top-up controls
+    TOPUP_LOCK_TTL_SECONDS: int = int(os.getenv("TOPUP_LOCK_TTL_SECONDS", "120"))
+    TOPUP_MAX_RUNTIME_SECONDS: int = int(os.getenv("TOPUP_MAX_RUNTIME_SECONDS", "300"))
+    INVENTORY_HEALTH_CACHE_TTL: int = int(os.getenv("INVENTORY_HEALTH_CACHE_TTL", "60"))
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

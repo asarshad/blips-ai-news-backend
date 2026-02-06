@@ -1,20 +1,29 @@
 """Video routes for the REST API.
 
 Updated to serve content from the unified content_items table with AI filtering.
-Includes diversity mixing to ensure varied source distribution.
+Includes tiered freshness strategy (A/B/C) and diversity mixing.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from typing import Dict, Any
 
 from app.core.dependencies import get_db
 from app.core.feature_flags import get_feature_flags, FeatureFlags
 from app.core.exceptions import not_found_exception
 from app.core.logging import get_logger
+from app.db.base import SessionLocal
 from app.schemas.video import Video as VideoSchema, VideoList
 from app.repositories.content_repo import ContentItemRepository
 from app.models.content import ContentType
 from app.services.diversity_mixer import mix_feed
+from app.services.inventory_service import Surface
+from app.services.tiered_feed_service import (
+    get_tiered_feed,
+    get_cached_tiered_feed,
+    tiered_item_to_dict,
+)
+from app.services.topup_service import check_and_trigger_topup
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -26,7 +35,7 @@ def get_content_repo(db: Session = Depends(get_db)) -> ContentItemRepository:
 
 
 def _content_item_to_video_schema(item) -> dict:
-    """Convert ContentItem to Video schema format."""
+    """Convert ContentItem to Video schema format (backward compatible)."""
     return {
         "id": item.id,
         "title": item.title,
@@ -38,20 +47,26 @@ def _content_item_to_video_schema(item) -> dict:
         "category": (item.topics[0] if item.topics else "Technology"),
         "duration_seconds": item.duration_seconds,
         "hot_score": int(item.global_score * 100) if item.global_score else 0,
-        "created_at": item.created_at
+        "created_at": item.created_at.isoformat() if item.created_at else None
     }
 
 
-@router.get("/recent", response_model=VideoList)
+@router.get("/recent", response_model=Dict[str, Any])
 def get_recent_videos(
     limit: int = Query(10, ge=1, le=50, description="Number of videos to return"),
     page: int = Query(1, ge=1, description="Page number"),
-    content_repo: ContentItemRepository = Depends(get_content_repo),
+    db: Session = Depends(get_db),
     flags: FeatureFlags = Depends(get_feature_flags)
 ):
     """
-    Get the most recent videos.
-    Only returns AI-processed videos with valid summaries.
+    Get the most recent videos using tiered freshness strategy.
+    
+    Returns a blend of:
+    - Tier A (Fresh): videos published within rolling window
+    - Tier B (Backfill): videos added recently but published earlier
+    - Tier C (Evergreen): older high-quality videos
+    
+    Each video includes freshness_tier, published_age_seconds, and added_age_seconds.
     Results are diversity-mixed to ensure varied source distribution.
     """
     # Check videos feature flag
@@ -61,40 +76,51 @@ def get_recent_videos(
             detail="Videos feature is currently disabled"
         )
     
+    # Check inventory and trigger background top-up if needed (non-blocking)
+    check_and_trigger_topup(db, SessionLocal)
+    
     offset = (page - 1) * limit
     
-    # Fetch more candidates for diversity mixing
-    fetch_limit = min(limit * 3, 100)
-    
-    items = content_repo.get_by_type(
-        ContentType.VIDEO,
-        limit=fetch_limit,
+    # Use cached tiered feed for better performance
+    videos, has_more = get_cached_tiered_feed(
+        db,
+        Surface.VIDEOS,
+        limit=limit,
         offset=offset,
-        hours_back=720,  # 30 days - ensure enough content available
-        ai_processed_only=True
+        require_ai_processed=True,
     )
     
-    # Apply diversity mixing
-    mixed_items = mix_feed(items, surface="videos", target_size=limit)
+    # Log tier distribution (from cached results)
+    tier_counts = {}
+    for v in videos:
+        tier = v.get("freshness_tier", "?")
+        tier_counts[tier] = tier_counts.get(tier, 0) + 1
+    logger.info(f"Videos page {page}: {tier_counts} (limit={limit})")
     
-    videos = [_content_item_to_video_schema(item) for item in mixed_items]
-    logger.info(f"Returning {len(videos)} diversity-mixed videos (page {page})")
-    
-    return {"videos": videos}
+    return {
+        "videos": videos,
+        "has_more": has_more,
+        "page": page,
+    }
 
 
-@router.get("/reels", response_model=VideoList)
+@router.get("/reels", response_model=Dict[str, Any])
 def get_reels(
     limit: int = Query(10, ge=1, le=50, description="Number of reels to return"),
     page: int = Query(1, ge=1, description="Page number"),
-    content_repo: ContentItemRepository = Depends(get_content_repo),
+    db: Session = Depends(get_db),
     flags: FeatureFlags = Depends(get_feature_flags)
 ):
     """
-    Get the most recent reels (short videos).
-    REELs don't require AI summaries but must exist in content_items.
+    Get the most recent reels (short videos) using tiered freshness strategy.
+    
+    Returns a blend of:
+    - Tier A (Fresh): reels published within rolling window (7 days)
+    - Tier B (Backfill): reels added recently but published earlier
+    - Tier C (Evergreen): older high-quality reels
+    
+    REELs don't require AI summaries.
     Results are diversity-mixed to ensure varied source distribution.
-    This is especially important for reels which can be dominated by one source.
     """
     # Check reels feature flag
     if not flags.is_enabled("reels"):
@@ -103,26 +129,32 @@ def get_reels(
             detail="Reels feature is currently disabled"
         )
     
+    # Check inventory and trigger background top-up if needed (non-blocking)
+    check_and_trigger_topup(db, SessionLocal)
+    
     offset = (page - 1) * limit
     
-    # Fetch more candidates for diversity mixing (important for reels)
-    fetch_limit = min(limit * 4, 150)  # Larger pool for reels diversity
-    
-    items = content_repo.get_by_type(
-        ContentType.REEL,
-        limit=fetch_limit,
+    # Use cached tiered feed for better performance
+    videos, has_more = get_cached_tiered_feed(
+        db,
+        Surface.REELS,
+        limit=limit,
         offset=offset,
-        hours_back=720,  # 30 days - REELs are more evergreen than articles
-        ai_processed_only=False  # REELs don't need AI summaries
+        require_ai_processed=False,  # Reels don't need AI processing
     )
     
-    # Apply diversity mixing with stricter reels constraints
-    mixed_items = mix_feed(items, surface="reels", target_size=limit)
+    # Log tier distribution (from cached results)
+    tier_counts = {}
+    for v in videos:
+        tier = v.get("freshness_tier", "?")
+        tier_counts[tier] = tier_counts.get(tier, 0) + 1
+    logger.info(f"Reels page {page}: {tier_counts} (limit={limit})")
     
-    videos = [_content_item_to_video_schema(item) for item in mixed_items]
-    logger.info(f"Returning {len(videos)} diversity-mixed reels (page {page})")
-    
-    return {"videos": videos}
+    return {
+        "videos": videos,
+        "has_more": has_more,
+        "page": page,
+    }
 
 
 @router.get("/{video_id}", response_model=VideoSchema)

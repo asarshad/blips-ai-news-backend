@@ -1,0 +1,66 @@
+"""
+Inventory Health API routes.
+
+Provides visibility into content inventory across freshness tiers.
+These endpoints are fast and do not trigger ingestion.
+"""
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from typing import Any, Dict
+
+from app.core.dependencies import get_db
+from app.core.logging import get_logger
+from app.services.inventory_service import (
+    Surface,
+    get_cached_inventory_health,
+    compute_surface_health,
+)
+
+logger = get_logger(__name__)
+router = APIRouter()
+
+
+@router.get("/health", response_model=Dict[str, Any])
+def get_inventory_health(
+    db: Session = Depends(get_db),
+):
+    """
+    Get overall inventory health across all surfaces.
+    
+    Returns tier counts, freshness metrics, and health status for:
+    - Articles
+    - Videos  
+    - Reels
+    
+    Includes top-up priority if any surface is below threshold.
+    This endpoint is cached (60s TTL) and does not trigger ingestion.
+    """
+    health = get_cached_inventory_health(db)
+    return health.to_dict()
+
+
+@router.get("/health/{surface}", response_model=Dict[str, Any])
+def get_surface_health(
+    surface: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Get inventory health for a specific surface.
+    
+    Args:
+        surface: One of 'articles', 'videos', 'reels'
+        
+    Returns tier counts, freshness metrics, and source distribution.
+    """
+    try:
+        surf = Surface(surface.lower())
+    except ValueError:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid surface '{surface}'. Must be one of: articles, videos, reels"
+        )
+    
+    health = compute_surface_health(db, surf)
+    return health.to_dict()

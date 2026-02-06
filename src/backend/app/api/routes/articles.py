@@ -1,16 +1,17 @@
 """Article routes for the REST API.
 
 Updated to serve content from the unified content_items table with AI filtering.
-Includes diversity mixing to ensure varied source distribution.
+Includes tiered freshness strategy (A/B/C) and diversity mixing.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from app.core.dependencies import get_db
 from app.core.exceptions import not_found_exception
 from app.core.logging import get_logger
+from app.db.base import SessionLocal
 from app.schemas.article import (
     Article as ArticleSchema, 
     ArticleWithConversation, 
@@ -20,6 +21,13 @@ from app.schemas.article import (
 from app.repositories.content_repo import ContentItemRepository
 from app.models.content import ContentType
 from app.services.diversity_mixer import mix_feed
+from app.services.inventory_service import Surface
+from app.services.tiered_feed_service import (
+    get_tiered_feed,
+    get_cached_tiered_feed,
+    tiered_item_to_dict,
+)
+from app.services.topup_service import check_and_trigger_topup
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -104,40 +112,52 @@ def get_cached_articles(
     return [_content_item_to_article_schema(item) for item in items]
 
 
-@router.get("/recent", response_model=ArticleList)
+@router.get("/recent", response_model=Dict[str, Any])
 def get_recent_articles(
     limit: int = Query(5, ge=1, le=50, description="Number of articles to return"),
     page: int = Query(1, ge=1, description="Page number"),
-    content_repo: ContentItemRepository = Depends(get_content_repo)
+    db: Session = Depends(get_db)
 ):
     """
-    Get the most recent articles.
-    Only returns AI-processed articles with valid summaries.
-    Results are diversity-mixed to ensure varied source distribution.
+    Get the most recent articles using tiered freshness strategy.
+    
+    Returns a blend of:
+    - Tier A (Fresh): articles published within rolling window
+    - Tier B (Backfill): articles added recently but published earlier
+    - Tier C (Evergreen): older high-quality articles
+    
+    Each article includes freshness_tier, published_age_seconds, and added_age_seconds.
+    Results are diversity-mixed and cached (45s TTL) for performance.
     """
+    # Check inventory and trigger background top-up if needed (non-blocking)
+    check_and_trigger_topup(db, SessionLocal)
+    
     offset = (page - 1) * limit
     
-    # Fetch more candidates for diversity mixing (2x target + buffer)
-    fetch_limit = min(limit * 3, 100)
-    
-    items = content_repo.get_by_type(
-        ContentType.ARTICLE,
-        limit=fetch_limit,
+    # Use cached tiered feed for better performance
+    articles, has_more = get_cached_tiered_feed(
+        db,
+        Surface.ARTICLES,
+        limit=limit,
         offset=offset,
-        hours_back=720,  # 30 days - ensure enough content available
-        ai_processed_only=True
+        require_ai_processed=True,
     )
     
-    if not items and page == 1:
+    if not articles and page == 1:
         raise HTTPException(status_code=404, detail="No articles found")
     
-    # Apply diversity mixing
-    mixed_items = mix_feed(items, surface="articles", target_size=limit)
+    # Log tier distribution (from cached results)
+    tier_counts = {}
+    for a in articles:
+        tier = a.get("freshness_tier", "?")
+        tier_counts[tier] = tier_counts.get(tier, 0) + 1
+    logger.info(f"Articles page {page}: {tier_counts} (limit={limit})")
     
-    articles = [_content_item_to_article_schema(item) for item in mixed_items]
-    logger.info(f"Returning {len(articles)} diversity-mixed articles (page {page})")
-    
-    return {"articles": articles}
+    return {
+        "articles": articles,
+        "has_more": has_more,
+        "page": page,
+    }
 
 
 @router.get("/tags/{tag_name}", response_model=ArticleList)
