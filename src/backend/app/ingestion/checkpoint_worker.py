@@ -93,6 +93,7 @@ def process_progress_row_batch(
     from app.models.ingestion_progress import IngestionProgress
 
     progress = db.query(IngestionProgress).filter(IngestionProgress.id == row_id).one()
+    logger.info(f"Processing row: id={row_id} type={progress.source_type} feed={progress.feed_name} target={progress.target} ingested={progress.items_ingested} status={progress.status}")
 
     # Respect backoff.
     now = datetime.utcnow()
@@ -139,14 +140,18 @@ def process_progress_row_batch(
                 return {"row_id": row_id, "status": "failed", "inserted": 0}
 
             max_entries = int(os.getenv("RSS_ENTRIES_PER_FEED", "50"))
+            logger.info(f"RSS fetch: feed={progress.feed_name} url={cfg.url} max_entries={max_entries}")
             entries = rss.fetch_feed(cfg.url, max_entries=max_entries)
             if not entries:
+                logger.info(f"RSS fetch: feed={progress.feed_name} no entries returned")
                 return {"row_id": row_id, "status": "no_entries", "inserted": 0, "attempted": 0}
 
             remaining = max(0, int(progress.target) - int(progress.items_ingested))
+            logger.info(f"RSS ingestion: feed={progress.feed_name} entries={len(entries)} target={progress.target} ingested={progress.items_ingested} remaining={remaining}")
 
             reserved = budget_repo.reserve(day=day_utc, content_type=ContentType.ARTICLE, want=min(batch_size, remaining))
             if reserved <= 0:
+                logger.info(f"RSS budget full: feed={progress.feed_name} - ARTICLE budget exhausted")
                 return {"row_id": row_id, "status": "skipped_type_full", "inserted": 0, "attempted": 0}
 
             new_window = min(batch_size, max(1, remaining))
