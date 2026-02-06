@@ -58,9 +58,9 @@ services:
       - key: NEWS_FETCH_INTERVAL_MINUTES
         value: "30"
       - key: INGEST_UNTIL_TARGETS
-        value: "true"  # Keep ingesting (within limits) until daily targets are met
+        value: "true"  # Keep ingesting until FULL daily targets are met (not just typical)
       - key: INGEST_CATCHUP_MAX_SECONDS
-        value: "600"
+        value: "1800"  # 30 minutes to reach full targets
       - key: INGESTION_ENABLED
         value: "true"
       - key: INGESTION_CRON_DISABLED

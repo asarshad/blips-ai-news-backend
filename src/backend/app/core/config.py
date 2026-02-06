@@ -86,7 +86,8 @@ class Settings(BaseSettings):
 
     # Catch-up loop controls
     INGEST_UNTIL_TARGETS: bool = os.getenv("INGEST_UNTIL_TARGETS", "true").lower() in ("true", "1", "yes", "on")
-    INGEST_CATCHUP_MAX_SECONDS: int = int(os.getenv("INGEST_CATCHUP_MAX_SECONDS", "600"))
+    # 30 minutes max to reach full targets (not just typical)
+    INGEST_CATCHUP_MAX_SECONDS: int = int(os.getenv("INGEST_CATCHUP_MAX_SECONDS", "1800"))
 
     # Source fetch depth (larger batches help backfill around duplicates)
     RSS_ENTRIES_PER_FEED: int = int(os.getenv("RSS_ENTRIES_PER_FEED", "50"))

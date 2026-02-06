@@ -180,12 +180,15 @@ def _start_scheduler() -> None:
 
             threading.Thread(target=_refresh_lock_forever, daemon=True).start()
 
-            logger.info("Scheduler initialized - running initial fetch in background")
-            # Start background thread for initial fetch (doesn't block startup)
-            threading.Thread(target=_run_initial_fetch, daemon=True).start()
+            logger.info("Scheduler initialized")
             
     except Exception as e:
         logger.error(f"Error starting scheduler: {str(e)}")
+    
+    # Always run initial fetch check regardless of scheduler lock
+    # This ensures we resume ingestion after restart if targets not met
+    logger.info("Starting initial fetch check in background")
+    threading.Thread(target=_run_initial_fetch, daemon=True).start()
 
 
 @asynccontextmanager
