@@ -281,12 +281,10 @@ class IngestionScheduler:
 
                     self.mark_active(task)
                     logger.info(
-                        "ingestion.task_picked",
-                        extra={
-                            "row_id": task.row_id,
-                            "source_type": task.source_type,
-                            "feed_name": task.feed_name,
-                        },
+                        "ingestion.task_picked: row=%s type=%s feed=%s",
+                        task.row_id,
+                        task.source_type,
+                        task.feed_name,
                     )
                     fut = ex.submit(process_task_batch, task.row_id, self.config.batch_size)
                     futures[fut] = task
@@ -316,15 +314,13 @@ class IngestionScheduler:
                     total_attempted += int(result.get("attempted") or 0)
 
                     logger.info(
-                        "ingestion.task_done",
-                        extra={
-                            "row_id": task.row_id,
-                            "source_type": task.source_type,
-                            "feed_name": task.feed_name,
-                            "status": result.get("status"),
-                            "attempted": result.get("attempted"),
-                            "inserted": result.get("inserted"),
-                        },
+                        "ingestion.task_done: row=%s type=%s feed=%s status=%s attempted=%s inserted=%s",
+                        task.row_id,
+                        task.source_type,
+                        task.feed_name,
+                        result.get("status"),
+                        result.get("attempted"),
+                        result.get("inserted"),
                     )
 
         return {

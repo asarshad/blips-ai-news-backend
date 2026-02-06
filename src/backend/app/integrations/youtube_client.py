@@ -187,7 +187,10 @@ class YouTubeClient:
 
     def get_video_duration(self, video_id: str) -> Optional[int]:
         """
-        Get video duration in seconds by scraping the video page.
+        Get video duration in seconds.
+        
+        Uses YouTube Data API if available (YOUTUBE_API_KEY env var),
+        otherwise falls back to scraping (less reliable due to consent pages).
         
         Args:
             video_id: The YouTube video ID.
@@ -196,26 +199,119 @@ class YouTubeClient:
             Duration in seconds or None if not found.
         """
         if video_id in self._duration_cache_seconds:
-            return self._duration_cache_seconds[video_id]
+            cached = self._duration_cache_seconds[video_id]
+            logger.debug("get_video_duration: vid=%s -> %s (cached)", video_id, cached)
+            return cached
 
+        # Try YouTube Data API first (if API key available)
+        api_key = os.getenv("YOUTUBE_API_KEY")
+        if api_key:
+            duration = self._get_duration_from_api(video_id, api_key)
+            if duration is not None:
+                self._duration_cache_seconds[video_id] = duration
+                return duration
+
+        # Fall back to scraping (less reliable due to consent pages in Docker/server)
+        duration = self._get_duration_from_scrape(video_id)
+        if duration is not None:
+            self._duration_cache_seconds[video_id] = duration
+            return duration
+        
+        self._duration_cache_seconds[video_id] = None
+        return None
+    
+    def _get_duration_from_api(self, video_id: str, api_key: str) -> Optional[int]:
+        """Get duration using YouTube Data API."""
+        try:
+            url = f"https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id={video_id}&key={api_key}"
+            response = requests.get(url, timeout=5)
+            
+            if response.status_code == 200:
+                data = response.json()
+                items = data.get("items", [])
+                if items:
+                    duration_iso = items[0].get("contentDetails", {}).get("duration", "")
+                    seconds = self._parse_iso_duration(duration_iso)
+                    if seconds is not None:
+                        logger.info("get_video_duration: vid=%s -> %d seconds (API)", video_id, seconds)
+                        return seconds
+            else:
+                logger.warning("get_video_duration: API error HTTP %d for vid=%s", response.status_code, video_id)
+        except Exception as e:
+            logger.warning("get_video_duration: API exception for vid=%s: %s", video_id, str(e))
+        return None
+    
+    def _parse_iso_duration(self, duration: str) -> Optional[int]:
+        """Parse ISO 8601 duration format (PT1H2M3S) to seconds."""
+        if not duration or not duration.startswith("PT"):
+            return None
+        
+        pattern = r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?"
+        match = re.match(pattern, duration)
+        if not match:
+            return None
+        
+        hours = int(match.group(1) or 0)
+        minutes = int(match.group(2) or 0)
+        seconds = int(match.group(3) or 0)
+        return hours * 3600 + minutes * 60 + seconds
+    
+    def _get_duration_from_scrape(self, video_id: str) -> Optional[int]:
+        """Get duration by scraping YouTube page (fallback, less reliable)."""
         url = f"https://www.youtube.com/watch?v={video_id}"
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
             }
-            response = requests.get(url, headers=headers, timeout=5)
+            response = requests.get(url, headers=headers, timeout=10)
             
             if response.status_code == 200:
-                match = re.search(r'"approxDurationMs":"(\d+)"', response.text)
-                if match:
-                    ms = int(match.group(1))
-                    seconds = ms // 1000
-                    self._duration_cache_seconds[video_id] = seconds
-                    return seconds
+                # Try multiple patterns for duration
+                patterns = [
+                    (r'"approxDurationMs":"(\d+)"', "approxDurationMs", lambda m: int(m.group(1)) // 1000),
+                    (r'"lengthSeconds":"(\d+)"', "lengthSeconds", lambda m: int(m.group(1))),
+                ]
+                
+                for pattern, name, extractor in patterns:
+                    match = re.search(pattern, response.text)
+                    if match:
+                        seconds = extractor(match)
+                        logger.info("get_video_duration: vid=%s -> %d seconds (scrape/%s)", video_id, seconds, name)
+                        return seconds
+                
+                logger.debug("get_video_duration: vid=%s -> None (scrape: no pattern matched)", video_id)
+            else:
+                logger.debug("get_video_duration: vid=%s -> None (scrape: HTTP %d)", video_id, response.status_code)
         except Exception as e:
-            logger.debug(f"Error fetching duration for video {video_id}: {e}")
+            logger.debug("get_video_duration: vid=%s -> None (scrape error: %s)", video_id, str(e))
+        return None
 
-        self._duration_cache_seconds[video_id] = None
+    def _is_vertical_thumbnail(self, video_id: str) -> Optional[bool]:
+        """
+        Check if a video has a vertical thumbnail (indicating it's a Short).
+        
+        NOTE: This method is currently limited. YouTube's oembed endpoint always
+        returns the standard hqdefault.jpg thumbnail (480x360) regardless of 
+        whether the video is a Short. True aspect ratio detection would require
+        either:
+        1. YouTube Data API (contentDetails part)
+        2. Downloading and analyzing the actual video file
+        3. Web scraping (blocked by consent pages in Docker/server environments)
+        
+        Args:
+            video_id: The YouTube video ID.
+            
+        Returns:
+            True if vertical (likely Short), False if horizontal, None if detection failed.
+        """
+        # The oembed endpoint doesn't reliably indicate Shorts - it always returns
+        # horizontal thumbnail dimensions (480x360). This method is kept as a stub
+        # for future improvements if YouTube provides better metadata.
+        #
+        # For now, return None to indicate detection failed, which causes the
+        # caller to fall back to other methods or default assumptions.
+        logger.debug("_is_vertical_thumbnail: vid=%s -> None (oembed unreliable for aspect ratio)", video_id)
         return None
 
     def fetch_all_channels(self, videos_per_channel: int = 10) -> List[VideoEntry]:
@@ -328,7 +424,11 @@ class YouTubeClient:
         videos = []
         
         try:
-            logger.info(f"Fetching YouTube feed: {config.feed_url}")
+            logger.info(
+                "Fetching YouTube feed: %s (content_format=%s)",
+                config.name,
+                config.content_format.value if config.content_format else "None"
+            )
             feed = feedparser.parse(config.feed_url)
             
             if feed.bozo:
@@ -347,12 +447,13 @@ class YouTubeClient:
                     if not video_id:
                         continue
                     
+                    title = entry.get('title', 'Untitled')
+                    
                     # Check if it's a short
-                    is_short = self._detect_short(video_url, video_id, config)
+                    is_short = self._detect_short(video_url, video_id, config, title=title)
                     
                     thumbnail_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
                     summary = self._get_summary(entry)
-                    title = entry.get('title', 'Untitled')
                     category = self._categorize_video(title, summary)
                     
                     videos.append(VideoEntry(
@@ -386,7 +487,8 @@ class YouTubeClient:
         self, 
         video_url: str, 
         video_id: str, 
-        config: ChannelConfig
+        config: ChannelConfig,
+        title: str = "",
     ) -> bool:
         """
         Detect if a video is a short based on multiple signals.
@@ -395,28 +497,54 @@ class YouTubeClient:
             video_url: Video URL
             video_id: Video ID
             config: Channel configuration
+            title: Video title (for hashtag detection)
             
         Returns:
             True if video is a short
         """
         # URL contains /shorts/
         if "/shorts/" in video_url:
+            logger.info("_detect_short: vid=%s -> True (url contains /shorts/)", video_id)
             return True
         
         # Channel is shorts-native
         if config.content_format == ContentFormat.SHORTS:
+            logger.info("_detect_short: vid=%s -> True (channel is SHORTS format)", video_id)
             return True
         
-        # For mixed channels, fall back to duration heuristic.
+        # Title contains #shorts or #short hashtag (common for shorts)
+        title_lower = title.lower()
+        if "#shorts" in title_lower or "#short" in title_lower:
+            logger.info("_detect_short: vid=%s -> True (title contains #shorts)", video_id)
+            return True
+        
+        # For mixed channels, use duration heuristic.
         # YouTube RSS links are commonly /watch?v=... for both videos and Shorts,
         # so URL-only detection is unreliable.
         if config.content_format == ContentFormat.MIXED:
             short_max_seconds = int(os.getenv("YT_SHORT_MAX_SECONDS", "75"))
+            
+            # Try duration (requires API key - scraping blocked in Docker by consent pages)
             duration = self.get_video_duration(video_id)
-            if duration is not None and duration <= short_max_seconds:
-                return True
+            if duration is not None:
+                if duration <= short_max_seconds:
+                    logger.info("_detect_short: vid=%s -> True (MIXED, duration=%ds <= %ds)", video_id, duration, short_max_seconds)
+                    return True
+                else:
+                    logger.info("_detect_short: vid=%s -> False (MIXED, duration=%ds > %ds)", video_id, duration, short_max_seconds)
+                    return False
+            
+            # Duration detection failed (no API key and scraping blocked)
+            # NOTE: Thumbnail aspect ratio detection via oembed doesn't work - YouTube
+            # always returns horizontal (480x360) thumbnails regardless of video type.
+            # Without YOUTUBE_API_KEY, we cannot reliably detect Shorts for MIXED channels.
+            logger.info(
+                "_detect_short: vid=%s -> False (MIXED, duration detection failed - set YOUTUBE_API_KEY for reliable detection)",
+                video_id
+            )
             return False
         
+        logger.info("_detect_short: vid=%s -> False (LONG_FORM channel)", video_id)
         return False
     
     # Legacy method for backward compatibility

@@ -47,7 +47,8 @@ class IngestionBudgetRepository:
         # Targets can change across runs; only ever increase to remain additive and deterministic.
         if int(target or 0) > int(row.target or 0):
             row.target = int(target or 0)
-            self.db.commit()
+        # Always commit to release the FOR UPDATE lock
+        self.db.commit()
         return row
 
     def remaining(self, *, day: date, content_type: ContentType) -> int:
@@ -63,11 +64,15 @@ class IngestionBudgetRepository:
 
         row = self.get(day=day, content_type=content_type, for_update=True)
         if row is None:
+            # No lock acquired if row doesn't exist, but commit to release any transactional state
+            self.db.commit()
             return 0
 
         remaining = max(0, int(row.target or 0) - int(row.inserted or 0) - int(row.reserved or 0))
         take = min(want_n, remaining)
         if take <= 0:
+            # Release the FOR UPDATE lock without making changes
+            self.db.commit()
             return 0
 
         row.reserved = int(row.reserved or 0) + int(take)
@@ -88,6 +93,8 @@ class IngestionBudgetRepository:
         # reserved_taken slots are released regardless; inserted increments durable count.
         row = self.get(day=day, content_type=content_type, for_update=True)
         if row is None:
+            # Release any transactional state even if row doesn't exist
+            self.db.commit()
             return
 
         row.reserved = max(0, int(row.reserved or 0) - int(reserved_taken or 0))

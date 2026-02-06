@@ -273,11 +273,29 @@ def process_progress_row_batch(
                 repo.mark_failed(row_id, f"Unknown YouTube channel: {progress.feed_name}")
                 return {"row_id": row_id, "status": "failed", "inserted": 0}
 
+            # Debug: log channel config info
+            logger.info(
+                "YT channel config: name=%s content_format=%s",
+                cfg.name,
+                cfg.content_format.value if cfg.content_format else "None"
+            )
+
             max_videos = int(os.getenv("YT_VIDEOS_PER_CHANNEL", "30"))
             entries = yt._fetch_channel_with_config(cfg, max_videos=max_videos)  # noqa: SLF001
             if not entries:
                 logger.info("YT fetch: no entries from %s", progress.feed_name)
                 return {"row_id": row_id, "status": "no_entries", "inserted": 0, "attempted": 0}
+            
+            # Debug: log is_short for each entry
+            shorts_count = sum(1 for e in entries if e.is_short)
+            logger.info(
+                "YT fetch entries: channel=%s total=%d shorts=%d longs=%d",
+                progress.feed_name,
+                len(entries),
+                shorts_count,
+                len(entries) - shorts_count
+            )
+            
             want_reel = progress.source_type == "youtube_reel"
 
             remaining = max(0, int(progress.target) - int(progress.items_ingested))
@@ -292,8 +310,19 @@ def process_progress_row_batch(
             multiplier = max(1, _int_env("INGESTION_CANDIDATE_MULTIPLIER", 5))
             candidate_limit = max(new_window, batch_size * multiplier)
 
+            logger.info(
+                "YT processing: feed=%s want_reel=%s reserved=%d new_window=%d candidate_limit=%d entries=%d",
+                progress.feed_name,
+                want_reel,
+                reserved,
+                new_window,
+                candidate_limit,
+                len(entries),
+            )
+
             values: List[dict] = []
             last_scanned_cursor: Optional[str] = progress.last_item_cursor
+            skipped_reasons: dict = {"is_short_mismatch": 0, "no_source_url": 0}
 
             def _add_entry(e) -> None:
                 nonlocal last_scanned_cursor
@@ -302,11 +331,22 @@ def process_progress_row_batch(
                     last_scanned_cursor = entry_cursor
 
                 is_reel = bool(e.is_short or (e.video_url and "/shorts/" in e.video_url))
+                # Debug: trace the filter decision
+                logger.info(
+                    "YT filter: want_reel=%s is_reel=%s e.is_short=%s url_has_shorts=%s video_id=%s",
+                    want_reel,
+                    is_reel,
+                    e.is_short,
+                    "/shorts/" in (e.video_url or ""),
+                    e.video_id,
+                )
                 if want_reel != is_reel:
+                    skipped_reasons["is_short_mismatch"] += 1
                     return
 
                 source_url = normalize_url(e.video_url) if e.video_url else e.video_url
                 if not source_url:
+                    skipped_reasons["no_source_url"] += 1
                     return
 
                 values.append(
@@ -370,13 +410,14 @@ def process_progress_row_batch(
 
             # Debug logging for video/reel ingestion
             logger.info(
-                "YT ingestion: type=%s feed=%s entries=%d values=%d want_reel=%s reserved=%d",
+                "YT ingestion: type=%s feed=%s entries=%d values=%d want_reel=%s reserved=%d skipped=%s",
                 progress.source_type,
                 progress.feed_name,
                 len(entries),
                 len(values),
                 want_reel,
                 reserved,
+                skipped_reasons,
             )
 
             try:
