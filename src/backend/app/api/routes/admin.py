@@ -181,3 +181,15 @@ def get_content_stats():
     finally:
         db.close()
 
+
+@router.post("/trigger-fetch")
+def trigger_fetch():
+    """Manually trigger content ingestion (dev/testing only)."""
+    from app.scheduler.tasks import fetch_and_process_news
+    
+    try:
+        fetch_and_process_news()
+        return {"status": "triggered", "message": "Ingestion job triggered successfully"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
