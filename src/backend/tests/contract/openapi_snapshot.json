@@ -1,3 +1,4 @@
+2026-02-06 06:46:26,690 - httpx - INFO - HTTP Request: GET http://testserver/api/v1/openapi.json "HTTP/1.1 200 OK"
 {
   "components": {
     "schemas": {
@@ -657,6 +658,179 @@
         "title": "PreferencesResponse",
         "type": "object"
       },
+      "QualityBudgetRow": {
+        "properties": {
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "day": {
+            "title": "Day",
+            "type": "string"
+          },
+          "inserted": {
+            "title": "Inserted",
+            "type": "integer"
+          },
+          "remaining": {
+            "title": "Remaining",
+            "type": "integer"
+          },
+          "reserved": {
+            "title": "Reserved",
+            "type": "integer"
+          },
+          "seen": {
+            "title": "Seen",
+            "type": "integer"
+          },
+          "suppressed": {
+            "title": "Suppressed",
+            "type": "integer"
+          },
+          "target": {
+            "title": "Target",
+            "type": "integer"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "day",
+          "content_type",
+          "target",
+          "reserved",
+          "inserted",
+          "remaining",
+          "seen",
+          "suppressed",
+          "attempts"
+        ],
+        "title": "QualityBudgetRow",
+        "type": "object"
+      },
+      "QualityExtractionRow": {
+        "properties": {
+          "article_text_coverage": {
+            "title": "Article Text Coverage",
+            "type": "number"
+          },
+          "article_total": {
+            "title": "Article Total",
+            "type": "integer"
+          },
+          "article_with_text": {
+            "title": "Article With Text",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "article_total",
+          "article_with_text",
+          "article_text_coverage"
+        ],
+        "title": "QualityExtractionRow",
+        "type": "object"
+      },
+      "QualityReport": {
+        "additionalProperties": true,
+        "properties": {
+          "budgets": {
+            "items": {
+              "$ref": "#/components/schemas/QualityBudgetRow"
+            },
+            "title": "Budgets",
+            "type": "array"
+          },
+          "day": {
+            "title": "Day",
+            "type": "string"
+          },
+          "extraction": {
+            "$ref": "#/components/schemas/QualityExtractionRow"
+          },
+          "types": {
+            "items": {
+              "$ref": "#/components/schemas/QualityTypeRow"
+            },
+            "title": "Types",
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "day",
+          "budgets",
+          "types",
+          "extraction",
+          "warnings"
+        ],
+        "title": "QualityReport",
+        "type": "object"
+      },
+      "QualityTypeRow": {
+        "properties": {
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "inserted": {
+            "title": "Inserted",
+            "type": "integer"
+          },
+          "suppressed": {
+            "title": "Suppressed",
+            "type": "integer"
+          },
+          "top_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top Source"
+          },
+          "top_source_share": {
+            "title": "Top Source Share",
+            "type": "number"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "content_type",
+          "inserted",
+          "suppressed",
+          "total",
+          "top_source_share"
+        ],
+        "title": "QualityTypeRow",
+        "type": "object"
+      },
       "Tag": {
         "properties": {
           "name": {
@@ -750,6 +924,13 @@
       },
       "ValidationError": {
         "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
           "loc": {
             "items": {
               "anyOf": [
@@ -1060,6 +1241,26 @@
           }
         },
         "summary": "Get Content Stats",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/trigger-fetch": {
+      "post": {
+        "description": "Manually trigger content ingestion (dev/testing only).",
+        "operationId": "trigger_fetch_api_v1_admin_trigger_fetch_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Trigger Fetch",
         "tags": [
           "admin"
         ]
@@ -1547,6 +1748,58 @@
         "summary": "Save Message",
         "tags": [
           "conversations"
+        ]
+      }
+    },
+    "/api/v1/quality/report": {
+      "get": {
+        "operationId": "get_quality_report_api_v1_quality_report_get",
+        "parameters": [
+          {
+            "description": "Ingestion day (YYYY-MM-DD). Defaults to ingestion-day timezone.",
+            "in": "query",
+            "name": "day",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Ingestion day (YYYY-MM-DD). Defaults to ingestion-day timezone.",
+              "title": "Day"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Quality Report",
+        "tags": [
+          "quality"
         ]
       }
     },
@@ -2109,7 +2362,7 @@
     },
     "/health": {
       "get": {
-        "description": "Health check endpoint for monitoring.",
+        "description": "Health check endpoint for monitoring.\n\nMust stay lightweight for keep-alive pings (no heavy DB queries).",
         "operationId": "health_check_health_get",
         "responses": {
           "200": {
@@ -2122,6 +2375,23 @@
           }
         },
         "summary": "Health Check"
+      }
+    },
+    "/metrics": {
+      "get": {
+        "description": "Lightweight JSON metrics for ingestion progress.",
+        "operationId": "metrics_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Metrics"
       }
     }
   }
