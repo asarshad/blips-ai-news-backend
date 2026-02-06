@@ -267,7 +267,11 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title=settings.PROJECT_NAME,
+    description="AI-powered tech news aggregator API. Fetches articles from RSS feeds and videos from YouTube, processes with AI summarization, and serves personalized feeds.",
+    version="1.0.0",
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    docs_url="/docs",  # Swagger UI
+    redoc_url="/redoc",  # ReDoc alternative
     lifespan=lifespan,
 )
 

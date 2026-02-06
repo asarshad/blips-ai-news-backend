@@ -4,7 +4,7 @@ An AI-powered tech news aggregator with a mobile-first experience. Fetches artic
 
 ## Overview
 
-Blips aggregates tech news from multiple sources (RSS feeds, YouTube channels), clusters similar content to avoid duplicates, ranks items by quality and relevance, and serves them to a mobile app.
+Blips aggregates tech news from multiple sources (RSS feeds, YouTube channels), clusters similar content to avoid duplicates, ranks items by quality and relevance, and serves them to a mobile app with a rolling freshness strategy.
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
@@ -28,6 +28,8 @@ Blips aggregates tech news from multiple sources (RSS feeds, YouTube channels), 
 - 💬 **AI Chat** - Ask questions about any article
 - 📊 **Engagement Tracking** - Learn from user interactions
 - ⏰ **Background Jobs** - Automatic content refresh
+- 🔄 **Rolling Freshness** - Tiered A/B/C content strategy with auto top-up
+- 📈 **Inventory Health** - Self-healing content reservoir
 
 ## Tech Stack
 
@@ -36,7 +38,7 @@ Blips aggregates tech news from multiple sources (RSS feeds, YouTube channels), 
 | API | FastAPI (Python 3.11+) |
 | Database | PostgreSQL + SQLAlchemy |
 | Cache | Redis |
-| AI | OpenAI GPT-4 |
+| AI | OpenAI GPT-4o-mini / Mistral |
 | Scheduler | APScheduler |
 | Container | Docker + Docker Compose |
 
@@ -56,8 +58,52 @@ docker-compose up -d
 docker-compose exec api alembic upgrade head
 
 # Verify
-curl http://localhost:8000/api/v1/health
+curl http://localhost:8000/health
 ```
+
+## API Documentation
+
+Interactive API documentation is available at:
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
+- **OpenAPI JSON**: http://localhost:8000/api/v1/openapi.json
+
+## API Endpoints
+
+### Content Feeds
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/articles/recent` | Get recent articles with tiered freshness |
+| GET | `/api/v1/articles/{id}` | Get article by ID with conversation |
+| GET | `/api/v1/videos/recent` | Get recent videos |
+| GET | `/api/v1/videos/reels` | Get short-form videos for reels player |
+
+### Session & Personalization
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/session/playlist` | Personalized mixed feed |
+| POST | `/api/v1/session/interactions` | Log user engagement events |
+| GET | `/api/v1/session/preferences` | Get user preferences |
+
+### Health & Monitoring
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Basic health check |
+| GET | `/metrics` | Ingestion metrics and budget status |
+| GET | `/api/v1/inventory/health` | Content inventory health across tiers |
+
+### AI Chat
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/ai/respond` | AI chat about content |
+| GET | `/api/v1/conversations/{id}` | Get conversation history |
+
+### Admin
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/admin/flags` | Get feature flags |
+| POST | `/api/v1/admin/trigger-fetch` | Trigger manual ingestion |
+| GET | `/api/v1/admin/stats/content` | Content statistics |
 
 ## Project Structure
 
@@ -68,25 +114,20 @@ src/backend/
 │   ├── models/              # SQLAlchemy models
 │   ├── repositories/        # Data access layer
 │   ├── services/            # Business logic
-│   │   ├── clustering.py    # Content deduplication
-│   │   ├── ranking.py       # Item scoring
-│   │   └── summarization.py # AI summaries
+│   │   ├── inventory_service.py   # Health monitoring
+│   │   ├── tiered_feed_service.py # Freshness tiers
+│   │   ├── topup_service.py       # Auto ingestion
+│   │   ├── playlist_service.py    # Personalized feeds
+│   │   └── diversity_mixer.py     # Feed balancing
+│   ├── ingestion/           # Content fetching
+│   ├── clustering/          # Content deduplication
+│   ├── ranking/             # Item scoring
 │   ├── scheduler/           # Background jobs
 │   └── core/                # Config, settings
 ├── alembic/                 # Database migrations
+├── tests/                   # Unit tests
 └── docker-compose.yml
 ```
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/v1/health` | Health check |
-| GET | `/api/v1/articles/recent` | Get recent articles |
-| GET | `/api/v1/videos/recent` | Get recent videos |
-| GET | `/api/v1/videos/reels` | Get videos for reels player |
-| POST | `/api/v1/interactions` | Track user engagement |
-| POST | `/api/v1/ai/chat` | AI chat about content |
 
 ## Documentation
 
@@ -96,6 +137,8 @@ src/backend/
 | [Backend Structure](docs/BACKEND_STRUCTURE.md) | Code organization and patterns |
 | [Configuration](docs/CONFIGURATION.md) | Environment variables and tuning |
 | [Development Guide](docs/DEVELOPMENT_GUIDE.md) | Local setup, testing, debugging |
+| [Feed Freshness Strategy](docs/FEED_FRESHNESS_STRATEGY.md) | Tiered content delivery |
+| [Inventory Runbook](docs/INVENTORY_RUNBOOK.md) | Monitoring and troubleshooting |
 
 ## Development
 
@@ -105,6 +148,9 @@ docker-compose logs -f api
 
 # Run tests
 docker-compose exec api pytest
+
+# Run specific tests
+docker-compose exec api pytest tests/unit/test_tiered_feed.py -v
 
 # Database shell
 docker-compose exec db psql -U postgres -d blips
