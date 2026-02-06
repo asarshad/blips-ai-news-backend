@@ -94,7 +94,7 @@ class IngestionProgressRepository:
         current = now or datetime.utcnow()
         q = self.db.query(IngestionProgress).filter(
             IngestionProgress.day_utc == day_utc,
-            IngestionProgress.status != "complete",
+            IngestionProgress.status.not_in(["complete", "failed"]),
             IngestionProgress.items_ingested < IngestionProgress.target,
             or_(IngestionProgress.retry_at.is_(None), IngestionProgress.retry_at <= current),
         )
