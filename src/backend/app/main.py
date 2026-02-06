@@ -88,15 +88,30 @@ def _run_initial_fetch():
         from app.db.base import SessionLocal
         from app.ingestion.time import get_ingestion_day
         from app.repositories.ingestion_progress_repo import IngestionProgressRepository
+        from app.repositories.ingestion_budget_repo import IngestionBudgetRepository
+        from app.models.ingestion_budget import IngestionBudget
         
         db = SessionLocal()
         try:
             day = get_ingestion_day()
             repo = IngestionProgressRepository(db)
             
+            # Log current budget status
+            budgets = db.query(IngestionBudget).filter(IngestionBudget.day == day).all()
+            for b in budgets:
+                remaining = max(0, int(b.target or 0) - int(b.inserted or 0) - int(b.reserved or 0))
+                logger.info(f"INITIAL FETCH: Budget {b.content_type.value} target={b.target} inserted={b.inserted} reserved={b.reserved} remaining={remaining}")
+            
             # Check if any progress rows exist for today
             all_rows = repo.list_for_day(day_utc=day)
             incomplete = repo.list_incomplete(day_utc=day)
+            
+            # Log incomplete breakdown by source type
+            by_type = {}
+            for r in incomplete:
+                by_type.setdefault(r.source_type, []).append(r.feed_name)
+            for st, feeds in by_type.items():
+                logger.info(f"INITIAL FETCH: Incomplete {st}: {len(feeds)} feeds")
             
             if not all_rows:
                 # Fresh start - no rows exist yet, run ingestion to create them
