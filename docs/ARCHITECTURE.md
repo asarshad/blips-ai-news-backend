@@ -180,13 +180,25 @@ Blips is a personalized tech news aggregator with two main components:
 8. Mobile app requests /api/v1/articles/recent
                 │
                 ▼
-9. API returns articles:
-   - Filtered to cluster representatives
-   - Sorted by global_score
-   - Paginated
+9. Tiered Feed Service blends content:
+   - Tier A (Fresh): Recently published
+   - Tier B (Backfill): Recently added, older publish
+   - Tier C (Evergreen): High quality archive
                 │
                 ▼
-10. Flutter displays in ArticleCard widget
+10. Inventory health check:
+   - If below threshold, trigger top-up ingestion
+   - Cache invalidation on new content
+                │
+                ▼
+11. API returns tiered articles:
+   - Filtered to cluster representatives
+   - Blended by freshness tier
+   - Diversity mixed
+   - With tier/age metadata for UI
+                │
+                ▼
+12. Flutter displays in ArticleCard with freshness label
 ```
 
 ## Security Considerations
@@ -195,6 +207,12 @@ Blips is a personalized tech news aggregator with two main components:
 - **Rate Limiting**: Redis-based per-IP rate limiting on chat endpoints.
 - **API Keys**: OpenAI key stored in environment, never in code.
 - **CORS**: Configured for specific origins in production.
+
+## API Documentation
+
+Interactive documentation available at:
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
 
 ## Scalability Path
 

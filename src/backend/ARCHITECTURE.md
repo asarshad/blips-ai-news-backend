@@ -80,29 +80,48 @@ Converts raw articles/videos into unified content items.
 |--------|---------|
 | `extractors.py` | Topic/entity/source extraction |
 | `service.py` | Ingestion pipeline orchestration |
+| `checkpointing.py` | Checkpoint-based ingestion with budget tracking |
+
+### Services (`app/services/`)
+
+Business logic and feed generation.
+
+| Module | Purpose |
+|--------|---------|
+| `inventory_service.py` | Health monitoring with tier counts |
+| `tiered_feed_service.py` | A/B/C freshness tier blending |
+| `topup_service.py` | Auto-ingestion when inventory low |
+| `playlist_service.py` | Personalized feed generation |
+| `diversity_mixer.py` | Topic/source diversity balancing |
+| `personalization_service.py` | User preference learning |
 
 ## Data Flow
 
 ```
 RSS Feeds ─────┐
-               ├──► Ingestion ──► Scoring ──► Feed API
-YouTube ───────┘        │
-                        ▼
-                   Clustering
+               ├──► Ingestion ──► Scoring ──► Tiered Feed ──► API
+YouTube ───────┘        │              │
+                        ▼              ▼
+                   Clustering    Inventory Health
+                                       │
+                                       ▼
+                                 Auto Top-Up
 ```
 
-1. **Fetch**: Scheduler pulls from RSS/YouTube
+1. **Fetch**: Scheduler pulls from RSS/YouTube with budget limits
 2. **Ingest**: Normalize into `content_items`, extract metadata
 3. **Cluster**: Group related stories
 4. **Score**: Compute quality/trend/recency/diversity
-5. **Serve**: API returns personalized, ranked content
+5. **Tier**: Classify content into Fresh (A), Backfill (B), Evergreen (C)
+6. **Serve**: API returns tiered, diverse, personalized content
+7. **Monitor**: Inventory health triggers top-up when needed
 
 ## Database Schema
 
 Primary tables:
-- `content_items` - Unified content with scores
-- `articles` - Raw article data
-- `videos` - Raw video data
+- `content_items` - Unified content with scores and freshness
+- `ingestion_progress` - Per-feed checkpoint tracking
+- `ingestion_budget` - Daily target quotas
 - `user_profiles` - User settings
 - `interaction_events` - Engagement tracking
 
@@ -110,11 +129,23 @@ Primary tables:
 
 | Job | Schedule | Purpose |
 |-----|----------|---------|
-| `fetch_articles` | 15 min | Pull RSS feeds |
-| `fetch_videos` | 30 min | Pull YouTube |
-| `run_scoring` | 1 hour | Update scores |
-| `run_clustering` | 15 min | Cluster content |
+| `fetch_and_process_news` | 30 min | Pull RSS/YouTube with checkpoints |
+| `run_scoring` | 1 hour | Update global scores |
+| `run_clustering` | 15 min | Cluster related content |
 | `preference_decay` | Daily | Decay old preferences |
+| `retry_ai_processing` | 2 hours | Retry failed AI extractions |
+
+## Tiered Freshness Strategy
+
+Content is classified into tiers for balanced feeds:
+
+| Tier | Name | Criteria | Priority |
+|------|------|----------|----------|
+| A | Fresh | published_at < 36h (articles) | Highest |
+| B | Backfill | created_at < 24h, older publish | Medium |
+| C | Evergreen | High score, < 14 days | Lowest |
+
+See [FEED_FRESHNESS_STRATEGY.md](docs/FEED_FRESHNESS_STRATEGY.md) for details.
 
 ## Configuration
 
@@ -131,26 +162,38 @@ SCORING_WEIGHT_TREND=0.30
 SCORING_WEIGHT_RECENCY=0.20
 SCORING_WEIGHT_DIVERSITY=0.10
 
-# Recency decay
-RECENCY_HALF_LIFE_HOURS=24
-RECENCY_MAX_AGE_HOURS=168
+# Freshness windows
+ARTICLES_FRESH_PUBLISHED_HOURS=36
+ARTICLES_BACKFILL_CREATED_HOURS=24
+MIN_FRESH_ARTICLES=30
+RESERVOIR_ARTICLES=200
 ```
 
 ## API Endpoints
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/api/feed/articles` | GET | Personalized article feed |
-| `/api/feed/videos` | GET | Personalized video feed |
-| `/api/feed/reels` | GET | Short-form videos |
-| `/api/chat` | POST | AI chat about content |
-| `/api/events` | POST | Track engagement |
+| `/api/v1/articles/recent` | GET | Tiered article feed |
+| `/api/v1/videos/recent` | GET | Video feed |
+| `/api/v1/videos/reels` | GET | Short-form videos |
+| `/api/v1/session/playlist` | GET | Personalized mixed feed |
+| `/api/v1/inventory/health` | GET | Inventory health by tier |
+| `/api/v1/ai/respond` | POST | AI chat about content |
+| `/health` | GET | Health check |
+| `/metrics` | GET | Ingestion metrics |
+
+## API Documentation
+
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
 
 ## Testing
 
 ```bash
 cd src/backend
 pytest tests/
+pytest tests/unit/test_tiered_feed.py -v
+pytest tests/unit/test_inventory_service.py -v
 ```
 
 ## Running

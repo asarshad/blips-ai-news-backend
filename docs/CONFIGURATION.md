@@ -271,6 +271,55 @@ services:
 
 ---
 
+## Rolling Freshness Strategy
+
+The tiered content strategy ensures feeds never feel empty.
+
+### Articles Freshness
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ARTICLES_FRESH_PUBLISHED_HOURS` | `36` | Tier A: Fresh content window |
+| `ARTICLES_BACKFILL_CREATED_HOURS` | `24` | Tier B: Recently added window |
+| `ARTICLES_EVERGREEN_MAX_DAYS` | `14` | Tier C: Max age for evergreen |
+| `MIN_FRESH_ARTICLES` | `30` | Minimum fresh items (triggers top-up) |
+| `RESERVOIR_ARTICLES` | `200` | Total inventory size |
+
+### Videos Freshness
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VIDEOS_FRESH_PUBLISHED_HOURS` | `72` | Tier A: Fresh content window |
+| `VIDEOS_BACKFILL_CREATED_HOURS` | `48` | Tier B: Recently added window |
+| `VIDEOS_EVERGREEN_MAX_DAYS` | `30` | Tier C: Max age for evergreen |
+| `MIN_FRESH_VIDEOS` | `25` | Minimum fresh items |
+| `RESERVOIR_VIDEOS` | `150` | Total inventory size |
+
+### Reels Freshness
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REELS_FRESH_PUBLISHED_HOURS` | `168` | Tier A: 7 days (shorts stay relevant) |
+| `REELS_BACKFILL_CREATED_HOURS` | `72` | Tier B: Recently added window |
+| `REELS_EVERGREEN_MAX_DAYS` | `45` | Tier C: Max age for evergreen |
+| `MIN_FRESH_REELS` | `20` | Minimum fresh items |
+| `RESERVOIR_REELS` | `300` | Total inventory size |
+
+### Top-Up Controls
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TOPUP_LOCK_TTL_SECONDS` | `120` | Lock timeout for top-up |
+| `TOPUP_MAX_RUNTIME_SECONDS` | `300` | Max top-up duration |
+| `INVENTORY_HEALTH_CACHE_TTL` | `60` | Health check cache duration |
+
+**Tuning guide**:
+- Increase fresh windows during slow news periods
+- Decrease MIN_FRESH thresholds if hitting API limits
+- Increase RESERVOIR for more browsing depth
+
+---
+
 ## Environment-Specific Overrides
 
 ### Development
@@ -302,6 +351,10 @@ SCHEDULER_NEWS_FETCH_INTERVAL_MINUTES=15
 # Tighter quotas
 QUOTA_MAX_MESSAGES_PER_DAY=3
 CACHE_PLAYLIST_CACHE_TTL_SECONDS=600
+
+# Freshness tuning
+ARTICLES_FRESH_PUBLISHED_HOURS=24
+MIN_FRESH_ARTICLES=50
 ```
 
 ---
@@ -334,3 +387,8 @@ CACHE_PLAYLIST_CACHE_TTL_SECONDS=600
 
 **Symptom**: App crashes on low-memory devices
 **Fix**: Reduce `poolSize` to 3-4
+
+### 6. Empty Feeds at Day Rollover
+
+**Symptom**: "No articles" message at midnight
+**Fix**: This is fixed by the tiered freshness strategy. Verify `MIN_FRESH_ARTICLES` threshold is reasonable.

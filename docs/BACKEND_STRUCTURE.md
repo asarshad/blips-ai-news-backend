@@ -106,17 +106,27 @@ Business logic layer. Orchestrates operations across repositories.
 
 | File | Responsibility |
 |------|----------------|
+| `inventory_service.py` | Health monitoring with tier counts (A/B/C) |
+| `tiered_feed_service.py` | Freshness tier blending for feeds |
+| `topup_service.py` | Auto-ingestion when inventory low |
 | `playlist_service.py` | Generate personalized feeds |
-| `chat_service.py` | AI chat with context management |
+| `diversity_mixer.py` | Topic/source diversity balancing |
+| `personalization_service.py` | User preference learning and decay |
+| `quota_manager.py` | AI chat quota management |
+| `ai_chat.py` | AI chat with context management |
 
 ### `/app/ingestion/`
 
-Content fetching from external sources.
+Content fetching from external sources with checkpoint-based tracking.
 
 | File | Purpose |
 |------|---------|
 | `service.py` | Main ingestion orchestrator |
-| `extractors.py` | Source-specific parsers |
+| `checkpointing.py` | Checkpoint-based ingestion with budget tracking |
+| `checkpoint_worker.py` | Worker for processing individual feeds |
+| `extractors.py` | Topic/entity extraction |
+| `leases.py` | Distributed locking for feed processing |
+| `runtime_state.py` | Scheduler state tracking |
 
 **How to add a new content source** (see dedicated section below).
 
@@ -150,7 +160,7 @@ All configuration centralized here.
 |------|---------|
 | `settings.py` | Environment variables, defaults |
 | `clustering.py` | Clustering thresholds |
-| `ranking.py` | Score weights |
+| `scoring.py` | Score weights |
 | `sources.py` | Default RSS feeds and channels |
 
 ### `/app/scheduler/`
@@ -159,8 +169,10 @@ Background job definitions.
 
 | File | Jobs |
 |------|------|
-| `jobs.py` | Job functions (fetch_news, run_scoring, etc.) |
-| `scheduler.py` | APScheduler setup and registration |
+| `tasks.py` | Main job functions (fetch_and_process_news) |
+| `tasks_curation.py` | Scoring, clustering, preference decay jobs |
+| `__init__.py` | APScheduler setup and registration |
+| `job_stats.py` | Job execution statistics |
 
 ### `/app/core/`
 
@@ -169,7 +181,9 @@ Shared utilities.
 | File | Purpose |
 |------|---------|
 | `logging.py` | Structured logging setup |
-| `deps.py` | FastAPI dependency injection |
+| `config.py` | Pydantic settings with freshness config |
+| `dependencies.py` | FastAPI dependency injection |
+| `feature_flags.py` | Feature flag management |
 
 ---
 
@@ -184,7 +198,7 @@ INSERT INTO feed_sources (name, url, source_type, category, is_active)
 VALUES ('New Tech Blog', 'https://example.com/rss', 'rss', 'Technology', true);
 ```
 
-2. **Or update default sources** in `/app/config/sources.py`:
+2. **Or update default sources** in `/app/config/feeds.py`:
 
 ```python
 DEFAULT_RSS_FEEDS = [
