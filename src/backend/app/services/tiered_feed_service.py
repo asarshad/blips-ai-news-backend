@@ -37,6 +37,17 @@ logger = get_logger(__name__)
 TIERED_FEED_CACHE_TTL = 45  # 45 seconds - balance freshness vs DB load
 
 
+@dataclass
+class FeedResponseMeta:
+    """Metadata about a feed response for diagnostics."""
+    source: str  # "redis" | "db"
+    cache_key: Optional[str]
+    cache_hit: bool
+    generated_at: datetime
+    tier_config: Dict[str, int]
+    surface: str
+
+
 def _get_redis_client():
     """Get Redis client for caching."""
     try:
@@ -312,7 +323,7 @@ def get_cached_tiered_feed(
     limit: int = 20,
     offset: int = 0,
     require_ai_processed: bool = True,
-) -> Tuple[List[Dict[str, Any]], bool]:
+) -> Tuple[List[Dict[str, Any]], bool, FeedResponseMeta]:
     """
     Get tiered feed with Redis caching.
     
@@ -327,10 +338,12 @@ def get_cached_tiered_feed(
         require_ai_processed: Filter to AI-processed content
         
     Returns:
-        Tuple of (list of item dicts, has_more)
+        Tuple of (list of item dicts, has_more, metadata)
     """
+    now = datetime.utcnow()
     cache_key = _cache_key(surface, limit, offset, require_ai_processed)
     redis_client = _get_redis_client()
+    cfg = _get_surface_config(surface)
     
     # Try to get from cache
     if redis_client:
@@ -339,7 +352,25 @@ def get_cached_tiered_feed(
             if cached:
                 data = json.loads(cached)
                 logger.debug(f"Cache HIT for {cache_key}")
-                return data["items"], data["has_more"]
+                
+                # Log cache hit with item preview for debugging
+                items = data["items"]
+                if items:
+                    newest = max((i.get("published_at", "") for i in items), default="none")
+                    logger.info(
+                        f"Feed cache HIT: surface={surface.value} key={cache_key} "
+                        f"items={len(items)} newest_published={newest}"
+                    )
+                
+                meta = FeedResponseMeta(
+                    source="redis",
+                    cache_key=cache_key,
+                    cache_hit=True,
+                    generated_at=now,
+                    tier_config=cfg,
+                    surface=surface.value,
+                )
+                return data["items"], data["has_more"], meta
         except Exception as e:
             logger.debug(f"Cache read failed: {e}")
     
@@ -355,6 +386,18 @@ def get_cached_tiered_feed(
     
     items = [tiered_item_to_dict(t) for t in tiered_items]
     
+    # Log DB query result for debugging
+    if items:
+        newest = max((i.get("published_at", "") for i in items), default="none")
+        tier_dist = {}
+        for i in items:
+            t = i.get("freshness_tier", "?")
+            tier_dist[t] = tier_dist.get(t, 0) + 1
+        logger.info(
+            f"Feed cache MISS: surface={surface.value} key={cache_key} "
+            f"items={len(items)} newest_published={newest} tiers={tier_dist}"
+        )
+    
     # Cache the result
     if redis_client:
         try:
@@ -364,4 +407,13 @@ def get_cached_tiered_feed(
         except Exception as e:
             logger.debug(f"Cache write failed: {e}")
     
-    return items, has_more
+    meta = FeedResponseMeta(
+        source="db",
+        cache_key=cache_key,
+        cache_hit=False,
+        generated_at=now,
+        tier_config=cfg,
+        surface=surface.value,
+    )
+    return items, has_more, meta
+
