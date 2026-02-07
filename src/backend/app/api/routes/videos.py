@@ -4,7 +4,7 @@ Updated to serve content from the unified content_items table with AI filtering.
 Includes tiered freshness strategy (A/B/C) and diversity mixing.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 from typing import Dict, Any
 
@@ -22,8 +22,10 @@ from app.services.tiered_feed_service import (
     get_tiered_feed,
     get_cached_tiered_feed,
     tiered_item_to_dict,
+    FeedResponseMeta,
 )
 from app.services.topup_service import check_and_trigger_topup
+from app.api.feed_headers import FeedMetadata, compute_feed_version
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -32,6 +34,7 @@ router = APIRouter()
 def get_content_repo(db: Session = Depends(get_db)) -> ContentItemRepository:
     """Factory for ContentItemRepository."""
     return ContentItemRepository(db)
+
 
 
 def _content_item_to_video_schema(item) -> dict:
@@ -55,6 +58,7 @@ def _content_item_to_video_schema(item) -> dict:
 def get_recent_videos(
     limit: int = Query(10, ge=1, le=50, description="Number of videos to return"),
     page: int = Query(1, ge=1, description="Page number"),
+    response: Response = None,
     db: Session = Depends(get_db),
     flags: FeatureFlags = Depends(get_feature_flags)
 ):
@@ -82,7 +86,7 @@ def get_recent_videos(
     offset = (page - 1) * limit
     
     # Use cached tiered feed for better performance
-    videos, has_more = get_cached_tiered_feed(
+    videos, has_more, meta = get_cached_tiered_feed(
         db,
         Surface.VIDEOS,
         limit=limit,
@@ -97,6 +101,20 @@ def get_recent_videos(
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
     logger.info(f"Videos page {page}: {tier_counts} (limit={limit})")
     
+    # Add diagnostic headers
+    if response:
+        feed_meta = FeedMetadata(
+            generated_at=meta.generated_at,
+            source=meta.source,
+            cache_key=meta.cache_key,
+            cache_hit=meta.cache_hit,
+            items=videos,
+            surface="videos",
+            tier_config=meta.tier_config,
+            feed_version=compute_feed_version(videos, meta.generated_at),
+        )
+        feed_meta.add_headers(response)
+    
     return {
         "videos": videos,
         "has_more": has_more,
@@ -108,6 +126,7 @@ def get_recent_videos(
 def get_reels(
     limit: int = Query(10, ge=1, le=50, description="Number of reels to return"),
     page: int = Query(1, ge=1, description="Page number"),
+    response: Response = None,
     db: Session = Depends(get_db),
     flags: FeatureFlags = Depends(get_feature_flags)
 ):
@@ -135,7 +154,7 @@ def get_reels(
     offset = (page - 1) * limit
     
     # Use cached tiered feed for better performance
-    videos, has_more = get_cached_tiered_feed(
+    videos, has_more, meta = get_cached_tiered_feed(
         db,
         Surface.REELS,
         limit=limit,
@@ -149,6 +168,20 @@ def get_reels(
         tier = v.get("freshness_tier", "?")
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
     logger.info(f"Reels page {page}: {tier_counts} (limit={limit})")
+    
+    # Add diagnostic headers
+    if response:
+        feed_meta = FeedMetadata(
+            generated_at=meta.generated_at,
+            source=meta.source,
+            cache_key=meta.cache_key,
+            cache_hit=meta.cache_hit,
+            items=videos,
+            surface="reels",
+            tier_config=meta.tier_config,
+            feed_version=compute_feed_version(videos, meta.generated_at),
+        )
+        feed_meta.add_headers(response)
     
     return {
         "videos": videos,

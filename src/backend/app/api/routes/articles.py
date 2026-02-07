@@ -4,7 +4,7 @@ Updated to serve content from the unified content_items table with AI filtering.
 Includes tiered freshness strategy (A/B/C) and diversity mixing.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Response
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 
@@ -26,8 +26,10 @@ from app.services.tiered_feed_service import (
     get_tiered_feed,
     get_cached_tiered_feed,
     tiered_item_to_dict,
+    FeedResponseMeta,
 )
 from app.services.topup_service import check_and_trigger_topup
+from app.api.feed_headers import FeedMetadata, compute_feed_version
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -114,6 +116,7 @@ def get_cached_articles(
 
 @router.get("/recent", response_model=Dict[str, Any])
 def get_recent_articles(
+    response: Response,
     limit: int = Query(5, ge=1, le=50, description="Number of articles to return"),
     page: int = Query(1, ge=1, description="Page number"),
     db: Session = Depends(get_db)
@@ -128,6 +131,9 @@ def get_recent_articles(
     
     Each article includes freshness_tier, published_age_seconds, and added_age_seconds.
     Results are diversity-mixed and cached (45s TTL) for performance.
+    
+    Response headers include diagnostic info:
+    - X-Feed-Generated-At, X-Feed-Source, X-Cache, X-Newest-Published-At, etc.
     """
     # Check inventory and trigger background top-up if needed (non-blocking)
     check_and_trigger_topup(db, SessionLocal)
@@ -135,7 +141,7 @@ def get_recent_articles(
     offset = (page - 1) * limit
     
     # Use cached tiered feed for better performance
-    articles, has_more = get_cached_tiered_feed(
+    articles, has_more, meta = get_cached_tiered_feed(
         db,
         Surface.ARTICLES,
         limit=limit,
@@ -152,6 +158,19 @@ def get_recent_articles(
         tier = a.get("freshness_tier", "?")
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
     logger.info(f"Articles page {page}: {tier_counts} (limit={limit})")
+    
+    # Add diagnostic headers
+    feed_meta = FeedMetadata(
+        generated_at=meta.generated_at,
+        source=meta.source,
+        cache_key=meta.cache_key,
+        cache_hit=meta.cache_hit,
+        items=articles,
+        surface="articles",
+        tier_config=meta.tier_config,
+        feed_version=compute_feed_version(articles, meta.generated_at),
+    )
+    feed_meta.add_headers(response)
     
     return {
         "articles": articles,
