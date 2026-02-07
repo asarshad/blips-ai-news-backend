@@ -1,7 +1,7 @@
 """Add conversation_starters column to content_items
 
 Revision ID: add_conversation_starters
-Revises: curation_system_002_drop_clusters
+Revises: curation_system_002
 Create Date: 2026-02-06
 
 """
@@ -12,7 +12,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers, used by Alembic.
 revision = 'add_conversation_starters'
-down_revision = 'curation_system_002_drop_clusters'
+down_revision = 'curation_system_002'
 branch_labels = None
 depends_on = None
 
