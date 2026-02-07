@@ -21,6 +21,7 @@ class LLMProvider(str, Enum):
     """Supported LLM providers."""
     OPENAI = "openai"
     MISTRAL = "mistral"
+    FAKE = "fake"  # For testing - deterministic responses, no API calls
 
 
 @dataclass
@@ -218,13 +219,16 @@ class LLMClient:
         Initialize LLM client with specified or configured provider.
         
         Args:
-            provider: LLM provider ("openai" or "mistral"). Defaults to LLM_PROVIDER env var.
+            provider: LLM provider ("openai", "mistral", or "fake"). Defaults to LLM_PROVIDER env var.
             api_key: API key for the provider. Defaults to provider-specific env var.
             model: Model to use. Defaults to provider-specific default.
         """
         provider_name = provider or settings.LLM_PROVIDER
         
-        if provider_name == LLMProvider.MISTRAL:
+        if provider_name == LLMProvider.FAKE or provider_name == "fake":
+            from app.integrations.fake_llm import FakeLLMClient
+            self._client = FakeLLMClient()
+        elif provider_name == LLMProvider.MISTRAL:
             default_model = model or settings.MISTRAL_MODEL
             self._client = MistralLLMClient(api_key=api_key, model=default_model)
         else:

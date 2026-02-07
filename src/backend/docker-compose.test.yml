@@ -1,0 +1,38 @@
+version: '3.8'
+
+# Infrastructure-only compose file for local E2E testing
+# Does NOT include the API service - run that separately with FakeLLM
+#
+# Usage:
+#   docker-compose -f docker-compose.test.yml up -d
+#   # Then run API with: LLM_PROVIDER=fake uvicorn app.main:app --reload
+
+services:
+  db:
+    image: postgres:14
+    volumes:
+      - e2e_postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=blips_test
+    ports:
+      - "5433:5432"  # Use 5433 to avoid conflict with local postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    ports:
+      - "6380:6379"  # Use 6380 to avoid conflict with local redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  e2e_postgres_data:
