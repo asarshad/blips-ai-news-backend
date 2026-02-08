@@ -77,17 +77,17 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             replace_existing=True
         )
         
-        # Add AI processing retry job (every 2 hours)
+        # Add AI processing retry job (every 15 minutes - critical for feed freshness)
         scheduler.add_job(
             retry_ai_processing,
-            IntervalTrigger(hours=2),
+            IntervalTrigger(minutes=15),
             id="ai_retry_job",
             replace_existing=True
         )
         
         scheduler.start()
         logger.info(f"Started background scheduler - fetching news every {fetch_human}")
-        logger.info("Curation jobs: scoring (hourly), clustering (15min), decay (daily), AI retry (2h)")
+        logger.info("Curation jobs: scoring (hourly), clustering (15min), decay (daily), AI retry (15min)")
         
         return scheduler
         
