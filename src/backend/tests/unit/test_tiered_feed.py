@@ -215,3 +215,147 @@ class TestCacheInvalidation:
         
         # Should not raise
         invalidate_tiered_feed_cache()
+
+
+class TestFeedResponseMeta:
+    """Test FeedResponseMeta dataclass for diagnostics."""
+
+    def test_meta_from_db(self):
+        """Meta correctly records DB source."""
+        from app.services.tiered_feed_service import FeedResponseMeta
+
+        now = datetime(2026, 2, 8, 12, 0, 0)
+        meta = FeedResponseMeta(
+            source="db",
+            cache_key="blips:tiered_feed:articles:l20:o0:ai1",
+            cache_hit=False,
+            generated_at=now,
+            tier_config={"fresh_hours": 36, "backfill_hours": 24, "evergreen_days": 14},
+            surface="articles",
+        )
+
+        assert meta.source == "db"
+        assert meta.cache_hit is False
+        assert meta.cache_key == "blips:tiered_feed:articles:l20:o0:ai1"
+        assert meta.tier_config["fresh_hours"] == 36
+
+    def test_meta_from_redis(self):
+        """Meta correctly records Redis cache hit."""
+        from app.services.tiered_feed_service import FeedResponseMeta
+
+        now = datetime(2026, 2, 8, 12, 0, 0)
+        meta = FeedResponseMeta(
+            source="redis",
+            cache_key="blips:tiered_feed:videos:l10:o0:ai1",
+            cache_hit=True,
+            generated_at=now,
+            tier_config={"fresh_hours": 72, "backfill_hours": 48, "evergreen_days": 30},
+            surface="videos",
+        )
+
+        assert meta.source == "redis"
+        assert meta.cache_hit is True
+        assert meta.surface == "videos"
+
+
+class TestFeedMetadata:
+    """Test FeedMetadata for response headers."""
+
+    def test_get_newest_dates_with_items(self):
+        """Correctly extracts newest published and created dates."""
+        from app.api.feed_headers import FeedMetadata
+
+        now = datetime(2026, 2, 8, 12, 0, 0)
+        items = [
+            {"published_at": "2026-02-08T10:00:00", "created_at": "2026-02-08T11:00:00"},
+            {"published_at": "2026-02-08T11:30:00", "created_at": "2026-02-08T11:45:00"},
+            {"published_at": "2026-02-07T09:00:00", "created_at": "2026-02-08T10:00:00"},
+        ]
+
+        meta = FeedMetadata(
+            generated_at=now,
+            source="db",
+            items=items,
+        )
+
+        newest_pub, newest_created = meta.get_newest_dates()
+
+        assert newest_pub == "2026-02-08T11:30:00"
+        assert newest_created == "2026-02-08T11:45:00"
+
+    def test_get_newest_dates_empty(self):
+        """Returns None for empty items list."""
+        from app.api.feed_headers import FeedMetadata
+
+        now = datetime(2026, 2, 8, 12, 0, 0)
+        meta = FeedMetadata(
+            generated_at=now,
+            source="db",
+            items=[],
+        )
+
+        newest_pub, newest_created = meta.get_newest_dates()
+
+        assert newest_pub is None
+        assert newest_created is None
+
+    def test_add_headers(self):
+        """Correctly adds headers to response."""
+        from app.api.feed_headers import FeedMetadata
+        from unittest.mock import MagicMock
+
+        now = datetime(2026, 2, 8, 12, 0, 0)
+        items = [
+            {"published_at": "2026-02-08T11:00:00", "created_at": "2026-02-08T11:30:00"},
+        ]
+
+        meta = FeedMetadata(
+            generated_at=now,
+            source="redis",
+            cache_key="blips:tiered_feed:articles:l5:o0:ai1",
+            cache_hit=True,
+            items=items,
+            tier_config={"fresh_hours": 36, "backfill_hours": 24, "evergreen_days": 14},
+            feed_version="n:5|p:2026-02-08T11:00:00|t:1234567",
+        )
+
+        response = MagicMock()
+        response.headers = {}
+
+        meta.add_headers(response)
+
+        assert response.headers["X-Feed-Generated-At"] == "2026-02-08T12:00:00"
+        assert response.headers["X-Feed-Source"] == "redis"
+        assert response.headers["X-Cache"] == "HIT"
+        assert response.headers["X-Feed-Key"] == "blips:tiered_feed:articles:l5:o0:ai1"
+        assert response.headers["X-Newest-Published-At"] == "2026-02-08T11:00:00"
+        assert "X-Query-Window" in response.headers
+
+
+class TestComputeFeedVersion:
+    """Test feed version computation for cache invalidation."""
+
+    def test_version_with_items(self):
+        """Version includes item count and newest published."""
+        from app.api.feed_headers import compute_feed_version
+
+        now = datetime(2026, 2, 8, 12, 0, 0)
+        items = [
+            {"published_at": "2026-02-08T10:00:00"},
+            {"published_at": "2026-02-08T11:00:00"},
+            {"published_at": "2026-02-07T09:00:00"},
+        ]
+
+        version = compute_feed_version(items, now)
+
+        assert "n:3" in version
+        assert "p:2026-02-08T11:00:00" in version
+
+    def test_version_empty_items(self):
+        """Empty items produce empty version."""
+        from app.api.feed_headers import compute_feed_version
+
+        now = datetime(2026, 2, 8, 12, 0, 0)
+        version = compute_feed_version([], now)
+
+        assert "empty:" in version
