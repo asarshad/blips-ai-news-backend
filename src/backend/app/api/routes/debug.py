@@ -215,9 +215,9 @@ def get_feed_state(
         inventory_status = {
             "is_healthy": health.is_healthy,
             "needs_topup": health.needs_topup,
-            "surface_tier_a_count": surface_health.tier_a_count if surface_health else None,
-            "surface_tier_b_count": surface_health.tier_b_count if surface_health else None,
-            "surface_tier_c_count": surface_health.tier_c_count if surface_health else None,
+            "surface_tier_a_count": surface_health.tier_counts.tier_a if surface_health else None,
+            "surface_tier_b_count": surface_health.tier_counts.tier_b if surface_health else None,
+            "surface_tier_c_count": surface_health.tier_counts.tier_c if surface_health else None,
         }
     except Exception as e:
         inventory_status = {"error": str(e)}
@@ -273,6 +273,26 @@ def invalidate_feed_cache(
     else:
         invalidate_tiered_feed_cache()
         return {"status": "ok", "invalidated": "all"}
+
+
+@router.post("/trigger_ai_processing")
+def trigger_ai_processing(
+    limit: int = Query(20, description="Max items to process"),
+) -> Dict[str, Any]:
+    """
+    Manually trigger AI processing for unprocessed content.
+    
+    Use this to immediately process new articles instead of waiting
+    for the scheduled job (every 15 minutes).
+    """
+    from app.scheduler.tasks_ai_retry import retry_ai_processing
+    
+    try:
+        # Run the AI processing task synchronously
+        retry_ai_processing()
+        return {"status": "ok", "message": f"AI processing triggered (limit={limit})"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 
 @router.get("/cache_keys")
