@@ -10,6 +10,8 @@ from app.db.base import SessionLocal
 from app.scheduler.config import LLM_RATE_LIMIT_DELAY, MAX_ITEMS_PER_RUN, MAX_LLM_CALLS_PER_RUN
 from app.scheduler.job_stats import log_job_start
 
+from sqlalchemy.orm import Session
+
 logger = get_logger(__name__)
 
 
@@ -80,6 +82,9 @@ def retry_ai_processing():
                 stats.errors.append(f"{item.title[:50]}: {str(e)}")
                 continue
 
+        # Second pass: generate conversation starters for items that have summaries but no starters
+        _backfill_starters(db, llm_client, stats)
+
     except Exception as e:
         stats.errors.append(str(e))
         logger.error(f"[ai_retry] Fatal error: {str(e)}")
@@ -87,3 +92,47 @@ def retry_ai_processing():
         db.close()
         stats.complete()
         stats.log_summary()
+
+
+def _backfill_starters(db: Session, llm_client, stats) -> None:
+    """Backfill conversation starters for items that have summaries but no starters.
+    
+    This ensures the feed API returns inline starters, eliminating the need
+    for the mobile app to make a separate /starters/{id} API call.
+    """
+    from app.models.content import ContentItem, ContentType
+    from app.services.conversation_starters import get_starters_service
+
+    if not llm_client.is_configured():
+        return
+
+    # Find items with summaries but no conversation_starters (limit to avoid LLM cost spikes)
+    items = (
+        db.query(ContentItem)
+        .filter(
+            ContentItem.ai_processed.is_(True),
+            ContentItem.conversation_starters.is_(None),
+            ContentItem.type.in_([ContentType.ARTICLE, ContentType.VIDEO]),
+        )
+        .order_by(ContentItem.created_at.desc())
+        .limit(20)
+        .all()
+    )
+
+    if not items:
+        return
+
+    logger.info(f"[ai_retry] Backfilling starters for {len(items)} items")
+    starters_service = get_starters_service(llm_client)
+
+    for item in items:
+        if stats.llm_calls >= MAX_LLM_CALLS_PER_RUN:
+            break
+        try:
+            starters_service.generate_and_persist(item)
+            db.commit()
+            stats.llm_calls += 1
+            time.sleep(LLM_RATE_LIMIT_DELAY)
+        except Exception as e:
+            db.rollback()
+            logger.warning(f"[ai_retry] Starters backfill failed for {item.id}: {e}")

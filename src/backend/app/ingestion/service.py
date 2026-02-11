@@ -164,6 +164,9 @@ class IngestionPipeline:
         self.clustering.cluster_new_item(content_item)
         self._update_scores(content_item)
         
+        # Generate conversation starters inline so they're available in feed responses
+        self._generate_starters(content_item)
+        
         # Log role info if available
         role_info = ""
         if entry.feed_role:
@@ -297,6 +300,10 @@ class IngestionPipeline:
         
         self.clustering.cluster_new_item(content_item)
         self._update_scores(content_item)
+        
+        # Generate conversation starters inline so they're available in feed responses
+        if content_type != ContentType.REEL:
+            self._generate_starters(content_item)
         
         # Log role info if available
         role_info = ""
@@ -618,6 +625,23 @@ class IngestionPipeline:
             diversity_boost=scores["diversity"],
             global_score=scores["global"],
         )
+
+    def _generate_starters(self, content_item: ContentItem) -> None:
+        """Generate conversation starters during ingestion so they're inline in feed responses."""
+        try:
+            if not self.llm_client.is_configured():
+                return
+            if not (content_item.summary or content_item.description):
+                return
+
+            from app.services.conversation_starters import get_starters_service
+            starters_service = get_starters_service(self.llm_client)
+            starters_service.generate_and_persist(content_item)
+            self.db.commit()
+            logger.debug(f"Generated starters for content_id={content_item.id}")
+        except Exception as e:
+            logger.warning(f"Failed to generate starters for {content_item.id}: {e}")
+            # Non-fatal — starters will be generated on-demand if needed
 
 
 def create_ingestion_pipeline(db: Session) -> IngestionPipeline:
