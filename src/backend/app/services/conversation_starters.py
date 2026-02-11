@@ -52,8 +52,9 @@ Generate 3 conversation starter questions that:
 1. Are specific to this content (reference the title/topic)
 2. Encourage deeper discussion about the implications
 3. Are conversational and engaging
+4. Each question must be at most 120 characters long
 
-Also provide 2-3 fallback questions that work for any content.
+Also provide 2-3 fallback questions that work for any content. Each fallback must also be at most 120 characters long.
 
 Respond ONLY with valid JSON in this exact format:
 {{
@@ -103,9 +104,17 @@ def parse_starters_response(response_text: str) -> Dict[str, List[str]]:
         if not isinstance(starters, list) or len(starters) == 0:
             raise StarterGenerationError("No starters in response")
         
+        # Filter empty strings and truncate to 120 chars
+        starters = [s.strip() for s in starters if isinstance(s, str) and s.strip()]
+        starters = [s[:117] + "..." if len(s) > 120 else s for s in starters]
+        
+        fallback_list = fallback[:3] if fallback else DEFAULT_FALLBACK_STARTERS
+        fallback_list = [s.strip() for s in fallback_list if isinstance(s, str) and s.strip()]
+        fallback_list = [s[:117] + "..." if len(s) > 120 else s for s in fallback_list]
+        
         return {
             "starters": starters[:5],  # Limit to 5
-            "fallback": fallback[:3] if fallback else DEFAULT_FALLBACK_STARTERS,
+            "fallback": fallback_list if fallback_list else DEFAULT_FALLBACK_STARTERS,
         }
         
     except json.JSONDecodeError as e:
