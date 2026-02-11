@@ -213,11 +213,17 @@ class RSSClient:
         return entries
     
     # Domains that block scraping — skip full-page extraction and rely on
-    # the RSS description fallback instead.
-    SCRAPE_BLOCKLIST = {"producthunt.com"}
+    # the RSS description fallback instead.  Avoids wasting HTTP requests
+    # on sites we already know will reject us.
+    SCRAPE_BLOCKLIST = {"producthunt.com", "theinformation.com"}
 
     def _extract_article_content(self, url: str) -> str:
-        """Extract article content from URL."""
+        """Extract article content from URL.
+        
+        Returns empty string on failure — caller falls through to RSS
+        description.  403/paywall responses are expected for some sources
+        and logged at INFO level, not ERROR.
+        """
         try:
             from urllib.parse import urlparse
             domain = urlparse(url).netloc.lower().removeprefix("www.")
@@ -252,8 +258,16 @@ class RSSClient:
             # Limit size for processing
             return article_content[:8000] if article_content else ""
             
+        except requests.exceptions.HTTPError as e:
+            # 403/paywall is expected for some sources — demote to info
+            status = getattr(e.response, 'status_code', None)
+            if status in (401, 403):
+                logger.info(f"Paywall/blocked ({status}) for {url}, using RSS description")
+            else:
+                logger.warning(f"HTTP {status} extracting content from {url}")
+            return ""
         except Exception as e:
-            logger.error(f"Error extracting content from {url}: {str(e)}")
+            logger.warning(f"Failed to extract content from {url}: {str(e)}")
             return ""
     
     def _get_rss_description(self, entry) -> str:
