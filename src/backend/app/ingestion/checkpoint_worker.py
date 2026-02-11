@@ -13,6 +13,7 @@ from app.core.logging import get_logger
 from app.ingestion.canonical import canonical_key_for_article, canonical_key_for_youtube
 from app.ingestion.checkpoint_locks import pg_advisory_unlock, try_pg_advisory_lock
 from app.ingestion.extractors import extract_entities, extract_source, extract_topics
+from app.ingestion.language_filter import is_english
 from app.ingestion.leases import claim_lease, lease_key, release_lease
 from app.ingestion.url_normalizer import normalize_url
 from app.models.content import ContentItem, ContentType
@@ -166,6 +167,10 @@ def process_progress_row_batch(
                 ec = _cursor_from_rss_entry(e)
                 if ec:
                     last_scanned_cursor = ec
+
+                # Language gate: skip non-English content
+                if not is_english(e.title, e.content):
+                    return
 
                 source_url = normalize_url(e.url) if e.url else e.url
                 if not source_url:
@@ -347,6 +352,12 @@ def process_progress_row_batch(
                 )
                 if want_reel != is_reel:
                     skipped_reasons["is_short_mismatch"] += 1
+                    return
+
+                # Language gate: skip non-English content
+                if not is_english(e.title, getattr(e, 'summary', None)):
+                    skipped_reasons.setdefault("non_english", 0)
+                    skipped_reasons["non_english"] += 1
                     return
 
                 source_url = normalize_url(e.video_url) if e.video_url else e.video_url
