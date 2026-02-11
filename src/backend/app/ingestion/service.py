@@ -20,6 +20,7 @@ from app.clustering.service import ClusteringService
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.ingestion.extractors import extract_entities, extract_source, extract_topics
+from app.ingestion.language_filter import is_english
 from app.ingestion.url_normalizer import normalize_url
 from app.integrations.llm_client import LLMClient
 from app.integrations.rss_client import FeedEntry, RSSClient
@@ -103,6 +104,10 @@ class IngestionPipeline:
         existing = self.content_repo.get_by_dedupe_key(dedupe_key)
         if existing:
             logger.debug(f"Article already ingested: {entry.title}")
+            return None
+
+        # Language gate: reject non-English content before spending LLM tokens
+        if not is_english(entry.title, entry.content):
             return None
         
         # Generate AI summary
@@ -226,6 +231,10 @@ class IngestionPipeline:
         existing = self.content_repo.get_by_dedupe_key(dedupe_key)
         if existing:
             logger.debug(f"Video already ingested: {entry.title}")
+            return None
+
+        # Language gate: reject non-English videos before spending LLM tokens
+        if not is_english(entry.title, entry.summary):
             return None
         
         # Generate AI summary (skip for reels - metadata only)
