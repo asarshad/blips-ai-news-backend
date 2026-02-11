@@ -212,9 +212,18 @@ class RSSClient:
         
         return entries
     
+    # Domains that block scraping — skip full-page extraction and rely on
+    # the RSS description fallback instead.
+    SCRAPE_BLOCKLIST = {"producthunt.com"}
+
     def _extract_article_content(self, url: str) -> str:
         """Extract article content from URL."""
         try:
+            from urllib.parse import urlparse
+            domain = urlparse(url).netloc.lower().removeprefix("www.")
+            if domain in self.SCRAPE_BLOCKLIST:
+                return ""  # fall through to RSS description
+
             headers = {"User-Agent": random.choice(self.USER_AGENTS)}
             response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
