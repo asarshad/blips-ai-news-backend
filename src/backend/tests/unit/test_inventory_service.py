@@ -5,17 +5,13 @@ Tests health computation, caching, and threshold detection.
 """
 
 from datetime import datetime
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from app.services.inventory_service import (
-    FreshnessTier,
-    Surface,
-    TierCounts,
-    SurfaceHealth,
     InventoryHealth,
     SourceDistribution,
+    Surface,
+    SurfaceHealth,
+    TierCounts,
 )
 
 

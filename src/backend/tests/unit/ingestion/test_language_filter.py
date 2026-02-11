@@ -3,9 +3,7 @@
 import importlib.util
 import os
 import sys
-
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 # Load language_filter directly to avoid the heavy app.ingestion.__init__ chain
 _filter_path = os.path.join(
