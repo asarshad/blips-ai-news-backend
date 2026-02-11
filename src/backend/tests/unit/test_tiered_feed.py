@@ -7,8 +7,6 @@ Tests the tier selection logic, caching, and diversity mixing.
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from app.services.inventory_service import FreshnessTier, Surface
 
 
@@ -67,8 +65,8 @@ class TestTieredItemToDict:
     
     def test_article_serialization(self):
         """Articles include read_time and tags."""
-        from app.services.tiered_feed_service import tiered_item_to_dict, TieredItem
         from app.models.content import ContentType
+        from app.services.tiered_feed_service import TieredItem, tiered_item_to_dict
         
         now = datetime(2026, 2, 6, 12, 0, 0)
         item = MagicMock()
@@ -104,8 +102,8 @@ class TestTieredItemToDict:
     
     def test_video_serialization(self):
         """Videos include video_url, thumbnail, category."""
-        from app.services.tiered_feed_service import tiered_item_to_dict, TieredItem
         from app.models.content import ContentType
+        from app.services.tiered_feed_service import TieredItem, tiered_item_to_dict
         
         now = datetime(2026, 2, 6, 12, 0, 0)
         item = MagicMock()
@@ -301,8 +299,9 @@ class TestFeedMetadata:
 
     def test_add_headers(self):
         """Correctly adds headers to response."""
-        from app.api.feed_headers import FeedMetadata
         from unittest.mock import MagicMock
+
+        from app.api.feed_headers import FeedMetadata
 
         now = datetime(2026, 2, 8, 12, 0, 0)
         items = [

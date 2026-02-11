@@ -5,6 +5,7 @@ applied. They verify the full flow from API → Service → Database.
 """
 
 import os
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -34,9 +35,10 @@ def client():
 @pytest.fixture
 def sample_article(client):
     """Create a sample article in the database for testing."""
+    from datetime import datetime, timezone
+
     from app.db.base import SessionLocal
     from app.models.content import ContentItem, ContentType
-    from datetime import datetime, timezone
 
     db = SessionLocal()
     try:
@@ -62,9 +64,10 @@ def sample_article(client):
 @pytest.fixture
 def sample_video(client):
     """Create a sample video in the database for testing."""
+    from datetime import datetime, timezone
+
     from app.db.base import SessionLocal
     from app.models.content import ContentItem, ContentType
-    from datetime import datetime, timezone
 
     db = SessionLocal()
     try:

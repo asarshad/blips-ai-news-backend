@@ -1,16 +1,17 @@
 """Unit tests for conversation starters service."""
 
 import json
+
 import pytest
 
+from app.models.content import ContentType
 from app.services.conversation_starters import (
+    DEFAULT_FALLBACK_STARTERS,
     ConversationStartersService,
+    StarterGenerationError,
     get_starter_prompt,
     parse_starters_response,
-    StarterGenerationError,
-    DEFAULT_FALLBACK_STARTERS,
 )
-from app.models.content import ContentType
 
 
 class TestGetStarterPrompt:
