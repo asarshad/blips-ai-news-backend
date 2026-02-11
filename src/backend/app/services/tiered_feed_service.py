@@ -300,6 +300,9 @@ def tiered_item_to_dict(tiered: TieredItem) -> Dict[str, Any]:
         "freshness_reason": tiered.reason,
         "published_age_seconds": tiered.published_age_seconds,
         "added_age_seconds": tiered.added_age_seconds,
+        
+        # Conversation starters (inline to avoid separate API call)
+        "conversation_starters": item.conversation_starters or {},
     }
     
     # Type-specific fields
