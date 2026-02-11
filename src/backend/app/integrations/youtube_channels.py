@@ -32,6 +32,7 @@ class ChannelRole(str, Enum):
     EXPLAINER = "explainer"        # Reviews, tutorials, explainers (MKBHD, Dave2D)
     NEWS = "news"                  # Daily tech news coverage (Bloomberg, Verge)
     ENGINEER = "engineer"          # Deep technical content (Two Minute Papers, 3Blue1Brown)
+    AI = "ai"                      # AI/ML focused creators and explainers
     OFFICIAL = "official"          # Primary source announcements (Apple, Google, OpenAI)
     SHORTS = "shorts"              # Shorts/Reels native channels
 
@@ -274,7 +275,8 @@ CHANNEL_REGISTRY: List[ChannelConfig] = [
         content_format=ContentFormat.LONG_FORM,
         daily_cap=1,
         quality_tier=QualityTier.PREMIUM,
-        notes="Hardware engineering deep dives",
+        enabled=False,
+        notes="Educational, publishes ~1/month, not news",
     ),
     ChannelConfig(
         channel_id="UC8butISFwT-Wl7EV0hUK0BQ",
@@ -283,7 +285,8 @@ CHANNEL_REGISTRY: List[ChannelConfig] = [
         content_format=ContentFormat.LONG_FORM,
         daily_cap=2,
         quality_tier=QualityTier.STANDARD,
-        notes="Programming tutorials and courses",
+        enabled=False,
+        notes="3-10 hour tutorials, wrong format for news app",
     ),
     ChannelConfig(
         channel_id="UCsBjURrPoezykLs9EqgamOA",
@@ -362,7 +365,8 @@ CHANNEL_REGISTRY: List[ChannelConfig] = [
         content_format=ContentFormat.LONG_FORM,
         daily_cap=2,
         quality_tier=QualityTier.SUPPLEMENTAL,
-        notes="AWS tech content",
+        enabled=False,
+        notes="Conference talks, not news",
     ),
     ChannelConfig(
         channel_id="UCL-g3eGJi1omSDSz48AML-g",
@@ -371,7 +375,110 @@ CHANNEL_REGISTRY: List[ChannelConfig] = [
         content_format=ContentFormat.LONG_FORM,
         daily_cap=2,
         quality_tier=QualityTier.SUPPLEMENTAL,
-        notes="NVIDIA GPU and AI announcements",
+        enabled=False,
+        notes="Product demos and conference recordings",
+    ),
+
+    # =========================================================================
+    # DIVERSE REVIEWER CHANNELS (NEW)
+    # Broader demographic appeal, mobile-focused, lifestyle tech
+    # Target: 6-8 videos/day
+    # =========================================================================
+    ChannelConfig(
+        channel_id="UCSOpcUkE-is7u7c4AkLgqTw",
+        name="MrMobile (Michael Fisher)",
+        role=ChannelRole.EXPLAINER,
+        content_format=ContentFormat.LONG_FORM,
+        daily_cap=1,
+        quality_tier=QualityTier.PREMIUM,
+        notes="Mobile-focused reviews, retro tech, excellent production",
+    ),
+    ChannelConfig(
+        channel_id="UCIrrRLyFMVmmL9NDAU2obJA",
+        name="SuperSaf",
+        role=ChannelRole.EXPLAINER,
+        content_format=ContentFormat.MIXED,
+        daily_cap=2,
+        quality_tier=QualityTier.STANDARD,
+        notes="Phone comparisons, camera tests, diverse perspective",
+    ),
+    ChannelConfig(
+        channel_id="UCey_c7U86mJGz1VJWH5CYPA",
+        name="iJustine",
+        role=ChannelRole.EXPLAINER,
+        content_format=ContentFormat.LONG_FORM,
+        daily_cap=1,
+        quality_tier=QualityTier.STANDARD,
+        notes="Apple ecosystem, lifestyle tech, female creator",
+    ),
+    ChannelConfig(
+        channel_id="UCFfCqe7b9YiDk2ZiAG8UIGA",
+        name="Flossy Carter",
+        role=ChannelRole.EXPLAINER,
+        content_format=ContentFormat.LONG_FORM,
+        daily_cap=1,
+        quality_tier=QualityTier.STANDARD,
+        notes="Unfiltered phone reviews, diverse perspective",
+    ),
+    ChannelConfig(
+        channel_id="UCWFKCr40YwOZQx8FHU_ZqqQ",
+        name="JerryRigEverything",
+        role=ChannelRole.EXPLAINER,
+        content_format=ContentFormat.MIXED,
+        daily_cap=2,
+        quality_tier=QualityTier.STANDARD,
+        notes="Durability tests, teardowns, hands-on reviews",
+    ),
+    ChannelConfig(
+        channel_id="UC0MYNOsIrz6jmXfIMERyRHQ",
+        name="Karl Conrad",
+        role=ChannelRole.EXPLAINER,
+        content_format=ContentFormat.MIXED,
+        daily_cap=2,
+        quality_tier=QualityTier.STANDARD,
+        notes="Cinematic tech reviews, camera comparisons",
+    ),
+    ChannelConfig(
+        channel_id="UCH7_fVl9_71cNjNDCCZAH6w",
+        name="Snazzy Labs",
+        role=ChannelRole.EXPLAINER,
+        content_format=ContentFormat.MIXED,
+        daily_cap=1,
+        quality_tier=QualityTier.STANDARD,
+        notes="Apple ecosystem deep dives, homelab, smart home",
+    ),
+    ChannelConfig(
+        channel_id="UC_1awbvccFZOnVRjAIkCG7Q",
+        name="Sam Beckman",
+        role=ChannelRole.EXPLAINER,
+        content_format=ContentFormat.MIXED,
+        daily_cap=2,
+        quality_tier=QualityTier.STANDARD,
+        notes="Phone speed tests, comparisons, budget tech",
+    ),
+
+    # =========================================================================
+    # AI / ML FOCUSED CHANNELS (NEW)
+    # AI tools, research explainers, ML developments
+    # Target: 3-4 videos/day
+    # =========================================================================
+    ChannelConfig(
+        channel_id="UCl3U-xOlFVLlsheAug-QoWA",
+        name="Matt Wolfe",
+        role=ChannelRole.AI,
+        content_format=ContentFormat.MIXED,
+        daily_cap=2,
+        quality_tier=QualityTier.PREMIUM,
+        notes="AI tools roundups, weekly AI news, tutorials",
+    ),
+    ChannelConfig(
+        channel_id="UCNJ1Ymd5yFuUPtn21xtRbbw",
+        name="AI Explained",
+        role=ChannelRole.AI,
+        content_format=ContentFormat.LONG_FORM,
+        daily_cap=1,
+        quality_tier=QualityTier.PREMIUM,
+        notes="Deep AI research analysis, model comparisons, benchmarks",
     ),
     
     # =========================================================================
@@ -437,7 +544,8 @@ CHANNEL_REGISTRY: List[ChannelConfig] = [
         content_format=ContentFormat.SHORTS,
         daily_cap=2,
         quality_tier=QualityTier.PREMIUM,
-        notes="Science experiment shorts",
+        enabled=False,
+        notes="Science/chemistry, not tech",
     ),
     ChannelConfig(
         channel_id="UCnmGIkw-KdI0W5siakKPKog",
@@ -511,11 +619,12 @@ def get_role_quotas() -> Dict[ChannelRole, Dict[str, int]]:
         Dict mapping role to quota info (min, target, max)
     """
     return {
-        ChannelRole.EXPLAINER: {"min": 6, "target": 10, "max": 15},
+        ChannelRole.EXPLAINER: {"min": 6, "target": 12, "max": 18},
         ChannelRole.NEWS: {"min": 6, "target": 10, "max": 15},
         ChannelRole.ENGINEER: {"min": 2, "target": 5, "max": 8},
+        ChannelRole.AI: {"min": 2, "target": 4, "max": 8},
         ChannelRole.OFFICIAL: {"min": 2, "target": 4, "max": 6},
-        ChannelRole.SHORTS: {"min": 20, "target": 30, "max": 50},
+        ChannelRole.SHORTS: {"min": 15, "target": 25, "max": 40},
     }
 
 

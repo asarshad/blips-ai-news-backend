@@ -4,7 +4,7 @@ RSS Feed Configuration with Editorial Roles.
 This module defines the complete feed registry with role-based metadata
 for reliable, diverse tech news ingestion.
 
-Target: ~35-40 high-quality, non-repetitive tech articles per day.
+Target: ~50-55 high-quality, non-repetitive tech articles per day.
 
 Architecture:
     - Each feed has an editorial ROLE (breaking, analysis, infra, etc.)
@@ -24,6 +24,7 @@ class FeedRole(Enum):
     
     BREAKING: Fast-moving news, gadget launches, tech industry updates
     ANALYSIS: Deep dives, opinion, long-form context pieces
+    AI: Artificial intelligence, machine learning, LLM developments
     INFRA: Cloud, DevOps, backend systems, enterprise tech
     SECURITY: Cybersecurity, privacy, threats, vulnerabilities
     BUSINESS: Startups, funding, acquisitions, market analysis
@@ -32,6 +33,7 @@ class FeedRole(Enum):
     """
     BREAKING = "breaking"
     ANALYSIS = "analysis"
+    AI = "ai"
     INFRA = "infra"
     SECURITY = "security"
     BUSINESS = "business"
@@ -81,12 +83,13 @@ DECAY_HALF_LIFE_HOURS: Dict[DecayProfile, int] = {
 
 # Role quotas - target articles per day per role
 ROLE_QUOTAS: Dict[FeedRole, int] = {
-    FeedRole.BREAKING: 12,    # Major news coverage
-    FeedRole.ANALYSIS: 8,     # Deep dives
+    FeedRole.BREAKING: 15,    # Major news coverage (expanded with new sources)
+    FeedRole.ANALYSIS: 10,    # Deep dives
+    FeedRole.AI: 6,           # AI/ML focused content
     FeedRole.INFRA: 5,        # Cloud/backend
     FeedRole.SECURITY: 4,     # Security news
     FeedRole.BUSINESS: 4,     # Startups/funding
-    FeedRole.DEV: 4,          # Developer content
+    FeedRole.DEV: 6,          # Developer content + mobile
     FeedRole.PRIMARY: 3,      # Official blogs (down-ranked)
 }
 
@@ -122,8 +125,8 @@ class FeedConfig:
 # FEED REGISTRY
 # =============================================================================
 # Organized by editorial role.
-# Total daily capacity: ~70 articles (with caps)
-# Target after deduplication: ~35-40 articles/day
+# Total daily capacity: ~100+ articles (with caps)
+# Target after deduplication: ~50-55 articles/day
 
 FEED_REGISTRY: List[FeedConfig] = [
     # =========================================================================
@@ -271,7 +274,8 @@ FEED_REGISTRY: List[FeedConfig] = [
         daily_cap=2,
         decay_profile=DecayProfile.NORMAL,
         base_quality_weight=0.80,
-        notes="AWS announcements and tutorials",
+        enabled=False,
+        notes="Enterprise noise, low consumer engagement",
     ),
     FeedConfig(
         url="https://cloudblog.withgoogle.com/rss/",
@@ -281,7 +285,8 @@ FEED_REGISTRY: List[FeedConfig] = [
         daily_cap=2,
         decay_profile=DecayProfile.NORMAL,
         base_quality_weight=0.80,
-        notes="GCP announcements and best practices",
+        enabled=False,
+        notes="Enterprise announcements, low consumer engagement",
     ),
 
     # =========================================================================
@@ -390,7 +395,8 @@ FEED_REGISTRY: List[FeedConfig] = [
         daily_cap=2,
         decay_profile=DecayProfile.SLOW,
         base_quality_weight=0.78,
-        notes="Frontend development, CSS, web tech",
+        enabled=False,
+        notes="Nearly dead since DigitalOcean acquisition",
     ),
 
     # =========================================================================
@@ -405,8 +411,9 @@ FEED_REGISTRY: List[FeedConfig] = [
         quality_tier=QualityTier.SUPPLEMENTAL,
         daily_cap=2,
         decay_profile=DecayProfile.NORMAL,
-        base_quality_weight=0.70,  # Down-ranked
-        notes="Official announcements - prefer news coverage",
+        base_quality_weight=0.70,
+        enabled=False,
+        notes="Covered by TechCrunch/Verge, feed often breaks",
     ),
     FeedConfig(
         url="https://blog.google/technology/ai/rss/",
@@ -435,8 +442,152 @@ FEED_REGISTRY: List[FeedConfig] = [
         quality_tier=QualityTier.SUPPLEMENTAL,
         daily_cap=2,
         decay_profile=DecayProfile.NORMAL,
-        base_quality_weight=0.70,  # Down-ranked
-        notes="Official announcements - prefer news coverage",
+        base_quality_weight=0.70,
+        enabled=False,
+        notes="Press releases, covered faster by 9to5Mac/MacRumors",
+    ),
+
+    # =========================================================================
+    # MOBILE & CONSUMER TECH (NEW)
+    # Apple, Android, mobile devices, consumer gadgets
+    # Target: 8-10 articles/day
+    # =========================================================================
+    FeedConfig(
+        url="https://9to5mac.com/feed/",
+        name="9to5Mac",
+        role=FeedRole.BREAKING,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=3,
+        decay_profile=DecayProfile.FAST,
+        base_quality_weight=0.88,
+        notes="Apple ecosystem news, leaks, reviews",
+    ),
+    FeedConfig(
+        url="https://9to5google.com/feed/",
+        name="9to5Google",
+        role=FeedRole.BREAKING,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=3,
+        decay_profile=DecayProfile.FAST,
+        base_quality_weight=0.88,
+        notes="Google/Android ecosystem news, Pixel, Chrome",
+    ),
+    FeedConfig(
+        url="https://www.androidauthority.com/feed/",
+        name="Android Authority",
+        role=FeedRole.ANALYSIS,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=2,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.78,
+        notes="Android reviews, tutorials, buying guides",
+    ),
+    FeedConfig(
+        url="https://feeds.macrumors.com/MacRumors-All",
+        name="MacRumors",
+        role=FeedRole.BREAKING,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=2,
+        decay_profile=DecayProfile.FAST,
+        base_quality_weight=0.80,
+        notes="Apple rumors, product launches, buying guides",
+    ),
+    FeedConfig(
+        url="https://www.xda-developers.com/feed/",
+        name="XDA Developers",
+        role=FeedRole.DEV,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=2,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.75,
+        notes="Mobile dev, Android mods, phone reviews",
+    ),
+    FeedConfig(
+        url="https://www.digitaltrends.com/feed/",
+        name="Digital Trends",
+        role=FeedRole.BREAKING,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=2,
+        decay_profile=DecayProfile.FAST,
+        base_quality_weight=0.75,
+        notes="Consumer tech, lifestyle tech, buying guides",
+    ),
+    FeedConfig(
+        url="https://www.techradar.com/rss",
+        name="TechRadar",
+        role=FeedRole.BREAKING,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=2,
+        decay_profile=DecayProfile.FAST,
+        base_quality_weight=0.75,
+        notes="Reviews, deals, consumer tech news",
+    ),
+    FeedConfig(
+        url="https://www.tomshardware.com/feeds/all",
+        name="Tom's Hardware",
+        role=FeedRole.ANALYSIS,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=2,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.80,
+        notes="PC hardware benchmarks, GPU reviews, components",
+    ),
+
+    # =========================================================================
+    # AI & MACHINE LEARNING (NEW)
+    # AI research, tools, industry developments
+    # Target: 4-6 articles/day
+    # =========================================================================
+    FeedConfig(
+        url="https://simonwillison.net/atom/everything/",
+        name="Simon Willison's Blog",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.92,
+        notes="LLM tools, prompt engineering, AI analysis from Django co-creator",
+    ),
+    FeedConfig(
+        url="https://www.deeplearning.ai/the-batch/feed/",
+        name="The Batch (Andrew Ng)",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.90,
+        enabled=False,
+        notes="Weekly AI/ML newsletter — feed URL returns 404, needs investigation",
+    ),
+
+    # =========================================================================
+    # PRODUCT & STARTUP DISCOVERY (NEW)
+    # Product launches, indie tools, startup ecosystem
+    # =========================================================================
+    FeedConfig(
+        url="https://www.producthunt.com/feed",
+        name="Product Hunt",
+        role=FeedRole.DEV,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=3,
+        decay_profile=DecayProfile.FAST,
+        base_quality_weight=0.70,
+        notes="New product launches, indie tools, startup ecosystem",
+    ),
+
+    # =========================================================================
+    # PREMIUM ANALYSIS (NEW)
+    # Investigative tech journalism, premium reporting
+    # =========================================================================
+    FeedConfig(
+        url="https://www.theinformation.com/feed",
+        name="The Information",
+        role=FeedRole.ANALYSIS,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.95,
+        notes="Premium tech business journalism, scoops, analysis",
     ),
 ]
 

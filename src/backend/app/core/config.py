@@ -66,9 +66,9 @@ class Settings(BaseSettings):
     PREFERENCE_DECAY_FACTOR: float = float(os.getenv("PREFERENCE_DECAY_FACTOR", "0.95"))
 
     # Daily ingestion targets (per UTC day)
-    DAILY_TARGET_ARTICLES: int = int(os.getenv("DAILY_TARGET_ARTICLES", "40"))
-    DAILY_TARGET_VIDEOS: int = int(os.getenv("DAILY_TARGET_VIDEOS", "30"))
-    DAILY_TARGET_REELS: int = int(os.getenv("DAILY_TARGET_REELS", "30"))
+    DAILY_TARGET_ARTICLES: int = int(os.getenv("DAILY_TARGET_ARTICLES", "55"))
+    DAILY_TARGET_VIDEOS: int = int(os.getenv("DAILY_TARGET_VIDEOS", "35"))
+    DAILY_TARGET_REELS: int = int(os.getenv("DAILY_TARGET_REELS", "25"))
 
     # Ingestion durability controls
     INGESTION_ENABLED: bool = os.getenv("INGESTION_ENABLED", "true").lower() in ("true", "1", "yes", "on")
