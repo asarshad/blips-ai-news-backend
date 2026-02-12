@@ -3,11 +3,11 @@ Application configuration using Pydantic settings.
 All environment variables and configuration options are defined here.
 """
 
-from pydantic_settings import BaseSettings
-from pydantic import Field
 import os
-from dotenv import load_dotenv
 from typing import List
+
+from dotenv import load_dotenv
+from pydantic_settings import BaseSettings
 
 load_dotenv()
 
@@ -16,6 +16,16 @@ class Settings(BaseSettings):
     # API Settings
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "blips-ai-news"
+
+    # Security
+    ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "")
+    DEBUG_ROUTES_ENABLED: bool = os.getenv("DEBUG_ROUTES_ENABLED", "false").lower() in ("true", "1", "yes", "on")
+    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "")
+    DOCS_ENABLED: bool = os.getenv("DOCS_ENABLED", "false").lower() in ("true", "1", "yes", "on")
+
+    # Rate limiting
+    RATE_LIMIT_DEFAULT: str = os.getenv("RATE_LIMIT_DEFAULT", "60/minute")
+    RATE_LIMIT_CHAT: str = os.getenv("RATE_LIMIT_CHAT", "10/minute")
     
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@db:5432/blips")

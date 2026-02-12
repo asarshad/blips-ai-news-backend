@@ -1099,6 +1099,17 @@
       "get": {
         "description": "Get status of all feature flags.\n\nReturns dict with each feature's current status and source (redis/env/default).",
         "operationId": "get_all_feature_flags_api_v1_admin_flags_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1111,6 +1122,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Get All Feature Flags",
@@ -1130,6 +1151,15 @@
             "required": true,
             "schema": {
               "title": "Feature",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
               "type": "string"
             }
           }
@@ -1171,6 +1201,15 @@
               "title": "Feature",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1210,6 +1249,15 @@
             "required": true,
             "schema": {
               "title": "Feature",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
               "type": "string"
             }
           }
@@ -1256,6 +1304,17 @@
       "get": {
         "description": "Get content statistics for monitoring.",
         "operationId": "get_content_stats_api_v1_admin_stats_content_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1264,6 +1323,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Get Content Stats",
@@ -1276,6 +1345,17 @@
       "post": {
         "description": "Manually trigger content ingestion (dev/testing only).",
         "operationId": "trigger_fetch_api_v1_admin_trigger_fetch_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1284,6 +1364,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Trigger Fetch",
@@ -1776,204 +1866,6 @@
         "summary": "Save Message",
         "tags": [
           "conversations"
-        ]
-      }
-    },
-    "/api/v1/debug/cache_keys": {
-      "get": {
-        "description": "List all tiered feed cache keys for debugging.",
-        "operationId": "list_cache_keys_api_v1_debug_cache_keys_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Cache Keys Api V1 Debug Cache Keys Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "List Cache Keys",
-        "tags": [
-          "debug"
-        ]
-      }
-    },
-    "/api/v1/debug/feed_state": {
-      "get": {
-        "description": "Get comprehensive feed state for debugging staleness issues.\n\nReturns:\n    - newest_published_at: Most recent published_at in DB\n    - newest_created_at: Most recent created_at in DB  \n    - redis_cache_state: TTL, cached_at, data preview\n    - tier_config: Current window settings\n    - inventory_health: Current inventory status",
-        "operationId": "get_feed_state_api_v1_debug_feed_state_get",
-        "parameters": [
-          {
-            "description": "Surface: articles, videos, reels",
-            "in": "query",
-            "name": "surface",
-            "required": false,
-            "schema": {
-              "default": "articles",
-              "description": "Surface: articles, videos, reels",
-              "title": "Surface",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Limit for cache key lookup",
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 20,
-              "description": "Limit for cache key lookup",
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Offset for cache key lookup",
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "description": "Offset for cache key lookup",
-              "title": "Offset",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Feed State Api V1 Debug Feed State Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Feed State",
-        "tags": [
-          "debug"
-        ]
-      }
-    },
-    "/api/v1/debug/invalidate_cache": {
-      "post": {
-        "description": "Force invalidate feed cache for debugging.",
-        "operationId": "invalidate_feed_cache_api_v1_debug_invalidate_cache_post",
-        "parameters": [
-          {
-            "description": "Surface to invalidate, or all if not specified",
-            "in": "query",
-            "name": "surface",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Surface to invalidate, or all if not specified",
-              "title": "Surface"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Invalidate Feed Cache Api V1 Debug Invalidate Cache Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Invalidate Feed Cache",
-        "tags": [
-          "debug"
-        ]
-      }
-    },
-    "/api/v1/debug/trigger_ai_processing": {
-      "post": {
-        "description": "Manually trigger AI processing for unprocessed content.\n\nUse this to immediately process new articles instead of waiting\nfor the scheduled job (every 15 minutes).",
-        "operationId": "trigger_ai_processing_api_v1_debug_trigger_ai_processing_post",
-        "parameters": [
-          {
-            "description": "Max items to process",
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 20,
-              "description": "Max items to process",
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Trigger Ai Processing Api V1 Debug Trigger Ai Processing Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Trigger Ai Processing",
-        "tags": [
-          "debug"
         ]
       }
     },
