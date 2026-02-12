@@ -285,6 +285,31 @@
         "title": "ConversationOut",
         "type": "object"
       },
+      "DataDeletionResponse": {
+        "description": "Response for the data deletion endpoint.",
+        "properties": {
+          "deleted": {
+            "additionalProperties": true,
+            "title": "Deleted",
+            "type": "object"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "deleted",
+          "message"
+        ],
+        "title": "DataDeletionResponse",
+        "type": "object"
+      },
       "EventTypeParam": {
         "description": "Event type parameter for API.",
         "enum": [
@@ -2028,6 +2053,51 @@
           }
         },
         "summary": "Invalidate Cache",
+        "tags": [
+          "session"
+        ]
+      }
+    },
+    "/api/v1/session/data": {
+      "delete": {
+        "description": "Delete all data associated with a device.\n\nRemoves usage records, interaction events, learned preferences, and the\ndevice profile.  Returns counts of deleted rows per table.",
+        "operationId": "delete_my_data_api_v1_session_data_delete",
+        "parameters": [
+          {
+            "description": "Device identifier",
+            "in": "header",
+            "name": "x-device-id",
+            "required": true,
+            "schema": {
+              "description": "Device identifier",
+              "title": "X-Device-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataDeletionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete My Data",
         "tags": [
           "session"
         ]

@@ -8,24 +8,26 @@ Endpoints:
 - GET /session/stats: Get user stats (debug)
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Header
-from sqlalchemy.orm import Session
-from typing import List, Optional
-import redis
-from pydantic import BaseModel
 from enum import Enum
+from typing import List, Optional
+
+import redis
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_db, get_redis
 from app.core.logging import get_logger
-from app.models.content import ContentType, EventType
+from app.models.content import ContentType, EventType, InteractionEvent, UserPreference, UserProfile
+from app.models.usage import Usage
 from app.repositories.content_repo import ContentItemRepository
 from app.repositories.user_repo import (
-    UserProfileRepository,
+    InteractionEventRepository,
     UserPreferenceRepository,
-    InteractionEventRepository
+    UserProfileRepository,
 )
-from app.services.playlist_service import PlaylistService
 from app.services.personalization_service import PersonalizationService
+from app.services.playlist_service import PlaylistService
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -317,3 +319,68 @@ def invalidate_cache(
     """
     playlist_service.invalidate_user_cache(device_id)
     return {"success": True, "message": "Cache invalidated"}
+
+
+# ============================================================================
+# Data Deletion Endpoint
+# ============================================================================
+
+class DataDeletionResponse(BaseModel):
+    """Response for the data deletion endpoint."""
+    success: bool
+    deleted: dict
+    message: str
+
+
+@router.delete("/data", response_model=DataDeletionResponse)
+def delete_my_data(
+    device_id: str = Depends(get_device_id),
+    db: Session = Depends(get_db),
+):
+    """
+    Delete all data associated with a device.
+
+    Removes usage records, interaction events, learned preferences, and the
+    device profile.  Returns counts of deleted rows per table.
+    """
+    counts: dict[str, int] = {}
+
+    try:
+        counts["usage"] = (
+            db.query(Usage)
+            .filter(Usage.device_id == device_id)
+            .delete(synchronize_session=False)
+        )
+
+        counts["interaction_events"] = (
+            db.query(InteractionEvent)
+            .filter(InteractionEvent.device_id == device_id)
+            .delete(synchronize_session=False)
+        )
+
+        counts["user_preferences"] = (
+            db.query(UserPreference)
+            .filter(UserPreference.device_id == device_id)
+            .delete(synchronize_session=False)
+        )
+
+        counts["user_profiles"] = (
+            db.query(UserProfile)
+            .filter(UserProfile.device_id == device_id)
+            .delete(synchronize_session=False)
+        )
+
+        db.commit()
+        total = sum(counts.values())
+        logger.info(f"[delete_my_data] Deleted {total} rows for device {device_id[:8]}...")
+
+        return DataDeletionResponse(
+            success=True,
+            deleted=counts,
+            message=f"Deleted {total} records across {len([v for v in counts.values() if v > 0])} tables.",
+        )
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"[delete_my_data] Error for device {device_id[:8]}...: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete data. Please try again.")

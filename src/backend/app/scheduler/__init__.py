@@ -17,6 +17,7 @@ from app.scheduler.tasks import (
     retry_ai_processing,
     run_backfill_job,
     run_clustering_job,
+    run_data_cleanup_job,
     run_preference_decay_job,
     run_scoring_job,
 )
@@ -84,10 +85,18 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             id="ai_retry_job",
             replace_existing=True
         )
+
+        # Add data cleanup job (daily at 4 AM UTC)
+        scheduler.add_job(
+            run_data_cleanup_job,
+            CronTrigger(hour=4, minute=0),
+            id="data_cleanup_job",
+            replace_existing=True
+        )
         
         scheduler.start()
         logger.info(f"Started background scheduler - fetching news every {fetch_human}")
-        logger.info("Curation jobs: scoring (hourly), clustering (15min), decay (daily), AI retry (15min)")
+        logger.info("Curation jobs: scoring (hourly), clustering (15min), decay (daily), AI retry (15min), cleanup (daily)")
         
         return scheduler
         
@@ -101,6 +110,7 @@ __all__ = [
     "fetch_and_process_news",
     "run_scoring_job",
     "run_clustering_job",
+    "run_data_cleanup_job",
     "run_preference_decay_job",
     "run_backfill_job",
     "retry_ai_processing",
