@@ -163,7 +163,7 @@ Format mirrors [TASKS.md](TASKS.md).
 
 ### Site (`blips-site`)
 
-- [ ] Rewrite `privacy.html` to disclose:
+- [x] Rewrite `privacy.html` to disclose:
   - Device identifiers collected (hashed IP+UA — after fix #4)
   - Interaction tracking: what events, how used (personalization), retention period
   - AI chat: messages processed by Mistral AI / OpenAI, retention policy
@@ -172,14 +172,14 @@ Format mirrors [TASKS.md](TASKS.md).
   - Data retention: specific periods (see #8)
   - Deletion: functional mechanism (not just "email us")
   - No cookies, no advertising, no sale of data
-- [ ] Rewrite `terms.html`:
+- [x] Rewrite `terms.html`:
   - AI-generated content disclaimer (summaries may be inaccurate)
   - Third-party content attribution
   - User responsibility for chat interactions
   - Remove "template/starting point" disclaimer
-- [ ] Add minimum age requirement (13+) to both documents
-- [ ] Update effective dates to current date
-- [ ] Remove the "starting point" disclaimer footer
+- [x] Add minimum age requirement (13+) to both documents
+- [x] Update effective dates to current date
+- [x] Remove the "starting point" disclaimer footer
 
 ---
 
@@ -193,24 +193,24 @@ Format mirrors [TASKS.md](TASKS.md).
 
 ### Backend
 
-- [ ] Define retention periods:
+- [x] Define retention periods:
   - `usage` table: 90 days
   - `interaction_events`: 90 days
   - `conversations`: 30 days (or remove if chats are device-local only)
   - `user_profiles` / `user_preferences`: until deletion requested
   - `content_items`: already managed via evergreen window (45 days)
-- [ ] Create `app/scheduler/tasks_cleanup.py`:
+- [x] Create `app/scheduler/tasks_cleanup.py`:
   - Scheduled daily job to purge expired records
   - Log count of deleted records per table
-- [ ] Add `DELETE /api/v1/session/data` endpoint:
+- [x] Add `DELETE /api/v1/session/data` endpoint:
   - Accepts `X-Device-ID` header
   - Deletes all data for that device: usage, interaction_events, user_profile, user_preferences
   - Returns confirmation with counts
-- [ ] Register cleanup task in scheduler config
+- [x] Register cleanup task in scheduler config
 
 ### Mobile
 
-- [ ] Add "Delete My Data" button in Settings page:
+- [x] Add "Delete My Data" button in Settings page:
   - Calls the deletion endpoint
   - Clears local SQLite databases
   - Shows confirmation dialog before proceeding
