@@ -1,36 +1,43 @@
 """AI Chat routes for the REST API."""
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
-from sqlalchemy.orm import Session
 from typing import Optional
-import redis
 
+import redis
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from sqlalchemy.orm import Session
+
+from app.core.config import settings as _settings
 from app.core.dependencies import get_db, get_redis
-from app.core.feature_flags import get_feature_flags, FeatureFlags
+from app.core.device_id import get_device_id as _get_device_id_hashed
 from app.core.exceptions import (
-    ArticleNotFoundError, 
+    ArticleNotFoundError,
     ChatGenerationError,
+    internal_error_exception,
     not_found_exception,
     quota_exceeded_exception,
-    internal_error_exception,
 )
-from app.schemas.conversation import ConversationCreate
-from app.services.ai_chat import AiChatService
-from app.services.quota_manager import QuotaManager
+from app.core.feature_flags import FeatureFlags, get_feature_flags
 from app.repositories.content_repo import ContentItemRepository
 from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.usage_repo import UsageRepository
+from app.schemas.conversation import ConversationCreate
+from app.services.ai_chat import AiChatService
+from app.services.quota_manager import QuotaManager
+
+_limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter()
 
 
 def _get_device_id(request: Request, user_agent: Optional[str]) -> str:
-    """Generate a device ID from client IP and user agent."""
-    client_ip = request.client.host
-    return f"{client_ip}_{user_agent[:50]}" if user_agent else client_ip
+    """Generate a hashed device ID from client IP and user agent."""
+    return _get_device_id_hashed(request, user_agent)
 
 
 @router.post("/respond")
+@_limiter.limit(_settings.RATE_LIMIT_CHAT)
 def get_ai_response(
     request: Request,
     message: ConversationCreate,

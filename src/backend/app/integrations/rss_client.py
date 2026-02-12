@@ -8,26 +8,23 @@ Enhanced with role-based feed configuration for diverse,
 high-quality content ingestion.
 """
 
+import html
+import random
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Dict, List, Optional
+
 import feedparser
 import requests
 from bs4 import BeautifulSoup
-import html
-import random
-from typing import List, Dict, Any, Optional
-from datetime import datetime
-from dataclasses import dataclass, field
 
-from app.core.config import settings
 from app.core.logging import get_logger
 from app.integrations.rss_feeds import (
+    DecayProfile,
     FeedConfig,
     FeedRole,
     QualityTier,
-    DecayProfile,
     get_enabled_feeds,
-    get_feed_by_url,
-    get_quality_modifier,
-    get_decay_half_life,
 )
 
 logger = get_logger(__name__)
@@ -175,16 +172,11 @@ class RSSClient:
                     title = decode_html_entities(entry.title)
                     url = entry.link
                     
-                    # Extract content - try full page extraction first, fallback to RSS description
-                    content = self._extract_article_content(url)
+                    # Use RSS feed content only (no full-page scraping)
+                    content = self._get_rss_description(entry)
                     if not content:
-                        # Fallback: use RSS feed's description/summary
-                        content = self._get_rss_description(entry)
-                        if content:
-                            logger.info(f"Using RSS description for article: {title}")
-                        else:
-                            logger.warning(f"Skipped article with no content: {title}")
-                            continue
+                        logger.warning(f"Skipped article with no RSS content: {title}")
+                        continue
                     
                     # Get image
                     image_url = self._extract_image_url(entry, url)
@@ -212,63 +204,8 @@ class RSSClient:
         
         return entries
     
-    # Domains that block scraping — skip full-page extraction and rely on
-    # the RSS description fallback instead.  Avoids wasting HTTP requests
-    # on sites we already know will reject us.
-    SCRAPE_BLOCKLIST = {"producthunt.com", "theinformation.com"}
-
-    def _extract_article_content(self, url: str) -> str:
-        """Extract article content from URL.
-        
-        Returns empty string on failure — caller falls through to RSS
-        description.  403/paywall responses are expected for some sources
-        and logged at INFO level, not ERROR.
-        """
-        try:
-            from urllib.parse import urlparse
-            domain = urlparse(url).netloc.lower().removeprefix("www.")
-            if domain in self.SCRAPE_BLOCKLIST:
-                return ""  # fall through to RSS description
-
-            headers = {"User-Agent": random.choice(self.USER_AGENTS)}
-            response = requests.get(url, headers=headers, timeout=10)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Remove non-content elements
-            for element in soup(['script', 'style', 'nav', 'header', 'footer', 'aside', 'form', 'iframe']):
-                element.extract()
-            
-            # Try different content extraction methods
-            article_content = ""
-            
-            # 1. Look for common article containers
-            article_tags = soup.select("article, .article, #article, .post-content, .entry-content, .content, .post, .story")
-            
-            if article_tags:
-                largest_tag = max(article_tags, key=lambda tag: len(tag.get_text()))
-                paragraphs = largest_tag.find_all('p')
-                article_content = " ".join([p.get_text(strip=True) for p in paragraphs if len(p.get_text(strip=True)) > 50])
-            else:
-                # 2. Fallback to main paragraphs
-                paragraphs = soup.find_all('p')
-                article_content = " ".join([p.get_text(strip=True) for p in paragraphs if len(p.get_text(strip=True)) > 50])
-            
-            # Limit size for processing
-            return article_content[:8000] if article_content else ""
-            
-        except requests.exceptions.HTTPError as e:
-            # 403/paywall is expected for some sources — demote to info
-            status = getattr(e.response, 'status_code', None)
-            if status in (401, 403):
-                logger.info(f"Paywall/blocked ({status}) for {url}, using RSS description")
-            else:
-                logger.warning(f"HTTP {status} extracting content from {url}")
-            return ""
-        except Exception as e:
-            logger.warning(f"Failed to extract content from {url}: {str(e)}")
-            return ""
+    # _extract_article_content removed — we now use RSS descriptions
+    # only (no full-page scraping) to respect copyright and avoid SSRF.
     
     def _get_rss_description(self, entry) -> str:
         """Extract content from RSS feed's description/summary fields."""
@@ -321,33 +258,9 @@ class RSSClient:
             if img_tag and img_tag.get('src'):
                 return img_tag['src']
         
-        # Try Open Graph image from article page
-        return self._fetch_og_image(article_url)
-    
-    def _fetch_og_image(self, url: str) -> str:
-        """Fetch Open Graph image from article page."""
-        try:
-            headers = {"User-Agent": random.choice(self.USER_AGENTS)}
-            response = requests.get(url, headers=headers, timeout=5)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Try Open Graph image
-            og_image = soup.find('meta', property='og:image')
-            if og_image and og_image.get('content'):
-                return og_image['content']
-            
-            # Try Twitter card image
-            twitter_image = soup.find('meta', attrs={'name': 'twitter:image'})
-            if twitter_image and twitter_image.get('content'):
-                return twitter_image['content']
-            
-            return ""
-            
-        except Exception as e:
-            logger.debug(f"Error fetching OG image from {url}: {e}")
-            return ""
+        # No OG image fallback — we only use images from the RSS feed
+        # metadata to avoid scraping article pages.
+        return ""
     
     def _parse_date(self, entry) -> datetime:
         """Parse and normalize publication date."""

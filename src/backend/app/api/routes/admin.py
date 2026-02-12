@@ -4,15 +4,17 @@ These endpoints allow instant feature flag updates without redeploy.
 Should be protected in production (e.g., behind internal network or auth).
 """
 
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
-from typing import Dict, Any
+from typing import Any, Dict
 
-from app.core.feature_flags import get_feature_flags, FeatureFlags
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
+from app.core.auth import require_admin_key
+from app.core.feature_flags import FeatureFlags, get_feature_flags
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_admin_key)])
 
 
 class FeatureFlagUpdate(BaseModel):
@@ -138,6 +140,7 @@ def reset_feature_flag(
 def get_content_stats():
     """Get content statistics for monitoring."""
     from sqlalchemy import text
+
     from app.db.base import SessionLocal
     
     db = SessionLocal()

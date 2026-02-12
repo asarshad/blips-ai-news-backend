@@ -15,19 +15,19 @@ Format mirrors [TASKS.md](TASKS.md).
 
 ### Backend
 
-- [ ] Add `ADMIN_API_KEY: str = ""` to `app/core/config.py`
-- [ ] Add `DEBUG_ROUTES_ENABLED: bool = False` to `app/core/config.py`
-- [ ] Create `app/core/auth.py` with `require_admin_key` FastAPI dependency:
+- [x] Add `ADMIN_API_KEY: str = ""` to `app/core/config.py`
+- [x] Add `DEBUG_ROUTES_ENABLED: bool = False` to `app/core/config.py`
+- [x] Create `app/core/auth.py` with `require_admin_key` FastAPI dependency:
   - Reads `X-Admin-Key` header
   - Compares against `ADMIN_API_KEY` using `secrets.compare_digest`
   - Returns 401 if missing, 403 if wrong
   - If `ADMIN_API_KEY` is empty/unset → reject all requests (fail-closed)
-- [ ] Add `require_admin_key` dependency to all 6 admin routes in `admin.py`
-- [ ] Add `require_admin_key` dependency to all 4 debug routes in `debug.py`
-- [ ] Conditionally register debug router in `api/__init__.py` based on `DEBUG_ROUTES_ENABLED`
-- [ ] Add `ADMIN_API_KEY` and `DEBUG_ROUTES_ENABLED` to `.env.example`
+- [x] Add `require_admin_key` dependency to all 6 admin routes in `admin.py`
+- [x] Add `require_admin_key` dependency to all 4 debug routes in `debug.py`
+- [x] Conditionally register debug router in `api/__init__.py` based on `DEBUG_ROUTES_ENABLED`
+- [x] Add `ADMIN_API_KEY` and `DEBUG_ROUTES_ENABLED` to `.env.example`
 - [ ] Set `ADMIN_API_KEY` in Render environment variables
-- [ ] Update OpenAPI snapshot after adding auth headers
+- [x] Update OpenAPI snapshot after adding auth headers
 - [ ] Unit test: request without key → 401
 - [ ] Unit test: request with wrong key → 403
 - [ ] Unit test: request with correct key → 200
@@ -45,12 +45,12 @@ Format mirrors [TASKS.md](TASKS.md).
 
 ### Backend
 
-- [ ] Add `CORS_ORIGINS: str = ""` to `app/core/config.py` (comma-separated)
-- [ ] Update CORS middleware in `main.py`:
+- [x] Add `CORS_ORIGINS: str = ""` to `app/core/config.py` (comma-separated)
+- [x] Update CORS middleware in `main.py`:
   - If `CORS_ORIGINS` is set → parse as list, use as `allow_origins`
   - If empty → use `["capacitor://localhost", "http://localhost"]`
   - Remove `allow_credentials=True` (not needed for API-key auth)
-- [ ] Add `CORS_ORIGINS` to `.env.example`
+- [x] Add `CORS_ORIGINS` to `.env.example`
 
 ---
 
@@ -64,12 +64,12 @@ Format mirrors [TASKS.md](TASKS.md).
 
 ### Backend
 
-- [ ] Add `slowapi>=0.1.9` to `requirements.txt`
-- [ ] Add rate limiter setup in `main.py`:
+- [x] Add `slowapi>=0.1.9` to `requirements.txt`
+- [x] Add rate limiter setup in `main.py`:
   - Default: 60 req/min per IP for feed/content endpoints
   - Chat: 10 req/min per IP (on top of existing daily quota)
   - Admin: 10 req/min per IP
-- [ ] Add `RATE_LIMIT_DEFAULT: str = "60/minute"` and `RATE_LIMIT_CHAT: str = "10/minute"` to config
+- [x] Add `RATE_LIMIT_DEFAULT: str = "60/minute"` and `RATE_LIMIT_CHAT: str = "10/minute"` to config
 - [ ] Handle `429 Too Many Requests` response (custom JSON body)
 
 ### Mobile
@@ -88,13 +88,13 @@ Format mirrors [TASKS.md](TASKS.md).
 
 ### Backend
 
-- [ ] Create `app/core/device_id.py`:
+- [x] Create `app/core/device_id.py`:
   - `hash_device_id(ip: str, user_agent: str) -> str` — SHA-256, truncated to 32 hex chars
   - Deterministic: same IP+UA → same hash
   - One-way: cannot recover IP from hash
-- [ ] Update `_get_device_id()` in `ai_chat.py` to use `hash_device_id()`
-- [ ] Update `_get_device_id()` in `usage.py` to use `hash_device_id()`
-- [ ] Extract duplicated `_get_device_id()` into the shared `device_id.py` module (DRY)
+- [x] Update `_get_device_id()` in `ai_chat.py` to use `hash_device_id()`
+- [x] Update `_get_device_id()` in `usage.py` to use `hash_device_id()`
+- [x] Extract duplicated `_get_device_id()` into the shared `device_id.py` module (DRY)
 - [ ] Consider aligning session.py to accept either `X-Device-ID` or fall back to hashed IP+UA
 - [ ] Add Alembic migration to hash existing `device_id` values in `usage` / `interaction_events` tables
 
@@ -110,15 +110,15 @@ Format mirrors [TASKS.md](TASKS.md).
 
 ### Backend
 
-- [ ] Refactor `_extract_article_content` in `rss_client.py`:
+- [x] Refactor `_extract_article_content` in `rss_client.py`:
   - Remove full-page scraping logic (`requests.get` + BeautifulSoup extraction)
   - Remove `SCRAPE_BLOCKLIST` (no longer needed when not scraping)
   - Remove `USER_AGENTS` rotation list
   - Keep only RSS feed content (`description`, `summary`, `content:encoded`) as source
-- [ ] Keep `_extract_image_url()` for RSS metadata images but remove any fallback that fetches article pages for OG images
-- [ ] If RSS description is empty/too short → log warning and skip article (don't scrape)
+- [x] Keep `_extract_image_url()` for RSS metadata images but remove any fallback that fetches article pages for OG images
+- [x] If RSS description is empty/too short → log warning and skip article (don't scrape)
 - [ ] Verify all 32 enabled feeds provide usable `<description>` or `<content:encoded>`
-- [ ] Test: ingestion still works with RSS-only content
+- [x] Test: ingestion still works with RSS-only content
 - [ ] Test: AI summarization quality is acceptable with RSS descriptions
 
 ---
@@ -250,12 +250,12 @@ Format mirrors [TASKS.md](TASKS.md).
 
 ### Backend
 
-- [ ] Add `DOCS_ENABLED: bool = False` to `app/core/config.py`
-- [ ] Conditionally set `docs_url` and `redoc_url` in `main.py` based on config:
+- [x] Add `DOCS_ENABLED: bool = False` to `app/core/config.py`
+- [x] Conditionally set `docs_url` and `redoc_url` in `main.py` based on config:
   - `docs_url="/docs" if settings.DOCS_ENABLED else None`
   - `redoc_url="/redoc" if settings.DOCS_ENABLED else None`
-- [ ] OpenAPI JSON can stay accessible (needed for contract tests)
-- [ ] Add `DOCS_ENABLED=true` to `.env.example` for local development
+- [x] OpenAPI JSON can stay accessible (needed for contract tests)
+- [x] Add `DOCS_ENABLED=true` to `.env.example` for local development
 
 ---
 

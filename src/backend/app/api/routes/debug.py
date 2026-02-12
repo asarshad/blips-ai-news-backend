@@ -12,11 +12,11 @@ SECURITY NOTE: These endpoints should be disabled or auth-protected in productio
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
+from app.core.auth import require_admin_key
 from app.core.dependencies import get_db
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentType
@@ -32,7 +32,7 @@ from app.services.tiered_feed_service import (
 )
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_admin_key)])
 
 
 def _surface_from_string(surface: str) -> Surface:

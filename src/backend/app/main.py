@@ -19,6 +19,9 @@ from typing import Optional
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from app.api import api_router
 from app.core.config import settings
@@ -90,9 +93,8 @@ def _run_initial_fetch():
     try:
         from app.db.base import SessionLocal
         from app.ingestion.time import get_ingestion_day
-        from app.repositories.ingestion_progress_repo import IngestionProgressRepository
-        from app.repositories.ingestion_budget_repo import IngestionBudgetRepository
         from app.models.ingestion_budget import IngestionBudget
+        from app.repositories.ingestion_progress_repo import IngestionProgressRepository
         from app.services.topup_service import startup_inventory_check
         
         # First: check inventory health and trigger top-up if needed
@@ -270,19 +272,33 @@ app = FastAPI(
     description="AI-powered tech news aggregator API. Fetches articles from RSS feeds and videos from YouTube, processes with AI summarization, and serves personalized feeds.",
     version="1.0.0",
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
-    docs_url="/docs",  # Swagger UI
-    redoc_url="/redoc",  # ReDoc alternative
+    docs_url="/docs" if settings.DOCS_ENABLED else None,
+    redoc_url="/redoc" if settings.DOCS_ENABLED else None,
     lifespan=lifespan,
 )
 
-# CORS middleware - allow all origins in development
+# CORS middleware — restrict origins
+_cors_origins: list[str] = (
+    [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+    if settings.CORS_ORIGINS
+    else ["capacitor://localhost", "http://localhost"]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Rate limiting (per IP)
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=[settings.RATE_LIMIT_DEFAULT],
+    storage_uri=settings.REDIS_URL,
+)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.middleware("http")
