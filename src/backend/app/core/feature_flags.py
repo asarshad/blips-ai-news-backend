@@ -19,8 +19,8 @@ Usage:
 
 import os
 import json
+import time
 from typing import Optional, Dict
-from functools import lru_cache
 
 import redis
 
@@ -82,21 +82,23 @@ class FeatureFlags:
     Feature flag manager with Redis-first, env-fallback strategy.
     
     Priority order:
-    1. Redis (for instant updates without redeploy)
-    2. Environment variable (FEATURE_{NAME}_ENABLED)
-    3. Default value (based on ENV)
+    1. In-memory cache (TTL-based, avoids hitting Redis on every request)
+    2. Redis (for instant updates without redeploy)
+    3. Environment variable (FEATURE_{NAME}_ENABLED)
+    4. Default value (based on ENV)
     """
     
     def __init__(self, redis_client: Optional[redis.Redis] = None):
         self._redis = redis_client
         self._env = os.getenv("ENV", "dev").lower()
-        self._cache: Dict[str, tuple] = {}  # name -> (value, timestamp)
+        self._cache: Dict[str, tuple] = {}  # name -> (value, expiry_timestamp)
     
     def _get_redis(self) -> Optional[redis.Redis]:
-        """Get Redis client, lazily connecting if needed."""
+        """Get Redis client, using shared connection pool."""
         if self._redis is None:
             try:
-                self._redis = redis.from_url(settings.REDIS_URL)
+                from app.core.dependencies import get_redis
+                self._redis = get_redis()
                 self._redis.ping()
             except Exception as e:
                 logger.warning(f"Redis unavailable for feature flags: {e}")
@@ -137,7 +139,7 @@ class FeatureFlags:
         """
         Check if a feature is enabled.
         
-        Priority: Redis > Environment > Default
+        Priority: Cache > Redis > Environment > Default
         
         Args:
             feature: Feature name (e.g., "chat", "ingestion")
@@ -148,21 +150,29 @@ class FeatureFlags:
         # Normalize feature name
         feature = feature.lower().strip()
         
+        # Check in-memory cache first (avoids Redis round-trip)
+        cached = self._cache.get(feature)
+        if cached is not None:
+            value, expiry = cached
+            if time.monotonic() < expiry:
+                return value
+            # expired — fall through
+        
         # Check Redis first (dynamic, no redeploy)
         redis_value = self._get_from_redis(feature)
         if redis_value is not None:
-            logger.debug(f"Feature '{feature}' from Redis: {redis_value}")
+            self._cache[feature] = (redis_value, time.monotonic() + FLAG_CACHE_TTL)
             return redis_value
         
         # Check environment variable
         env_value = self._get_from_env(feature)
         if env_value is not None:
-            logger.debug(f"Feature '{feature}' from env: {env_value}")
+            self._cache[feature] = (env_value, time.monotonic() + FLAG_CACHE_TTL)
             return env_value
         
         # Fall back to default
         default = self._get_default(feature)
-        logger.debug(f"Feature '{feature}' using default: {default}")
+        self._cache[feature] = (default, time.monotonic() + FLAG_CACHE_TTL)
         return default
     
     def set_flag(self, feature: str, enabled: bool) -> bool:
@@ -184,6 +194,8 @@ class FeatureFlags:
         try:
             key = f"{REDIS_KEY_PREFIX}{feature.lower()}"
             redis_client.set(key, "true" if enabled else "false")
+            # Invalidate local cache so next check sees the update
+            self._cache.pop(feature.lower(), None)
             logger.info(f"Feature flag '{feature}' set to {enabled}")
             return True
         except Exception as e:
@@ -207,6 +219,7 @@ class FeatureFlags:
         try:
             key = f"{REDIS_KEY_PREFIX}{feature.lower()}"
             redis_client.delete(key)
+            self._cache.pop(feature.lower(), None)
             logger.info(f"Feature flag '{feature}' deleted from Redis")
             return True
         except Exception as e:
@@ -279,5 +292,16 @@ def get_feature_flags() -> FeatureFlags:
     return _feature_flags
 
 
-# Convenience alias
-feature_flags = get_feature_flags()
+# Convenience alias — lazily initialized on first property access.
+class _LazyFeatureFlags:
+    """Proxy that delays FeatureFlags construction until first use."""
+
+    _instance: Optional[FeatureFlags] = None
+
+    def __getattr__(self, name: str):  # noqa: ANN001
+        if self._instance is None:
+            self._instance = FeatureFlags()
+        return getattr(self._instance, name)
+
+
+feature_flags: FeatureFlags = _LazyFeatureFlags()  # type: ignore[assignment]
