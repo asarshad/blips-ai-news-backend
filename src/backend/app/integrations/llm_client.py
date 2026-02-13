@@ -3,18 +3,42 @@ LLM provider abstraction layer.
 
 Supports multiple LLM providers (OpenAI, Mistral) with a unified interface.
 Switch providers via LLM_PROVIDER environment variable.
+Includes retry logic, request timeouts, and daily cost tracking.
 """
 
-import os
+import time
 from abc import ABC, abstractmethod
+from datetime import date, timezone
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 from enum import Enum
+
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 
 from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Timeout for individual LLM API calls (seconds)
+LLM_REQUEST_TIMEOUT = int(settings.LLM_REQUEST_TIMEOUT) if hasattr(settings, "LLM_REQUEST_TIMEOUT") else 30
+
+# Daily cost ceiling (USD) — tracked in Redis
+LLM_DAILY_COST_CEILING = float(
+    getattr(settings, "LLM_DAILY_COST_CEILING", 5.0)
+)
+
+# Approximate cost per 1K tokens (input+output blended) for budgeting
+_TOKEN_COST_PER_1K = {
+    "openai": 0.00030,   # gpt-4o-mini blended
+    "mistral": 0.00025,  # mistral-small blended
+    "fake": 0.0,
+}
 
 
 class LLMProvider(str, Enum):
@@ -76,16 +100,19 @@ class OpenAILLMClient(BaseLLMClient):
     
     def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
         import openai
-        self.openai = openai
         
         self.api_key = api_key or settings.OPENAI_API_KEY
         self.model = model
+        self._client = None
         
         if not self._is_valid_key(self.api_key):
             logger.warning("OpenAI API key is missing or invalid. AI features will be unavailable.")
             self.api_key = None
         else:
-            self.openai.api_key = self.api_key
+            self._client = openai.OpenAI(
+                api_key=self.api_key,
+                timeout=LLM_REQUEST_TIMEOUT,
+            )
     
     def _is_valid_key(self, key: Optional[str]) -> bool:
         if not key or key.strip() == "":
@@ -95,11 +122,17 @@ class OpenAILLMClient(BaseLLMClient):
         return True
     
     def is_configured(self) -> bool:
-        return self.api_key is not None
+        return self._client is not None
     
     def get_provider_name(self) -> str:
         return "openai"
     
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        reraise=True,
+    )
     def chat(
         self,
         messages: List[ChatMessage],
@@ -107,7 +140,7 @@ class OpenAILLMClient(BaseLLMClient):
         temperature: float = 0.7
     ) -> ChatResponse:
         if not self.is_configured():
-            raise Exception("OpenAI API key is not configured. Set OPENAI_API_KEY environment variable.")
+            raise RuntimeError("OpenAI API key is not configured. Set OPENAI_API_KEY environment variable.")
         
         try:
             api_messages = [
@@ -115,11 +148,11 @@ class OpenAILLMClient(BaseLLMClient):
                 for msg in messages
             ]
             
-            response = self.openai.chat.completions.create(
+            response = self._client.chat.completions.create(
                 model=self.model,
                 messages=api_messages,
                 max_tokens=max_tokens,
-                temperature=temperature
+                temperature=temperature,
             )
             
             return ChatResponse(
@@ -128,8 +161,10 @@ class OpenAILLMClient(BaseLLMClient):
                 model=self.model,
                 provider="openai"
             )
+        except (ConnectionError, TimeoutError):
+            raise  # let tenacity retry
         except Exception as e:
-            logger.error(f"OpenAI chat error: {str(e)}")
+            logger.error(f"OpenAI chat error: {type(e).__name__}: {e}")
             raise
 
 
@@ -165,6 +200,12 @@ class MistralLLMClient(BaseLLMClient):
     def get_provider_name(self) -> str:
         return "mistral"
     
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        reraise=True,
+    )
     def chat(
         self,
         messages: List[ChatMessage],
@@ -172,7 +213,7 @@ class MistralLLMClient(BaseLLMClient):
         temperature: float = 0.7
     ) -> ChatResponse:
         if not self.is_configured():
-            raise Exception("Mistral API key is not configured. Set MISTRAL_API_KEY environment variable.")
+            raise RuntimeError("Mistral API key is not configured. Set MISTRAL_API_KEY environment variable.")
         
         try:
             api_messages = [
@@ -193,8 +234,10 @@ class MistralLLMClient(BaseLLMClient):
                 model=self.model,
                 provider="mistral"
             )
+        except (ConnectionError, TimeoutError):
+            raise  # let tenacity retry
         except Exception as e:
-            logger.error(f"Mistral chat error: {str(e)}")
+            logger.error(f"Mistral chat error: {type(e).__name__}: {e}")
             raise
 
 
@@ -255,6 +298,9 @@ class LLMClient:
         """
         Send a chat completion request to the configured provider.
         
+        Enforces daily cost ceiling via Redis counter. Raises RuntimeError
+        if the ceiling has been reached.
+        
         Args:
             messages: List of ChatMessage objects
             max_tokens: Maximum tokens in response
@@ -263,7 +309,63 @@ class LLMClient:
         Returns:
             ChatResponse with content and usage info
         """
-        return self._client.chat(messages, max_tokens, temperature)
+        # --- Daily cost ceiling check ---
+        self._enforce_cost_ceiling()
+
+        response = self._client.chat(messages, max_tokens, temperature)
+
+        # --- Track token spend ---
+        self._record_tokens(response.tokens_used, response.provider)
+
+        return response
+
+    # ------------------------------------------------------------------
+    # Cost tracking helpers
+    # ------------------------------------------------------------------
+
+    def _cost_redis_key(self) -> str:
+        """Redis key for today's token counter."""
+        today = date.today().isoformat()
+        return f"llm:tokens:{today}"
+
+    def _enforce_cost_ceiling(self) -> None:
+        """Raise RuntimeError if daily estimated spend exceeds ceiling."""
+        if LLM_DAILY_COST_CEILING <= 0:
+            return  # disabled
+        try:
+            from app.core.dependencies import get_redis
+            r = get_redis()
+            raw = r.get(self._cost_redis_key())
+            if raw is not None:
+                total_tokens = int(raw)
+                provider = self._client.get_provider_name()
+                cost_per_1k = _TOKEN_COST_PER_1K.get(provider, 0.0003)
+                estimated_cost = (total_tokens / 1000.0) * cost_per_1k
+                if estimated_cost >= LLM_DAILY_COST_CEILING:
+                    logger.warning(
+                        f"LLM daily cost ceiling reached: ${estimated_cost:.4f} >= ${LLM_DAILY_COST_CEILING}"
+                    )
+                    raise RuntimeError(
+                        f"LLM daily cost ceiling of ${LLM_DAILY_COST_CEILING} reached"
+                    )
+        except RuntimeError:
+            raise
+        except Exception as e:
+            # If Redis is down, allow the request rather than blocking AI entirely
+            logger.warning(f"Cost ceiling check failed (allowing request): {e}")
+
+    def _record_tokens(self, tokens: int, provider: str) -> None:
+        """Increment today's token counter in Redis."""
+        if tokens <= 0:
+            return
+        try:
+            from app.core.dependencies import get_redis
+            r = get_redis()
+            key = self._cost_redis_key()
+            r.incrby(key, tokens)
+            r.expire(key, 90_000)  # 25 hours — auto-expire stale counters
+        except Exception as e:
+            logger.warning(f"Token tracking failed (non-fatal): {e}")
     
     def summarize_article(
         self,
@@ -283,7 +385,7 @@ class LLMClient:
             SummaryResult with summary and tags
         """
         if not self.is_configured():
-            raise Exception(f"{self.get_provider()} API key is not configured")
+            raise RuntimeError(f"{self.get_provider()} API key is not configured")
         
         truncated_content = content[:max_content_length]
         
@@ -345,7 +447,7 @@ TAGS: tag1, tag2, tag3
             Summary string
         """
         if not self.is_configured():
-            raise Exception(f"{self.get_provider()} API key is not configured")
+            raise RuntimeError(f"{self.get_provider()} API key is not configured")
         
         truncated_desc = description[:max_length]
         
@@ -372,7 +474,7 @@ Format your response as just the summary text.
             
             summary = response.content.strip()
             if not summary:
-                raise Exception("Empty summary returned from LLM")
+                raise ValueError("Empty summary returned from LLM")
             
             return summary
             

@@ -25,6 +25,7 @@ apscheduler>=3.10.4
 # LLM Providers
 openai>=1.40.0
 mistralai>=1.0.0
+tenacity>=8.2.0
 
 # RSS processing
 feedparser==6.0.10

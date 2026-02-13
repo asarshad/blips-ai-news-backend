@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # Mistral
     MISTRAL_API_KEY: str = os.getenv("MISTRAL_API_KEY", "")
     MISTRAL_MODEL: str = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
+
+    # LLM resilience / cost controls
+    LLM_REQUEST_TIMEOUT: int = int(os.getenv("LLM_REQUEST_TIMEOUT", "30"))
+    LLM_DAILY_COST_CEILING: float = float(os.getenv("LLM_DAILY_COST_CEILING", "5.0"))
     
     # News sources
     RSS_FEEDS: List[str] = [
