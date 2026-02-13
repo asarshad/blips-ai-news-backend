@@ -8,6 +8,7 @@ from app.api.routes import (
     conversation,
     debug,
     inventory,
+    metrics,
     quality,
     session,
     starters,
@@ -28,6 +29,7 @@ api_router.include_router(session.router, prefix="/session", tags=["session"])
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 api_router.include_router(quality.router, prefix="/quality", tags=["quality"])
 api_router.include_router(inventory.router, prefix="/inventory", tags=["inventory"])
+api_router.include_router(metrics.router, tags=["metrics"])
 
 if settings.DEBUG_ROUTES_ENABLED:
     api_router.include_router(debug.router, prefix="/debug", tags=["debug"])
