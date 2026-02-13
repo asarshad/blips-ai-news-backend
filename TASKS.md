@@ -46,27 +46,27 @@ Tracking document for pending improvements across backend and mobile.
 
 ### Backend
 
-- [ ] Add `langdetect>=1.0.9` to `requirements.txt`
-- [ ] Create `app/ingestion/language_filter.py`:
+- [x] Add `langdetect>=1.0.9` to `requirements.txt`
+- [x] Create `app/ingestion/language_filter.py`:
   - `is_english(title, description=None) -> bool`
   - Uses `langdetect.detect()` on concatenated title + first 500 chars of description
   - Returns `True` if language is `"en"`, `False` otherwise
   - Returns `True` on detection failure (safe default for curated English sources)
   - Logs non-English detections at WARNING level with detected language and title
-- [ ] Insert language gate in `app/ingestion/service.py` — `ingest_rss_entry()`:
+- [x] Insert language gate in `app/ingestion/service.py` — `ingest_rss_entry()`:
   - After dedupe_key check (~L106), before AI summarization (~L108)
   - `if not is_english(entry.title, entry.content): return None`
-- [ ] Insert language gate in `app/ingestion/checkpoint_worker.py` — `_add_entry()` for YouTube:
+- [x] Insert language gate in `app/ingestion/checkpoint_worker.py` — `_add_entry()` for YouTube:
   - After `want_reel != is_reel` filter (~L319), before URL normalization (~L320)
   - `if not is_english(e.title, e.summary): skipped_reasons["non_english"] += 1; return`
-- [ ] Insert language gate in RSS branch of `checkpoint_worker.py` (~L168):
+- [x] Insert language gate in RSS branch of `checkpoint_worker.py` (~L168):
   - After cursor tracking, before building values dict
-- [ ] Write unit tests in `tests/unit/ingestion/test_language_filter.py`:
+- [x] Write unit tests in `tests/unit/ingestion/test_language_filter.py`:
   - English titles → True
   - Spanish title → False
   - Mixed/mostly English → True
   - Empty/very short text → True (safe default)
-- [ ] Deploy and monitor logs for "non-English" skip messages
+- [x] Deploy and monitor logs for "non-English" skip messages
 - [ ] One-time cleanup of existing non-English content:
   ```sql
   UPDATE content_items SET is_suppressed = true
