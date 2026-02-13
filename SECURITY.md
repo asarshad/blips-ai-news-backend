@@ -227,16 +227,16 @@ Format mirrors [TASKS.md](TASKS.md).
 
 ### Mobile
 
-- [ ] Apple App Store Connect — Privacy Nutrition Labels:
+- [x] Apple App Store Connect — Privacy Nutrition Labels:
   - Data Linked to You: Device ID (hashed)
   - Data Used to Track You: None
   - Data types collected: Usage Data, Identifiers (device ID)
   - Purposes: App Functionality, Personalization
-- [ ] Google Play Console — Data Safety:
+- [x] Google Play Console — Data Safety:
   - Data collected: Device or other IDs, App interactions
   - Data shared: Chat messages with AI providers (Mistral/OpenAI)
   - Security: Data encrypted in transit (HTTPS), data deletion available
-- [ ] Document declarations in `PRIVACY_DECLARATIONS.md`
+- [x] Document declarations in `PRIVACY_DECLARATIONS.md`
 
 ---
 
