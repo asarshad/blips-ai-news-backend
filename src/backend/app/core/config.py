@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     RATE_LIMIT_DEFAULT: str = "60/minute"
     RATE_LIMIT_CHAT: str = "10/minute"
 
+    # Alerting
+    ALERT_ENABLED: bool = False
+    ALERT_WEBHOOK_URL: str = ""
+
     # Database
     DATABASE_URL: str = "postgresql://postgres:postgres@db:5432/blips"
 
