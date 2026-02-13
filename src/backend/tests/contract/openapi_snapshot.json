@@ -2736,8 +2736,19 @@
     },
     "/metrics": {
       "get": {
-        "description": "Lightweight JSON metrics for ingestion progress.",
+        "description": "Lightweight JSON metrics for ingestion progress (requires ADMIN_API_KEY).",
         "operationId": "metrics_metrics_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -2746,6 +2757,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Metrics"

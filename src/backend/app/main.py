@@ -16,7 +16,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -25,6 +25,7 @@ from slowapi.util import get_remote_address
 from sqlalchemy import text
 
 from app.api import api_router
+from app.core.auth import require_admin_key
 from app.core.config import settings
 from app.core.dependencies import get_redis
 from app.core.logging import get_logger, setup_logging
@@ -363,9 +364,9 @@ def health_check():
     return checks
 
 
-@app.get("/metrics")
+@app.get("/metrics", dependencies=[Depends(require_admin_key)])
 def metrics():
-    """Lightweight JSON metrics for ingestion progress."""
+    """Lightweight JSON metrics for ingestion progress (requires ADMIN_API_KEY)."""
     from app.ingestion.runtime_state import get_scheduler_snapshot
     from app.ingestion.time import get_ingestion_day
     from app.models.ingestion_progress import IngestionProgress
