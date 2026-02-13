@@ -62,6 +62,34 @@ class ChatGenerationError(ExternalServiceError):
     pass
 
 
+class LLMQuotaExceededError(ExternalServiceError):
+    """Raised when LLM daily cost ceiling is exceeded."""
+    
+    def __init__(self, ceiling: float, current_spend: float):
+        super().__init__(
+            f"Daily LLM cost ceiling exceeded",
+            f"Ceiling: ${ceiling:.2f}, Current: ${current_spend:.2f}"
+        )
+        self.ceiling = ceiling
+        self.current_spend = current_spend
+
+
+class LLMConfigurationError(ExternalServiceError):
+    """Raised when LLM API keys are not configured."""
+    
+    def __init__(self, provider: str):
+        super().__init__(f"{provider} API is not configured")
+        self.provider = provider
+
+
+class ContentNotFoundError(NotFoundError):
+    """Raised when a content item (article/video/reel) is not found."""
+    
+    def __init__(self, content_id: int):
+        super().__init__(f"Content with id '{content_id}' not found")
+        self.content_id = content_id
+
+
 class FeedFetchError(ExternalServiceError):
     """Raised when RSS/YouTube feed fetching fails."""
     

@@ -325,13 +325,73 @@ async def add_process_time_header(request: Request, call_next):
     return response
 
 
+# Exception handlers for custom exceptions
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Handle uncaught exceptions globally."""
+    """Handle uncaught exceptions globally with proper categorization."""
+    from app.core.exceptions import (
+        NotFoundError,
+        QuotaExceededError,
+        ExternalServiceError,
+        ValidationError,
+        LLMQuotaExceededError,
+        LLMConfigurationError,
+    )
+    
+    # Handle specific exception types
+    if isinstance(exc, NotFoundError):
+        return JSONResponse(
+            status_code=404,
+            content={"detail": exc.message, "type": "not_found"}
+        )
+    
+    if isinstance(exc, QuotaExceededError):
+        return JSONResponse(
+            status_code=429,
+            content={"detail": exc.message, "type": "quota_exceeded"}
+        )
+    
+    if isinstance(exc, LLMQuotaExceededError):
+        logger.warning(f"LLM quota exceeded: {exc.message}")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": "AI service temporarily unavailable. Please try again later.",
+                "type": "llm_quota_exceeded"
+            }
+        )
+    
+    if isinstance(exc, LLMConfigurationError):
+        logger.error(f"LLM configuration error: {exc.message}")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": "AI service is not configured. Contact support.",
+                "type": "llm_configuration_error"
+            }
+        )
+    
+    if isinstance(exc, ValidationError):
+        return JSONResponse(
+            status_code=400,
+            content={"detail": exc.message, "type": "validation_error"}
+        )
+    
+    if isinstance(exc, ExternalServiceError):
+        logger.error(f"External service error: {exc.message}", exc_info=True)
+        return JSONResponse(
+            status_code=502,
+            content={
+                "detail": "An external service is temporarily unavailable",
+                "type": "external_service_error"
+            }
+        )
+    
+    # Generic unhandled exception
     logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"detail": "An internal server error occurred"}
+        content={"detail": "An internal server error occurred", "type": "internal_error"}
     )
 
 
