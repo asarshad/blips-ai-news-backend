@@ -1,0 +1,308 @@
+# Operations Runbook
+
+Comprehensive operational guide for Blips backend service.
+
+**Last Updated:** February 2026  
+**Service Owner:** Engineering Team
+
+---
+
+## Table of Contents
+
+1. [Quick Reference](#quick-reference)
+2. [Health Monitoring](#health-monitoring)
+3. [Common Incidents](#common-incidents)
+4. [Emergency Procedures](#emergency-procedures)
+5. [Maintenance Tasks](#maintenance-tasks)
+
+---
+
+## Quick Reference
+
+### Service URLs (Production)
+
+| Service | URL |
+|---------|-----|
+| API | `https://blips-api.onrender.com` |
+| Health Check | `GET /health` |
+| Metrics | `GET /metrics` (requires ADMIN_API_KEY) |
+| Ops Status | `GET /ops/status` (requires ADMIN_API_KEY) |
+
+### Admin API Access
+
+```bash
+# Set your admin key
+export ADMIN_KEY="your-admin-api-key"
+
+# Health check (no auth required)
+curl -s https://blips-api.onrender.com/health | jq
+
+# Metrics (requires auth)
+curl -s -H "X-Admin-Key: $ADMIN_KEY" https://blips-api.onrender.com/metrics | jq
+
+# Operational status (requires auth)
+curl -s -H "X-Admin-Key: $ADMIN_KEY" https://blips-api.onrender.com/ops/status | jq
+```
+
+### Key Environment Variables
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `DATABASE_URL` | PostgreSQL connection | Required |
+| `REDIS_URL` | Redis connection | Required |
+| `ADMIN_API_KEY` | Admin endpoint auth | Required |
+| `OPENAI_API_KEY` | OpenAI API access | Optional |
+| `MISTRAL_API_KEY` | Mistral API access | Required |
+| `INGESTION_CRON_DISABLED` | Kill switch for ingestion | `false` |
+| `LLM_DAILY_CEILING_USD` | Daily LLM spend limit | `5.0` |
+
+---
+
+## Health Monitoring
+
+### Health Check Response
+
+```json
+{
+  "status": "healthy",
+  "database": "ok",
+  "redis": "ok"
+}
+```
+
+**Status Codes:**
+- `200`: All systems operational
+- `503`: One or more dependencies failing
+
+### Ops Status Response
+
+Key metrics to monitor:
+
+```json
+{
+  "request_metrics": {
+    "total_requests": 1234,
+    "total_errors": 12,
+    "error_rate": 0.0097,
+    "uptime_seconds": 86400,
+    "top_endpoints": [...],
+    "slow_endpoints": [...]
+  },
+  "redis_pool": {
+    "status": "ok",
+    "max_connections": 20
+  },
+  "db_pool": {
+    "status": "ok",
+    "size": 5,
+    "checkedout": 1
+  }
+}
+```
+
+### Alert Thresholds
+
+| Metric | Warning | Critical |
+|--------|---------|----------|
+| Error rate | > 1% | > 5% |
+| Avg latency | > 500ms | > 2000ms |
+| DB pool checked out | > 80% | > 95% |
+| Tier A content | < 20 items | < 10 items |
+
+---
+
+## Common Incidents
+
+### 1. Database Connection Failures
+
+**Symptoms:**
+- Health check returns `database: error`
+- 503 responses on API calls
+- Logs show `SQLAlchemyError`
+
+**Investigation:**
+```bash
+# Check health
+curl -s https://blips-api.onrender.com/health | jq
+
+# Check Render database status
+# Go to Render dashboard -> Database -> Logs
+```
+
+**Resolution:**
+1. Check Render PostgreSQL dashboard for outages
+2. Verify `DATABASE_URL` is correct in Render env vars
+3. Check if database is over connection limit
+4. Restart web service if needed
+
+### 2. Redis Connection Failures
+
+**Symptoms:**
+- Health check returns `redis: error`
+- Rate limiting not working
+- Feed caching disabled
+
+**Investigation:**
+```bash
+# Check health
+curl -s https://blips-api.onrender.com/health | jq '.redis'
+```
+
+**Resolution:**
+1. Check Render Redis dashboard
+2. Verify `REDIS_URL` in environment
+3. Redis may need restart if maxmemory exceeded
+
+### 3. Ingestion Stopped
+
+**Symptoms:**
+- `/metrics` shows 0 items_ingested
+- Tier A content count dropping
+- `needs_topup: true` persisting
+
+**Investigation:**
+```bash
+# Check metrics
+curl -s -H "X-Admin-Key: $ADMIN_KEY" \
+  https://blips-api.onrender.com/metrics | jq '.totals'
+
+# Check scheduler state
+curl -s -H "X-Admin-Key: $ADMIN_KEY" \
+  https://blips-api.onrender.com/metrics | jq '.scheduler'
+```
+
+**Resolution:**
+1. Check Render worker service logs for errors
+2. Verify RSS feed URLs are accessible
+3. Check if `INGESTION_CRON_DISABLED=true` was accidentally set
+4. Restart worker service
+
+### 4. LLM API Failures
+
+**Symptoms:**
+- AI chat returning 503 errors
+- Summaries not being generated
+- Logs show `LLMQuotaExceededError` or `LLMConfigurationError`
+
+**Investigation:**
+```bash
+# Check LLM provider status pages:
+# - Mistral: https://status.mistral.ai
+# - OpenAI: https://status.openai.com
+
+# Check daily spend (in logs)
+grep "LLM daily spend" /var/log/app.log | tail -5
+```
+
+**Resolution:**
+1. If quota exceeded: Wait until next day (UTC reset) or increase `LLM_DAILY_CEILING_USD`
+2. If configuration error: Verify API keys in environment
+3. If provider outage: Service will fallback to non-AI summaries
+
+### 5. High Latency
+
+**Symptoms:**
+- `slow_endpoints` in /ops/status showing > 2s avg
+- User complaints about slow app
+
+**Investigation:**
+```bash
+# Check slow endpoints
+curl -s -H "X-Admin-Key: $ADMIN_KEY" \
+  https://blips-api.onrender.com/ops/status | jq '.request_metrics.slow_endpoints'
+
+# Check DB pool
+curl -s -H "X-Admin-Key: $ADMIN_KEY" \
+  https://blips-api.onrender.com/ops/status | jq '.db_pool'
+```
+
+**Resolution:**
+1. If DB pool exhausted: Restart service to clear pool
+2. If specific endpoint slow: Check N+1 queries in that endpoint
+3. Scale up Render plan if persistent
+
+---
+
+## Emergency Procedures
+
+### Kill Switch: Stop All Ingestion
+
+```bash
+# Set environment variable in Render dashboard:
+INGESTION_CRON_DISABLED=true
+
+# Then restart the worker service
+```
+
+### Force Content Cache Clear
+
+```bash
+# Connect to Redis and flush tiered feed cache
+redis-cli -u $REDIS_URL
+> KEYS "blips:tiered_feed:*"
+> DEL "blips:tiered_feed:articles" "blips:tiered_feed:videos" "blips:tiered_feed:reels"
+```
+
+### Rollback Deployment
+
+1. Go to Render dashboard -> Service -> Deploys
+2. Find the previous successful deploy
+3. Click "Redeploy"
+
+### Database Migration Rollback
+
+```bash
+# If a migration failed, rollback via:
+cd src/backend
+alembic downgrade -1
+```
+
+---
+
+## Maintenance Tasks
+
+### Weekly
+
+- [ ] Review error rates in `/ops/status`
+- [ ] Check LLM spending trends
+- [ ] Verify all RSS/YouTube sources are fetching
+
+### Monthly
+
+- [ ] Review slow endpoints, optimize if needed
+- [ ] Check database size and cleanup old data if needed
+- [ ] Update dependencies (security patches)
+
+### Quarterly
+
+- [ ] Review and update this runbook
+- [ ] Load test with expected growth
+- [ ] Security review
+
+---
+
+## Contacts
+
+| Role | Contact |
+|------|---------|
+| Service Owner | @engineering-team |
+| Render Support | support@render.com |
+| Mistral Support | support@mistral.ai |
+
+---
+
+## Appendix: Useful Commands
+
+```bash
+# View recent logs (Render CLI)
+render logs --service blips-api --tail 100
+
+# Check RSS feed health
+curl -s "https://techcrunch.com/feed/" | head -20
+
+# Test YouTube RSS
+curl -s "https://www.youtube.com/feeds/videos.xml?channel_id=UCBcRF18a7Qf58cCRy5xuWwQ" | head -20
+
+# Validate Redis connection
+redis-cli -u $REDIS_URL PING
+```
