@@ -13,6 +13,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.scheduler.tasks import (
+    check_ingestion_health,
     fetch_and_process_news,
     retry_ai_processing,
     run_backfill_job,
@@ -94,9 +95,17 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             replace_existing=True
         )
         
+        # Add ingestion health check (every 30 minutes)
+        scheduler.add_job(
+            check_ingestion_health,
+            IntervalTrigger(minutes=30),
+            id="ingestion_health_check",
+            replace_existing=True
+        )
+        
         scheduler.start()
         logger.info(f"Started background scheduler - fetching news every {fetch_human}")
-        logger.info("Curation jobs: scoring (hourly), clustering (15min), decay (daily), AI retry (15min), cleanup (daily)")
+        logger.info("Curation jobs: scoring (hourly), clustering (15min), decay (daily), AI retry (15min), cleanup (daily), ingestion health (30min)")
         
         return scheduler
         

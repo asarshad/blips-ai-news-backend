@@ -53,6 +53,10 @@ services:
         sync: false  # Set to "dev" or "prod" in dashboard
       - key: LOG_LEVEL
         sync: false  # Set to "DEBUG" or "WARNING" in dashboard
+      - key: ALERT_ENABLED
+        sync: false  # Set to "true" to enable Slack/webhook alerts
+      - key: ALERT_WEBHOOK_URL
+        sync: false  # Set to Slack webhook URL in dashboard
       - key: SCHEDULER_ENABLED
         value: "true"  # Set to "false" once you have a dedicated worker service
       - key: NEWS_FETCH_INTERVAL_MINUTES

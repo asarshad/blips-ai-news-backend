@@ -13,10 +13,13 @@ from app.scheduler.tasks_curation import (
     run_preference_decay_job,
     run_scoring_job,
 )
+from app.scheduler.tasks_health import check_ingestion_health, get_ingestion_metrics
 from app.scheduler.tasks_ingestion import fetch_and_process_news
 
 __all__ = [
+    "check_ingestion_health",
     "fetch_and_process_news",
+    "get_ingestion_metrics",
     "retry_ai_processing",
     "run_backfill_job",
     "run_clustering_job",
