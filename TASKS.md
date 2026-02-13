@@ -67,11 +67,9 @@ Tracking document for pending improvements across backend and mobile.
   - Mixed/mostly English → True
   - Empty/very short text → True (safe default)
 - [x] Deploy and monitor logs for "non-English" skip messages
-- [ ] One-time cleanup of existing non-English content:
-  ```sql
-  UPDATE content_items SET is_suppressed = true
-  WHERE title ILIKE '%en español%' OR title ILIKE '%español%';
-  ```
+- [x] One-time cleanup of existing non-English content:
+  - Script: `src/backend/scripts/cleanup_non_english_content.sql`
+  - Run manually in production after verifying affected content
 
 ---
 
