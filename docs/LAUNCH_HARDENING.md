@@ -26,15 +26,15 @@ The Blips application (backend + mobile + site) requires critical hardening befo
 | H4 | Feature flag cache declared but never used (every check hits Redis) | High | Backend | **Verified** | Implement TTL cache or remove dead cache code |
 | H5 | No offline/connectivity handling on mobile | High | Mobile | **Verified** | Add connectivity_plus, show offline banner, graceful degradation |
 | H6 | Gunicorn has no timeout, no max-requests recycling | High | Backend | **Verified** | Add --timeout 120 --max-requests 1000 --max-requests-jitter 50 |
-| M1 | /metrics endpoint has no authentication | Medium | Backend | Not Started | Add admin API key check |
-| M2 | 100+ bare except Exception blocks across backend | Medium | Backend | Not Started | Replace with specific exceptions in touched files |
-| M3 | Config anti-pattern: os.getenv() instead of Pydantic native | Medium | Backend | Not Started | Refactor to use Pydantic field defaults |
-| M4 | No error boundary on mobile PageView | Medium | Mobile | Not Started | Wrap tabs in try-catch widget |
-| M5 | iOS landscape orientation enabled (unintentional) | Medium | Mobile | Not Started | Remove landscape orientations from Info.plist |
-| M6 | Version still 1.0.0+1 | Medium | Mobile | Not Started | Bump version for store submission |
+| M1 | /metrics endpoint has no authentication | Medium | Backend | **Verified** | Add admin API key check |
+| M2 | 100+ bare except Exception blocks across backend | Medium | Backend | **Verified** | Replace with specific exceptions in touched files |
+| M3 | Config anti-pattern: os.getenv() instead of Pydantic native | Medium | Backend | **Verified** | Refactor to use Pydantic field defaults |
+| M4 | No error boundary on mobile PageView | Medium | Mobile | **Verified** | Wrap tabs in try-catch widget |
+| M5 | iOS landscape orientation enabled (unintentional) | Medium | Mobile | **Verified** | Remove landscape orientations from Info.plist |
+| M6 | Version still 1.0.0+1 | Medium | Mobile | **Verified** | Bump version for store submission |
 | L1 | declarative_base() deprecated in SQLAlchemy 2.0 | Low | Backend | **Verified** | Migrate to DeclarativeBase class |
 | L2 | openai.api_key global is deprecated pattern | Low | Backend | **Verified** | Use OpenAI(api_key=...) client instance |
-| L3 | Duplicate routes (tabs + standalone) | Low | Mobile | Not Started | Document or remove standalone routes |
+| L3 | Duplicate routes (tabs + standalone) | Low | Mobile | **Verified** | Document or remove standalone routes |
 
 ---
 
@@ -98,4 +98,10 @@ Before public release, ALL of the following must be true:
 | 2025-07-25 | H3 | Worker lock uses Lua CAS script for ownership verification | Commit `eb8b1aa`, 126 tests pass |
 | 2025-07-25 | H5 | connectivity_plus + OfflineBanner in FeedShellPage | Commit `980fd2d` on blips-mobile, 26 tests pass |
 | 2025-07-25 | H6 | Gunicorn: --timeout 120, --graceful-timeout 30, --max-requests 1000, --access-logfile - | Commit `d29705f`, 126 tests pass |
+| 2026-02-13 | M1 | Added Depends(require_admin_key) to /metrics endpoint | Commit `0744d38`, 126 tests pass |
+| 2026-02-13 | M3 | Replaced 60+ os.getenv() calls with Pydantic native env resolution | Commit `9d7aa07`, 126 tests pass |
+| 2026-02-13 | M5+M6 | Locked iOS to portrait-only, bumped version to 1.0.1+2 | Commit `9a2d930` on blips-mobile, 26 tests pass |
+| 2026-02-13 | M4 | Created ErrorBoundary widget, wrapped PageView tabs | Commit `7bbf2f3` on blips-mobile, 26 tests pass |
+| 2026-02-13 | L3 | Removed duplicate /chat and /settings GoRoutes | Commit `bd69a08` on blips-mobile, 26 tests pass |
+| 2026-02-13 | M2 | Replaced 31 bare except blocks with specific types in 6 core files | Commit `d3ac163`, 126 tests pass |
 
