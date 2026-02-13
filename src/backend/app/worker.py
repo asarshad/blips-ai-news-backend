@@ -12,6 +12,7 @@ import os
 import sys
 import time
 import signal
+import uuid
 
 # Add the backend directory to the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -29,6 +30,12 @@ logger = get_logger(__name__)
 # Global scheduler reference for graceful shutdown
 _scheduler = None
 
+# Unique token used to verify lock ownership
+_worker_lock_token: str = f"{os.getpid()}:{uuid.uuid4()}"
+
+WORKER_LOCK_KEY = "worker_lock"
+WORKER_LOCK_TTL = 300  # 5 minutes
+
 
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully."""
@@ -41,18 +48,18 @@ def signal_handler(signum, frame):
 def acquire_worker_lock() -> bool:
     """
     Acquire a distributed lock to ensure only one worker runs.
+    Uses a unique token so only the owning process can refresh/release.
     
     Returns:
         True if lock acquired, False otherwise
     """
     try:
         redis_client = get_redis()
-        # Try to acquire lock with 5 minute expiry (refreshed by heartbeat)
         acquired = redis_client.set(
-            "worker_lock",
-            os.getpid(),
+            WORKER_LOCK_KEY,
+            _worker_lock_token,
             nx=True,
-            ex=300
+            ex=WORKER_LOCK_TTL,
         )
         return bool(acquired)
     except Exception as e:
@@ -60,13 +67,28 @@ def acquire_worker_lock() -> bool:
         return False
 
 
-def refresh_worker_lock():
-    """Refresh the worker lock TTL."""
+# Lua script: only refresh TTL if caller still owns the lock (CAS).
+_REFRESH_LUA = (
+    "if redis.call('get', KEYS[1]) == ARGV[1] then "
+    "  return redis.call('expire', KEYS[1], ARGV[2]) "
+    "else return 0 end"
+)
+
+
+def refresh_worker_lock() -> bool:
+    """Refresh the worker lock TTL — only if we still own it."""
     try:
         redis_client = get_redis()
-        redis_client.expire("worker_lock", 300)
+        result = redis_client.eval(
+            _REFRESH_LUA, 1, WORKER_LOCK_KEY, _worker_lock_token, str(WORKER_LOCK_TTL)
+        )
+        if int(result or 0) == 0:
+            logger.warning("Worker lock lost — another process owns it")
+            return False
+        return True
     except Exception as e:
         logger.warning(f"Failed to refresh worker lock: {e}")
+        return False
 
 
 def run_worker():
@@ -120,7 +142,9 @@ def run_worker():
     logger.info("Worker running. Press Ctrl+C to stop.")
     try:
         while True:
-            refresh_worker_lock()
+            if not refresh_worker_lock():
+                logger.error("Lost worker lock — shutting down to avoid dual execution")
+                break
             time.sleep(60)  # Refresh lock every minute
     except (KeyboardInterrupt, SystemExit):
         logger.info("Worker shutting down...")
