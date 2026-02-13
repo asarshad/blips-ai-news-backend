@@ -13,7 +13,6 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from collections import defaultdict
 from datetime import datetime
-from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 
 from app.core.logging import get_logger
 from app.integrations.youtube_channels import (
@@ -145,24 +144,20 @@ class YouTubeClient:
     
     def get_transcript(self, video_id: str) -> Optional[str]:
         """
-        Fetches the transcript for a YouTube video.
+        DEPRECATED: Transcript fetching has been removed for YouTube ToS compliance.
+        
+        Previously used youtube-transcript-api which violates YouTube ToS.
+        Summaries now rely on RSS feed descriptions and YouTube Data API snippets.
         
         Args:
             video_id: The YouTube video ID.
             
         Returns:
-            The transcript text or None if not found/disabled.
+            Always returns None.
         """
-        try:
-            transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
-            full_text = " ".join([item['text'] for item in transcript_list])
-            return full_text
-        except (TranscriptsDisabled, NoTranscriptFound):
-            logger.warning(f"No transcript available for video {video_id}")
-            return None
-        except Exception as e:
-            logger.error(f"Error fetching transcript for video {video_id}: {e}")
-            return None
+        # Removed: youtube-transcript-api violates YouTube ToS
+        # See SECURITY.md section 6 for details
+        return None
 
     def is_youtube_short(self, video_id: str) -> bool:
         """

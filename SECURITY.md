@@ -133,10 +133,10 @@ Format mirrors [TASKS.md](TASKS.md).
 
 ### Backend
 
-- [ ] Remove `youtube-transcript-api==0.6.2` from `requirements.txt`
-- [ ] Remove transcript imports and `get_transcript` logic from `youtube_client.py`
-- [ ] For video summaries, rely on: RSS feed description → YouTube Data API snippet → channel-provided description
-- [ ] Keep YouTube Data API usage for duration lookups (legitimate API usage)
+- [x] Remove `youtube-transcript-api==0.6.2` from `requirements.txt`
+- [x] Remove transcript imports and `get_transcript` logic from `youtube_client.py`
+- [x] For video summaries, rely on: RSS feed description → YouTube Data API snippet → channel-provided description
+- [x] Keep YouTube Data API usage for duration lookups (legitimate API usage)
 
 ### Mobile
 
