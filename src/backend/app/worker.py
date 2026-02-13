@@ -22,6 +22,7 @@ from app.core.logging import setup_logging, get_logger
 from app.core.dependencies import get_redis
 from app.scheduler import init_scheduler
 from app.scheduler.tasks import fetch_and_process_news
+from redis.exceptions import RedisError
 
 # Configure logging
 setup_logging()
@@ -62,7 +63,7 @@ def acquire_worker_lock() -> bool:
             ex=WORKER_LOCK_TTL,
         )
         return bool(acquired)
-    except Exception as e:
+    except RedisError as e:
         logger.error(f"Failed to acquire worker lock: {e}")
         return False
 
@@ -86,7 +87,7 @@ def refresh_worker_lock() -> bool:
             logger.warning("Worker lock lost — another process owns it")
             return False
         return True
-    except Exception as e:
+    except RedisError as e:
         logger.warning(f"Failed to refresh worker lock: {e}")
         return False
 
@@ -135,7 +136,7 @@ def run_worker():
     try:
         fetch_and_process_news()
         logger.info("Initial fetch completed")
-    except Exception as e:
+    except RedisError as e:
         logger.error(f"Initial fetch failed: {e}")
     
     # Keep the worker running and refresh lock

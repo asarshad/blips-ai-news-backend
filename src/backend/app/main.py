@@ -23,6 +23,8 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from redis.exceptions import RedisError
 
 from app.api import api_router
 from app.core.auth import require_admin_key
@@ -69,7 +71,7 @@ def _create_tables() -> None:
         else:
             logger.info("Skipping table creation - another worker is handling it")
             time.sleep(2)
-    except Exception as e:
+    except (SQLAlchemyError, RedisError) as e:
         logger.warning(f"Table creation error (non-fatal): {str(e)}")
 
 
@@ -80,7 +82,7 @@ def _check_redis_connection() -> bool:
         redis_client.ping()
         logger.info("Redis connection successful")
         return True
-    except Exception as e:
+    except RedisError as e:
         logger.error(f"Redis connection error: {str(e)}")
         return False
 
@@ -138,7 +140,7 @@ def _run_initial_fetch():
                 logger.info("INITIAL FETCH: All targets met - skipping")
         finally:
             db.close()
-    except Exception as e:
+    except (SQLAlchemyError, RedisError) as e:
         logger.error(f"INITIAL FETCH: Error - {str(e)}", exc_info=True)
     logger.info("=" * 50)
 
@@ -204,7 +206,7 @@ def _start_scheduler() -> None:
                             logger.warning("Scheduler lock lost; stopping lock refresher")
                             _scheduler_lock_stop_event.set()
                             return
-                    except Exception as e:
+                    except RedisError as e:
                         logger.warning(f"Scheduler lock refresh error (non-fatal): {e}")
                     time.sleep(SCHEDULER_LOCK_REFRESH_SECONDS)
 
@@ -212,7 +214,7 @@ def _start_scheduler() -> None:
 
             logger.info("Scheduler initialized")
             
-    except Exception as e:
+    except RedisError as e:
         logger.error(f"Error starting scheduler: {str(e)}")
     
     # Always run initial fetch check regardless of scheduler lock
@@ -232,7 +234,7 @@ async def lifespan(app: FastAPI):
         from app.ingestion.checkpointing import install_signal_handlers
 
         install_signal_handlers()
-    except Exception:
+    except (ImportError, OSError):
         pass
 
     if os.getenv("SKIP_STARTUP_CHECKS", "").lower() == "true":
@@ -259,7 +261,7 @@ async def lifespan(app: FastAPI):
                 "else return 0 end"
             )
             _scheduler_lock_redis.eval(lua, 1, SCHEDULER_LOCK_KEY, _scheduler_lock_token)
-        except Exception as e:
+        except RedisError as e:
             logger.warning(f"Scheduler lock release error (non-fatal): {e}")
     _scheduler_lock_stop_event = None
     _scheduler_lock_token = None
@@ -344,7 +346,7 @@ def health_check():
             checks["database"] = "ok"
         finally:
             db.close()
-    except Exception as e:
+    except SQLAlchemyError as e:
         checks["database"] = f"error: {type(e).__name__}"
         is_healthy = False
 
@@ -353,7 +355,7 @@ def health_check():
         redis_client = get_redis()
         redis_client.ping()
         checks["redis"] = "ok"
-    except Exception as e:
+    except RedisError as e:
         checks["redis"] = f"error: {type(e).__name__}"
         is_healthy = False
 
@@ -394,7 +396,7 @@ def metrics():
                 .order_by(IngestionBudget.content_type.asc())
                 .all()
             )
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.warning(f"Failed to query ingestion budgets: {e}")
             budgets = []
 

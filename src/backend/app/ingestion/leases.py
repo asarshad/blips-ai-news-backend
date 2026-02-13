@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+from redis.exceptions import RedisError
+
 
 LEASE_PREFIX = "blips:ingestion:lease:"
 
@@ -30,7 +32,7 @@ def claim_lease(redis_client, *, key: str, owner_token: str, ttl_ms: int) -> boo
     try:
         # redis-py: set(name, value, nx=True, px=ttl_ms)
         return bool(redis_client.set(key, owner_token, nx=True, px=int(ttl_ms)))
-    except Exception:
+    except RedisError:
         return False
 
 
@@ -48,7 +50,7 @@ def release_lease(redis_client, *, key: str, owner_token: str) -> bool:
     try:
         result = redis_client.eval(lua, 1, key, owner_token)
         return int(result or 0) == 1
-    except Exception:
+    except RedisError:
         # Some Redis test doubles (e.g., fakeredis) may not support scripting.
         pass
 
@@ -56,7 +58,7 @@ def release_lease(redis_client, *, key: str, owner_token: str) -> bool:
     try:
         try:
             from redis.exceptions import WatchError  # type: ignore
-        except Exception:  # pragma: no cover
+        except ImportError:  # pragma: no cover
             WatchError = Exception  # type: ignore
 
         pipe = redis_client.pipeline()
@@ -83,16 +85,16 @@ def release_lease(redis_client, *, key: str, owner_token: str) -> bool:
             finally:
                 try:
                     pipe.reset()
-                except Exception:
+                except RedisError:
                     pass
-    except Exception:
+    except RedisError:
         # Last resort: non-atomic best-effort.
         try:
             current = redis_client.get(key)
             current_str = current.decode("utf-8") if isinstance(current, (bytes, bytearray)) else str(current)
             if current is not None and current_str == owner_token:
                 return int(redis_client.delete(key) or 0) == 1
-        except Exception:
+        except RedisError:
             return False
 
     return False

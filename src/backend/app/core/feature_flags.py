@@ -26,6 +26,7 @@ import redis
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from redis.exceptions import RedisError
 
 logger = get_logger(__name__)
 
@@ -100,7 +101,7 @@ class FeatureFlags:
                 from app.core.dependencies import get_redis
                 self._redis = get_redis()
                 self._redis.ping()
-            except Exception as e:
+            except RedisError as e:
                 logger.warning(f"Redis unavailable for feature flags: {e}")
                 self._redis = None
         return self._redis
@@ -123,7 +124,7 @@ class FeatureFlags:
             if value is not None:
                 return value.decode().lower() in ("true", "1", "yes", "on")
             return None
-        except Exception as e:
+        except RedisError as e:
             logger.warning(f"Error reading feature flag from Redis: {e}")
             return None
     
@@ -198,7 +199,7 @@ class FeatureFlags:
             self._cache.pop(feature.lower(), None)
             logger.info(f"Feature flag '{feature}' set to {enabled}")
             return True
-        except Exception as e:
+        except RedisError as e:
             logger.error(f"Error setting feature flag: {e}")
             return False
     
@@ -222,7 +223,7 @@ class FeatureFlags:
             self._cache.pop(feature.lower(), None)
             logger.info(f"Feature flag '{feature}' deleted from Redis")
             return True
-        except Exception as e:
+        except RedisError as e:
             logger.error(f"Error deleting feature flag: {e}")
             return False
     

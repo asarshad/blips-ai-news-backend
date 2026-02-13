@@ -22,6 +22,7 @@ from tenacity import (
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from redis.exceptions import RedisError
 
 logger = get_logger(__name__)
 
@@ -163,7 +164,7 @@ class OpenAILLMClient(BaseLLMClient):
             )
         except (ConnectionError, TimeoutError):
             raise  # let tenacity retry
-        except Exception as e:
+        except (RuntimeError, ValueError) as e:
             logger.error(f"OpenAI chat error: {type(e).__name__}: {e}")
             raise
 
@@ -236,7 +237,7 @@ class MistralLLMClient(BaseLLMClient):
             )
         except (ConnectionError, TimeoutError):
             raise  # let tenacity retry
-        except Exception as e:
+        except (RuntimeError, ValueError) as e:
             logger.error(f"Mistral chat error: {type(e).__name__}: {e}")
             raise
 
@@ -350,7 +351,7 @@ class LLMClient:
                     )
         except RuntimeError:
             raise
-        except Exception as e:
+        except RedisError as e:
             # If Redis is down, allow the request rather than blocking AI entirely
             logger.warning(f"Cost ceiling check failed (allowing request): {e}")
 
@@ -364,7 +365,7 @@ class LLMClient:
             key = self._cost_redis_key()
             r.incrby(key, tokens)
             r.expire(key, 90_000)  # 25 hours — auto-expire stale counters
-        except Exception as e:
+        except RedisError as e:
             logger.warning(f"Token tracking failed (non-fatal): {e}")
     
     def summarize_article(
@@ -425,7 +426,7 @@ TAGS: tag1, tag2, tag3
             
             return SummaryResult(summary=summary, tags=tags)
             
-        except Exception as e:
+        except (RuntimeError, ValueError) as e:
             logger.error(f"Article summarization error: {str(e)}")
             raise
     
@@ -478,7 +479,7 @@ Format your response as just the summary text.
             
             return summary
             
-        except Exception as e:
+        except (RuntimeError, ValueError) as e:
             logger.error(f"Video summarization error: {str(e)}")
             raise
     
