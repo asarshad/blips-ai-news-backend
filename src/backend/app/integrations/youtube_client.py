@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from collections import defaultdict
 from datetime import datetime
 
+from app.core.circuit_breaker import CircuitBreaker, get_youtube_breaker
 from app.core.logging import get_logger
 from app.integrations.youtube_channels import (
     ChannelConfig,
@@ -115,6 +116,7 @@ class YouTubeClient:
         channel_configs: Optional[List[ChannelConfig]] = None,
         daily_video_cap_per_channel: int = 2,
         daily_shorts_cap_per_channel: int = 4,
+        circuit_breaker: Optional[CircuitBreaker] = None,
     ):
         """
         Initialize YouTube client with channel configuration.
@@ -123,10 +125,14 @@ class YouTubeClient:
             channel_configs: List of ChannelConfig objects. Defaults to enabled channels.
             daily_video_cap_per_channel: Default cap for long-form videos per channel
             daily_shorts_cap_per_channel: Default cap for shorts per channel
+            circuit_breaker: Optional CircuitBreaker instance. Defaults to shared singleton.
         """
         self.channel_configs = channel_configs or get_enabled_channels()
         self.daily_video_cap = daily_video_cap_per_channel
         self.daily_shorts_cap = daily_shorts_cap_per_channel
+        
+        # Circuit breaker for external HTTP calls
+        self._breaker = circuit_breaker or get_youtube_breaker()
         
         # Track ingestion counts per channel per day
         self._daily_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: {"videos": 0, "shorts": 0})
@@ -169,14 +175,19 @@ class YouTubeClient:
         Returns:
             True if it's a Short, False otherwise.
         """
+        if not self._breaker.allow_request():
+            logger.debug("Circuit open - skipping short check for %s", video_id)
+            return False
         url = f'https://www.youtube.com/shorts/{video_id}'
         try:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
             }
             response = requests.head(url, headers=headers, allow_redirects=False, timeout=5)
+            self._breaker.record_success()
             return response.status_code == 200
         except Exception as e:
+            self._breaker.record_failure()
             logger.debug(f"Error checking if video {video_id} is a Short: {e}")
             return False
 
@@ -217,11 +228,15 @@ class YouTubeClient:
     
     def _get_duration_from_api(self, video_id: str, api_key: str) -> Optional[int]:
         """Get duration using YouTube Data API."""
+        if not self._breaker.allow_request():
+            logger.debug("Circuit open - skipping API duration for %s", video_id)
+            return None
         try:
             url = f"https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id={video_id}&key={api_key}"
             response = requests.get(url, timeout=5)
             
             if response.status_code == 200:
+                self._breaker.record_success()
                 data = response.json()
                 items = data.get("items", [])
                 if items:
@@ -231,8 +246,10 @@ class YouTubeClient:
                         logger.info("get_video_duration: vid=%s -> %d seconds (API)", video_id, seconds)
                         return seconds
             else:
+                self._breaker.record_failure()
                 logger.warning("get_video_duration: API error HTTP %d for vid=%s", response.status_code, video_id)
         except Exception as e:
+            self._breaker.record_failure()
             logger.warning("get_video_duration: API exception for vid=%s: %s", video_id, str(e))
         return None
     
@@ -253,6 +270,9 @@ class YouTubeClient:
     
     def _get_duration_from_scrape(self, video_id: str) -> Optional[int]:
         """Get duration by scraping YouTube page (fallback, less reliable)."""
+        if not self._breaker.allow_request():
+            logger.debug("Circuit open - skipping scrape duration for %s", video_id)
+            return None
         url = f"https://www.youtube.com/watch?v={video_id}"
         try:
             headers = {
@@ -262,6 +282,7 @@ class YouTubeClient:
             response = requests.get(url, headers=headers, timeout=10)
             
             if response.status_code == 200:
+                self._breaker.record_success()
                 # Try multiple patterns for duration
                 patterns = [
                     (r'"approxDurationMs":"(\d+)"', "approxDurationMs", lambda m: int(m.group(1)) // 1000),
@@ -277,8 +298,10 @@ class YouTubeClient:
                 
                 logger.debug("get_video_duration: vid=%s -> None (scrape: no pattern matched)", video_id)
             else:
+                self._breaker.record_failure()
                 logger.debug("get_video_duration: vid=%s -> None (scrape: HTTP %d)", video_id, response.status_code)
         except Exception as e:
+            self._breaker.record_failure()
             logger.debug("get_video_duration: vid=%s -> None (scrape error: %s)", video_id, str(e))
         return None
 
