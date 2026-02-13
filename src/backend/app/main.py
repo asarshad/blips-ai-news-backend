@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from sqlalchemy import text
 
 from app.api import api_router
 from app.core.config import settings
@@ -328,9 +329,38 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 def health_check():
     """Health check endpoint for monitoring.
 
-    Must stay lightweight for keep-alive pings (no heavy DB queries).
+    Validates DB and Redis connectivity for Render's readiness probe.
+    Returns 503 if any critical dependency is unreachable.
     """
-    return {"status": "healthy"}
+    checks: dict = {"status": "healthy"}
+    is_healthy = True
+
+    # Check database
+    try:
+        db = SessionLocal()
+        try:
+            db.execute(text("SELECT 1"))
+            checks["database"] = "ok"
+        finally:
+            db.close()
+    except Exception as e:
+        checks["database"] = f"error: {type(e).__name__}"
+        is_healthy = False
+
+    # Check Redis
+    try:
+        redis_client = get_redis()
+        redis_client.ping()
+        checks["redis"] = "ok"
+    except Exception as e:
+        checks["redis"] = f"error: {type(e).__name__}"
+        is_healthy = False
+
+    if not is_healthy:
+        checks["status"] = "unhealthy"
+        return JSONResponse(status_code=503, content=checks)
+
+    return checks
 
 
 @app.get("/metrics")
@@ -363,7 +393,8 @@ def metrics():
                 .order_by(IngestionBudget.content_type.asc())
                 .all()
             )
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to query ingestion budgets: {e}")
             budgets = []
 
         feeds = [

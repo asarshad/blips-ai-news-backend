@@ -2719,7 +2719,7 @@
     },
     "/health": {
       "get": {
-        "description": "Health check endpoint for monitoring.\n\nMust stay lightweight for keep-alive pings (no heavy DB queries).",
+        "description": "Health check endpoint for monitoring.\n\nValidates DB and Redis connectivity for Render's readiness probe.\nReturns 503 if any critical dependency is unreachable.",
         "operationId": "health_check_health_get",
         "responses": {
           "200": {
