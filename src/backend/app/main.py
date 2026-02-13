@@ -19,7 +19,7 @@ from typing import Optional
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy import text
@@ -302,7 +302,64 @@ limiter = Limiter(
     storage_uri=settings.REDIS_URL,
 )
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """Custom rate limit handler with structured error code."""
+    from app.core.error_codes import ErrorCode, ERROR_MESSAGES
+    code = ErrorCode.RATE_LIMITED
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": str(exc.detail),
+            "code": code.value,
+            "message": ERROR_MESSAGES[code],
+        },
+    )
+
+app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
+
+
+# ── Redis fail-closed middleware ────────────────────────────────────────
+_redis_last_check: float = 0.0
+_redis_healthy: bool = True
+_REDIS_CHECK_INTERVAL = 5.0  # seconds
+
+
+@app.middleware("http")
+async def redis_health_guard(request: Request, call_next):
+    """Fail-closed: reject requests if Redis is down (cached check every 5s)."""
+    global _redis_last_check, _redis_healthy
+
+    _skip_paths = ("/health", "/metrics", "/docs", "/openapi.json", "/redoc")
+    if request.url.path in _skip_paths:
+        return await call_next(request)
+
+    now = time.monotonic()
+    if now - _redis_last_check > _REDIS_CHECK_INTERVAL:
+        try:
+            import redis as _redis
+            r = _redis.from_url(settings.REDIS_URL, socket_connect_timeout=1)
+            r.ping()
+            _redis_healthy = True
+        except Exception:
+            _redis_healthy = False
+            logger.error("Redis unreachable - fail-closed rate limiting active")
+        _redis_last_check = now
+
+    if not _redis_healthy:
+        from app.core.error_codes import ErrorCode, ERROR_MESSAGES
+        code = ErrorCode.SERVICE_UNAVAILABLE
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": "Rate limiting service unavailable",
+                "code": code.value,
+                "message": ERROR_MESSAGES[code],
+            },
+        )
+
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -328,71 +385,69 @@ async def add_process_time_header(request: Request, call_next):
 # Exception handlers for custom exceptions
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Handle uncaught exceptions globally with proper categorization."""
+    """Handle uncaught exceptions globally with structured error codes."""
     from app.core.exceptions import (
         NotFoundError,
+        ArticleNotFoundError,
+        VideoNotFoundError,
+        ContentNotFoundError,
         QuotaExceededError,
         ExternalServiceError,
         ValidationError,
         LLMQuotaExceededError,
         LLMConfigurationError,
+        FeedFetchError,
     )
-    
-    # Handle specific exception types
+    from app.core.error_codes import ErrorCode, ERROR_MESSAGES
+
+    def _err(status: int, code: ErrorCode, detail: str | None = None):
+        return JSONResponse(
+            status_code=status,
+            content={
+                "detail": detail or ERROR_MESSAGES[code],
+                "code": code.value,
+                "message": ERROR_MESSAGES[code],
+            },
+        )
+
+    # Handle specific exception types (most-specific first)
+    if isinstance(exc, ArticleNotFoundError):
+        return _err(404, ErrorCode.ARTICLE_NOT_FOUND, exc.message)
+
+    if isinstance(exc, VideoNotFoundError):
+        return _err(404, ErrorCode.VIDEO_NOT_FOUND, exc.message)
+
+    if isinstance(exc, ContentNotFoundError):
+        return _err(404, ErrorCode.CONTENT_NOT_FOUND, exc.message)
+
     if isinstance(exc, NotFoundError):
-        return JSONResponse(
-            status_code=404,
-            content={"detail": exc.message, "type": "not_found"}
-        )
-    
+        return _err(404, ErrorCode.NOT_FOUND, exc.message)
+
     if isinstance(exc, QuotaExceededError):
-        return JSONResponse(
-            status_code=429,
-            content={"detail": exc.message, "type": "quota_exceeded"}
-        )
-    
+        return _err(429, ErrorCode.QUOTA_EXCEEDED, exc.message)
+
     if isinstance(exc, LLMQuotaExceededError):
         logger.warning(f"LLM quota exceeded: {exc.message}")
-        return JSONResponse(
-            status_code=503,
-            content={
-                "detail": "AI service temporarily unavailable. Please try again later.",
-                "type": "llm_quota_exceeded"
-            }
-        )
-    
+        return _err(503, ErrorCode.LLM_QUOTA_EXCEEDED, exc.message)
+
     if isinstance(exc, LLMConfigurationError):
         logger.error(f"LLM configuration error: {exc.message}")
-        return JSONResponse(
-            status_code=503,
-            content={
-                "detail": "AI service is not configured. Contact support.",
-                "type": "llm_configuration_error"
-            }
-        )
-    
+        return _err(503, ErrorCode.LLM_CONFIGURATION_ERROR, exc.message)
+
+    if isinstance(exc, FeedFetchError):
+        logger.error(f"Feed fetch error: {exc.message}", exc_info=True)
+        return _err(502, ErrorCode.FEED_FETCH_ERROR, exc.message)
+
     if isinstance(exc, ValidationError):
-        return JSONResponse(
-            status_code=400,
-            content={"detail": exc.message, "type": "validation_error"}
-        )
-    
+        return _err(400, ErrorCode.VALIDATION_ERROR, exc.message)
+
     if isinstance(exc, ExternalServiceError):
         logger.error(f"External service error: {exc.message}", exc_info=True)
-        return JSONResponse(
-            status_code=502,
-            content={
-                "detail": "An external service is temporarily unavailable",
-                "type": "external_service_error"
-            }
-        )
-    
+        return _err(502, ErrorCode.EXTERNAL_SERVICE_ERROR)
+
     # Generic unhandled exception
     logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "An internal server error occurred", "type": "internal_error"}
-    )
+    return _err(500, ErrorCode.INTERNAL_ERROR)
 
 
 # Register API routes
@@ -432,9 +487,28 @@ def health_check():
 
     if not is_healthy:
         checks["status"] = "unhealthy"
+        # Send alert for health check failure
+        try:
+            from app.services.alerting_service import alert_health_check_failed
+            alert_health_check_failed(
+                database_status=checks.get("database", "unknown"),
+                redis_status=checks.get("redis", "unknown"),
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send health check alert: {e}")
         return JSONResponse(status_code=503, content=checks)
 
     return checks
+
+
+def _get_ingestion_health_metrics() -> dict:
+    """Get ingestion health metrics for the /metrics endpoint."""
+    try:
+        from app.scheduler.tasks_health import get_ingestion_metrics
+        return get_ingestion_metrics()
+    except Exception as e:
+        logger.warning(f"Failed to get ingestion health metrics: {e}")
+        return {"error": str(e)}
 
 
 @app.get("/metrics", dependencies=[Depends(require_admin_key)])
@@ -542,6 +616,7 @@ def metrics():
                     "target": target_by_type,
                 },
             },
+            "ingestion_health": _get_ingestion_health_metrics(),
         }
     finally:
         db.close()
