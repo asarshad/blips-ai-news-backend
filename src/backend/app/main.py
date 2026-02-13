@@ -307,10 +307,21 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
-    """Add request processing time to response headers."""
+    """Add request processing time to response headers and record metrics."""
+    from app.core.observability import metrics_collector
+    
     start_time = time.time()
     response = await call_next(request)
-    response.headers["X-Process-Time"] = str(time.time() - start_time)
+    latency_ms = (time.time() - start_time) * 1000
+    
+    response.headers["X-Process-Time"] = str(latency_ms / 1000)
+    
+    # Record metrics for non-static paths
+    path = request.url.path
+    if not path.startswith("/static") and path != "/favicon.ico":
+        is_error = response.status_code >= 400
+        metrics_collector.record_request(path, latency_ms, is_error)
+    
     return response
 
 
@@ -474,6 +485,22 @@ def metrics():
         }
     finally:
         db.close()
+
+
+@app.get("/ops/status", dependencies=[Depends(require_admin_key)])
+def operational_status():
+    """
+    Comprehensive operational status endpoint (requires ADMIN_API_KEY).
+    
+    Returns:
+    - Request metrics (last 60 minutes): total requests, error rate, latencies
+    - Connection pool stats: Redis and DB pool utilization
+    - Service health indicators
+    
+    Use this for operational monitoring dashboards and alerting.
+    """
+    from app.core.observability import get_operational_status
+    return get_operational_status()
 
 
 if __name__ == "__main__":
