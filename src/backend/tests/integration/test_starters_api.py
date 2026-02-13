@@ -44,10 +44,10 @@ def sample_article(client):
     try:
         article = ContentItem(
             title="Test AI Breakthrough",
-            url="https://example.com/test-article",
+            source_url="https://example.com/test-article",
             summary="Researchers achieve new milestone in AI development.",
-            content_type=ContentType.ARTICLE,
-            source_name="Test Source",
+            type=ContentType.ARTICLE,
+            source="Test Source",
             published_at=datetime.now(timezone.utc),
         )
         db.add(article)
@@ -73,12 +73,11 @@ def sample_video(client):
     try:
         video = ContentItem(
             title="Tech Trends 2024",
-            url="https://youtube.com/watch?v=test123",
+            source_url="https://youtube.com/watch?v=test123",
             summary="Overview of emerging tech trends.",
-            content_type=ContentType.VIDEO,
-            source_name="Test Channel",
+            type=ContentType.VIDEO,
+            source="Test Channel",
             published_at=datetime.now(timezone.utc),
-            youtube_video_id="test123",
         )
         db.add(video)
         db.commit()
