@@ -334,3 +334,127 @@ The `/metrics` endpoint exposes pool statistics:
 - `checked_out`: Connections currently in use
 - `overflow`: Extra connections beyond pool_size
 - `checked_in`: Idle connections in pool
+
+---
+
+## Incident Response Runbooks
+
+### INC-1: Complete Service Outage (Health Returns 503)
+
+**Severity:** P1 — Immediate  
+**Detection:** `/health` returns 503, alerting webhook fires  
+
+**Triage (first 5 minutes):**
+1. Check Render dashboard: https://dashboard.render.com
+2. Is the service running? Check deploy logs for crash loops
+3. Run: `curl -s https://blips-api.onrender.com/health | jq`
+4. Check which dependency failed (database, redis, or both)
+
+**If Database is down:**
+1. Check Render PostgreSQL dashboard for status
+2. Try `SELECT 1` via psql if you have direct access
+3. If Render outage → check https://status.render.com, wait for recovery
+4. If connection pool exhausted → restart: Render dashboard → Manual Deploy
+5. Verify: `/health` returns `"database": "ok"`
+
+**If Redis is down:**
+1. Check Render Redis dashboard for status
+2. Redis is used for rate limiting and caching — app should partially work
+3. Note: `redis_health_guard` middleware returns 503 when Redis is down
+4. If Redis is fully gone → restart service to reconnect
+5. Verify: `/health` returns `"redis": "ok"`
+
+**If service itself crashed:**
+1. Check Render deploy logs for Python tracebacks
+2. Common causes: missing env var, bad migration, OOM
+3. Roll back: Render dashboard → Deploys → Revert to last working deploy
+4. Verify: `/health` returns 200
+
+**Post-incident:**
+- Write incident report within 24h
+- Update this runbook if new failure mode discovered
+
+---
+
+### INC-2: Ingestion Stall (No New Content)
+
+**Severity:** P2 — High (2h+ to detect)  
+**Detection:** `check_ingestion_health` job fires alert after 2h of no insertions  
+
+**Triage:**
+1. Check `/metrics` for `ingestion_health.is_stalled`
+2. Check scheduler status: is `fetch_news` job running?
+3. Review logs for ingestion errors: `INGESTION_CRON_DISABLED` set to `true`?
+
+**If scheduler stopped:**
+1. Check if `SCHEDULER_ENABLED=true` in env
+2. Restart service: Render dashboard → Manual Deploy
+3. Verify: Check logs for "fetch_and_process_news completed"
+
+**If feeds are failing:**
+1. Check `/metrics/sources` for `problem_feeds`
+2. Check if specific RSS feeds changed URLs
+3. Check if YouTube API key is exhausted (quota resets at midnight PT)
+4. Verify: `articles_ingested_last_2h > 0` in `/metrics`
+
+**If LLM quota exceeded:**
+1. Check `/metrics` for LLM spend
+2. If `LLM_DAILY_CEILING_USD` is hit → articles ingest but without AI summaries
+3. Summaries will be retried by `retry_ai_processing` job
+4. Optional: increase `LLM_DAILY_CEILING_USD` temporarily
+
+---
+
+### INC-3: High Error Rate on Mobile
+
+**Severity:** P2 — High  
+**Detection:** Crash reports, user feedback, or API error spike  
+
+**Triage:**
+1. Check error codes in API logs — are they 4xx or 5xx?
+2. Is this affecting all users or specific endpoints?
+3. Check circuit breaker state: is YouTube breaker OPEN?
+
+**If API returning 5xx:**
+→ Follow INC-1 runbook
+
+**If API returning 429 (rate limited):**
+1. Check if a single device is hammering the API
+2. Review `RATE_LIMIT_DEFAULT` (60/min) and `RATE_LIMIT_CHAT` (10/min)
+3. If legitimate traffic spike → temporarily increase limits
+
+**If YouTube content broken:**
+1. Check circuit breaker stats in logs
+2. If breaker is OPEN → YouTube API is down, will auto-recover in 60s
+3. If persistent → check YouTube Data API quota in Google Cloud Console
+4. Shorts detection and duration fetching degrade gracefully (return defaults)
+
+---
+
+### INC-4: LLM Service Degradation
+
+**Severity:** P3 — Medium  
+**Detection:** `LLMQuotaExceededError` or `LLMConfigurationError` in logs  
+
+**Impact:** AI chat and summaries unavailable, feed still works  
+
+**Resolution:**
+1. Check `LLM_DAILY_COST_CEILING` vs actual spend
+2. If quota hit legitimately → wait for midnight reset
+3. If API key expired → rotate key in Render env vars
+4. If provider outage → check https://status.openai.com or https://status.mistral.ai
+5. `retry_ai_processing` job will automatically retry failed summaries
+
+---
+
+### INC-5: Cold Start / Slow Response Times
+
+**Severity:** P3 — Medium  
+**Detection:** First request takes >5s, user complaints  
+
+**Resolution:**
+1. Verify keepalive workflow is running: Check GitHub Actions → keepalive.yml
+2. Check if `RENDER_HEALTH_URL` secret is configured
+3. If service was sleeping → first request wakes it (expected on free tier)
+4. If on paid tier and still slow → check connection pool, pending migrations
+5. Monitor: response times should be <500ms after warmup

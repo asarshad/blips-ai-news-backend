@@ -164,36 +164,44 @@
 ## Week 4: Release Prep (Days 22-30)
 
 ### Task 4.1-4.2: iOS App Store Submission
-- [ ] Update Info.plist versions
-- [ ] Create App Store Connect listing
-- [ ] Build and submit IPA
+- [x] Version bumped in pubspec.yaml (1.0.2+3) — iOS reads from Flutter
+- [x] App Store description/keywords prepared (`store_metadata/app_store/description.md`)
+- [x] Pre-launch checklist created (`PRE_LAUNCH_CHECKLIST.md`)
+- [ ] Create App Store Connect listing (manual)
+- [ ] Upload screenshots (see `store_metadata/screenshots/README.md`)
+- [ ] Build and submit IPA: `flutter build ipa --release`
 - [ ] Verification: Submitted for review
 
-**Status**: ⚪ Not Started
+**Status**: 🟡 Prep Done — Manual submission remaining
 
 ### Task 4.3-4.4: Android Play Store Submission
-- [ ] Update build.gradle versions
-- [ ] Create Play Console listing
-- [ ] Build and submit AAB
+- [x] Version bumped in pubspec.yaml (1.0.2+3) — Android reads from Flutter
+- [x] Play Store description prepared (`store_metadata/play_store/listing.md`)
+- [x] Release signing guide created (`android/app/signing.md`)
+- [ ] Generate upload keystore and configure `key.properties` (manual — see signing.md)
+- [ ] Create Play Console listing (manual)
+- [ ] Upload screenshots (see `store_metadata/screenshots/README.md`)
+- [ ] Build and submit AAB: `flutter build appbundle --release`
 - [ ] Verification: Submitted for review
 
-**Status**: ⚪ Not Started
+**Status**: 🟡 Prep Done — Signing setup & manual submission remaining
 
 ### Task 4.5-4.6: Soft Launch
-- [ ] TestFlight to 100 users
-- [ ] Internal testing track on Android
-- [ ] Create feedback form
+- [x] Pre-launch checklist includes soft launch criteria
+- [ ] TestFlight to 100 users (manual)
+- [ ] Internal testing track on Android (manual)
+- [ ] Create feedback form (manual)
 - [ ] Monitor crash-free rate
 - [ ] Verification: >99% crash-free
 
-**Status**: ⚪ Not Started
+**Status**: 🟡 Prep Done — Manual execution remaining
 
 ### Task 4.7-4.8: Incident Runbooks & Stability
-- [ ] Add incident runbooks to OPERATIONS_RUNBOOK.md
-- [ ] 7-day stability checkpoint
+- [x] Added 5 incident runbooks to OPERATIONS_RUNBOOK.md (INC-1 through INC-5)
+- [ ] 7-day stability checkpoint (run after soft launch)
 - [ ] Verification: All criteria met
 
-**Status**: ⚪ Not Started
+**Status**: 🟢 Runbooks Complete — Stability checkpoint pending
 
 ---
 
@@ -218,5 +226,9 @@
 
 | Date | Task | Status | Notes |
 |------|------|--------|-------|
+| Day 22 | 4.1-4.2 iOS Prep | 🟡 Prep Done | Version 1.0.2+3, App Store listing written |
+| Day 22 | 4.3-4.4 Android Prep | 🟡 Prep Done | Play Store listing written, signing guide created |
+| Day 22 | 4.7-4.8 Incident Runbooks | 🟢 Complete | INC-1 through INC-5 added to OPERATIONS_RUNBOOK.md |
+| Day 22 | 4.5-4.6 Soft Launch Prep | 🟡 Prep Done | Pre-launch checklist created |
 | 2026-02-13 | Task 1.1 | Started | Creating alerting service |
 
