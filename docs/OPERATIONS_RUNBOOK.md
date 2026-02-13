@@ -306,3 +306,31 @@ curl -s "https://www.youtube.com/feeds/videos.xml?channel_id=UCBcRF18a7Qf58cCRy5
 # Validate Redis connection
 redis-cli -u $REDIS_URL PING
 ```
+
+---
+
+## Database Failover
+
+### Prevention
+- `pool_pre_ping=True`: SQLAlchemy pings each connection before reuse, transparently discarding stale ones
+- `pool_recycle=1800`: Connections recycled every 30 minutes to prevent cloud DB idle disconnects
+- Pool: 5 base + 10 overflow = max 15 concurrent connections
+
+### Detection
+- `/health` endpoint runs `SELECT 1` — returns 503 if DB is unreachable
+- Ingestion health check (`tasks_health.py`) monitors for stale data
+- Alerting webhook fires on consecutive health check failures
+
+### Recovery Procedure
+1. **Check DB status**: `SELECT 1` via psql or Render dashboard
+2. **If Render DB is down**: Check Render status page; DB auto-recovers on their infra
+3. **If connection pool exhausted**: Restart the web service (Render dashboard → Manual Deploy)
+4. **If persistent**: Check `engine.pool.status()` via `/metrics` endpoint for pool stats
+5. **Verify recovery**: Hit `/health` — should return 200 with `"database": "ok"`
+
+### Connection Pool Monitoring
+The `/metrics` endpoint exposes pool statistics:
+- `pool_size`: Current pool capacity
+- `checked_out`: Connections currently in use
+- `overflow`: Extra connections beyond pool_size
+- `checked_in`: Idle connections in pool
