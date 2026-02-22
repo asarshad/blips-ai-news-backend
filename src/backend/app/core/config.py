@@ -146,6 +146,15 @@ class Settings(BaseSettings):
     RESERVOIR_VIDEOS: int = 150
     RESERVOIR_REELS: int = 300
 
+    # ------------------------------------------------------------------
+    # Ads (architecture only — no SDK, all OFF by default)
+    # ------------------------------------------------------------------
+    ADS_ENABLED: bool = False
+    ADS_FEED_CARD_ENABLED: bool = False
+    ADS_BANNER_ENABLED: bool = False
+    ADS_FEED_FREQUENCY: int = 0        # 1 ad every N organic items (0 = disabled)
+    ADS_CANARY_PERCENT: int = 0        # % of requests that receive ads (gradual rollout)
+
     # Top-up controls
     TOPUP_LOCK_TTL_SECONDS: int = 120
     TOPUP_MAX_RUNTIME_SECONDS: int = 300
