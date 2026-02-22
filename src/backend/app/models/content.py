@@ -92,7 +92,16 @@ class ContentItem(Base):
 
     # Suppression flag (hidden from default feeds)
     is_suppressed = Column(Boolean, default=False, nullable=False, index=True)
-    
+
+    # ── Editorial control fields ──────────────────────────────────────────
+    editorial_boost = Column(Integer, default=0, nullable=False, index=True)
+    manual_added = Column(Boolean, default=False, nullable=False)
+    added_by = Column(Text, nullable=True)
+    added_at = Column(DateTime, nullable=True)
+    last_modified_by = Column(Text, nullable=True)
+    last_modified_at = Column(DateTime, nullable=True)
+    # ─────────────────────────────────────────────────────────────────────
+
     # Timing
     published_at = Column(DateTime, nullable=False, index=True)
     

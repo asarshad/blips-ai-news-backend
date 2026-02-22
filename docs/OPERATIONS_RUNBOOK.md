@@ -14,6 +14,7 @@ Comprehensive operational guide for Blips backend service.
 3. [Common Incidents](#common-incidents)
 4. [Emergency Procedures](#emergency-procedures)
 5. [Maintenance Tasks](#maintenance-tasks)
+6. [Editorial Control](#editorial-control)
 
 ---
 
@@ -458,3 +459,52 @@ The `/metrics` endpoint exposes pool statistics:
 3. If service was sleeping → first request wakes it (expected on free tier)
 4. If on paid tier and still slow → check connection pool, pending migrations
 5. Monitor: response times should be <500ms after warmup
+
+---
+
+## Editorial Control
+
+Admin portal for content curation. Full docs: [`src/backend/docs/EDITORIAL_CONTROL.md`](../src/backend/docs/EDITORIAL_CONTROL.md).
+
+### Quick Commands
+
+```bash
+export ADMIN_KEY="your-admin-api-key"
+export HOST="https://blips-api.onrender.com"
+
+# List content (filtered by day)
+curl -s -H "X-Admin-Key: $ADMIN_KEY" \
+  "$HOST/admin/editorial/content?day=2024-01-15&page_size=10" | jq
+
+# Submit a URL for ingestion
+curl -X POST -H "X-Admin-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+  "$HOST/admin/editorial/content/submit" \
+  -d '{"url": "https://example.com/article", "importance_level": 2}' | jq
+
+# Boost a content item (0-3)
+curl -X POST -H "X-Admin-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+  "$HOST/admin/editorial/content/42/boost" \
+  -d '{"level": 2}' | jq
+
+# Suppress (soft delete) content from feeds
+curl -X POST -H "X-Admin-Key: $ADMIN_KEY" \
+  "$HOST/admin/editorial/content/42/suppress" | jq
+
+# Unsuppress
+curl -X POST -H "X-Admin-Key: $ADMIN_KEY" \
+  "$HOST/admin/editorial/content/42/unsuppress" | jq
+
+# View content detail + audit trail
+curl -s -H "X-Admin-Key: $ADMIN_KEY" \
+  "$HOST/admin/editorial/content/42" | jq
+```
+
+### Admin UI
+
+Browser-based dashboard at `$HOST/admin/ui/?key=$ADMIN_KEY`.
+
+### Migration
+
+```bash
+cd src/backend && alembic upgrade head
+```

@@ -6,6 +6,7 @@ from app.models.content import (
     InteractionEvent, EventType
 )
 from app.models.ingestion_progress import IngestionProgress
+from app.models.editorial import EditorialAction
 
 # For Alembic to detect all models
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "InteractionEvent",
     "EventType",
     "IngestionProgress",
+    "EditorialAction",
 ]
