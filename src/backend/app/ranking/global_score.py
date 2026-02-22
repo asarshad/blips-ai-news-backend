@@ -9,15 +9,23 @@ Formula:
         trend_weight * trend_score +
         recency_weight * recency_score +
         diversity_weight * diversity_boost  # Note: boost can be negative
-    )
+    ) + editorial_boost * EDITORIAL_BOOST_WEIGHT
 
 The global score is used for default feed ordering when no
 personalization is applied.
 """
 
+import os
 from typing import Optional
 
 from app.config.scoring import scoring_weights
+
+# Configurable via env – intentionally small to prevent editorial
+# boost from completely overriding organic relevance signals.
+# At the default 0.05 a max-boost (3) adds 0.15 to the [0-1] score.
+EDITORIAL_BOOST_WEIGHT: float = float(
+    os.getenv("EDITORIAL_BOOST_WEIGHT", "0.05")
+)
 
 
 def compute_global_score(
@@ -25,6 +33,7 @@ def compute_global_score(
     trend_score: float,
     recency_score: float,
     diversity_boost: float = 0.0,
+    editorial_boost: int = 0,
     quality_weight: Optional[float] = None,
     trend_weight: Optional[float] = None,
     recency_weight: Optional[float] = None,
@@ -33,20 +42,21 @@ def compute_global_score(
     """
     Compute the global ranking score for content.
     
-    Combines quality, trend, recency, and diversity signals.
+    Combines quality, trend, recency, diversity, and editorial signals.
     
     Args:
         quality_score: Source quality and completeness (0-1)
         trend_score: Viral/hot signal (0-1)
         recency_score: Freshness signal (0-1)
         diversity_boost: Diversity modifier (typically -0.5 to 0)
+        editorial_boost: Manual editorial importance (0-3)
         quality_weight: Override quality weight
         trend_weight: Override trend weight
         recency_weight: Override recency weight
         diversity_weight: Override diversity weight
         
     Returns:
-        Global score (typically 0-1, can be slightly negative with penalty)
+        Global score (typically 0-1, can exceed 1.0 with editorial boost)
     """
     # Use config defaults if not overridden
     if quality_weight is None:
@@ -58,15 +68,20 @@ def compute_global_score(
     if diversity_weight is None:
         diversity_weight = scoring_weights.diversity
     
-    global_score = (
+    base_score = (
         quality_weight * quality_score +
         trend_weight * trend_score +
         recency_weight * recency_score +
         diversity_weight * diversity_boost
     )
+
+    # Editorial boost is additive – it nudges but does not dominate.
+    editorial_addition = editorial_boost * EDITORIAL_BOOST_WEIGHT
+
+    global_score = base_score + editorial_addition
     
-    # Clamp to reasonable range
-    return max(0.0, min(1.0, global_score))
+    # Clamp to reasonable range (allow up to 1.15 for max editorial boost)
+    return max(0.0, min(1.0 + 3 * EDITORIAL_BOOST_WEIGHT, global_score))
 
 
 def explain_global_score(
@@ -74,6 +89,7 @@ def explain_global_score(
     trend_score: float,
     recency_score: float,
     diversity_boost: float = 0.0,
+    editorial_boost: int = 0,
 ) -> dict:
     """
     Return a breakdown of global score computation.
@@ -86,6 +102,7 @@ def explain_global_score(
         trend_score: Viral/hot signal (0-1)
         recency_score: Freshness signal (0-1)
         diversity_boost: Diversity modifier
+        editorial_boost: Manual editorial importance (0-3)
         
     Returns:
         Dictionary with component breakdown
@@ -94,9 +111,11 @@ def explain_global_score(
     trend_contrib = scoring_weights.trend * trend_score
     recency_contrib = scoring_weights.recency * recency_score
     diversity_contrib = scoring_weights.diversity * diversity_boost
+    editorial_contrib = editorial_boost * EDITORIAL_BOOST_WEIGHT
     
     global_score = compute_global_score(
-        quality_score, trend_score, recency_score, diversity_boost
+        quality_score, trend_score, recency_score, diversity_boost,
+        editorial_boost=editorial_boost,
     )
     
     return {
@@ -121,6 +140,11 @@ def explain_global_score(
                 "raw_score": round(diversity_boost, 4),
                 "weight": scoring_weights.diversity,
                 "contribution": round(diversity_contrib, 4),
+            },
+            "editorial": {
+                "boost_level": editorial_boost,
+                "weight": EDITORIAL_BOOST_WEIGHT,
+                "contribution": round(editorial_contrib, 4),
             },
         },
     }

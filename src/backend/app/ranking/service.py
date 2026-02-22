@@ -165,6 +165,7 @@ class ScoringService:
             trend_score=trend,
             recency_score=recency,
             diversity_boost=diversity,
+            editorial_boost=getattr(item, "editorial_boost", 0) or 0,
         )
         
         return {

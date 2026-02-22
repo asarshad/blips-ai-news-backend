@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app.models import Conversation, Usage
 from app.models import ContentItem, UserProfile, UserPreference, InteractionEvent, IngestionProgress
+from app.models import EditorialAction
 from app.db.base import Base
 from app.core.config import settings
 
