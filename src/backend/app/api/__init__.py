@@ -4,8 +4,10 @@ from fastapi import APIRouter
 from app.api.routes import (
     ai_chat,
     articles,
+    config,
     conversation,
     debug,
+    events,
     inventory,
     metrics,
     quality,
@@ -22,6 +24,8 @@ from app.core.config import settings
 api_router = APIRouter()
 
 api_router.include_router(articles.router, prefix="/articles", tags=["articles"])
+api_router.include_router(config.router, tags=["config"])
+api_router.include_router(events.router, tags=["events"])
 api_router.include_router(ai_chat.router, prefix="/ai", tags=["ai"])
 api_router.include_router(conversation.router, prefix="/conversations", tags=["conversations"])
 api_router.include_router(starters.router, prefix="/starters", tags=["starters"])

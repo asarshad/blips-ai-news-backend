@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from typing import Dict, Any
 
 from app.core.dependencies import get_db
+from app.core.config import settings
 from app.core.feature_flags import get_feature_flags, FeatureFlags
 from app.core.exceptions import not_found_exception
 from app.core.logging import get_logger
@@ -16,6 +17,7 @@ from app.db.base import SessionLocal
 from app.schemas.video import Video as VideoSchema, VideoList
 from app.repositories.content_repo import ContentItemRepository
 from app.models.content import ContentType
+from app.services.ad_mixer import inject_ads
 from app.services.diversity_mixer import mix_feed
 from app.services.inventory_service import Surface
 from app.services.tiered_feed_service import (
@@ -115,8 +117,14 @@ def get_recent_videos(
         )
         feed_meta.add_headers(response)
     
+    # Ad injection (noop when ADS_ENABLED is false)
+    mixed, ads_injected = inject_ads(videos, placement_id="feed_fullpage")
+    if response:
+        response.headers["X-Ads-Injected"] = str(ads_injected)
+        response.headers["X-Ads-Frequency"] = str(settings.ADS_FEED_FREQUENCY)
+
     return {
-        "videos": videos,
+        "videos": mixed,
         "has_more": has_more,
         "page": page,
     }
