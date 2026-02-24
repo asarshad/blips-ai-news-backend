@@ -20,16 +20,15 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
-from enum import Enum
 
-from sqlalchemy import desc, and_, or_
+from sqlalchemy import and_, desc, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentType
-from app.services.inventory_service import Surface, FreshnessTier, _get_surface_config
 from app.services.diversity_mixer import mix_feed
+from app.services.inventory_service import FreshnessTier, Surface, _get_surface_config
 
 logger = get_logger(__name__)
 
@@ -170,6 +169,19 @@ def get_tiered_feed(
     
     if require_ai_processed:
         base_filter = and_(base_filter, ContentItem.ai_processed.is_(True))
+    
+    # Defense-in-depth: for REELS, enforce max duration at query level.
+    # Some items slip through ingestion classification (e.g. is_short metadata
+    # flag without a valid duration).  This prevents multi-hour "reels".
+    if surface == Surface.REELS:
+        max_dur = settings.REEL_MAX_DURATION_SECONDS
+        base_filter = and_(
+            base_filter,
+            or_(
+                ContentItem.duration_seconds.is_(None),    # unknown duration still OK (shorts URLs)
+                ContentItem.duration_seconds <= max_dur,   # known duration must be short
+            ),
+        )
     
     results: List[TieredItem] = []
     seen_ids = set()

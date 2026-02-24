@@ -4,30 +4,27 @@ Updated to serve content from the unified content_items table with AI filtering.
 Includes tiered freshness strategy (A/B/C) and diversity mixing.
 """
 
+from typing import Any, Dict
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
-from typing import Dict, Any
 
-from app.core.dependencies import get_db
+from app.api.feed_headers import FeedMetadata, compute_feed_version
 from app.core.config import settings
-from app.core.feature_flags import get_feature_flags, FeatureFlags
+from app.core.dependencies import get_db
 from app.core.exceptions import not_found_exception
+from app.core.feature_flags import FeatureFlags, get_feature_flags
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
-from app.schemas.video import Video as VideoSchema, VideoList
-from app.repositories.content_repo import ContentItemRepository
 from app.models.content import ContentType
+from app.repositories.content_repo import ContentItemRepository
+from app.schemas.video import Video as VideoSchema
 from app.services.ad_mixer import inject_ads
-from app.services.diversity_mixer import mix_feed
 from app.services.inventory_service import Surface
 from app.services.tiered_feed_service import (
-    get_tiered_feed,
     get_cached_tiered_feed,
-    tiered_item_to_dict,
-    FeedResponseMeta,
 )
 from app.services.topup_service import check_and_trigger_topup
-from app.api.feed_headers import FeedMetadata, compute_feed_version
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -88,12 +85,15 @@ def get_recent_videos(
     offset = (page - 1) * limit
     
     # Use cached tiered feed for better performance
+    # NOTE: require_ai_processed=False because production has summarization
+    # disabled, so most videos have ai_processed=False.  Only Tier C
+    # evergreen content happens to survive — new videos would vanish.
     videos, has_more, meta = get_cached_tiered_feed(
         db,
         Surface.VIDEOS,
         limit=limit,
         offset=offset,
-        require_ai_processed=True,
+        require_ai_processed=False,
     )
     
     # Log tier distribution (from cached results)
@@ -103,7 +103,7 @@ def get_recent_videos(
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
     logger.info(f"Videos page {page}: {tier_counts} (limit={limit})")
     
-    # Add diagnostic headers
+    # ALWAYS add diagnostic headers (even on empty)
     if response:
         feed_meta = FeedMetadata(
             generated_at=meta.generated_at,
@@ -116,6 +116,9 @@ def get_recent_videos(
             feed_version=compute_feed_version(videos, meta.generated_at),
         )
         feed_meta.add_headers(response)
+    
+    if not videos and page == 1:
+        raise HTTPException(status_code=404, detail="No videos found")
     
     # Ad injection (noop when ADS_ENABLED is false)
     mixed, ads_injected = inject_ads(videos, placement_id="feed_fullpage")

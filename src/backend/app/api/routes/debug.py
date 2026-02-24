@@ -17,6 +17,7 @@ from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_admin_key
+from app.core.config import settings
 from app.core.dependencies import get_db
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentType
@@ -320,3 +321,113 @@ def list_cache_keys() -> Dict[str, Any]:
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+@router.get("/inventory")
+def get_inventory_breakdown(
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Comprehensive inventory breakdown for incident diagnosis.
+
+    Returns per-content-type:
+    - total, ai_processed vs not, suppressed count
+    - duration_seconds stats (for reels quality auditing)
+    - misclassification candidates (REELs with duration > max)
+    - newest published_at / created_at
+
+    This endpoint is permanent — it makes every future incident
+    diagnosable without SSH or ad-hoc queries.
+    """
+    now = datetime.utcnow()
+    result: Dict[str, Any] = {"timestamp": now.isoformat(), "surfaces": {}}
+
+    max_reel_dur = settings.REEL_MAX_DURATION_SECONDS
+
+    for ct in ContentType:
+        base = db.query(ContentItem).filter(
+            ContentItem.type == ct,
+            ContentItem.is_suppressed.is_(False),
+        )
+        total = base.count()
+        ai_true = base.filter(ContentItem.ai_processed.is_(True)).count()
+        ai_false = base.filter(ContentItem.ai_processed.is_(False)).count()
+
+        suppressed = db.query(func.count(ContentItem.id)).filter(
+            ContentItem.type == ct,
+            ContentItem.is_suppressed.is_(True),
+        ).scalar()
+
+        # Newest dates
+        newest = db.query(
+            func.max(ContentItem.published_at).label("pub"),
+            func.max(ContentItem.created_at).label("crt"),
+        ).filter(
+            ContentItem.type == ct,
+            ContentItem.is_suppressed.is_(False),
+        ).first()
+
+        surface_data: Dict[str, Any] = {
+            "total": total,
+            "ai_processed_true": ai_true,
+            "ai_processed_false": ai_false,
+            "suppressed": suppressed,
+            "newest_published_at": newest.pub.isoformat() if newest and newest.pub else None,
+            "newest_created_at": newest.crt.isoformat() if newest and newest.crt else None,
+        }
+
+        # Duration stats (relevant for REEL and VIDEO)
+        if ct in (ContentType.VIDEO, ContentType.REEL):
+            dur_stats = db.query(
+                func.count(ContentItem.id).label("with_duration"),
+                func.min(ContentItem.duration_seconds).label("min_dur"),
+                func.max(ContentItem.duration_seconds).label("max_dur"),
+                func.avg(ContentItem.duration_seconds).label("avg_dur"),
+            ).filter(
+                ContentItem.type == ct,
+                ContentItem.is_suppressed.is_(False),
+                ContentItem.duration_seconds.isnot(None),
+            ).first()
+
+            null_dur = db.query(func.count(ContentItem.id)).filter(
+                ContentItem.type == ct,
+                ContentItem.is_suppressed.is_(False),
+                ContentItem.duration_seconds.is_(None),
+            ).scalar()
+
+            surface_data["duration"] = {
+                "with_duration": dur_stats.with_duration if dur_stats else 0,
+                "null_duration": null_dur,
+                "min_seconds": dur_stats.min_dur if dur_stats else None,
+                "max_seconds": dur_stats.max_dur if dur_stats else None,
+                "avg_seconds": round(float(dur_stats.avg_dur), 1) if dur_stats and dur_stats.avg_dur else None,
+            }
+
+        # Misclassification audit for REELs
+        if ct == ContentType.REEL:
+            over_max = db.query(ContentItem).filter(
+                ContentItem.type == ContentType.REEL,
+                ContentItem.is_suppressed.is_(False),
+                ContentItem.duration_seconds.isnot(None),
+                ContentItem.duration_seconds > max_reel_dur,
+            ).all()
+
+            surface_data["misclassified_candidates"] = [
+                {
+                    "id": item.id,
+                    "title": item.title[:60],
+                    "duration_seconds": item.duration_seconds,
+                    "source_url": item.source_url,
+                }
+                for item in over_max[:20]  # cap preview
+            ]
+            surface_data["misclassified_count"] = len(over_max)
+
+        result["surfaces"][ct.value] = surface_data
+
+    result["config"] = {
+        "reel_max_duration_seconds": max_reel_dur,
+        "summarization_enabled": settings.INGESTION_ENABLED,  # approximate
+    }
+
+    return result

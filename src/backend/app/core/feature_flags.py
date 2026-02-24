@@ -18,15 +18,13 @@ Usage:
 """
 
 import os
-import json
 import time
-from typing import Optional, Dict
+from typing import Dict, Optional
 
 import redis
-
-from app.core.config import settings
-from app.core.logging import get_logger
 from redis.exceptions import RedisError
+
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -63,7 +61,7 @@ FEATURE_DEFAULTS = {
 # Production defaults - more conservative
 PROD_DEFAULTS = {
     "ingestion": True,      # Core functionality, keep on
-    "summarization": False,  # LLM costs - OFF until verified
+    "summarization": True,  # Core functionality — the app exists to summarize
     "chat": False,          # LLM costs - OFF until verified
     "reels": True,          # Low risk
     "videos": True,         # Low risk

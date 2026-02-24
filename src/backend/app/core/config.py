@@ -136,6 +136,9 @@ class Settings(BaseSettings):
     REELS_BACKFILL_CREATED_HOURS: int = 72
     REELS_EVERGREEN_MAX_DAYS: int = 45
 
+    # Reels quality enforcement (defense-in-depth)
+    REEL_MAX_DURATION_SECONDS: int = 180  # 3 minutes — anything longer is a VIDEO
+
     # Minimum fresh counts per surface (triggers top-up if below)
     MIN_FRESH_ARTICLES: int = 30
     MIN_FRESH_VIDEOS: int = 25

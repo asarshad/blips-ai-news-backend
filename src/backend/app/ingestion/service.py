@@ -5,11 +5,11 @@ Orchestrates the ingestion of articles and videos into the content system.
 Fetches directly from RSS feeds and YouTube channels with role-based quotas.
 """
 
+import os
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-import os
-import time
 from typing import Dict, List, Optional
 
 from sqlalchemy.exc import IntegrityError
@@ -206,14 +206,31 @@ class IngestionPipeline:
         except Exception as e:
             logger.warning(f"Failed to get duration for video {entry.title}: {e}")
         
-        # Classify as REEL if it's a Short (use entry metadata first)
+        # Classify as REEL if it's a Short.
+        # Priority: known duration > URL pattern > entry metadata hint.
+        # If we have a concrete duration, that is authoritative.
         if content_type == ContentType.VIDEO:
-            # Use the is_short flag from enhanced metadata if available
             is_short = getattr(entry, 'is_short', False)
             is_shorts_url = entry.video_url and "/shorts/" in entry.video_url
-            is_short_duration = duration_seconds and duration_seconds <= 180
-            if is_short or is_shorts_url or is_short_duration:
+            is_short_duration = duration_seconds is not None and duration_seconds <= settings.REEL_MAX_DURATION_SECONDS
+            is_long_duration = duration_seconds is not None and duration_seconds > settings.REEL_MAX_DURATION_SECONDS
+
+            if is_long_duration:
+                # Authoritative: known duration > 180s → always VIDEO
+                content_type = ContentType.VIDEO
+            elif is_short_duration:
+                # Authoritative: known short duration → always REEL
                 content_type = ContentType.REEL
+            elif is_shorts_url:
+                # URL-based signal (/shorts/ in URL) — strong hint
+                content_type = ContentType.REEL
+            elif is_short and duration_seconds is None:
+                # Metadata hint without duration — accept but log for audit
+                content_type = ContentType.REEL
+                logger.info(
+                    f"Reel classified by metadata hint only (no duration): "
+                    f"{entry.title} [{entry.video_id}]"
+                )
         
         source = entry.source or "YouTube"
         # YouTube titles repeat frequently (series/weekly formats). Use video_id for stable dedupe.

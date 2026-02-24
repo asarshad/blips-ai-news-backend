@@ -4,34 +4,27 @@ Updated to serve content from the unified content_items table with AI filtering.
 Includes tiered freshness strategy (A/B/C) and diversity mixing.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Response
-from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
-from app.core.dependencies import get_db
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy.orm import Session
+
+from app.api.feed_headers import FeedMetadata, compute_feed_version
 from app.core.config import settings
+from app.core.dependencies import get_db
 from app.core.exceptions import not_found_exception
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
-from app.schemas.article import (
-    Article as ArticleSchema, 
-    ArticleWithConversation, 
-    ArticleList, 
-    TagCount
-)
-from app.repositories.content_repo import ContentItemRepository
 from app.models.content import ContentType
+from app.repositories.content_repo import ContentItemRepository
+from app.schemas.article import Article as ArticleSchema
+from app.schemas.article import ArticleList, ArticleWithConversation, TagCount
 from app.services.ad_mixer import inject_ads
-from app.services.diversity_mixer import mix_feed
 from app.services.inventory_service import Surface
 from app.services.tiered_feed_service import (
-    get_tiered_feed,
     get_cached_tiered_feed,
-    tiered_item_to_dict,
-    FeedResponseMeta,
 )
 from app.services.topup_service import check_and_trigger_topup
-from app.api.feed_headers import FeedMetadata, compute_feed_version
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -70,12 +63,12 @@ def get_next_article(
     Returns the most recent article if no current_id is provided.
     Only returns AI-processed articles with valid summaries.
     """
-    # Get recent AI-processed articles
+    # Get recent articles (ai_processed not required — summarization may be off)
     items = content_repo.get_by_type(
         ContentType.ARTICLE,
         limit=50,
         hours_back=168,  # 7 days
-        ai_processed_only=True
+        ai_processed_only=False
     )
     
     if not items:
@@ -107,7 +100,7 @@ def get_cached_articles(
         ContentType.ARTICLE,
         limit=5,
         hours_back=72,
-        ai_processed_only=True
+        ai_processed_only=False
     )
     
     if not items:
@@ -143,16 +136,16 @@ def get_recent_articles(
     offset = (page - 1) * limit
     
     # Use cached tiered feed for better performance
+    # NOTE: require_ai_processed=False because production has summarization
+    # disabled, so all articles have ai_processed=False. Requiring True
+    # would return an empty feed (the root cause of the 404 bug).
     articles, has_more, meta = get_cached_tiered_feed(
         db,
         Surface.ARTICLES,
         limit=limit,
         offset=offset,
-        require_ai_processed=True,
+        require_ai_processed=False,
     )
-    
-    if not articles and page == 1:
-        raise HTTPException(status_code=404, detail="No articles found")
     
     # Log tier distribution (from cached results)
     tier_counts = {}
@@ -161,7 +154,8 @@ def get_recent_articles(
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
     logger.info(f"Articles page {page}: {tier_counts} (limit={limit})")
     
-    # Add diagnostic headers
+    # ALWAYS add diagnostic headers (even on empty results) so debugging is
+    # possible.  Previously a 404 was raised before headers were set.
     feed_meta = FeedMetadata(
         generated_at=meta.generated_at,
         source=meta.source,
@@ -173,6 +167,9 @@ def get_recent_articles(
         feed_version=compute_feed_version(articles, meta.generated_at),
     )
     feed_meta.add_headers(response)
+    
+    if not articles and page == 1:
+        raise HTTPException(status_code=404, detail="No articles found")
     
     # Ad injection (noop when ADS_ENABLED is false)
     mixed, ads_injected = inject_ads(articles, placement_id="feed_fullpage")
@@ -198,7 +195,7 @@ def get_articles_by_tag(
         ContentType.ARTICLE,
         limit=200,
         hours_back=168,
-        ai_processed_only=True
+        ai_processed_only=False
     )
     
     # Filter by topic
