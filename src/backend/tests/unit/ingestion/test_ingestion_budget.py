@@ -5,7 +5,7 @@ Tests the reserve/finalize budget system that prevents over-ingestion.
 """
 
 from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

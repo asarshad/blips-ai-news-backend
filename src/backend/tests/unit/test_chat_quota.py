@@ -5,9 +5,7 @@ Tests the quota checking and enforcement logic that limits
 API usage per device/user.
 """
 
-import json
-from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import fakeredis
 import pytest

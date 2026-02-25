@@ -21,11 +21,17 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app.domain.editorial.service import EditorialService, _extract_domain
+from app.ranking.global_score import (
+    EDITORIAL_BOOST_WEIGHT,
+    compute_global_score,
+    explain_global_score,
+)
+from app.repositories.editorial_repo import EditorialRepository
 
 # ---------------------------------------------------------------------------
 # 2. Editorial service — unit tests with mock DB
 # ---------------------------------------------------------------------------
-from app.domain.editorial.service import EditorialService, SubmitResult, _extract_domain
 
 
 class TestExtractDomain:
@@ -121,7 +127,6 @@ class TestEditorialServiceSubmit:
 # ---------------------------------------------------------------------------
 # 3. Editorial repository — unit tests with mock session
 # ---------------------------------------------------------------------------
-from app.repositories.editorial_repo import EditorialRepository
 
 
 class TestEditorialRepository:
@@ -190,7 +195,6 @@ class TestEditorialRepository:
 # ---------------------------------------------------------------------------
 # 4. Ranking integration — editorial_boost affects global_score
 # ---------------------------------------------------------------------------
-from app.ranking.global_score import compute_global_score, EDITORIAL_BOOST_WEIGHT
 
 
 class TestEditorialBoostScoring:
@@ -224,6 +228,7 @@ class TestAdminAuth:
     def test_constant_time_compare_used(self):
         """Auth module uses secrets.compare_digest for timing-safe comparison."""
         import inspect
+
         from app.core.auth import require_admin_key
         source = inspect.getsource(require_admin_key)
         assert "compare_digest" in source
@@ -231,6 +236,7 @@ class TestAdminAuth:
     def test_fail_closed_when_no_key_configured(self):
         """Auth module rejects requests when ADMIN_API_KEY is not set."""
         import inspect
+
         from app.core.auth import require_admin_key
         source = inspect.getsource(require_admin_key)
         # The function should check for empty key and raise 401
@@ -278,7 +284,6 @@ class TestAuditLogCreation:
 # ---------------------------------------------------------------------------
 # 7. Explain score includes editorial component
 # ---------------------------------------------------------------------------
-from app.ranking.global_score import explain_global_score
 
 
 class TestExplainGlobalScore:

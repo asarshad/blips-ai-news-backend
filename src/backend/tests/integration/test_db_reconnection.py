@@ -5,7 +5,6 @@ Verifies that SQLAlchemy's pool_pre_ping mechanism handles
 stale connections gracefully without application errors.
 """
 
-import pytest
 from sqlalchemy import text
 
 from app.db.base import SessionLocal, engine

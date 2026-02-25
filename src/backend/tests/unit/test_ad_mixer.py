@@ -18,8 +18,6 @@ import pathlib as _pathlib
 import sys
 import types
 
-import pytest
-
 # ---------------------------------------------------------------------------
 # Import ad_mixer directly, bypassing app.services.__init__ which triggers
 # heavy imports (feedparser -> cgi) that break under Python 3.13+.

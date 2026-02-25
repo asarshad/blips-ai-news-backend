@@ -65,8 +65,13 @@ def _integration_env(postgres_url: str, redis_url: str) -> None:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _run_migrations(postgres_url: str) -> None:
-    """Apply Alembic migrations against the ephemeral Postgres container."""
+def _run_migrations(postgres_url: str, _integration_env) -> None:
+    """Apply Alembic migrations against the ephemeral Postgres container.
+
+    Depends on ``_integration_env`` so that DATABASE_URL / REDIS_URL are set
+    **before** alembic/env.py imports ``app.db.base`` (which creates a
+    module-level engine bound to ``settings.DATABASE_URL``).
+    """
     alembic_ini = BACKEND_ROOT / "alembic.ini"
     alembic_cfg = AlembicConfig(str(alembic_ini))
 
