@@ -7,8 +7,9 @@ Tests critical ingestion functionality:
 - Feed parsing
 """
 
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import MagicMock, patch
 
 pytestmark = [pytest.mark.integration]
 
@@ -105,8 +106,9 @@ class TestYouTubeClientSafety:
     
     def test_duration_uses_api_not_scraping(self):
         """Video duration should use YouTube Data API when available."""
-        from app.integrations.youtube_client import YouTubeClient
         import os
+
+        from app.integrations.youtube_client import YouTubeClient
         
         # With API key set, should try API first
         with patch.dict(os.environ, {"YOUTUBE_API_KEY": "test-key"}):

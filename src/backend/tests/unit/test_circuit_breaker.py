@@ -4,8 +4,6 @@ Unit tests for the circuit breaker module.
 
 import time
 
-import pytest
-
 from app.core.circuit_breaker import (
     CircuitBreaker,
     CircuitState,
