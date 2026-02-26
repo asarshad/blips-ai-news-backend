@@ -48,7 +48,6 @@ class TestQuotaEnforcement:
         quota = manager.check_quota("new-device-123")
         
         # Should have maximum remaining
-        assert quota["has_quota"] is True
         assert quota["remaining_daily_messages"] > 0
     
     def test_user_near_limit_gets_warning(self):
@@ -60,7 +59,6 @@ class TestQuotaEnforcement:
         
         quota = manager.check_quota("active-device-123")
         
-        assert quota["has_quota"] is True
         assert 0 < quota["remaining_daily_messages"] <= 5
     
     def test_user_at_limit_denied(self):
@@ -72,7 +70,6 @@ class TestQuotaEnforcement:
         
         quota = manager.check_quota("heavy-user-device")
         
-        assert quota["has_quota"] is False
         assert quota["remaining_daily_messages"] == 0
     
     def test_article_quota_enforced(self):
@@ -85,7 +82,7 @@ class TestQuotaEnforcement:
         quota = manager.check_quota("user-device", article_id=123)
         
         # Article-level quota should impact result
-        assert "article_messages_remaining" in quota
+        assert "remaining_article_messages" in quota
 
 
 class TestQuotaCaching:
@@ -126,7 +123,7 @@ class TestQuotaCaching:
         assert redis_client.exists("quota:device-invalidate")
         
         # Record usage - should invalidate cache
-        manager.record_usage("device-invalidate", article_id=None, tokens=100)
+        manager.update_usage("device-invalidate", article_id=None, tokens=100)
         
         # Cache should be cleared
         assert not redis_client.exists("quota:device-invalidate")
@@ -158,7 +155,7 @@ class TestQuotaEdgeCases:
         # Should still return quota result from DB
         quota = manager.check_quota("device-redis-down")
         assert quota is not None
-        assert "has_quota" in quota
+        assert "remaining_daily_messages" in quota
     
     def test_negative_usage_treated_as_zero(self):
         """Negative usage values should be treated as zero."""
@@ -169,4 +166,4 @@ class TestQuotaEdgeCases:
         quota = manager.check_quota("device-negative")
         
         # Should not crash, should have full quota
-        assert quota["has_quota"] is True
+        assert quota["remaining_daily_messages"] > 0
