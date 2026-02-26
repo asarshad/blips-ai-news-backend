@@ -331,7 +331,8 @@ async def redis_health_guard(request: Request, call_next):
     """Fail-closed: reject requests if Redis is down (cached check every 5s)."""
     global _redis_last_check, _redis_healthy
 
-    _skip_paths = ("/health", "/metrics", "/docs", "/openapi.json", "/redoc")
+    _skip_paths = ("/health", "/metrics", "/docs", "/openapi.json", "/redoc",
+                   f"{settings.API_V1_STR}/openapi.json")
     if request.url.path in _skip_paths:
         return await call_next(request)
 

@@ -71,6 +71,11 @@ def _run_migrations(postgres_url: str, _integration_env) -> None:
     Depends on ``_integration_env`` so that DATABASE_URL / REDIS_URL are set
     **before** alembic/env.py imports ``app.db.base`` (which creates a
     module-level engine bound to ``settings.DATABASE_URL``).
+
+    After migrations, we forcibly rebind ``app.db.base.engine`` and
+    ``SessionLocal`` to the container URL.  This is necessary because
+    pytest may import test modules (and thereby ``app.db.base``) during
+    collection — before fixtures have a chance to set env vars.
     """
     alembic_ini = BACKEND_ROOT / "alembic.ini"
     alembic_cfg = AlembicConfig(str(alembic_ini))
@@ -82,3 +87,24 @@ def _run_migrations(postgres_url: str, _integration_env) -> None:
     alembic_cfg.set_main_option("sqlalchemy.url", postgres_url)
 
     alembic_command.upgrade(alembic_cfg, "head")
+
+    # Rebind the app-level engine / session to the container DB so that
+    # any module-level imports that already triggered engine creation
+    # (e.g. ``from app.db.base import engine``) now point at the right DB.
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    import app.db.base as db_mod
+
+    db_mod.engine.dispose()  # close connections to the stale (default) DB
+    db_mod.engine = create_engine(
+        postgres_url,
+        pool_size=5,
+        max_overflow=10,
+        pool_timeout=30,
+        pool_recycle=1800,
+        pool_pre_ping=True,
+    )
+    db_mod.SessionLocal = sessionmaker(
+        autocommit=False, autoflush=False, bind=db_mod.engine,
+    )
