@@ -39,16 +39,17 @@ def _content_item_to_article_schema(item) -> dict:
     """Convert ContentItem to Article schema format."""
     # Extract tags from topics
     tags = [{"name": topic} for topic in (item.topics or [])]
+    summary = item.summary or ""
     
     return {
         "id": item.id,
         "title": item.title,
         "source_url": item.source_url,
-        "summary": item.summary or "",
+        "summary": summary,
         "image_url": item.image_url,
         "published_date": item.published_at.date() if item.published_at else None,
         "created_at": item.created_at,
-        "read_time_minutes": max(1, len(item.summary or "") // 200) if item.summary else 1,
+        "read_time_minutes": max(1, len(summary) // 200) if summary else 1,
         "tags": tags
     }
 
@@ -63,12 +64,12 @@ def get_next_article(
     Returns the most recent article if no current_id is provided.
     Only returns AI-processed articles with valid summaries.
     """
-    # Get recent articles (ai_processed not required — summarization may be off)
+    # Only show articles with AI summaries
     items = content_repo.get_by_type(
         ContentType.ARTICLE,
         limit=50,
         hours_back=168,  # 7 days
-        ai_processed_only=False
+        ai_processed_only=True
     )
     
     if not items:
@@ -100,7 +101,7 @@ def get_cached_articles(
         ContentType.ARTICLE,
         limit=5,
         hours_back=72,
-        ai_processed_only=False
+        ai_processed_only=True
     )
     
     if not items:
@@ -136,15 +137,13 @@ def get_recent_articles(
     offset = (page - 1) * limit
     
     # Use cached tiered feed for better performance
-    # NOTE: require_ai_processed=False because production has summarization
-    # disabled, so all articles have ai_processed=False. Requiring True
-    # would return an empty feed (the root cause of the 404 bug).
+    # Only show articles that have been AI-processed (have summaries)
     articles, has_more, meta = get_cached_tiered_feed(
         db,
         Surface.ARTICLES,
         limit=limit,
         offset=offset,
-        require_ai_processed=False,
+        require_ai_processed=True,
     )
     
     # Log tier distribution (from cached results)
@@ -190,12 +189,12 @@ def get_articles_by_tag(
     content_repo: ContentItemRepository = Depends(get_content_repo)
 ):
     """Get articles by tag/topic name."""
-    # Get all recent articles and filter by topic
+    # Get all recent articles and filter by topic (only AI-processed)
     items = content_repo.get_by_type(
         ContentType.ARTICLE,
         limit=200,
         hours_back=168,
-        ai_processed_only=False
+        ai_processed_only=True
     )
     
     # Filter by topic
