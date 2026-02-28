@@ -53,13 +53,13 @@ class TestQuotaEnforcement:
     def test_user_near_limit_gets_warning(self):
         """User approaching limit should still have access but limited."""
         redis_client = fakeredis.FakeRedis(decode_responses=True)
-        # Set usage at 90% of typical daily limit (assuming limit is ~20)
-        repo = FakeUsageRepo(daily_usage=18, article_usage=0)
+        # Set usage just below daily limit (MAX_MESSAGES_PER_DAY defaults to 5)
+        repo = FakeUsageRepo(daily_usage=4, article_usage=0)
         manager = QuotaManager(repo, redis_client)
         
         quota = manager.check_quota("active-device-123")
         
-        assert 0 < quota["remaining_daily_messages"] <= 5
+        assert 0 < quota["remaining_daily_messages"] <= 2
     
     def test_user_at_limit_denied(self):
         """User who has hit daily limit should be denied."""
