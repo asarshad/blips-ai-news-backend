@@ -65,20 +65,20 @@ class TestContentDeduplication:
     
     def test_dedupe_key_generation(self):
         """Dedupe keys should be generated consistently."""
-        from app.ingestion.deduplication import generate_dedupe_key
+        from app.clustering.dedupe import compute_dedupe_key
         
         # Same source should generate same key
-        key1 = generate_dedupe_key("https://example.com/article/123")
-        key2 = generate_dedupe_key("https://example.com/article/123")
+        key1 = compute_dedupe_key("Test Article", "example.com")
+        key2 = compute_dedupe_key("Test Article", "example.com")
         assert key1 == key2
         
         # Different sources should generate different keys
-        key3 = generate_dedupe_key("https://example.com/article/456")
+        key3 = compute_dedupe_key("Different Article", "example.com")
         assert key1 != key3
     
     def test_url_normalization(self):
         """URLs should be normalized for deduplication."""
-        from app.ingestion.deduplication import normalize_url
+        from app.ingestion.url_normalizer import normalize_url
         
         # With and without trailing slash
         url1 = normalize_url("https://example.com/article/")

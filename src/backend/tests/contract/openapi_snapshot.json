@@ -1,6 +1,52 @@
 {
   "components": {
     "schemas": {
+      "AdsConfig": {
+        "description": "Server-side ad feature flag bundle.\n\nAll flags default to ``False`` / ``0``, ensuring ads are\ncompletely disabled unless the operator explicitly enables them.",
+        "properties": {
+          "ads_banner_enabled": {
+            "default": false,
+            "title": "Ads Banner Enabled",
+            "type": "boolean"
+          },
+          "ads_canary_percent": {
+            "default": 0,
+            "description": "Percent of requests that receive ads (for gradual rollout).",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Ads Canary Percent",
+            "type": "integer"
+          },
+          "ads_enabled": {
+            "default": false,
+            "title": "Ads Enabled",
+            "type": "boolean"
+          },
+          "ads_feed_card_enabled": {
+            "default": false,
+            "title": "Ads Feed Card Enabled",
+            "type": "boolean"
+          },
+          "ads_feed_frequency": {
+            "default": 0,
+            "description": "Insert one ad every N organic items (0 = disabled).",
+            "title": "Ads Feed Frequency",
+            "type": "integer"
+          }
+        },
+        "title": "AdsConfig",
+        "type": "object"
+      },
+      "AppConfigResponse": {
+        "description": "Top-level response for GET /config.",
+        "properties": {
+          "ads": {
+            "$ref": "#/components/schemas/AdsConfig"
+          }
+        },
+        "title": "AppConfigResponse",
+        "type": "object"
+      },
       "Article": {
         "properties": {
           "created_at": {
@@ -165,6 +211,105 @@
         "title": "ArticleWithConversation",
         "type": "object"
       },
+      "Body_ui_boost_api_v1_admin_ui_action__content_id__boost_post": {
+        "properties": {
+          "key": {
+            "default": "",
+            "title": "Key",
+            "type": "string"
+          },
+          "level": {
+            "default": 0,
+            "title": "Level",
+            "type": "integer"
+          }
+        },
+        "title": "Body_ui_boost_api_v1_admin_ui_action__content_id__boost_post",
+        "type": "object"
+      },
+      "Body_ui_submit_url_api_v1_admin_ui_submit_post": {
+        "properties": {
+          "importance_level": {
+            "default": 0,
+            "title": "Importance Level",
+            "type": "integer"
+          },
+          "key": {
+            "default": "",
+            "title": "Key",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "Body_ui_submit_url_api_v1_admin_ui_submit_post",
+        "type": "object"
+      },
+      "Body_ui_suppress_api_v1_admin_ui_action__content_id__suppress_post": {
+        "properties": {
+          "key": {
+            "default": "",
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "title": "Body_ui_suppress_api_v1_admin_ui_action__content_id__suppress_post",
+        "type": "object"
+      },
+      "Body_ui_unsuppress_api_v1_admin_ui_action__content_id__unsuppress_post": {
+        "properties": {
+          "key": {
+            "default": "",
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "title": "Body_ui_unsuppress_api_v1_admin_ui_action__content_id__unsuppress_post",
+        "type": "object"
+      },
+      "BoostRequest": {
+        "properties": {
+          "level": {
+            "maximum": 3.0,
+            "minimum": 0.0,
+            "title": "Level",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "level"
+        ],
+        "title": "BoostRequest",
+        "type": "object"
+      },
+      "BoostResponse": {
+        "properties": {
+          "content_id": {
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "editorial_boost": {
+            "title": "Editorial Boost",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content_id",
+          "editorial_boost",
+          "message"
+        ],
+        "title": "BoostResponse",
+        "type": "object"
+      },
       "ChatMessage": {
         "properties": {
           "content": {
@@ -181,6 +326,445 @@
           "content"
         ],
         "title": "ChatMessage",
+        "type": "object"
+      },
+      "ContentItemDetail": {
+        "properties": {
+          "added_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Added At"
+          },
+          "added_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Added By"
+          },
+          "ai_processed": {
+            "default": false,
+            "title": "Ai Processed",
+            "type": "boolean"
+          },
+          "canonical_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Key"
+          },
+          "canonical_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Url"
+          },
+          "cluster_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Id"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "dedupe_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedupe Key"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "diversity_boost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diversity Boost"
+          },
+          "editorial_boost": {
+            "default": 0,
+            "title": "Editorial Boost",
+            "type": "integer"
+          },
+          "entities": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entities"
+          },
+          "freshness_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freshness Tier"
+          },
+          "global_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Global Score"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "last_modified_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Modified At"
+          },
+          "last_modified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Modified By"
+          },
+          "manual_added": {
+            "default": false,
+            "title": "Manual Added",
+            "type": "boolean"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "quality_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quality Score"
+          },
+          "recency_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recency Score"
+          },
+          "recent_actions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EditorialActionRecord"
+            },
+            "title": "Recent Actions",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "suppressed": {
+            "default": false,
+            "title": "Suppressed",
+            "type": "boolean"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "topics": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topics"
+          },
+          "trend_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trend Score"
+          },
+          "video_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Video Url"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "source",
+          "source_url",
+          "content_type"
+        ],
+        "title": "ContentItemDetail",
+        "type": "object"
+      },
+      "ContentItemSummary": {
+        "description": "Lightweight representation for list endpoints.",
+        "properties": {
+          "canonical_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Url"
+          },
+          "cluster_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Id"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "editorial_boost": {
+            "default": 0,
+            "title": "Editorial Boost",
+            "type": "integer"
+          },
+          "freshness_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freshness Tier"
+          },
+          "global_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Global Score"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "manual_added": {
+            "default": false,
+            "title": "Manual Added",
+            "type": "boolean"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "quality_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quality Score"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "suppressed": {
+            "default": false,
+            "title": "Suppressed",
+            "type": "boolean"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "source",
+          "source_url",
+          "content_type"
+        ],
+        "title": "ContentItemSummary",
         "type": "object"
       },
       "ContentTypeParam": {
@@ -308,6 +892,140 @@
           "message"
         ],
         "title": "DataDeletionResponse",
+        "type": "object"
+      },
+      "EditorialActionRecord": {
+        "properties": {
+          "action_type": {
+            "title": "Action Type",
+            "type": "string"
+          },
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "new_value": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Value"
+          },
+          "old_value": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Old Value"
+          }
+        },
+        "required": [
+          "id",
+          "action_type",
+          "actor",
+          "created_at"
+        ],
+        "title": "EditorialActionRecord",
+        "type": "object"
+      },
+      "EventPayload": {
+        "description": "Shared payload for impression and click events.",
+        "properties": {
+          "ad_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ad identifier (mutually exclusive with content_id).",
+            "title": "Ad Id"
+          },
+          "content_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Organic content ID (mutually exclusive with ad_id).",
+            "title": "Content Id"
+          },
+          "item_type": {
+            "description": "Discriminator: 'ARTICLE', 'VIDEO', 'REEL', or 'AD'.",
+            "title": "Item Type",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Anonymous session identifier (no PII).",
+            "title": "Session Id"
+          },
+          "surface": {
+            "description": "Where the event happened: 'feed', 'video', 'reel'.",
+            "title": "Surface",
+            "type": "string"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Client-side ISO-8601 timestamp.",
+            "title": "Timestamp"
+          }
+        },
+        "required": [
+          "item_type",
+          "surface"
+        ],
+        "title": "EventPayload",
+        "type": "object"
+      },
+      "EventResponse": {
+        "description": "Acknowledgement returned to the client.",
+        "properties": {
+          "status": {
+            "default": "ok",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "EventResponse",
         "type": "object"
       },
       "EventTypeParam": {
@@ -438,6 +1156,42 @@
           "success"
         ],
         "title": "InteractionResponse",
+        "type": "object"
+      },
+      "PaginatedContentResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ContentItemSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "pages"
+        ],
+        "title": "PaginatedContentResponse",
         "type": "object"
       },
       "PlaylistItem": {
@@ -897,6 +1651,85 @@
         "title": "StartersResponse",
         "type": "object"
       },
+      "SubmitURLRequest": {
+        "properties": {
+          "importance_level": {
+            "default": 0,
+            "maximum": 3.0,
+            "minimum": 0.0,
+            "title": "Importance Level",
+            "type": "integer"
+          },
+          "url": {
+            "maxLength": 2048,
+            "minLength": 5,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "SubmitURLRequest",
+        "type": "object"
+      },
+      "SubmitURLResponse": {
+        "properties": {
+          "content_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Id"
+          },
+          "duplicate": {
+            "default": false,
+            "title": "Duplicate",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message"
+        ],
+        "title": "SubmitURLResponse",
+        "type": "object"
+      },
+      "SuppressResponse": {
+        "properties": {
+          "content_id": {
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "suppressed": {
+            "title": "Suppressed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "content_id",
+          "suppressed",
+          "message"
+        ],
+        "title": "SuppressResponse",
+        "type": "object"
+      },
       "Tag": {
         "properties": {
           "name": {
@@ -1120,6 +1953,443 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/admin/editorial/content": {
+      "get": {
+        "description": "List content with editorial filters.",
+        "operationId": "list_content_api_v1_admin_editorial_content_get",
+        "parameters": [
+          {
+            "description": "UTC date YYYY-MM-DD",
+            "in": "query",
+            "name": "day",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "UTC date YYYY-MM-DD",
+              "title": "Day"
+            }
+          },
+          {
+            "description": "ARTICLE|VIDEO|REEL",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ARTICLE|VIDEO|REEL",
+              "title": "Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "suppressed",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Suppressed"
+            }
+          },
+          {
+            "in": "query",
+            "name": "manual_added",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Manual Added"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "required": false,
+            "schema": {
+              "default": "published_at",
+              "title": "Sort By",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedContentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Content",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
+    "/api/v1/admin/editorial/content/submit": {
+      "post": {
+        "description": "Manually submit a URL for ingestion.\n\nRuns through the same canonicalization / dedupe logic as the\nautomatic ingestion pipeline.",
+        "operationId": "submit_url_api_v1_admin_editorial_content_submit_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitURLRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitURLResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Url",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
+    "/api/v1/admin/editorial/content/{content_id}": {
+      "get": {
+        "description": "Get full content details + recent editorial actions.",
+        "operationId": "get_content_detail_api_v1_admin_editorial_content__content_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentItemDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Content Detail",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
+    "/api/v1/admin/editorial/content/{content_id}/boost": {
+      "post": {
+        "description": "Set editorial boost level (0-3).",
+        "operationId": "boost_content_api_v1_admin_editorial_content__content_id__boost_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BoostRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoostResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Boost Content",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
+    "/api/v1/admin/editorial/content/{content_id}/suppress": {
+      "post": {
+        "description": "Suppress content (soft-delete). Removes from public feeds.",
+        "operationId": "suppress_content_api_v1_admin_editorial_content__content_id__suppress_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuppressResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Suppress Content",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
+    "/api/v1/admin/editorial/content/{content_id}/unsuppress": {
+      "post": {
+        "description": "Unsuppress content. Restores to public feeds.",
+        "operationId": "unsuppress_content_api_v1_admin_editorial_content__content_id__unsuppress_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuppressResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unsuppress Content",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
     "/api/v1/admin/flags": {
       "get": {
         "description": "Get status of all feature flags.\n\nReturns dict with each feature's current status and source (redis/env/default).",
@@ -1404,6 +2674,664 @@
         "summary": "Trigger Fetch",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/ui/": {
+      "get": {
+        "operationId": "ui_content_list_api_v1_admin_ui__get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "day",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Day"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "suppressed",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Suppressed"
+            }
+          },
+          {
+            "in": "query",
+            "name": "manual_added",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Manual Added"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "required": false,
+            "schema": {
+              "default": "published_at",
+              "title": "Sort By",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Content List",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
+    "/api/v1/admin/ui/action/{content_id}/boost": {
+      "post": {
+        "operationId": "ui_boost_api_v1_admin_ui_action__content_id__boost_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ui_boost_api_v1_admin_ui_action__content_id__boost_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Boost",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
+    "/api/v1/admin/ui/action/{content_id}/suppress": {
+      "post": {
+        "operationId": "ui_suppress_api_v1_admin_ui_action__content_id__suppress_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ui_suppress_api_v1_admin_ui_action__content_id__suppress_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Suppress",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
+    "/api/v1/admin/ui/action/{content_id}/unsuppress": {
+      "post": {
+        "operationId": "ui_unsuppress_api_v1_admin_ui_action__content_id__unsuppress_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ui_unsuppress_api_v1_admin_ui_action__content_id__unsuppress_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Unsuppress",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
+    "/api/v1/admin/ui/detail/{content_id}": {
+      "get": {
+        "operationId": "ui_content_detail_api_v1_admin_ui_detail__content_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "flash",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Flash"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Content Detail",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
+    "/api/v1/admin/ui/submit": {
+      "get": {
+        "operationId": "ui_submit_form_api_v1_admin_ui_submit_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "flash",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Flash"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Submit Form",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      },
+      "post": {
+        "operationId": "ui_submit_url_api_v1_admin_ui_submit_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ui_submit_url_api_v1_admin_ui_submit_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Submit Url",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
         ]
       }
     },
@@ -1758,6 +3686,28 @@
         ]
       }
     },
+    "/api/v1/config": {
+      "get": {
+        "description": "Returns current server-side feature flags and ad settings. Clients should fetch on app start and cache with a reasonable TTL.",
+        "operationId": "get_app_config_api_v1_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppConfigResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Client configuration",
+        "tags": [
+          "config"
+        ]
+      }
+    },
     "/api/v1/conversations/{content_item_id}": {
       "delete": {
         "description": "Delete conversation history for a content item.",
@@ -1894,6 +3844,90 @@
         ]
       }
     },
+    "/api/v1/events/click": {
+      "post": {
+        "description": "Log that a user tapped / clicked a feed item or ad.",
+        "operationId": "record_click_api_v1_events_click_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record a click event",
+        "tags": [
+          "events"
+        ]
+      }
+    },
+    "/api/v1/events/impression": {
+      "post": {
+        "description": "Log that a user viewed a feed item or ad.",
+        "operationId": "record_impression_api_v1_events_impression_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record an impression event",
+        "tags": [
+          "events"
+        ]
+      }
+    },
     "/api/v1/inventory/health": {
       "get": {
         "description": "Get overall inventory health across all surfaces.\n\nReturns tier counts, freshness metrics, and health status for:\n- Articles\n- Videos  \n- Reels\n\nIncludes top-up priority if any surface is below threshold.\nThis endpoint is cached (60s TTL) and does not trigger ingestion.",
@@ -1960,6 +3994,48 @@
         "summary": "Get Surface Health",
         "tags": [
           "inventory"
+        ]
+      }
+    },
+    "/api/v1/metrics/sources": {
+      "get": {
+        "description": "Get per-source ingestion health metrics.\n\nReturns:\n    - Per-feed status: last success, items ingested today, retry counts\n    - Per-source aggregates: total inserted today, average success rate\n    - Problem feeds: any with status=failed or high retry counts\n    \nRequires ADMIN_API_KEY.",
+        "operationId": "get_source_health_metrics_api_v1_metrics_sources_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Source Health Metrics",
+        "tags": [
+          "metrics",
+          "metrics"
         ]
       }
     },
@@ -2770,6 +4846,44 @@
           }
         },
         "summary": "Metrics"
+      }
+    },
+    "/ops/status": {
+      "get": {
+        "description": "Comprehensive operational status endpoint (requires ADMIN_API_KEY).\n\nReturns:\n- Request metrics (last 60 minutes): total requests, error rate, latencies\n- Connection pool stats: Redis and DB pool utilization\n- Service health indicators\n\nUse this for operational monitoring dashboards and alerting.",
+        "operationId": "operational_status_ops_status_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Operational Status"
       }
     }
   }
