@@ -141,7 +141,7 @@ class TestAIChatEndpoints:
     
     def test_conversation_starters_endpoint(self, client):
         """Conversation starters endpoint should exist."""
-        resp = client.get("/api/v1/starters/test-content-id")
+        resp = client.get("/api/v1/starters/1")
         assert resp.status_code in [200, 404, 500]
 
 

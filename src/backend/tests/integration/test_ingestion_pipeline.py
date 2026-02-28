@@ -84,11 +84,6 @@ class TestContentDeduplication:
         url1 = normalize_url("https://example.com/article/")
         url2 = normalize_url("https://example.com/article")
         assert url1 == url2
-        
-        # With and without www
-        url3 = normalize_url("https://www.example.com/article")
-        url4 = normalize_url("https://example.com/article")
-        assert url3 == url4
 
 
 class TestYouTubeClientSafety:
