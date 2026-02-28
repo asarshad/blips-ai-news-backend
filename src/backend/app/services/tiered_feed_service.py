@@ -290,13 +290,14 @@ def tiered_item_to_dict(tiered: TieredItem) -> Dict[str, Any]:
     Includes backward-compatible fields plus new tier annotations.
     """
     item = tiered.item
+    summary = item.summary or ""
     
     # Base fields (backward compatible)
     result = {
         "id": item.id,
         "title": item.title,
         "source_url": item.source_url,
-        "summary": item.summary or "",
+        "summary": summary,
         "image_url": item.image_url,
         "source": item.source or "Unknown",
         "created_at": item.created_at.isoformat() if item.created_at else None,
@@ -319,7 +320,7 @@ def tiered_item_to_dict(tiered: TieredItem) -> Dict[str, Any]:
     
     # Type-specific fields
     if item.type == ContentType.ARTICLE:
-        result["read_time_minutes"] = max(1, len(item.summary or "") // 200)
+        result["read_time_minutes"] = max(1, len(summary) // 200)
         result["tags"] = [{"name": topic} for topic in (item.topics or [])]
     
     elif item.type in (ContentType.VIDEO, ContentType.REEL):

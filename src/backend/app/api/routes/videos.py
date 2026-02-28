@@ -85,15 +85,13 @@ def get_recent_videos(
     offset = (page - 1) * limit
     
     # Use cached tiered feed for better performance
-    # NOTE: require_ai_processed=False because production has summarization
-    # disabled, so most videos have ai_processed=False.  Only Tier C
-    # evergreen content happens to survive — new videos would vanish.
+    # Only show videos that have been AI-processed (have summaries)
     videos, has_more, meta = get_cached_tiered_feed(
         db,
         Surface.VIDEOS,
         limit=limit,
         offset=offset,
-        require_ai_processed=False,
+        require_ai_processed=True,
     )
     
     # Log tier distribution (from cached results)

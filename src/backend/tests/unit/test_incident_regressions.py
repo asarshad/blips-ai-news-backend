@@ -19,45 +19,43 @@ during incident response.  If these tests break, the incidents are back.
 
 class TestArticlesFeedAiProcessed:
     """
-    ROOT CAUSE: articles.py called get_cached_tiered_feed with
-    require_ai_processed=True, but production has LLM summarization OFF,
-    so every article has ai_processed=False → empty feed → 404.
-
-    FIX: require_ai_processed=False for the articles feed.
+    POLICY: Summarization is enabled in production.  Articles without
+    AI summaries should not be shown to users.  All article endpoints
+    must filter to ai_processed=True so only summarized content appears.
     """
 
-    def test_articles_recent_does_not_require_ai_processed(self):
+    def test_articles_recent_requires_ai_processed(self):
         """
-        The /articles/recent endpoint must NOT filter on ai_processed,
-        so articles are visible even when summarization is disabled.
+        The /articles/recent endpoint must filter on ai_processed=True
+        so only articles with AI summaries are shown.
         """
         import inspect
 
         from app.api.routes.articles import get_recent_articles
 
         source = inspect.getsource(get_recent_articles)
-        assert "require_ai_processed=False" in source, (
-            "get_recent_articles must use require_ai_processed=False "
-            "to avoid empty feeds when summarization is disabled"
+        assert "require_ai_processed=True" in source, (
+            "get_recent_articles must use require_ai_processed=True "
+            "to hide articles without AI summaries"
         )
 
-    def test_articles_next_does_not_require_ai_processed(self):
-        """The /articles/next endpoint must not filter on ai_processed."""
+    def test_articles_next_requires_ai_processed(self):
+        """The /articles/next endpoint must filter on ai_processed."""
         import inspect
 
         from app.api.routes.articles import get_next_article
 
         source = inspect.getsource(get_next_article)
-        assert "ai_processed_only=False" in source
+        assert "ai_processed_only=True" in source
 
-    def test_articles_cache_does_not_require_ai_processed(self):
-        """The /articles/cache endpoint must not filter on ai_processed."""
+    def test_articles_cache_requires_ai_processed(self):
+        """The /articles/cache endpoint must filter on ai_processed."""
         import inspect
 
         from app.api.routes.articles import get_cached_articles
 
         source = inspect.getsource(get_cached_articles)
-        assert "ai_processed_only=False" in source
+        assert "ai_processed_only=True" in source
 
 
 class TestArticlesDiagnosticHeaders:
@@ -91,15 +89,15 @@ class TestArticlesDiagnosticHeaders:
 # ---------------------------------------------------------------------------
 
 class TestVideosFeedAiProcessed:
-    """Same pattern as articles — videos must also use require_ai_processed=False."""
+    """Videos must also require AI processing — only show summarized videos."""
 
-    def test_videos_recent_does_not_require_ai_processed(self):
+    def test_videos_recent_requires_ai_processed(self):
         import inspect
 
         from app.api.routes.videos import get_recent_videos
 
         source = inspect.getsource(get_recent_videos)
-        assert "require_ai_processed=False" in source
+        assert "require_ai_processed=True" in source
 
     def test_videos_headers_before_404(self):
         import inspect
