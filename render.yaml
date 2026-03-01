@@ -1,17 +1,20 @@
 # Render Blueprint Configuration
 # https://render.com/docs/blueprint-spec
 #
-# This file defines a SINGLE environment template.
-# Deploy this blueprint separately for dev and prod environments.
-# Set environment-specific values in Render dashboard after deployment.
+# Deploys:  blips-api (web), blips-worker (background), blips-db (Postgres),
+#           blips-redis (key-value store).
+#
+# After first deploy, set secrets (sync: false) in the Render dashboard:
+#   ADMIN_API_KEY, OPENAI_API_KEY, MISTRAL_API_KEY, YOUTUBE_API_KEY,
+#   LLM_PROVIDER, ENV, LOG_LEVEL, ALERT_ENABLED, ALERT_WEBHOOK_URL
 
 # =============================================================================
-# DATABASE
+# DATABASE  (legacy "starter" plan removed — use basic-256mb or higher)
 # =============================================================================
 
 databases:
   - name: blips-db
-    plan: starter
+    plan: basic-256mb
     databaseName: blips
     user: blips
     region: oregon
@@ -21,7 +24,7 @@ databases:
 # =============================================================================
 
 services:
-  # API Service (Web)
+  # ── API Service (Web) ───────────────────────────────────────────────────
   - type: web
     name: blips-api
     runtime: python
@@ -29,11 +32,22 @@ services:
     region: oregon
     rootDir: src/backend
     buildCommand: pip install -r requirements.txt && alembic upgrade head
-    startCommand: gunicorn app.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120 --graceful-timeout 30 --max-requests 1000 --max-requests-jitter 50 --access-logfile -
+    startCommand: >-
+      gunicorn app.main:app
+      --workers 2
+      --worker-class uvicorn.workers.UvicornWorker
+      --bind 0.0.0.0:$PORT
+      --timeout 120
+      --graceful-timeout 30
+      --max-requests 1000
+      --max-requests-jitter 50
+      --access-logfile -
     healthCheckPath: /health
     envVars:
+      # ── Runtime ──
       - key: PYTHON_VERSION
-        value: 3.11.4
+        value: "3.11.4"
+      # ── Connections (auto-wired from Blueprint resources) ──
       - key: DATABASE_URL
         fromDatabase:
           name: blips-db
@@ -43,46 +57,32 @@ services:
           name: blips-redis
           type: redis
           property: connectionString
+      # ── Secrets (set in dashboard) ──
       - key: ADMIN_API_KEY
-        sync: false  # Set a strong secret in Render dashboard
+        sync: false
       - key: OPENAI_API_KEY
-        sync: false  # Set manually in Render dashboard
+        sync: false
       - key: MISTRAL_API_KEY
-        sync: false  # Set manually in Render dashboard
+        sync: false
       - key: YOUTUBE_API_KEY
-        sync: false  # Set manually in Render dashboard
+        sync: false
       - key: LLM_PROVIDER
-        sync: false  # Set to "openai" or "mistral" in dashboard
+        sync: false
       - key: ENV
-        sync: false  # Set to "dev" or "prod" in dashboard
+        sync: false
       - key: LOG_LEVEL
-        sync: false  # Set to "DEBUG", "INFO", or "WARNING" in dashboard
-      - key: DOCS_ENABLED
-        value: "false"  # Disable Swagger UI in production
+        sync: false
       - key: ALERT_ENABLED
-        sync: false  # Set to "true" to enable Slack/webhook alerts
+        sync: false
       - key: ALERT_WEBHOOK_URL
-        sync: false  # Set to Slack webhook URL in dashboard
+        sync: false
+      # ── API-specific defaults ──
       - key: SCHEDULER_ENABLED
-        value: "false"  # Scheduler runs on the worker service only
-      - key: NEWS_FETCH_INTERVAL_MINUTES
-        value: "30"
-      - key: INGEST_UNTIL_TARGETS
-        value: "true"
-      - key: INGEST_CATCHUP_MAX_SECONDS
-        value: "1800"
-      - key: INGESTION_ENABLED
-        value: "true"
-      - key: INGESTION_CRON_DISABLED
+        value: "false"            # Worker owns all scheduled jobs
+      - key: DOCS_ENABLED
         value: "false"
-      - key: INGESTION_MAX_WORKERS
-        value: "1"   # API service doesn't need many ingestion workers
-      - key: INGESTION_POLL_SECONDS
-        value: "5"
-      - key: INGESTION_LEASE_TTL_MS
-        value: "60000"
-      - key: MAX_ITEMS_PER_RUN
-        value: "100"
+      - key: INGESTION_ENABLED
+        value: "false"            # API does NOT run ingestion — worker does
       - key: DB_POOL_SIZE
         value: "3"
       - key: DB_MAX_OVERFLOW
@@ -91,8 +91,12 @@ services:
         value: "15"
       - key: LLM_DAILY_COST_CEILING
         value: "5.0"
+      - key: MAX_ITEMS_PER_RUN
+        value: "100"
 
-  # Worker Service (Background Jobs)
+  # ── Worker Service (Background Jobs) ────────────────────────────────────
+  # Runs APScheduler: ingestion, scoring, clustering, cleanup, AI retry.
+  # Does NOT bind to a port — Render "worker" type is correct.
   - type: worker
     name: blips-worker
     runtime: python
@@ -102,8 +106,10 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python -m app.worker
     envVars:
+      # ── Runtime ──
       - key: PYTHON_VERSION
-        value: 3.11.4
+        value: "3.11.4"
+      # ── Connections ──
       - key: DATABASE_URL
         fromDatabase:
           name: blips-db
@@ -113,6 +119,7 @@ services:
           name: blips-redis
           type: redis
           property: connectionString
+      # ── Secrets (set in dashboard) ──
       - key: ADMIN_API_KEY
         sync: false
       - key: OPENAI_API_KEY
@@ -122,25 +129,28 @@ services:
       - key: YOUTUBE_API_KEY
         sync: false
       - key: LLM_PROVIDER
-        sync: false  # Set to "openai" or "mistral" in dashboard
+        sync: false
       - key: ENV
         sync: false
       - key: LOG_LEVEL
         sync: false
+      # ── Worker-specific defaults ──
       - key: SCHEDULER_ENABLED
-        value: "true"  # Worker service owns all scheduled jobs
-      - key: NEWS_FETCH_INTERVAL_MINUTES
-        value: "30"
+        value: "true"             # Worker owns all scheduled jobs
       - key: INGESTION_ENABLED
         value: "true"
-      - key: INGESTION_CRON_DISABLED
-        value: "false"
       - key: FEATURE_INGESTION_ENABLED
         value: "true"
       - key: INGESTION_MAX_WORKERS
         value: "4"
+      - key: NEWS_FETCH_INTERVAL_MINUTES
+        value: "30"
       - key: MAX_ITEMS_PER_RUN
         value: "100"
+      - key: INGEST_UNTIL_TARGETS
+        value: "true"
+      - key: INGEST_CATCHUP_MAX_SECONDS
+        value: "1800"
       - key: PREFERENCE_DECAY_FACTOR
         value: "0.95"
       - key: DB_POOL_SIZE
@@ -152,10 +162,10 @@ services:
       - key: LLM_DAILY_COST_CEILING
         value: "5.0"
 
-  # Redis
+  # ── Redis ───────────────────────────────────────────────────────────────
   - type: redis
     name: blips-redis
     plan: starter
     region: oregon
-    maxmemoryPolicy: volatile-lru  # Only evict keys with TTL set; protects persistent locks/flags
-    ipAllowList: []  # Allow only internal Render services
+    maxmemoryPolicy: volatile-lru
+    ipAllowList: []
