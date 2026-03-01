@@ -23,7 +23,7 @@ projects:
       - name: development
         databases:
           - name: blips-dev-db
-            plan: basic-256mb
+            plan: free
             databaseName: blips
             user: blips
             region: oregon
@@ -33,7 +33,7 @@ projects:
           - type: web
             name: blips-dev-api
             runtime: python
-            plan: starter
+            plan: free
             region: oregon
             rootDir: src/backend
             buildCommand: pip install -r requirements.txt && alembic upgrade head
