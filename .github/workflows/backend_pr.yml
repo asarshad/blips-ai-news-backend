@@ -52,6 +52,9 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to Render
-        run: |
-          curl -sf "${{ secrets.RENDER_DEPLOY_HOOK_URL }}" || echo "Deploy hook not configured yet"
+      - name: Deploy dev-api
+        run: curl -sf "${{ secrets.RENDER_DEPLOY_HOOK_DEV_API }}" || echo "Hook not set"
+      - name: Deploy prod-api
+        run: curl -sf "${{ secrets.RENDER_DEPLOY_HOOK_PROD_API }}" || echo "Hook not set"
+      - name: Deploy prod-worker
+        run: curl -sf "${{ secrets.RENDER_DEPLOY_HOOK_PROD_WORKER }}" || echo "Hook not set"
