@@ -3,27 +3,11 @@
 #
 # Two environments: development (single service) and production (API + Worker).
 # After first deploy, set secrets (sync: false) in the Render dashboard for
-# each environment:
-#   ADMIN_API_KEY, OPENAI_API_KEY, MISTRAL_API_KEY, YOUTUBE_API_KEY,
-#   LLM_PROVIDER, ENV, LOG_LEVEL
-
-# =============================================================================
-# SHARED ENV VAR GROUPS
-# =============================================================================
-
-envVarGroups:
-  - name: blips-shared-secrets
-    envVars:
-      - key: ADMIN_API_KEY
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: MISTRAL_API_KEY
-        sync: false
-      - key: YOUTUBE_API_KEY
-        sync: false
-      - key: LLM_PROVIDER
-        sync: false
+# each service:
+#   ADMIN_API_KEY, OPENAI_API_KEY, MISTRAL_API_KEY, YOUTUBE_API_KEY, LLM_PROVIDER
+#
+# NOTE: sync: false cannot be used inside envVarGroups (Render ignores it),
+# so secrets are defined per-service instead.
 
 # =============================================================================
 # PROJECT: blips
@@ -74,7 +58,16 @@ projects:
                   name: blips-dev-redis
                   type: redis
                   property: connectionString
-              - fromGroup: blips-shared-secrets
+              - key: ADMIN_API_KEY
+                sync: false
+              - key: OPENAI_API_KEY
+                sync: false
+              - key: MISTRAL_API_KEY
+                sync: false
+              - key: YOUTUBE_API_KEY
+                sync: false
+              - key: LLM_PROVIDER
+                sync: false
               - key: ENV
                 value: "dev"
               - key: LOG_LEVEL
@@ -153,7 +146,16 @@ projects:
                   name: blips-redis
                   type: redis
                   property: connectionString
-              - fromGroup: blips-shared-secrets
+              - key: ADMIN_API_KEY
+                sync: false
+              - key: OPENAI_API_KEY
+                sync: false
+              - key: MISTRAL_API_KEY
+                sync: false
+              - key: YOUTUBE_API_KEY
+                sync: false
+              - key: LLM_PROVIDER
+                sync: false
               - key: ENV
                 sync: false             # Set to "prod" in dashboard
               - key: LOG_LEVEL
@@ -201,7 +203,16 @@ projects:
                   name: blips-redis
                   type: redis
                   property: connectionString
-              - fromGroup: blips-shared-secrets
+              - key: ADMIN_API_KEY
+                sync: false
+              - key: OPENAI_API_KEY
+                sync: false
+              - key: MISTRAL_API_KEY
+                sync: false
+              - key: YOUTUBE_API_KEY
+                sync: false
+              - key: LLM_PROVIDER
+                sync: false
               - key: ENV
                 sync: false
               - key: LOG_LEVEL
