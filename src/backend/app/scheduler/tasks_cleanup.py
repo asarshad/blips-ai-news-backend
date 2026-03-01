@@ -24,27 +24,47 @@ logger = get_logger(__name__)
 # Redis lock key & TTL for cleanup job
 CLEANUP_LOCK_KEY = "blips:cleanup_lock"
 CLEANUP_LOCK_TTL = 600  # 10 minutes — generous ceiling for the job
+_cleanup_lock_token: str = ""
 
 
 def _acquire_cleanup_lock() -> bool:
     """Acquire a Redis NX lock so only one replica runs cleanup."""
+    global _cleanup_lock_token
     try:
+        import uuid
         from app.core.dependencies import get_redis
+        token = str(uuid.uuid4())
         r = get_redis()
-        return bool(r.set(CLEANUP_LOCK_KEY, datetime.utcnow().isoformat(), nx=True, ex=CLEANUP_LOCK_TTL))
+        acquired = bool(r.set(CLEANUP_LOCK_KEY, token, nx=True, ex=CLEANUP_LOCK_TTL))
+        if acquired:
+            _cleanup_lock_token = token
+        return acquired
     except Exception as e:
         logger.warning(f"[data_cleanup] Redis lock unavailable, proceeding anyway: {e}")
         return True  # fail-open: still run if Redis is down
 
 
 def _release_cleanup_lock() -> None:
-    """Release the cleanup lock."""
+    """Release the cleanup lock via compare-and-delete (CAS).
+
+    Prevents releasing another instance's lock if our TTL expired.
+    """
+    global _cleanup_lock_token
+    if not _cleanup_lock_token:
+        return
     try:
         from app.core.dependencies import get_redis
         r = get_redis()
-        r.delete(CLEANUP_LOCK_KEY)
+        lua = (
+            "if redis.call('get', KEYS[1]) == ARGV[1] then "
+            "return redis.call('del', KEYS[1]) "
+            "else return 0 end"
+        )
+        r.eval(lua, 1, CLEANUP_LOCK_KEY, _cleanup_lock_token)
     except Exception:
         pass  # TTL will auto-expire
+    finally:
+        _cleanup_lock_token = ""
 
 
 def run_data_cleanup_job() -> dict:

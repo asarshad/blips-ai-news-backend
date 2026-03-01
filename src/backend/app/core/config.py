@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "blips-ai-news"
 
+    # Environment
+    ENV: str = "dev"  # "dev" or "prod"
+    LOG_LEVEL: str = "INFO"  # DEBUG, INFO, WARNING, ERROR
+
     # Security
     ADMIN_API_KEY: str = ""
     DEBUG_ROUTES_ENABLED: bool = False
@@ -32,9 +36,14 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = "postgresql://postgres:postgres@db:5432/blips"
+    DB_POOL_SIZE: int = 3
+    DB_MAX_OVERFLOW: int = 5
+    DB_POOL_TIMEOUT: int = 30
+    DB_POOL_RECYCLE_SECONDS: int = 1800
 
     # Redis
     REDIS_URL: str = "redis://redis:6379/0"
+    REDIS_MAX_CONNECTIONS: int = 20
 
     # LLM Provider Configuration ("openai" or "mistral")
     LLM_PROVIDER: str = "openai"

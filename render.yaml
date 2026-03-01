@@ -43,40 +43,54 @@ services:
           name: blips-redis
           type: redis
           property: connectionString
+      - key: ADMIN_API_KEY
+        sync: false  # Set a strong secret in Render dashboard
       - key: OPENAI_API_KEY
         sync: false  # Set manually in Render dashboard
       - key: MISTRAL_API_KEY
+        sync: false  # Set manually in Render dashboard
+      - key: YOUTUBE_API_KEY
         sync: false  # Set manually in Render dashboard
       - key: LLM_PROVIDER
         sync: false  # Set to "openai" or "mistral" in dashboard
       - key: ENV
         sync: false  # Set to "dev" or "prod" in dashboard
       - key: LOG_LEVEL
-        sync: false  # Set to "DEBUG" or "WARNING" in dashboard
+        sync: false  # Set to "DEBUG", "INFO", or "WARNING" in dashboard
+      - key: DOCS_ENABLED
+        value: "false"  # Disable Swagger UI in production
       - key: ALERT_ENABLED
         sync: false  # Set to "true" to enable Slack/webhook alerts
       - key: ALERT_WEBHOOK_URL
         sync: false  # Set to Slack webhook URL in dashboard
       - key: SCHEDULER_ENABLED
-        value: "true"  # Set to "false" once you have a dedicated worker service
+        value: "false"  # Scheduler runs on the worker service only
       - key: NEWS_FETCH_INTERVAL_MINUTES
         value: "30"
       - key: INGEST_UNTIL_TARGETS
-        value: "true"  # Keep ingesting until FULL daily targets are met (not just typical)
+        value: "true"
       - key: INGEST_CATCHUP_MAX_SECONDS
-        value: "1800"  # 30 minutes to reach full targets
+        value: "1800"
       - key: INGESTION_ENABLED
         value: "true"
       - key: INGESTION_CRON_DISABLED
         value: "false"
       - key: INGESTION_MAX_WORKERS
-        value: "4"
+        value: "1"   # API service doesn't need many ingestion workers
       - key: INGESTION_POLL_SECONDS
         value: "5"
       - key: INGESTION_LEASE_TTL_MS
         value: "60000"
       - key: MAX_ITEMS_PER_RUN
         value: "100"
+      - key: DB_POOL_SIZE
+        value: "3"
+      - key: DB_MAX_OVERFLOW
+        value: "5"
+      - key: REDIS_MAX_CONNECTIONS
+        value: "15"
+      - key: LLM_DAILY_COST_CEILING
+        value: "5.0"
 
   # Worker Service (Background Jobs)
   - type: worker
@@ -99,9 +113,13 @@ services:
           name: blips-redis
           type: redis
           property: connectionString
+      - key: ADMIN_API_KEY
+        sync: false
       - key: OPENAI_API_KEY
         sync: false
       - key: MISTRAL_API_KEY
+        sync: false
+      - key: YOUTUBE_API_KEY
         sync: false
       - key: LLM_PROVIDER
         sync: false  # Set to "openai" or "mistral" in dashboard
@@ -110,7 +128,7 @@ services:
       - key: LOG_LEVEL
         sync: false
       - key: SCHEDULER_ENABLED
-        value: "true"  # Always true on worker service
+        value: "true"  # Worker service owns all scheduled jobs
       - key: NEWS_FETCH_INTERVAL_MINUTES
         value: "30"
       - key: INGESTION_ENABLED
@@ -125,11 +143,19 @@ services:
         value: "100"
       - key: PREFERENCE_DECAY_FACTOR
         value: "0.95"
+      - key: DB_POOL_SIZE
+        value: "3"
+      - key: DB_MAX_OVERFLOW
+        value: "5"
+      - key: REDIS_MAX_CONNECTIONS
+        value: "15"
+      - key: LLM_DAILY_COST_CEILING
+        value: "5.0"
 
   # Redis
   - type: redis
     name: blips-redis
     plan: starter
     region: oregon
-    maxmemoryPolicy: allkeys-lru
+    maxmemoryPolicy: volatile-lru  # Only evict keys with TTL set; protects persistent locks/flags
     ipAllowList: []  # Allow only internal Render services

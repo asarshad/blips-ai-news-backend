@@ -99,10 +99,23 @@ class BaseLLMClient(ABC):
 
 class OpenAILLMClient(BaseLLMClient):
     """OpenAI implementation of LLM client."""
-    
+
+    # Transient exception types that should trigger a retry.
+    _RETRYABLE: tuple = ()  # populated in __init__ after import
+
     def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
         import openai
-        
+
+        # Build the retryable tuple once at init time.
+        self._RETRYABLE = (
+            ConnectionError,
+            TimeoutError,
+            openai.APIConnectionError,
+            openai.APITimeoutError,
+            openai.RateLimitError,
+            openai.InternalServerError,
+        )
+
         self.api_key = api_key or settings.OPENAI_API_KEY
         self.model = model
         self._client = None
@@ -163,9 +176,9 @@ class OpenAILLMClient(BaseLLMClient):
                 model=self.model,
                 provider="openai"
             )
-        except (ConnectionError, TimeoutError):
+        except tuple(self._RETRYABLE):
             raise  # let tenacity retry
-        except (RuntimeError, ValueError) as e:
+        except Exception as e:
             logger.error(f"OpenAI chat error: {type(e).__name__}: {e}")
             raise
 
@@ -184,7 +197,10 @@ class MistralLLMClient(BaseLLMClient):
         else:
             try:
                 from mistralai import Mistral
-                self.client = Mistral(api_key=self.api_key)
+                self.client = Mistral(
+                    api_key=self.api_key,
+                    timeout=LLM_REQUEST_TIMEOUT,
+                )
             except ImportError:
                 logger.error("mistralai package not installed. Run: pip install mistralai")
                 self.api_key = None
@@ -238,7 +254,7 @@ class MistralLLMClient(BaseLLMClient):
             )
         except (ConnectionError, TimeoutError):
             raise  # let tenacity retry
-        except (RuntimeError, ValueError) as e:
+        except Exception as e:
             logger.error(f"Mistral chat error: {type(e).__name__}: {e}")
             raise
 

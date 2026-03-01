@@ -52,7 +52,10 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             fetch_and_process_news,
             fetch_trigger,
             id="fetch_news",
-            replace_existing=True
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
         )
         
         # Add scoring job (hourly)
@@ -60,7 +63,10 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             run_scoring_job,
             IntervalTrigger(hours=1),
             id="scoring_job",
-            replace_existing=True
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
         )
         
         # Add clustering job (every 15 minutes)
@@ -68,7 +74,10 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             run_clustering_job,
             IntervalTrigger(minutes=15),
             id="clustering_job",
-            replace_existing=True
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=120,
         )
         
         # Add preference decay job (daily at 3 AM)
@@ -76,7 +85,10 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             run_preference_decay_job,
             CronTrigger(hour=3, minute=0),
             id="preference_decay_job",
-            replace_existing=True
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=3600,
         )
         
         # Add AI processing retry job (every 15 minutes - critical for feed freshness)
@@ -84,7 +96,10 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             retry_ai_processing,
             IntervalTrigger(minutes=15),
             id="ai_retry_job",
-            replace_existing=True
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
         )
 
         # Add data cleanup job (daily at 4 AM UTC)
@@ -92,7 +107,10 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             run_data_cleanup_job,
             CronTrigger(hour=4, minute=0),
             id="data_cleanup_job",
-            replace_existing=True
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=3600,
         )
         
         # Add ingestion health check (every 30 minutes)
@@ -100,7 +118,10 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             check_ingestion_health,
             IntervalTrigger(minutes=30),
             id="ingestion_health_check",
-            replace_existing=True
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
         )
         
         scheduler.start()
