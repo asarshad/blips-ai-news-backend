@@ -199,7 +199,7 @@ class MistralLLMClient(BaseLLMClient):
                 from mistralai import Mistral
                 self.client = Mistral(
                     api_key=self.api_key,
-                    timeout=LLM_REQUEST_TIMEOUT,
+                    timeout_ms=LLM_REQUEST_TIMEOUT * 1000,
                 )
             except ImportError:
                 logger.error("mistralai package not installed. Run: pip install mistralai")
