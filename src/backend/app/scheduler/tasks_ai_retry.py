@@ -1,4 +1,11 @@
-"""AI processing retry scheduled task."""
+"""AI summarization for ingested content.
+
+The primary entry-point is ``process_ai_summaries`` which picks up every
+content item with ``ai_processed=False`` and runs the LLM pipeline on it.
+
+``retry_ai_processing`` is an alias kept for backward-compatibility with the
+APScheduler job registration.
+"""
 
 from __future__ import annotations
 
@@ -15,8 +22,13 @@ from sqlalchemy.orm import Session
 logger = get_logger(__name__)
 
 
-def retry_ai_processing():
-    """Retry AI processing for content that failed previously."""
+def process_ai_summaries():
+    """Summarise all unprocessed content items via the LLM pipeline.
+
+    Called:
+    - Immediately after each ingestion run (event-driven).
+    - Every 15 min by the scheduler as a safety-net.
+    """
 
     if not feature_flags.is_enabled("summarization"):
         logger.info("[ai_retry] SKIPPED - summarization feature is disabled")
@@ -99,6 +111,10 @@ def retry_ai_processing():
         db.close()
         stats.complete()
         stats.log_summary()
+
+
+# Backward-compatible alias so the scheduler job keeps working.
+retry_ai_processing = process_ai_summaries
 
 
 def _backfill_starters(db: Session, llm_client, stats) -> None:

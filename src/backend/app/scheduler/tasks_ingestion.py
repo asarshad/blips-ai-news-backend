@@ -12,7 +12,13 @@ logger = get_logger(__name__)
 
 
 def fetch_and_process_news():
-    """Fetch and store new articles/videos via checkpointed ingestion."""
+    """Fetch new content then immediately run AI summarization.
+
+    Two phases:
+    1. Checkpointed ingestion — bulk-inserts articles/videos (ai_processed=False).
+    2. AI processing — summarises every unprocessed item so the feed is
+       populated without waiting for the 15-min retry scheduler.
+    """
 
     if not feature_flags.is_enabled("ingestion"):
         logger.info("[fetch_news] SKIPPED - ingestion feature is disabled")
@@ -31,6 +37,17 @@ def fetch_and_process_news():
         db.close()
         stats.complete()
         stats.log_summary()
+
+    # Phase 2: immediately summarise newly-ingested items so they appear
+    # in the feed right away instead of waiting for the next ai_retry tick.
+    try:
+        from app.scheduler.tasks_ai_retry import process_ai_summaries
+        logger.info("[fetch_news] Running immediate AI summarization…")
+        process_ai_summaries()
+        logger.info("[fetch_news] AI summarization complete")
+    except Exception as e:
+        # Non-fatal — the periodic ai_retry job will pick them up later.
+        logger.warning(f"[fetch_news] Immediate AI summarization failed (non-fatal): {e}")
 
 
 def _run_curation_ingestion_with_stats(db, stats: JobStats):
