@@ -250,7 +250,7 @@ projects:
           # ── Prod Redis ────────────────────────────────────────────────────
           - type: redis
             name: blips-redis
-            plan: free
+            plan: starter
             region: oregon
             maxmemoryPolicy: volatile-lru
             ipAllowList: []
