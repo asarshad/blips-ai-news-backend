@@ -149,12 +149,15 @@ to deploy **two environments** from a single file:
 | **development** | `blips-dev-api` (web) + `blips-dev-db` + `blips-dev-redis` | Single service, `SCHEDULER_ENABLED=true`, Swagger enabled |
 | **production** | `blips-api` (web) + `blips-worker` (background) + `blips-db` + `blips-redis` | API + dedicated worker, scheduler on worker only |
 
-Shared secrets (`ADMIN_API_KEY`, API keys, `LLM_PROVIDER`) are in the
-`blips-shared-secrets` env var group — set once, applied to all services.
+Shared secrets (`ADMIN_API_KEY`, API keys, `LLM_PROVIDER`) are defined as
+`sync: false` on each service — set them per-service in the Render dashboard.
+
+> **Note:** `sync: false` cannot be used inside `envVarGroups` (Render ignores it),
+> so secrets must be set individually on each service.
 
 ### Secrets to set in dashboard after Blueprint deploy
 
-Via the `blips-shared-secrets` env var group:
+Set on **each service** (dev-api, prod-api, prod-worker):
 ```
 ADMIN_API_KEY=<strong-random-secret>
 OPENAI_API_KEY=<key>
@@ -163,7 +166,7 @@ YOUTUBE_API_KEY=<key>
 LLM_PROVIDER=mistral
 ```
 
-Production services (set per service via `sync: false`):
+Production services only:
 ```
 ENV=prod
 LOG_LEVEL=WARNING
