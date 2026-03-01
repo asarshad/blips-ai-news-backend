@@ -1,63 +1,19 @@
 # Render Blueprint Configuration
 # https://render.com/docs/blueprint-spec
 #
-# Deploys:  blips-api (web), blips-worker (background), blips-db (Postgres),
-#           blips-redis (key-value store).
-#
-# After first deploy, set secrets (sync: false) in the Render dashboard:
+# Two environments: development (single service) and production (API + Worker).
+# After first deploy, set secrets (sync: false) in the Render dashboard for
+# each environment:
 #   ADMIN_API_KEY, OPENAI_API_KEY, MISTRAL_API_KEY, YOUTUBE_API_KEY,
-#   LLM_PROVIDER, ENV, LOG_LEVEL, ALERT_ENABLED, ALERT_WEBHOOK_URL
+#   LLM_PROVIDER, ENV, LOG_LEVEL
 
 # =============================================================================
-# DATABASE  (legacy "starter" plan removed — use basic-256mb or higher)
+# SHARED ENV VAR GROUPS
 # =============================================================================
 
-databases:
-  - name: blips-db
-    plan: basic-256mb
-    databaseName: blips
-    user: blips
-    region: oregon
-
-# =============================================================================
-# SERVICES
-# =============================================================================
-
-services:
-  # ── API Service (Web) ───────────────────────────────────────────────────
-  - type: web
-    name: blips-api
-    runtime: python
-    plan: starter
-    region: oregon
-    rootDir: src/backend
-    buildCommand: pip install -r requirements.txt && alembic upgrade head
-    startCommand: >-
-      gunicorn app.main:app
-      --workers 2
-      --worker-class uvicorn.workers.UvicornWorker
-      --bind 0.0.0.0:$PORT
-      --timeout 120
-      --graceful-timeout 30
-      --max-requests 1000
-      --max-requests-jitter 50
-      --access-logfile -
-    healthCheckPath: /health
+envVarGroups:
+  - name: blips-shared-secrets
     envVars:
-      # ── Runtime ──
-      - key: PYTHON_VERSION
-        value: "3.11.4"
-      # ── Connections (auto-wired from Blueprint resources) ──
-      - key: DATABASE_URL
-        fromDatabase:
-          name: blips-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          name: blips-redis
-          type: redis
-          property: connectionString
-      # ── Secrets (set in dashboard) ──
       - key: ADMIN_API_KEY
         sync: false
       - key: OPENAI_API_KEY
@@ -68,104 +24,219 @@ services:
         sync: false
       - key: LLM_PROVIDER
         sync: false
-      - key: ENV
-        sync: false
-      - key: LOG_LEVEL
-        sync: false
-      - key: ALERT_ENABLED
-        sync: false
-      - key: ALERT_WEBHOOK_URL
-        sync: false
-      # ── API-specific defaults ──
-      - key: SCHEDULER_ENABLED
-        value: "false"            # Worker owns all scheduled jobs
-      - key: DOCS_ENABLED
-        value: "false"
-      - key: INGESTION_ENABLED
-        value: "false"            # API does NOT run ingestion — worker does
-      - key: DB_POOL_SIZE
-        value: "3"
-      - key: DB_MAX_OVERFLOW
-        value: "5"
-      - key: REDIS_MAX_CONNECTIONS
-        value: "15"
-      - key: LLM_DAILY_COST_CEILING
-        value: "5.0"
-      - key: MAX_ITEMS_PER_RUN
-        value: "100"
 
-  # ── Worker Service (Background Jobs) ────────────────────────────────────
-  # Runs APScheduler: ingestion, scoring, clustering, cleanup, AI retry.
-  # Does NOT bind to a port — Render "worker" type is correct.
-  - type: worker
-    name: blips-worker
-    runtime: python
-    plan: starter
-    region: oregon
-    rootDir: src/backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: python -m app.worker
-    envVars:
-      # ── Runtime ──
-      - key: PYTHON_VERSION
-        value: "3.11.4"
-      # ── Connections ──
-      - key: DATABASE_URL
-        fromDatabase:
-          name: blips-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          name: blips-redis
-          type: redis
-          property: connectionString
-      # ── Secrets (set in dashboard) ──
-      - key: ADMIN_API_KEY
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: MISTRAL_API_KEY
-        sync: false
-      - key: YOUTUBE_API_KEY
-        sync: false
-      - key: LLM_PROVIDER
-        sync: false
-      - key: ENV
-        sync: false
-      - key: LOG_LEVEL
-        sync: false
-      # ── Worker-specific defaults ──
-      - key: SCHEDULER_ENABLED
-        value: "true"             # Worker owns all scheduled jobs
-      - key: INGESTION_ENABLED
-        value: "true"
-      - key: FEATURE_INGESTION_ENABLED
-        value: "true"
-      - key: INGESTION_MAX_WORKERS
-        value: "4"
-      - key: NEWS_FETCH_INTERVAL_MINUTES
-        value: "30"
-      - key: MAX_ITEMS_PER_RUN
-        value: "100"
-      - key: INGEST_UNTIL_TARGETS
-        value: "true"
-      - key: INGEST_CATCHUP_MAX_SECONDS
-        value: "1800"
-      - key: PREFERENCE_DECAY_FACTOR
-        value: "0.95"
-      - key: DB_POOL_SIZE
-        value: "3"
-      - key: DB_MAX_OVERFLOW
-        value: "5"
-      - key: REDIS_MAX_CONNECTIONS
-        value: "15"
-      - key: LLM_DAILY_COST_CEILING
-        value: "5.0"
+# =============================================================================
+# PROJECT: blips
+# =============================================================================
 
-  # ── Redis ───────────────────────────────────────────────────────────────
-  - type: redis
-    name: blips-redis
-    plan: starter
-    region: oregon
-    maxmemoryPolicy: volatile-lru
-    ipAllowList: []
+projects:
+  - name: blips
+    environments:
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # DEVELOPMENT — single web service (API + scheduler in one process)
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: development
+        databases:
+          - name: blips-dev-db
+            plan: basic-256mb
+            databaseName: blips
+            user: blips
+            region: oregon
+
+        services:
+          # ── Dev API (also runs scheduler) ─────────────────────────────────
+          - type: web
+            name: blips-dev-api
+            runtime: python
+            plan: starter
+            region: oregon
+            rootDir: src/backend
+            buildCommand: pip install -r requirements.txt && alembic upgrade head
+            startCommand: >-
+              gunicorn app.main:app
+              --workers 1
+              --worker-class uvicorn.workers.UvicornWorker
+              --bind 0.0.0.0:$PORT
+              --timeout 120
+              --graceful-timeout 30
+              --access-logfile -
+            healthCheckPath: /health
+            envVars:
+              - key: PYTHON_VERSION
+                value: "3.11.4"
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: blips-dev-db
+                  property: connectionString
+              - key: REDIS_URL
+                fromService:
+                  name: blips-dev-redis
+                  type: redis
+                  property: connectionString
+              - fromGroup: blips-shared-secrets
+              - key: ENV
+                value: "dev"
+              - key: LOG_LEVEL
+                value: "INFO"
+              - key: SCHEDULER_ENABLED
+                value: "true"           # Dev: single service runs scheduler
+              - key: DOCS_ENABLED
+                value: "true"           # Dev: Swagger UI enabled
+              - key: INGESTION_ENABLED
+                value: "true"
+              - key: FEATURE_INGESTION_ENABLED
+                value: "true"
+              - key: INGESTION_MAX_WORKERS
+                value: "1"
+              - key: NEWS_FETCH_INTERVAL_MINUTES
+                value: "30"
+              - key: MAX_ITEMS_PER_RUN
+                value: "50"
+              - key: DB_POOL_SIZE
+                value: "2"
+              - key: DB_MAX_OVERFLOW
+                value: "3"
+              - key: REDIS_MAX_CONNECTIONS
+                value: "10"
+              - key: LLM_DAILY_COST_CEILING
+                value: "2.0"
+
+          # ── Dev Redis ─────────────────────────────────────────────────────
+          - type: redis
+            name: blips-dev-redis
+            plan: free
+            region: oregon
+            maxmemoryPolicy: volatile-lru
+            ipAllowList: []
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # PRODUCTION — dedicated API + Worker (scheduler separated)
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: production
+        databases:
+          - name: blips-db
+            plan: basic-256mb
+            databaseName: blips
+            user: blips
+            region: oregon
+
+        services:
+          # ── Prod API (Web) ────────────────────────────────────────────────
+          - type: web
+            name: blips-api
+            runtime: python
+            plan: starter
+            region: oregon
+            rootDir: src/backend
+            buildCommand: pip install -r requirements.txt && alembic upgrade head
+            startCommand: >-
+              gunicorn app.main:app
+              --workers 2
+              --worker-class uvicorn.workers.UvicornWorker
+              --bind 0.0.0.0:$PORT
+              --timeout 120
+              --graceful-timeout 30
+              --max-requests 1000
+              --max-requests-jitter 50
+              --access-logfile -
+            healthCheckPath: /health
+            envVars:
+              - key: PYTHON_VERSION
+                value: "3.11.4"
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: blips-db
+                  property: connectionString
+              - key: REDIS_URL
+                fromService:
+                  name: blips-redis
+                  type: redis
+                  property: connectionString
+              - fromGroup: blips-shared-secrets
+              - key: ENV
+                sync: false             # Set to "prod" in dashboard
+              - key: LOG_LEVEL
+                sync: false             # Set to "WARNING" in dashboard
+              - key: ALERT_ENABLED
+                sync: false
+              - key: ALERT_WEBHOOK_URL
+                sync: false
+              - key: SCHEDULER_ENABLED
+                value: "false"          # Prod: worker owns scheduler
+              - key: DOCS_ENABLED
+                value: "false"
+              - key: INGESTION_ENABLED
+                value: "false"          # Prod: worker owns ingestion
+              - key: DB_POOL_SIZE
+                value: "3"
+              - key: DB_MAX_OVERFLOW
+                value: "5"
+              - key: REDIS_MAX_CONNECTIONS
+                value: "15"
+              - key: LLM_DAILY_COST_CEILING
+                value: "5.0"
+              - key: MAX_ITEMS_PER_RUN
+                value: "100"
+
+          # ── Prod Worker (Background Jobs) ─────────────────────────────────
+          # Runs APScheduler: ingestion, scoring, clustering, cleanup, AI retry.
+          - type: worker
+            name: blips-worker
+            runtime: python
+            plan: starter
+            region: oregon
+            rootDir: src/backend
+            buildCommand: pip install -r requirements.txt
+            startCommand: python -m app.worker
+            envVars:
+              - key: PYTHON_VERSION
+                value: "3.11.4"
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: blips-db
+                  property: connectionString
+              - key: REDIS_URL
+                fromService:
+                  name: blips-redis
+                  type: redis
+                  property: connectionString
+              - fromGroup: blips-shared-secrets
+              - key: ENV
+                sync: false
+              - key: LOG_LEVEL
+                sync: false
+              - key: SCHEDULER_ENABLED
+                value: "true"           # Worker owns all scheduled jobs
+              - key: INGESTION_ENABLED
+                value: "true"
+              - key: FEATURE_INGESTION_ENABLED
+                value: "true"
+              - key: INGESTION_MAX_WORKERS
+                value: "4"
+              - key: NEWS_FETCH_INTERVAL_MINUTES
+                value: "30"
+              - key: MAX_ITEMS_PER_RUN
+                value: "100"
+              - key: INGEST_UNTIL_TARGETS
+                value: "true"
+              - key: INGEST_CATCHUP_MAX_SECONDS
+                value: "1800"
+              - key: PREFERENCE_DECAY_FACTOR
+                value: "0.95"
+              - key: DB_POOL_SIZE
+                value: "3"
+              - key: DB_MAX_OVERFLOW
+                value: "5"
+              - key: REDIS_MAX_CONNECTIONS
+                value: "15"
+              - key: LLM_DAILY_COST_CEILING
+                value: "5.0"
+
+          # ── Prod Redis ────────────────────────────────────────────────────
+          - type: redis
+            name: blips-redis
+            plan: starter
+            region: oregon
+            maxmemoryPolicy: volatile-lru
+            ipAllowList: []
