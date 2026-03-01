@@ -34,7 +34,7 @@ projects:
             name: blips-dev-api
             runtime: python
             plan: free
-            autoDeploy: false
+            autoDeployTrigger: checksPass
             region: oregon
             rootDir: src/backend
             buildCommand: pip install -r requirements.txt && alembic upgrade head
@@ -110,7 +110,7 @@ projects:
       - name: production
         databases:
           - name: blips-db
-            plan: starter
+            plan: basic-256mb
             databaseName: blips
             user: blips
             region: oregon
@@ -121,7 +121,7 @@ projects:
             name: blips-api
             runtime: python
             plan: starter
-            autoDeploy: false
+            autoDeployTrigger: checksPass
             region: oregon
             rootDir: src/backend
             buildCommand: pip install -r requirements.txt && alembic upgrade head
@@ -189,7 +189,7 @@ projects:
             name: blips-worker
             runtime: python
             plan: starter
-            autoDeploy: false
+            autoDeployTrigger: checksPass
             region: oregon
             rootDir: src/backend
             buildCommand: pip install -r requirements.txt
