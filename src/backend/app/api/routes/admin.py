@@ -187,12 +187,24 @@ def get_content_stats():
 
 @router.post("/trigger-fetch")
 def trigger_fetch():
-    """Manually trigger content ingestion (dev/testing only)."""
+    """Manually trigger content ingestion + AI summarization."""
     from app.scheduler.tasks import fetch_and_process_news
     
     try:
         fetch_and_process_news()
-        return {"status": "triggered", "message": "Ingestion job triggered successfully"}
+        return {"status": "triggered", "message": "Ingestion + AI summarization triggered successfully"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@router.post("/trigger-summarize")
+def trigger_summarize():
+    """Manually trigger AI summarization for unprocessed content."""
+    from app.scheduler.tasks_ai_retry import process_ai_summaries
+
+    try:
+        process_ai_summaries()
+        return {"status": "triggered", "message": "AI summarization triggered successfully"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

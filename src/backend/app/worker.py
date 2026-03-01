@@ -92,6 +92,33 @@ def refresh_worker_lock() -> bool:
         return False
 
 
+def _acquire_lock_with_retry(max_attempts: int = 10, base_delay: float = 5.0) -> bool:
+    """Try to acquire the worker lock with exponential back-off.
+
+    Handles two common transient failures:
+    - Redis not yet reachable (cold start / network delay)
+    - Stale lock left by a previously-crashed worker (waits for TTL expiry)
+    """
+    for attempt in range(1, max_attempts + 1):
+        try:
+            if acquire_worker_lock():
+                return True
+            delay = min(base_delay * (2 ** (attempt - 1)), WORKER_LOCK_TTL)
+            logger.warning(
+                f"Lock held by another process (attempt {attempt}/{max_attempts}). "
+                f"Retrying in {delay:.0f}s …"
+            )
+            time.sleep(delay)
+        except Exception as e:
+            delay = min(base_delay * (2 ** (attempt - 1)), 60)
+            logger.warning(
+                f"Lock acquisition error (attempt {attempt}/{max_attempts}): {e}. "
+                f"Retrying in {delay:.0f}s …"
+            )
+            time.sleep(delay)
+    return False
+
+
 def run_worker():
     """Main worker entry point."""
     global _scheduler
@@ -109,12 +136,15 @@ def run_worker():
     scheduler_enabled = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
     if not scheduler_enabled:
         logger.info("Scheduler is disabled via SCHEDULER_ENABLED=false")
-        logger.info("Worker will exit.")
+        # Sleep forever so Render doesn't restart in a tight loop
+        logger.info("Worker idling (SCHEDULER_ENABLED=false).")
+        _idle_forever()
         return
     
-    # Try to acquire the worker lock
-    if not acquire_worker_lock():
-        logger.warning("Another worker is already running. Exiting.")
+    # Try to acquire the worker lock (with retry / back-off)
+    if not _acquire_lock_with_retry():
+        logger.error("Could not acquire worker lock after retries — idling")
+        _idle_forever()
         return
     
     logger.info("Worker lock acquired successfully")
@@ -123,21 +153,28 @@ def run_worker():
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
     
-    # Initialize scheduler
-    _scheduler = init_scheduler()
+    # Initialize scheduler (retry once on transient failure)
+    for attempt in range(1, 4):
+        _scheduler = init_scheduler()
+        if _scheduler:
+            break
+        logger.warning(f"Scheduler init failed (attempt {attempt}/3), retrying in 10s …")
+        time.sleep(10)
+
     if not _scheduler:
-        logger.error("Failed to initialize scheduler")
+        logger.error("Failed to initialize scheduler after 3 attempts — idling")
+        _idle_forever()
         return
     
     logger.info("Scheduler initialized successfully")
     
-    # Run initial fetch
+    # Run initial fetch (catch ALL errors so it never kills the worker)
     logger.info("Running initial news fetch...")
     try:
         fetch_and_process_news()
         logger.info("Initial fetch completed")
-    except RedisError as e:
-        logger.error(f"Initial fetch failed: {e}")
+    except Exception as e:
+        logger.error(f"Initial fetch failed (non-fatal): {e}")
     
     # Keep the worker running and refresh lock
     logger.info("Worker running. Press Ctrl+C to stop.")
@@ -148,10 +185,21 @@ def run_worker():
                 break
             time.sleep(60)  # Refresh lock every minute
     except (KeyboardInterrupt, SystemExit):
+        pass
+    finally:
         logger.info("Worker shutting down...")
         if _scheduler:
-            _scheduler.shutdown(wait=True)
+            _scheduler.shutdown(wait=False)
         logger.info("Worker shutdown complete")
+
+
+def _idle_forever():
+    """Block the process indefinitely so Render doesn't restart in a tight loop."""
+    try:
+        while True:
+            time.sleep(3600)
+    except (KeyboardInterrupt, SystemExit):
+        pass
 
 
 if __name__ == "__main__":
