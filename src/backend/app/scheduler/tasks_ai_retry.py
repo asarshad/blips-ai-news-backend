@@ -62,14 +62,21 @@ def retry_ai_processing():
                     result = llm_client.summarize_article(item.title, text)
                     summary = result.summary
                     topics = result.tags if result.tags else item.topics
+                    starters = result.conversation_starters
                 else:
-                    summary = llm_client.summarize_video(item.title, text)
+                    result = llm_client.summarize_video(item.title, text)
+                    summary = result.summary
                     topics = item.topics
+                    starters = result.conversation_starters
 
                 stats.llm_calls += 1
 
                 if summary and len(summary.strip()) > 50:
                     content_repo.mark_ai_processed(item.id, summary=summary, topics=topics)
+                    # Persist starters from the same LLM call when available
+                    if starters and not item.conversation_starters:
+                        item.conversation_starters = starters
+                        db.commit()
                     stats.items_processed += 1
                 else:
                     stats.items_failed += 1
