@@ -139,44 +139,32 @@ The env-var equivalents serve as fallback defaults:
 
 ---
 
-## Recommended Render Dashboard Values (Production)
+## Render Blueprint Architecture
 
-### Shared secrets (set on BOTH api and worker)
+The Blueprint (`render.yaml`) uses Render's `projects` + `environments` feature
+to deploy **two environments** from a single file:
+
+| Environment | Services | Description |
+|-------------|----------|-------------|
+| **development** | `blips-dev-api` (web) + `blips-dev-db` + `blips-dev-redis` | Single service, `SCHEDULER_ENABLED=true`, Swagger enabled |
+| **production** | `blips-api` (web) + `blips-worker` (background) + `blips-db` + `blips-redis` | API + dedicated worker, scheduler on worker only |
+
+Shared secrets (`ADMIN_API_KEY`, API keys, `LLM_PROVIDER`) are in the
+`blips-shared-secrets` env var group — set once, applied to all services.
+
+### Secrets to set in dashboard after Blueprint deploy
+
+Via the `blips-shared-secrets` env var group:
 ```
 ADMIN_API_KEY=<strong-random-secret>
-DATABASE_URL=<auto-wired by Blueprint>
-REDIS_URL=<auto-wired by Blueprint>
+OPENAI_API_KEY=<key>
+MISTRAL_API_KEY=<key>
+YOUTUBE_API_KEY=<key>
+LLM_PROVIDER=mistral
+```
+
+Production services (set per service via `sync: false`):
+```
 ENV=prod
 LOG_LEVEL=WARNING
-LLM_PROVIDER=mistral
-MISTRAL_API_KEY=<key>
-MISTRAL_MODEL=open-mixtral-8x22b
-OPENAI_API_KEY=<key>
-YOUTUBE_API_KEY=<key>
-```
-
-### blips-api only
-```
-SCHEDULER_ENABLED=false
-DOCS_ENABLED=false
-INGESTION_ENABLED=false
-DB_POOL_SIZE=3
-DB_MAX_OVERFLOW=5
-REDIS_MAX_CONNECTIONS=15
-LLM_DAILY_COST_CEILING=5.0
-```
-
-### blips-worker only
-```
-SCHEDULER_ENABLED=true
-INGESTION_ENABLED=true
-FEATURE_INGESTION_ENABLED=true
-INGESTION_MAX_WORKERS=4
-NEWS_FETCH_INTERVAL_MINUTES=30
-MAX_ITEMS_PER_RUN=100
-INGEST_UNTIL_TARGETS=true
-DB_POOL_SIZE=3
-DB_MAX_OVERFLOW=5
-REDIS_MAX_CONNECTIONS=15
-LLM_DAILY_COST_CEILING=5.0
 ```
