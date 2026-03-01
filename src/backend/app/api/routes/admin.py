@@ -173,12 +173,23 @@ def get_content_stats():
             GROUP BY type
         """))
         recent_24h = {row[0]: row[1] for row in result}
-        
+
+        # AI processing stats
+        result = db.execute(text("""
+            SELECT
+                COUNT(*) FILTER (WHERE ai_processed = true)  AS processed,
+                COUNT(*) FILTER (WHERE ai_processed = false) AS unprocessed
+            FROM content_items
+        """))
+        ai_row = result.fetchone()
+        ai_stats = {"processed": ai_row[0], "unprocessed": ai_row[1]} if ai_row else {}
+
         return {
             "total_by_type": by_type,
             "total": sum(by_type.values()),
             "duplicate_urls": duplicate_count,
-            "last_24h": recent_24h
+            "last_24h": recent_24h,
+            "ai_processing": ai_stats,
         }
         
     finally:
