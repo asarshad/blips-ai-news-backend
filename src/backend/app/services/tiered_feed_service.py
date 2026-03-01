@@ -283,6 +283,31 @@ def get_tiered_feed(
     return paginated, has_more
 
 
+def _default_starters_for(item) -> Dict[str, Any]:
+    """Generate title-based conversation starters at serving time when DB value is empty."""
+    short_title = item.title[:40] + "..." if len(item.title) > 40 else item.title
+    if item.type == ContentType.VIDEO:
+        starters = [
+            f"What are the key takeaways from '{short_title}'?",
+            "Can you explain the main concepts?",
+            "What practical applications does this have?",
+        ]
+    else:
+        starters = [
+            f"What are the implications of '{short_title}'?",
+            "Can you break down the key points?",
+            "How does this compare to similar developments?",
+        ]
+    return {
+        "starters": starters,
+        "fallback": [
+            "What are the main points of this?",
+            "Can you summarize this for me?",
+            "What should I know about this topic?",
+        ],
+    }
+
+
 def tiered_item_to_dict(tiered: TieredItem) -> Dict[str, Any]:
     """
     Convert a tiered item to a dictionary with all fields.
@@ -298,7 +323,7 @@ def tiered_item_to_dict(tiered: TieredItem) -> Dict[str, Any]:
         "title": item.title,
         "source_url": item.source_url,
         "summary": summary,
-        "image_url": item.image_url,
+        "image_url": item.image_url or None,  # coerce empty string to null
         "source": item.source or "Unknown",
         "created_at": item.created_at.isoformat() if item.created_at else None,
         
@@ -315,7 +340,9 @@ def tiered_item_to_dict(tiered: TieredItem) -> Dict[str, Any]:
         "added_age_seconds": tiered.added_age_seconds,
         
         # Conversation starters (inline to avoid separate API call)
-        "conversation_starters": item.conversation_starters or {},
+        # Serve persisted starters; generate title-based defaults at serving
+        # time if ingestion/backfill didn't populate them.
+        "conversation_starters": item.conversation_starters if item.conversation_starters else _default_starters_for(item),
     }
     
     # Type-specific fields
@@ -325,7 +352,7 @@ def tiered_item_to_dict(tiered: TieredItem) -> Dict[str, Any]:
     
     elif item.type in (ContentType.VIDEO, ContentType.REEL):
         result["video_url"] = item.video_url or item.source_url
-        result["thumbnail_url"] = item.image_url
+        result["thumbnail_url"] = item.image_url or None  # coerce empty string
         result["category"] = item.topics[0] if item.topics else "Technology"
         result["duration_seconds"] = item.duration_seconds
         result["hot_score"] = int(item.global_score * 100) if item.global_score else 0

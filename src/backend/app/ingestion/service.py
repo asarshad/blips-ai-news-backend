@@ -655,8 +655,6 @@ class IngestionPipeline:
     def _generate_starters(self, content_item: ContentItem) -> None:
         """Generate conversation starters during ingestion so they're inline in feed responses."""
         try:
-            if not self.llm_client.is_configured():
-                return
             if not (content_item.summary or content_item.description):
                 return
 
@@ -667,7 +665,15 @@ class IngestionPipeline:
             logger.debug(f"Generated starters for content_id={content_item.id}")
         except Exception as e:
             logger.warning(f"Failed to generate starters for {content_item.id}: {e}")
-            # Non-fatal — starters will be generated on-demand if needed
+            # Persist title-based defaults so the feed response isn't empty
+            try:
+                from app.services.conversation_starters import ConversationStartersService
+                defaults = ConversationStartersService()._get_default_starters(content_item)
+                content_item.conversation_starters = defaults
+                self.db.commit()
+                logger.info(f"Persisted default starters for content_id={content_item.id}")
+            except Exception:
+                self.db.rollback()
 
 
 def create_ingestion_pipeline(db: Session) -> IngestionPipeline:
