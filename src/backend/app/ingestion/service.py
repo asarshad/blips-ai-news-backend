@@ -110,13 +110,15 @@ class IngestionPipeline:
         if not is_english(entry.title, entry.content):
             return None
         
-        # Generate AI summary
+        # Generate AI summary + conversation starters in one LLM call
         summary = None
         ai_processed = False
+        inline_starters = None
         try:
             if self.llm_client.is_configured() and entry.content:
                 result = self.llm_client.summarize_article(entry.title, entry.content)
                 summary = result.summary
+                inline_starters = result.conversation_starters
                 ai_processed = bool(summary and len(summary.strip()) > 50)
         except Exception as e:
             logger.warning(f"Failed to summarize article {entry.title}: {e}")
@@ -139,6 +141,7 @@ class IngestionPipeline:
             entities=entities,
             dedupe_key=dedupe_key,
             ai_processed=ai_processed,
+            conversation_starters=inline_starters,
         )
         
         # Apply quality scoring with role-based modifiers
@@ -169,8 +172,10 @@ class IngestionPipeline:
         self.clustering.cluster_new_item(content_item)
         self._update_scores(content_item)
         
-        # Generate conversation starters inline so they're available in feed responses
-        self._generate_starters(content_item)
+        # Starters were included in the summary LLM call.
+        # Fall back to title-based defaults only if the LLM didn't produce them.
+        if not content_item.conversation_starters:
+            self._generate_starters_fallback(content_item)
         
         # Log role info if available
         role_info = ""
@@ -254,9 +259,10 @@ class IngestionPipeline:
         if not is_english(entry.title, entry.summary):
             return None
         
-        # Generate AI summary (skip for reels - metadata only)
+        # Generate AI summary + conversation starters (skip for reels - metadata only)
         summary = entry.summary
         ai_processed = False
+        inline_starters = None
         
         # Skip AI summarization for REEL content type
         if content_type == ContentType.REEL:
@@ -273,7 +279,9 @@ class IngestionPipeline:
                         if transcript:
                             summary = transcript[:5000]
                     
-                    ai_summary = self.llm_client.summarize_video(entry.title, summary)
+                    video_result = self.llm_client.summarize_video(entry.title, summary)
+                    ai_summary = video_result.summary
+                    inline_starters = video_result.conversation_starters
                     if ai_summary and len(ai_summary.strip()) > 50:
                         summary = ai_summary
                         ai_processed = True
@@ -305,6 +313,7 @@ class IngestionPipeline:
             entities=entities,
             dedupe_key=dedupe_key,
             ai_processed=ai_processed,
+            conversation_starters=inline_starters,
         )
         
         # Apply quality modifier from channel tier
@@ -327,9 +336,10 @@ class IngestionPipeline:
         self.clustering.cluster_new_item(content_item)
         self._update_scores(content_item)
         
-        # Generate conversation starters inline so they're available in feed responses
-        if content_type != ContentType.REEL:
-            self._generate_starters(content_item)
+        # Starters were included in the summary LLM call.
+        # Fall back to title-based defaults only if the LLM didn't produce them.
+        if content_type != ContentType.REEL and not content_item.conversation_starters:
+            self._generate_starters_fallback(content_item)
         
         # Log role info if available
         role_info = ""
@@ -652,28 +662,17 @@ class IngestionPipeline:
             global_score=scores["global"],
         )
 
-    def _generate_starters(self, content_item: ContentItem) -> None:
-        """Generate conversation starters during ingestion so they're inline in feed responses."""
+    def _generate_starters_fallback(self, content_item: ContentItem) -> None:
+        """Persist title-based default starters when the summary LLM call didn't produce them."""
         try:
-            if not (content_item.summary or content_item.description):
-                return
-
-            from app.services.conversation_starters import get_starters_service
-            starters_service = get_starters_service(self.llm_client)
-            starters_service.generate_and_persist(content_item)
+            from app.services.conversation_starters import ConversationStartersService
+            defaults = ConversationStartersService()._get_default_starters(content_item)
+            content_item.conversation_starters = defaults
             self.db.commit()
-            logger.debug(f"Generated starters for content_id={content_item.id}")
+            logger.info(f"Persisted fallback starters for content_id={content_item.id}")
         except Exception as e:
-            logger.warning(f"Failed to generate starters for {content_item.id}: {e}")
-            # Persist title-based defaults so the feed response isn't empty
-            try:
-                from app.services.conversation_starters import ConversationStartersService
-                defaults = ConversationStartersService()._get_default_starters(content_item)
-                content_item.conversation_starters = defaults
-                self.db.commit()
-                logger.info(f"Persisted default starters for content_id={content_item.id}")
-            except Exception:
-                self.db.rollback()
+            logger.warning(f"Failed to persist fallback starters for {content_item.id}: {e}")
+            self.db.rollback()
 
 
 def create_ingestion_pipeline(db: Session) -> IngestionPipeline:

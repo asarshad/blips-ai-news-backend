@@ -67,9 +67,10 @@ class ChatResponse:
 
 @dataclass
 class SummaryResult:
-    """Result from article summarization."""
+    """Result from article/video summarization."""
     summary: str
     tags: List[str]
+    conversation_starters: Optional[Dict[str, List[str]]] = None
 
 
 class BaseLLMClient(ABC):
@@ -375,7 +376,10 @@ class LLMClient:
         max_content_length: int = 4000
     ) -> SummaryResult:
         """
-        Generate a summary and tags for an article.
+        Generate a summary, tags, and conversation starters for an article.
+        
+        All three outputs come from a single LLM call to avoid extra latency
+        and ensure starters are always present when a summary is present.
         
         Args:
             title: Article title
@@ -383,7 +387,7 @@ class LLMClient:
             max_content_length: Max chars of content to send
             
         Returns:
-            SummaryResult with summary and tags
+            SummaryResult with summary, tags, and conversation_starters
         """
         if not self.is_configured():
             raise RuntimeError(f"{self.get_provider()} API key is not configured")
@@ -395,19 +399,27 @@ Article Title: {title}
 
 Article Content: {truncated_content}
 
+Perform ALL three tasks below in a single response.
+
 Task 1: Write a concise summary of this tech article in exactly 85-90 words. Keep it informative and engaging.
 
 Task 2: Generate 3-5 relevant tags for this article. Tags should be lowercase, single words or hyphenated phrases.
 
+Task 3: Generate exactly 3 conversation-starter questions about this specific article. Each question must:
+- Reference the specific topic or title
+- Be at most 120 characters
+- Encourage deeper discussion
+
 Format your response exactly like this:
 SUMMARY: [your summary here]
 TAGS: tag1, tag2, tag3
+STARTERS: question1 | question2 | question3
 """
         
         try:
             response = self.chat(
                 messages=[ChatMessage(role="user", content=prompt)],
-                max_tokens=300,
+                max_tokens=450,
                 temperature=0.5
             )
             
@@ -415,16 +427,36 @@ TAGS: tag1, tag2, tag3
             text = response.content
             summary = ""
             tags = []
+            starters = None
             
             if "SUMMARY:" in text:
+                # Split into sections
                 parts = text.split("TAGS:")
                 summary = parts[0].replace("SUMMARY:", "").strip()
                 if len(parts) > 1:
-                    tags = [t.strip().lower() for t in parts[1].split(",")]
+                    tag_section = parts[1]
+                    # Separate TAGS from STARTERS
+                    if "STARTERS:" in tag_section:
+                        tag_part, starter_part = tag_section.split("STARTERS:", 1)
+                        tags = [t.strip().lower() for t in tag_part.split(",") if t.strip()]
+                        raw_starters = [s.strip() for s in starter_part.split("|") if s.strip()]
+                        # Truncate each starter to 120 chars and take up to 5
+                        raw_starters = [s[:117] + "..." if len(s) > 120 else s for s in raw_starters]
+                        if raw_starters:
+                            starters = {
+                                "starters": raw_starters[:5],
+                                "fallback": [
+                                    "What are the main points of this?",
+                                    "Can you summarize this for me?",
+                                    "What should I know about this topic?",
+                                ],
+                            }
+                    else:
+                        tags = [t.strip().lower() for t in tag_section.split(",") if t.strip()]
             else:
                 summary = text.strip()
             
-            return SummaryResult(summary=summary, tags=tags)
+            return SummaryResult(summary=summary, tags=tags, conversation_starters=starters)
             
         except (RuntimeError, ValueError) as e:
             logger.error(f"Article summarization error: {str(e)}")
@@ -435,9 +467,12 @@ TAGS: tag1, tag2, tag3
         title: str,
         description: str,
         max_length: int = 4000
-    ) -> str:
+    ) -> SummaryResult:
         """
-        Generate a summary for a video based on its description.
+        Generate a summary and conversation starters for a video.
+        
+        Both come from a single LLM call. Returns a SummaryResult so the
+        caller gets starters inline, matching the article path.
         
         Args:
             title: Video title
@@ -445,7 +480,7 @@ TAGS: tag1, tag2, tag3
             max_length: Max chars of description to send
             
         Returns:
-            Summary string
+            SummaryResult with summary and conversation_starters
         """
         if not self.is_configured():
             raise RuntimeError(f"{self.get_provider()} API key is not configured")
@@ -457,10 +492,19 @@ Video Title: {title}
 
 Video Description: {truncated_desc}
 
-Task: Write a concise summary of this video in exactly 85-90 words based on the description. 
+Perform BOTH tasks below in a single response.
+
+Task 1: Write a concise summary of this video in exactly 85-90 words based on the description.
 Focus on the main topic and key points. Remove any channel promotion, "link in bio", or "subscribe" text.
 
-Format your response as just the summary text.
+Task 2: Generate exactly 3 conversation-starter questions about this specific video. Each question must:
+- Reference the specific topic or title
+- Be at most 120 characters
+- Encourage deeper discussion
+
+Format your response exactly like this:
+SUMMARY: [your summary here]
+STARTERS: question1 | question2 | question3
 """
         
         try:
@@ -469,15 +513,38 @@ Format your response as just the summary text.
                     ChatMessage(role="system", content="You are a tech journalist assistant that creates concise, informative summaries of tech videos."),
                     ChatMessage(role="user", content=prompt)
                 ],
-                max_tokens=200,
+                max_tokens=350,
                 temperature=0.5
             )
             
-            summary = response.content.strip()
-            if not summary:
-                raise ValueError("Empty summary returned from LLM")
+            text = response.content.strip()
+            if not text:
+                raise ValueError("Empty response returned from LLM")
             
-            return summary
+            summary = ""
+            starters = None
+            
+            if "SUMMARY:" in text:
+                if "STARTERS:" in text:
+                    parts = text.split("STARTERS:", 1)
+                    summary = parts[0].replace("SUMMARY:", "").strip()
+                    raw_starters = [s.strip() for s in parts[1].split("|") if s.strip()]
+                    raw_starters = [s[:117] + "..." if len(s) > 120 else s for s in raw_starters]
+                    if raw_starters:
+                        starters = {
+                            "starters": raw_starters[:5],
+                            "fallback": [
+                                "What are the main points of this?",
+                                "Can you summarize this for me?",
+                                "What should I know about this topic?",
+                            ],
+                        }
+                else:
+                    summary = text.replace("SUMMARY:", "").strip()
+            else:
+                summary = text
+            
+            return SummaryResult(summary=summary, tags=[], conversation_starters=starters)
             
         except (RuntimeError, ValueError) as e:
             logger.error(f"Video summarization error: {str(e)}")
