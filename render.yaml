@@ -110,7 +110,7 @@ projects:
       - name: production
         databases:
           - name: blips-db
-            plan: basic-256mb
+            plan: starter
             databaseName: blips
             user: blips
             region: oregon
@@ -250,7 +250,7 @@ projects:
           # ── Prod Redis ────────────────────────────────────────────────────
           - type: redis
             name: blips-redis
-            plan: starter
+            plan: free
             region: oregon
             maxmemoryPolicy: volatile-lru
             ipAllowList: []
