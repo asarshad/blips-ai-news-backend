@@ -33,9 +33,9 @@ dashboard or in a local `.env` file.
 | `DB_POOL_TIMEOUT` | `30` | No | Seconds to wait for a connection |
 | `DB_POOL_RECYCLE_SECONDS` | `1800` | No | Recycle connections after N seconds |
 
-> **Render Starter Postgres** allows ~20 connections.  With 2 Gunicorn workers
-> the default (`pool_size=3 + max_overflow=5` = 8 per worker × 2 = 16) stays
-> safely under the limit.
+> **Render Basic-256MB Postgres** allows ~97 connections.  With 2 Gunicorn
+> workers the default (`pool_size=3 + max_overflow=5` = 8 per worker × 2 = 16)
+> plus the worker service (8) totals 24 — safely within the limit.
 
 ## Redis
 
@@ -141,24 +141,40 @@ The env-var equivalents serve as fallback defaults:
 
 ## Recommended Render Dashboard Values (Production)
 
+### Shared secrets (set on BOTH api and worker)
 ```
 ADMIN_API_KEY=<strong-random-secret>
-DATABASE_URL=<from-render-db>
-REDIS_URL=<from-render-redis>
+DATABASE_URL=<auto-wired by Blueprint>
+REDIS_URL=<auto-wired by Blueprint>
 ENV=prod
 LOG_LEVEL=WARNING
-DOCS_ENABLED=false
 LLM_PROVIDER=mistral
 MISTRAL_API_KEY=<key>
 MISTRAL_MODEL=open-mixtral-8x22b
 OPENAI_API_KEY=<key>
 YOUTUBE_API_KEY=<key>
-SCHEDULER_ENABLED=false     # on API service
-SCHEDULER_ENABLED=true      # on worker service
+```
+
+### blips-api only
+```
+SCHEDULER_ENABLED=false
+DOCS_ENABLED=false
+INGESTION_ENABLED=false
+DB_POOL_SIZE=3
+DB_MAX_OVERFLOW=5
+REDIS_MAX_CONNECTIONS=15
+LLM_DAILY_COST_CEILING=5.0
+```
+
+### blips-worker only
+```
+SCHEDULER_ENABLED=true
+INGESTION_ENABLED=true
+FEATURE_INGESTION_ENABLED=true
+INGESTION_MAX_WORKERS=4
 NEWS_FETCH_INTERVAL_MINUTES=30
 MAX_ITEMS_PER_RUN=100
-FEATURE_CHAT_ENABLED=true
-FEATURE_SUMMARIZATION_ENABLED=true
+INGEST_UNTIL_TARGETS=true
 DB_POOL_SIZE=3
 DB_MAX_OVERFLOW=5
 REDIS_MAX_CONNECTIONS=15
