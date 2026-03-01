@@ -44,7 +44,7 @@ def _content_item_to_video_schema(item) -> dict:
         "summary": item.summary or "",
         "video_url": item.video_url or item.source_url,
         "source_url": item.source_url,
-        "thumbnail_url": item.image_url,
+        "thumbnail_url": item.image_url or None,  # coerce empty string to null
         "source": item.source or "YouTube",
         "category": (item.topics[0] if item.topics else "Technology"),
         "duration_seconds": item.duration_seconds,

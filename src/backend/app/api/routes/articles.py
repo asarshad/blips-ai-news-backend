@@ -46,7 +46,7 @@ def _content_item_to_article_schema(item) -> dict:
         "title": item.title,
         "source_url": item.source_url,
         "summary": summary,
-        "image_url": item.image_url,
+        "image_url": item.image_url or None,  # coerce empty string to null
         "published_date": item.published_at.date() if item.published_at else None,
         "created_at": item.created_at,
         "read_time_minutes": max(1, len(summary) // 200) if summary else 1,
