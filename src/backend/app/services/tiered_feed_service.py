@@ -48,10 +48,10 @@ class FeedResponseMeta:
 
 
 def _get_redis_client():
-    """Get Redis client for caching."""
+    """Get Redis client using shared connection pool."""
     try:
-        import redis
-        return redis.from_url(settings.REDIS_URL)
+        from app.core.dependencies import get_redis
+        return get_redis()
     except Exception as e:
         logger.debug(f"Redis not available for feed cache: {e}")
         return None

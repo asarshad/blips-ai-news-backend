@@ -163,6 +163,25 @@ class Settings(BaseSettings):
     TOPUP_MAX_RUNTIME_SECONDS: int = 300
     INVENTORY_HEALTH_CACHE_TTL: int = 60
 
+    # ------------------------------------------------------------------
+    # Redis TTL constants (seconds)
+    # ------------------------------------------------------------------
+    FEED_CACHE_TTL_SECONDS: int = 300         # Feed/playlist cache
+    ITEM_CACHE_TTL_SECONDS: int = 3600        # Per-item cache (quota, sessions)
+    CONFIG_CACHE_TTL_SECONDS: int = 21600     # Config / feature flags (6 hours)
+    LEASE_TTL_SECONDS: int = 300              # Distributed locks / leases
+
+    # ------------------------------------------------------------------
+    # Data retention policy (days)
+    # ------------------------------------------------------------------
+    RETAIN_CONTENT_DAYS: int = 90
+    RETAIN_INGESTION_PROGRESS_DAYS: int = 14
+    RETAIN_EVENTS_DAYS: int = 30
+    RETAIN_CONVERSATIONS_DAYS: int = 30
+    RETAIN_USAGE_DAYS: int = 90
+    RETAIN_EDITORIAL_DAYS: int = 180
+    RETAIN_DEBUG_DAYS: int = 7
+
     model_config = {
         "env_file": ".env",
         "case_sensitive": True,

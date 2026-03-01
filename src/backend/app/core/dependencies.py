@@ -3,7 +3,7 @@ FastAPI dependency injection functions.
 Centralizes all dependency providers for routes.
 """
 
-from typing import Generator
+from typing import Generator, Optional
 import redis
 from sqlalchemy.orm import Session
 
@@ -27,7 +27,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 # Singleton Redis connection pool — reused across all callers.
-_redis_pool: redis.ConnectionPool | None = None
+_redis_pool: Optional[redis.ConnectionPool] = None
 
 
 def _get_redis_pool() -> redis.ConnectionPool:

@@ -9,6 +9,7 @@ dependency chain (FastAPI, etc.), keeping it testable in isolation.
 """
 
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 _MIN_DETECT_LENGTH = 20
 
 
-def is_english(title: str, description: str | None = None) -> bool:
+def is_english(title: str, description: Optional[str] = None) -> bool:
     """Check if the given text is English.
 
     Concatenates title + first 500 chars of description for better accuracy.
