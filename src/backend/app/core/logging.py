@@ -4,22 +4,29 @@ Centralizes all logging setup in one place.
 """
 
 import logging
+import os
 import sys
 
 
 def setup_logging(level: int = logging.INFO) -> None:
     """
     Configure application-wide logging.
-    
-    Args:
-        level: The logging level to use (default: INFO)
+
+    Honors the LOG_LEVEL env var (DEBUG / INFO / WARNING / ERROR).
+    Falls back to the *level* parameter if the env var is absent.
     """
+    env_level = os.getenv("LOG_LEVEL", "").upper().strip()
+    resolved = getattr(logging, env_level, None) if env_level else None
+    if resolved is None:
+        resolved = level
+
     logging.basicConfig(
-        level=level,
+        level=resolved,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[
             logging.StreamHandler(sys.stdout)
-        ]
+        ],
+        force=True,  # override any prior basicConfig call
     )
 
 

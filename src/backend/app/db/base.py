@@ -10,10 +10,10 @@ from app.core.config import settings
 
 engine = create_engine(
     settings.DATABASE_URL,
-    pool_size=5,
-    max_overflow=10,
-    pool_timeout=30,
-    pool_recycle=1800,     # recycle connections every 30 min
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
+    pool_timeout=settings.DB_POOL_TIMEOUT,
+    pool_recycle=settings.DB_POOL_RECYCLE_SECONDS,
     pool_pre_ping=True,    # detect stale connections before use
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

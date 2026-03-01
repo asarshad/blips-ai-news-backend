@@ -291,8 +291,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Admin-Key", "X-Device-ID"],
 )
 
 # Rate limiting (per IP)
@@ -339,8 +339,7 @@ async def redis_health_guard(request: Request, call_next):
     now = time.monotonic()
     if now - _redis_last_check > _REDIS_CHECK_INTERVAL:
         try:
-            import redis as _redis
-            r = _redis.from_url(settings.REDIS_URL, socket_connect_timeout=1)
+            r = get_redis()
             r.ping()
             _redis_healthy = True
         except Exception:
