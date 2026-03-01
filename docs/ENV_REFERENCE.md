@@ -88,7 +88,6 @@ The env-var equivalents serve as fallback defaults:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `FEATURE_CHAT_ENABLED` | `false` | Enable AI chat feature |
 | `FEATURE_SUMMARIZATION_ENABLED` | `true` | Enable LLM summarization |
 | `FEATURE_INGESTION_ENABLED` | `true` | Enable content ingestion |
 
