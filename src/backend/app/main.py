@@ -401,7 +401,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
     from app.core.error_codes import ErrorCode, ERROR_MESSAGES
 
-    def _err(status: int, code: ErrorCode, detail: str | None = None):
+    def _err(status: int, code: ErrorCode, detail: Optional[str] = None):
         return JSONResponse(
             status_code=status,
             content={

@@ -196,3 +196,55 @@ def trigger_fetch():
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+
+# ------------------------------------------------------------------
+# Maintenance / Retention endpoints
+# ------------------------------------------------------------------
+
+@router.post("/maintenance/cleanup")
+def manual_cleanup():
+    """
+    Manually trigger data retention cleanup.
+
+    Uses the same retention service as the daily scheduler.
+    Returns counts of deleted rows per table.
+    """
+    from app.scheduler.tasks_cleanup import run_data_cleanup_job
+
+    try:
+        result = run_data_cleanup_job()
+        return {"status": "ok", "result": result}
+    except Exception as e:
+        logger.error(f"Manual cleanup failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/maintenance/status")
+def cleanup_status():
+    """
+    Return last cleanup run info and current retention config.
+    """
+    from app.core.config import settings as _settings
+
+    last_run_at = None
+    try:
+        from app.core.dependencies import get_redis
+        r = get_redis()
+        raw = r.get("blips:cleanup:last_run_at")
+        if raw:
+            last_run_at = raw.decode() if isinstance(raw, bytes) else raw
+    except Exception:
+        pass
+
+    return {
+        "last_run_at": last_run_at,
+        "retention_policy": {
+            "content_items_days": _settings.RETAIN_CONTENT_DAYS,
+            "ingestion_progress_days": _settings.RETAIN_INGESTION_PROGRESS_DAYS,
+            "events_days": _settings.RETAIN_EVENTS_DAYS,
+            "conversations_days": _settings.RETAIN_CONVERSATIONS_DAYS,
+            "usage_days": _settings.RETAIN_USAGE_DAYS,
+            "editorial_actions_days": _settings.RETAIN_EDITORIAL_DAYS,
+        },
+    }
+

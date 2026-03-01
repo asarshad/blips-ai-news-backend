@@ -35,10 +35,10 @@ _last_topup_trigger: Optional[datetime] = None
 
 
 def _get_redis_client():
-    """Get Redis client for distributed locking."""
+    """Get Redis client using shared connection pool."""
     try:
-        import redis
-        return redis.from_url(settings.REDIS_URL)
+        from app.core.dependencies import get_redis
+        return get_redis()
     except Exception as e:
         logger.warning(f"Redis not available for top-up lock: {e}")
         return None

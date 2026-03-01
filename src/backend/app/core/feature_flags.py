@@ -192,7 +192,8 @@ class FeatureFlags:
         
         try:
             key = f"{REDIS_KEY_PREFIX}{feature.lower()}"
-            redis_client.set(key, "true" if enabled else "false")
+            from app.core.config import settings as _settings
+            redis_client.setex(key, _settings.CONFIG_CACHE_TTL_SECONDS, "true" if enabled else "false")
             # Invalidate local cache so next check sees the update
             self._cache.pop(feature.lower(), None)
             logger.info(f"Feature flag '{feature}' set to {enabled}")

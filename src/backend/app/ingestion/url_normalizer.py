@@ -44,7 +44,7 @@ _YT_ID_PATTERNS: list[re.Pattern[str]] = [
 ]
 
 
-def _extract_youtube_id(url: str) -> str | None:
+def _extract_youtube_id(url: str) -> Optional[str]:
     for pat in _YT_ID_PATTERNS:
         m = pat.search(url)
         if m:
