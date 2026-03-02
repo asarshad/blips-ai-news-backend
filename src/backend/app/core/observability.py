@@ -8,12 +8,11 @@ Provides:
 - Unified operational status endpoint
 """
 
-import time
 from collections import defaultdict
-from threading import Lock
-from typing import Dict, Any
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from threading import Lock
+from typing import Any, Dict
 
 from app.core.logging import get_logger
 

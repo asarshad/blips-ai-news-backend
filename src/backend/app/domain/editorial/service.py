@@ -6,16 +6,15 @@ and suppression live here.  The service is injected with repositories
 and is therefore unit-testable without a database.
 """
 
-from datetime import datetime
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.clustering.dedupe import compute_dedupe_key
 from app.core.logging import get_logger
-from app.ingestion.canonical import canonical_key_for_article, canonical_key_for_youtube
+from app.ingestion.canonical import canonical_key_for_article
 from app.ingestion.url_normalizer import normalize_url
 from app.models.content import ContentItem, ContentType
 from app.repositories.editorial_repo import EditorialRepository

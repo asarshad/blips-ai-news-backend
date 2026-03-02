@@ -4,9 +4,7 @@ YouTube channel sources configuration.
 Defines all YouTube channels to fetch for video ingestion.
 """
 
-from typing import List, Dict
-from pydantic_settings import BaseSettings
-from pydantic import Field
+from typing import List
 
 
 class YouTubeChannel:

@@ -19,12 +19,12 @@ from typing import Optional
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from redis.exceptions import RedisError
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-from redis.exceptions import RedisError
 
 from app.api import api_router
 from app.core.auth import require_admin_key
@@ -306,7 +306,7 @@ app.state.limiter = limiter
 
 async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
     """Custom rate limit handler with structured error code."""
-    from app.core.error_codes import ErrorCode, ERROR_MESSAGES
+    from app.core.error_codes import ERROR_MESSAGES, ErrorCode
     code = ErrorCode.RATE_LIMITED
     return JSONResponse(
         status_code=429,
@@ -348,7 +348,7 @@ async def redis_health_guard(request: Request, call_next):
         _redis_last_check = now
 
     if not _redis_healthy:
-        from app.core.error_codes import ErrorCode, ERROR_MESSAGES
+        from app.core.error_codes import ERROR_MESSAGES, ErrorCode
         code = ErrorCode.SERVICE_UNAVAILABLE
         return JSONResponse(
             status_code=503,
@@ -386,19 +386,19 @@ async def add_process_time_header(request: Request, call_next):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Handle uncaught exceptions globally with structured error codes."""
+    from app.core.error_codes import ERROR_MESSAGES, ErrorCode
     from app.core.exceptions import (
-        NotFoundError,
         ArticleNotFoundError,
-        VideoNotFoundError,
         ContentNotFoundError,
-        QuotaExceededError,
         ExternalServiceError,
-        ValidationError,
-        LLMQuotaExceededError,
-        LLMConfigurationError,
         FeedFetchError,
+        LLMConfigurationError,
+        LLMQuotaExceededError,
+        NotFoundError,
+        QuotaExceededError,
+        ValidationError,
+        VideoNotFoundError,
     )
-    from app.core.error_codes import ErrorCode, ERROR_MESSAGES
 
     def _err(status: int, code: ErrorCode, detail: Optional[str] = None):
         return JSONResponse(

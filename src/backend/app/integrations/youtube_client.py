@@ -5,14 +5,15 @@ Handles fetching videos from YouTube channel RSS feeds with role-based
 channel configuration for balanced content ingestion.
 """
 
-import feedparser
 import os
 import re
-import requests
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Dict, List, Optional
+
+import feedparser
+import requests
 
 from app.core.circuit_breaker import CircuitBreaker, get_youtube_breaker
 from app.core.logging import get_logger
@@ -24,8 +25,6 @@ from app.integrations.youtube_channels import (
     get_enabled_channels,
     get_long_form_channels,
     get_shorts_channels,
-    get_channel_by_name,
-    get_quality_weight_modifier,
 )
 
 logger = get_logger(__name__)

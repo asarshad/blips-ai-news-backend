@@ -1,10 +1,15 @@
 
 # First import non-circular dependencies
-from app.schemas.usage import Usage, UsageCreate, UsageStats
+from app.schemas.article import Article, ArticleList, ArticleWithConversation, Tag, TagCount
 
 # Then import the schemas that may have dependencies on each other
-from app.schemas.conversation import ConversationOut, ConversationCreate, ConversationHistory, Conversation
-from app.schemas.article import Article, Tag, ArticleWithConversation, ArticleList, TagCount
+from app.schemas.conversation import (
+    Conversation,
+    ConversationCreate,
+    ConversationHistory,
+    ConversationOut,
+)
+from app.schemas.usage import Usage, UsageCreate, UsageStats
 
 # Export all schemas
 __all__ = [

@@ -7,9 +7,9 @@ and audit logging. All routes require admin authentication.
 
 from fastapi import APIRouter, Depends
 
-from app.core.auth import require_admin_key
 from app.api.admin.routes import router as editorial_router
 from app.api.admin.ui import router as ui_router
+from app.core.auth import require_admin_key
 
 admin_router = APIRouter(
     prefix="/admin",

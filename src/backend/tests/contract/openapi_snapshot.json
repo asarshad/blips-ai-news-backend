@@ -1823,13 +1823,6 @@
       },
       "ValidationError": {
         "properties": {
-          "ctx": {
-            "title": "Context",
-            "type": "object"
-          },
-          "input": {
-            "title": "Input"
-          },
           "loc": {
             "items": {
               "anyOf": [
@@ -2595,6 +2588,88 @@
         ]
       }
     },
+    "/api/v1/admin/maintenance/cleanup": {
+      "post": {
+        "description": "Manually trigger data retention cleanup.\n\nUses the same retention service as the daily scheduler.\nReturns counts of deleted rows per table.",
+        "operationId": "manual_cleanup_api_v1_admin_maintenance_cleanup_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Manual Cleanup",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/maintenance/status": {
+      "get": {
+        "description": "Return last cleanup run info and current retention config.",
+        "operationId": "cleanup_status_api_v1_admin_maintenance_status_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cleanup Status",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/stats/content": {
       "get": {
         "description": "Get content statistics for monitoring.",
@@ -2638,7 +2713,7 @@
     },
     "/api/v1/admin/trigger-fetch": {
       "post": {
-        "description": "Manually trigger content ingestion (dev/testing only).",
+        "description": "Manually trigger content ingestion + AI summarization.",
         "operationId": "trigger_fetch_api_v1_admin_trigger_fetch_post",
         "parameters": [
           {
@@ -2672,6 +2747,47 @@
           }
         },
         "summary": "Trigger Fetch",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/trigger-summarize": {
+      "post": {
+        "description": "Manually trigger AI summarization for unprocessed content.",
+        "operationId": "trigger_summarize_api_v1_admin_trigger_summarize_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger Summarize",
         "tags": [
           "admin"
         ]

@@ -4,6 +4,7 @@ Centralizes all dependency providers for routes.
 """
 
 from typing import Generator, Optional
+
 import redis
 from sqlalchemy.orm import Session
 

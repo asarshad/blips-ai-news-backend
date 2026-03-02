@@ -16,6 +16,7 @@ Where:
 """
 
 from typing import Optional
+
 from app.config.scoring import get_source_quality
 
 

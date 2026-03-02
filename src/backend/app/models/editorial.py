@@ -13,7 +13,6 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
-    String,
     Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB

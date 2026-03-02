@@ -10,11 +10,7 @@ Covers:
 """
 
 import logging
-import os
 from unittest.mock import MagicMock, patch
-
-import pytest
-
 
 # ── LOG_LEVEL ─────────────────────────────────────────────────────────
 
@@ -100,7 +96,7 @@ class TestSchedulerHardening:
     """Verify all scheduler jobs have misfire_grace_time, max_instances, and coalesce."""
 
     def test_all_jobs_have_safety_params(self):
-        from unittest.mock import patch, MagicMock, call
+        from unittest.mock import MagicMock, patch
 
         mock_scheduler = MagicMock()
 
@@ -214,7 +210,6 @@ class TestMistralTimeout:
             mock_settings.LLM_REQUEST_TIMEOUT = 30
 
             with patch("mistralai.Mistral") as MockMistral:
-                from importlib import reload
                 import app.integrations.llm_client as llm_mod
 
                 # Re-read the timeout constant
@@ -222,7 +217,7 @@ class TestMistralTimeout:
 
                 from app.integrations.llm_client import MistralLLMClient
 
-                client = MistralLLMClient(api_key="test-key")
+                _client = MistralLLMClient(api_key="test-key")
                 if MockMistral.called:
                     call_kwargs = MockMistral.call_args
                     # Should have timeout_ms in kwargs (Mistral SDK uses milliseconds)

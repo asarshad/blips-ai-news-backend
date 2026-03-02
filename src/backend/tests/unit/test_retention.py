@@ -9,7 +9,7 @@ Tests:
 
 from datetime import datetime, timedelta
 from typing import Optional
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -57,7 +57,7 @@ class FakeSession:
 
 # Force submodule registration before any test runs — prevents
 # AttributeError when app.services is already cached by another test module.
-import app.services.retention_service as _retention_mod
+import app.services.retention_service as _retention_mod  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -204,7 +204,7 @@ class TestContentItemProtection:
 
     def test_sql_excludes_editorial_and_manual(self):
         """The DELETE statement must include protection clauses."""
-        from app.services.retention_service import _cleanup_content_items, CleanupResult
+        from app.services.retention_service import CleanupResult, _cleanup_content_items
 
         captured_sql = []
 
@@ -234,7 +234,7 @@ class TestContentItemProtection:
 
     def test_cutoff_uses_retain_content_days(self, _mock_settings):
         """Cutoff should be now - RETAIN_CONTENT_DAYS."""
-        from app.services.retention_service import _cleanup_content_items, CleanupResult
+        from app.services.retention_service import CleanupResult, _cleanup_content_items
 
         _mock_settings.RETAIN_CONTENT_DAYS = 60
 
@@ -264,7 +264,7 @@ class TestGenericTableCleanup:
     """Tests for _cleanup_table helper."""
 
     def test_date_column_uses_date_cutoff(self, _mock_settings):
-        from app.services.retention_service import _cleanup_table, CleanupResult
+        from app.services.retention_service import CleanupResult, _cleanup_table
 
         captured_params = []
 
@@ -296,7 +296,7 @@ class TestGenericTableCleanup:
         assert not isinstance(cutoff, datetime)
 
     def test_datetime_column_uses_datetime_cutoff(self, _mock_settings):
-        from app.services.retention_service import _cleanup_table, CleanupResult
+        from app.services.retention_service import CleanupResult, _cleanup_table
 
         captured_params = []
 
@@ -324,7 +324,7 @@ class TestGenericTableCleanup:
         assert isinstance(cutoff, datetime)
 
     def test_rollback_on_error(self, _mock_settings):
-        from app.services.retention_service import _cleanup_table, CleanupResult
+        from app.services.retention_service import CleanupResult, _cleanup_table
 
         class ErrorSession:
             rolled_back = False

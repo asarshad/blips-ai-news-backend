@@ -6,12 +6,13 @@ not a conversation container. Each row is a message with content_item_id linking
 all messages in a conversation thread.
 """
 
-from typing import List, Optional
-from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from typing import List
 
-from app.repositories.base import BaseRepository
+from sqlalchemy import desc
+from sqlalchemy.orm import Session
+
 from app.models.conversation import Conversation
+from app.repositories.base import BaseRepository
 
 
 class ConversationRepository(BaseRepository[Conversation]):

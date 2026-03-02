@@ -7,10 +7,9 @@ these schemas exist purely so that the API contract is stable before
 any provider is integrated.
 """
 
-from typing import Dict, List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
-
 
 # ---------------------------------------------------------------------------
 # Ad tracking / metadata sub-models

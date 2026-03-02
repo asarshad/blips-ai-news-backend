@@ -13,7 +13,7 @@ Architecture:
     - Decay profiles control how quickly old articles lose ranking
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional
 

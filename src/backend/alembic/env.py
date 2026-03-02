@@ -1,21 +1,27 @@
 
-from logging.config import fileConfig
-
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
-
-from alembic import context
+import os
 
 # Import models for Alembic to detect
 import sys
-import os
+from logging.config import fileConfig
+
+from alembic import context
+from sqlalchemy import engine_from_config, pool
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from app.models import Conversation, Usage
-from app.models import ContentItem, UserProfile, UserPreference, InteractionEvent, IngestionProgress
-from app.models import EditorialAction
-from app.db.base import Base
 from app.core.config import settings
+from app.db.base import Base
+from app.models import (
+    ContentItem,
+    Conversation,
+    EditorialAction,
+    IngestionProgress,
+    InteractionEvent,
+    Usage,
+    UserPreference,
+    UserProfile,
+)
 
 # This is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

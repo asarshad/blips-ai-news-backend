@@ -13,10 +13,9 @@ MIGRATION POLICY: ADDITIVE ONLY
 - Never drop columns with data
 - Deprecated tables can be cleaned up manually after verification
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
-
 
 # revision identifiers, used by Alembic.
 revision = 'curation_system_002'

@@ -8,11 +8,11 @@ This is a thin service that coordinates the clustering modules.
 import uuid
 from typing import Dict, List, Optional
 
-from app.core.logging import get_logger
-from app.repositories.content_repo import ContentItemRepository
-from app.models.content import ContentItem, ContentType
-from app.config.clustering import clustering_config
 from app.clustering.similarity import compute_similarity
+from app.config.clustering import clustering_config
+from app.core.logging import get_logger
+from app.models.content import ContentItem, ContentType
+from app.repositories.content_repo import ContentItemRepository
 
 logger = get_logger(__name__)
 

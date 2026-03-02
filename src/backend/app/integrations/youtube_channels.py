@@ -15,9 +15,9 @@ This structure enables:
 - Quality-first ingestion
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 
 
 class ChannelRole(str, Enum):

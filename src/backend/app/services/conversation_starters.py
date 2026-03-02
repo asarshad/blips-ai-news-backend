@@ -9,7 +9,7 @@ import json
 from typing import Dict, List, Optional
 
 from app.core.logging import get_logger
-from app.integrations.llm_client import LLMClient, ChatMessage
+from app.integrations.llm_client import ChatMessage, LLMClient
 from app.models.content import ContentItem, ContentType
 
 logger = get_logger(__name__)
@@ -119,7 +119,7 @@ def parse_starters_response(response_text: str) -> Dict[str, List[str]]:
         
     except json.JSONDecodeError as e:
         logger.warning(f"Failed to parse starters JSON: {e}")
-        raise StarterGenerationError(f"Invalid JSON response: {e}")
+        raise StarterGenerationError(f"Invalid JSON response: {e}") from e
 
 
 class ConversationStartersService:

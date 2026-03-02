@@ -8,9 +8,8 @@ MIGRATION POLICY: ADDITIVE ONLY
 - Adds retry/backoff and attempted counters to ingestion_progress
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "3c2d5e7a8b9c"

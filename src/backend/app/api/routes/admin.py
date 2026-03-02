@@ -239,7 +239,7 @@ def manual_cleanup():
         return {"status": "ok", "result": result}
     except Exception as e:
         logger.error(f"Manual cleanup failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/maintenance/status")

@@ -7,8 +7,13 @@ select = [
   "E", "F", "I", "B"
 ]
 ignore = [
-  "E501"  # line length handled pragmatically
+  "E501",  # line length handled pragmatically
+  "B008",  # function calls in defaults — standard FastAPI pattern (Depends, Query, etc.)
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/**" = ["E402", "F401"]  # when ruff runs from src/backend/
+"**/alembic/**" = ["E402", "F401"]  # when ruff runs from repo root (pre-commit)
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

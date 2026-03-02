@@ -6,13 +6,13 @@ for data access. They abstract away SQLAlchemy specifics from services.
 """
 
 from app.repositories.base import BaseRepository
+from app.repositories.content_repo import ContentItemRepository
 from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.usage_repo import UsageRepository
-from app.repositories.content_repo import ContentItemRepository
 from app.repositories.user_repo import (
-    UserProfileRepository,
+    InteractionEventRepository,
     UserPreferenceRepository,
-    InteractionEventRepository
+    UserProfileRepository,
 )
 
 __all__ = [

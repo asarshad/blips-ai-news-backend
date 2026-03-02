@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 from app.api.admin.schemas import (
     BoostRequest,
     BoostResponse,
-    ContentFilter,
     ContentItemDetail,
     ContentItemSummary,
     EditorialActionRecord,
@@ -127,7 +126,7 @@ def list_content(
         try:
             parsed_day = date_type.fromisoformat(day)
         except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid day format. Use YYYY-MM-DD")
+            raise HTTPException(status_code=400, detail="Invalid day format. Use YYYY-MM-DD") from None
 
     repo = EditorialRepository(db)
     items, total = repo.list_content(

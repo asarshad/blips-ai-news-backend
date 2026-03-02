@@ -15,17 +15,16 @@ This file remains for backward compatibility. Import from app.ranking instead.
 """
 
 # Re-export from new location for backward compatibility
-from app.ranking import ScoringService
-from app.ranking.quality import compute_source_weight as get_source_quality_weight
-
 # Re-export config for tests that import directly
 from app.config.scoring import (
-    scoring_weights,
-    SOURCE_QUALITY_WEIGHTS,
     ENGAGEMENT_WEIGHTS,
-    recency_config,
+    SOURCE_QUALITY_WEIGHTS,
     diversity_config,
+    recency_config,
+    scoring_weights,
 )
+from app.ranking import ScoringService
+from app.ranking.quality import compute_source_weight as get_source_quality_weight
 
 # Create dict format for backward compatibility
 SCORE_WEIGHTS = {

@@ -1,6 +1,9 @@
 
 from fastapi import APIRouter
 
+from app.api.admin import admin_router as editorial_admin_router
+from app.api.admin import admin_ui_router
+from app.api.routes import admin as admin_routes
 from app.api.routes import (
     ai_chat,
     articles,
@@ -16,9 +19,6 @@ from app.api.routes import (
     usage,
     videos,
 )
-from app.api.routes import admin as admin_routes
-from app.api.admin import admin_router as editorial_admin_router
-from app.api.admin import admin_ui_router
 from app.core.config import settings
 
 api_router = APIRouter()

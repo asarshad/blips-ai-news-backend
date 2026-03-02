@@ -2,12 +2,11 @@ import os
 from pathlib import Path
 
 import pytest
+from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from testcontainers.core.docker_client import DockerClient
 from testcontainers.postgres import PostgresContainer
 from testcontainers.redis import RedisContainer
-
-from alembic import command as alembic_command
 
 # Repository layout: <repo>/src/backend/tests/integration/conftest.py
 # We want <repo>/src/backend as the backend root (contains alembic.ini).

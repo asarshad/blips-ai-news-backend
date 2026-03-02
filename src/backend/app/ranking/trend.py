@@ -17,7 +17,7 @@ to prevent gaming and ensure quality content surfaces.
 
 from typing import Dict, List, Optional
 
-from app.config.scoring import trend_config, get_engagement_weight
+from app.config.scoring import get_engagement_weight, trend_config
 
 
 def compute_cluster_score(

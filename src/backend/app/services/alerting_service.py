@@ -10,7 +10,6 @@ Features:
 - Context enrichment: includes service name, timestamp
 """
 
-import json
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, Optional
@@ -311,7 +310,7 @@ def alert_llm_quota_exceeded(
     Returns:
         True if alert sent
     """
-    message = f"LLM daily quota exceeded - AI features degraded"
+    message = "LLM daily quota exceeded - AI features degraded"
     
     context = {
         "provider": provider,

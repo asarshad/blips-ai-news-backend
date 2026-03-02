@@ -7,7 +7,6 @@ These endpoints provide detailed insights into system health and performance.
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_admin_key
@@ -108,7 +107,7 @@ def get_source_health_metrics(db: Session = Depends(get_db)):
                     })
         
         # Calculate success rates for each source
-        for key, data in sources.items():
+        for _key, data in sources.items():
             attempted = data["total_attempted_today"]
             if attempted > 0:
                 data["success_rate"] = round(data["total_ingested_today"] / attempted * 100, 1)

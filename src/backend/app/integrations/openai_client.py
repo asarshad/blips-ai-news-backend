@@ -5,9 +5,10 @@ Provides a clean interface for interacting with OpenAI's API,
 abstracting away API-specific details from business logic.
 """
 
-import openai
-from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
+from typing import Dict, List, Optional
+
+import openai
 
 from app.core.config import settings
 from app.core.logging import get_logger

@@ -11,6 +11,14 @@ dependency chain (FastAPI, etc.), keeping it testable in isolation.
 import logging
 from typing import Optional
 
+# Seed langdetect for deterministic results (uses random sampling internally).
+# Without this, identical text can return different languages across calls.
+try:
+    from langdetect import DetectorFactory
+    DetectorFactory.seed = 0
+except ImportError:
+    pass
+
 logger = logging.getLogger(__name__)
 
 # Minimum text length for reliable detection.

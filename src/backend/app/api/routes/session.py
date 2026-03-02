@@ -383,4 +383,4 @@ def delete_my_data(
     except Exception as e:
         db.rollback()
         logger.error(f"[delete_my_data] Error for device {device_id[:8]}...: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete data. Please try again.")
+        raise HTTPException(status_code=500, detail="Failed to delete data. Please try again.") from e

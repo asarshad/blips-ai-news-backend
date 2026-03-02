@@ -5,16 +5,17 @@ Provides visibility into content inventory across freshness tiers.
 These endpoints are fast and do not trigger ingestion.
 """
 
+from typing import Any, Dict
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from typing import Any, Dict
 
 from app.core.dependencies import get_db
 from app.core.logging import get_logger
 from app.services.inventory_service import (
     Surface,
-    get_cached_inventory_health,
     compute_surface_health,
+    get_cached_inventory_health,
 )
 
 logger = get_logger(__name__)
@@ -60,7 +61,7 @@ def get_surface_health(
         raise HTTPException(
             status_code=400,
             detail=f"Invalid surface '{surface}'. Must be one of: articles, videos, reels"
-        )
+        ) from None
     
     health = compute_surface_health(db, surf)
     return health.to_dict()

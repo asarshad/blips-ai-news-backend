@@ -38,7 +38,7 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/src/backend
         run: |
-          ruff check app/ingestion/url_normalizer.py app/services/quota_manager.py tests/unit tests/contract tests/integration
+          ruff check app/ tests/
 
       - name: Unit + contract tests
         env:

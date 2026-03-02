@@ -5,10 +5,9 @@ Revises: c1e8a0d4f2ab
 Create Date: 2026-02-06
 
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
-
 
 # revision identifiers, used by Alembic.
 revision = 'add_conversation_starters'

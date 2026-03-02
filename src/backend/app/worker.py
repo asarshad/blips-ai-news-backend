@@ -9,21 +9,21 @@ Usage:
 """
 
 import os
+import signal
 import sys
 import threading
 import time
-import signal
 import uuid
 
 # Add the backend directory to the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.core.config import settings
-from app.core.logging import setup_logging, get_logger
+from redis.exceptions import RedisError
+
 from app.core.dependencies import get_redis
+from app.core.logging import get_logger, setup_logging
 from app.scheduler import init_scheduler
 from app.scheduler.tasks import fetch_and_process_news
-from redis.exceptions import RedisError
 
 # Configure logging
 setup_logging()

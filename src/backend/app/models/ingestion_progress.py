@@ -11,7 +11,7 @@ Design goals:
 
 from datetime import datetime
 
-from sqlalchemy import Column, Date, DateTime, Integer, String, Text, UniqueConstraint, Index
+from sqlalchemy import Column, Date, DateTime, Index, Integer, String, Text, UniqueConstraint
 
 from app.db.base import Base
 

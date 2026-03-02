@@ -1,9 +1,10 @@
 """Conversation Starters API routes."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import List
+
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from typing import List, Optional
 
 from app.core.dependencies import get_db
 from app.core.exceptions import not_found_exception

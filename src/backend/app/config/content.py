@@ -6,7 +6,6 @@ Defines topics, entities, and extraction patterns for content processing.
 
 from typing import Set
 
-
 # Common tech topics for extraction
 # Used to tag content for filtering and personalization
 TECH_TOPICS: Set[str] = {
@@ -101,7 +100,7 @@ TECH_ENTITIES: Set[str] = {
     # AI Products
     "chatgpt", "gpt-4", "gpt-4o", "gpt-5", "claude", "gemini",
     "llama", "mistral", "dall-e", "midjourney", "stable diffusion", "sora",
-    "copilot", "cursor", "v0",
+    "cursor", "v0",
     
     # Notable People
     "elon musk", "tim cook", "satya nadella", "mark zuckerberg", "sundar pichai",
