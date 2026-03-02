@@ -12,11 +12,12 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"alembic/**" = ["E402", "F401"]  # when ruff runs from src/backend/
-"**/alembic/**" = ["E402", "F401"]  # when ruff runs from repo root (pre-commit)
+"alembic/**" = ["E402", "F401", "I001"]  # when ruff runs from src/backend/
+"**/alembic/**" = ["E402", "F401", "I001"]  # when ruff runs from repo root (pre-commit)
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
+known-third-party = ["alembic"]
 
 [tool.pytest.ini_options]
 # Keep this minimal; pytest.ini is the primary config.
