@@ -18,7 +18,7 @@ repos:
     hooks:
       - id: pytest-unit-contract
         name: pytest (unit + contract)
-        entry: bash -c 'cd src/backend && PYTHONPATH=. python -m pytest tests/unit tests/contract -x -q'
+        entry: bash -c 'cd src/backend && PYTHONPATH=. venv/bin/python -m pytest tests/unit tests/contract -x -q'
         language: system
         pass_filenames: false
         files: '^src/backend/'
