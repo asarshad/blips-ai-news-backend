@@ -172,6 +172,8 @@ projects:
                 value: "false"
               - key: INGESTION_ENABLED
                 value: "false"          # Prod: worker owns ingestion
+              - key: FEATURE_CHAT_ENABLED
+                value: "true"
               - key: DB_POOL_SIZE
                 value: "3"
               - key: DB_MAX_OVERFLOW
@@ -225,6 +227,8 @@ projects:
               - key: INGESTION_ENABLED
                 value: "true"
               - key: FEATURE_INGESTION_ENABLED
+                value: "true"
+              - key: FEATURE_CHAT_ENABLED
                 value: "true"
               - key: INGESTION_MAX_WORKERS
                 value: "4"
