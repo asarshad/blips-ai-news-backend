@@ -10,6 +10,7 @@ Usage:
 
 import os
 import sys
+import threading
 import time
 import signal
 import uuid
@@ -31,6 +32,10 @@ logger = get_logger(__name__)
 # Global scheduler reference for graceful shutdown
 _scheduler = None
 
+# Shared stop event — also wired into the ingestion checkpointing module
+# so ThreadPoolExecutors stop accepting new work before we tear down.
+_stop_event = threading.Event()
+
 # Unique token used to verify lock ownership
 _worker_lock_token: str = f"{os.getpid()}:{uuid.uuid4()}"
 
@@ -39,11 +44,20 @@ WORKER_LOCK_TTL = 300  # 5 minutes
 
 
 def signal_handler(signum, frame):
-    """Handle shutdown signals gracefully."""
-    logger.info(f"Received signal {signum}, shutting down...")
-    if _scheduler:
-        _scheduler.shutdown(wait=False)
-    sys.exit(0)
+    """Handle shutdown signals gracefully.
+
+    Sets the shared stop event so in-flight ingestion / ThreadPoolExecutors
+    finish their current batch and stop accepting new futures *before* we
+    tear down the APScheduler.
+    """
+    logger.info(f"Received signal {signum}, requesting graceful shutdown…")
+    _stop_event.set()
+    # Also propagate to the ingestion checkpointing module.
+    try:
+        from app.ingestion.checkpointing import STOP_EVENT
+        STOP_EVENT.set()
+    except Exception:
+        pass
 
 
 def acquire_worker_lock() -> bool:
@@ -179,15 +193,16 @@ def run_worker():
     # Keep the worker running and refresh lock
     logger.info("Worker running. Press Ctrl+C to stop.")
     try:
-        while True:
+        while not _stop_event.is_set():
             if not refresh_worker_lock():
                 logger.error("Lost worker lock — shutting down to avoid dual execution")
                 break
-            time.sleep(60)  # Refresh lock every minute
+            _stop_event.wait(timeout=60)  # Wakes immediately on signal
     except (KeyboardInterrupt, SystemExit):
         pass
     finally:
-        logger.info("Worker shutting down...")
+        logger.info("Worker shutting down…")
+        _stop_event.set()  # Ensure everything knows we're stopping
         if _scheduler:
             _scheduler.shutdown(wait=False)
         logger.info("Worker shutdown complete")
@@ -196,8 +211,8 @@ def run_worker():
 def _idle_forever():
     """Block the process indefinitely so Render doesn't restart in a tight loop."""
     try:
-        while True:
-            time.sleep(3600)
+        while not _stop_event.is_set():
+            _stop_event.wait(timeout=3600)
     except (KeyboardInterrupt, SystemExit):
         pass
 

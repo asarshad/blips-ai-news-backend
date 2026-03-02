@@ -4,11 +4,6 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "0 6 * * *" # daily 06:00 UTC
-  push:
-    branches: ["main"]
-    paths:
-      - "src/backend/**"
-      - ".github/workflows/backend_integration.yml"
 
 jobs:
   integration:
