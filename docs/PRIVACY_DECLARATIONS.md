@@ -2,8 +2,8 @@
 
 This document provides the information needed to complete privacy declarations for Apple App Store Connect and Google Play Console.
 
-**Last updated:** February 2026  
-**App version:** 1.0.1+2
+**Last updated:** March 2026  
+**App version:** 1.0.3+6
 
 ---
 
@@ -14,6 +14,7 @@ This document provides the information needed to complete privacy declarations f
 | Device ID (hashed) | Yes | Functionality, Personalization | No (anonymized) | No |
 | Usage Data (interactions) | Yes | Personalization | No | No |
 | Diagnostic Data (crashes) | Yes | App Stability | No | No |
+| Performance Data | Yes | App Functionality | No | No |
 | AI Chat Messages | Processed, not stored | Functionality | No | No |
 
 ---
@@ -43,8 +44,8 @@ The following data types are **NOT** collected:
 | **Data Type** | Device ID |
 | **Is data linked to user's identity?** | No |
 | **Is data used for tracking?** | No |
-| **Purpose** | App Functionality |
-| **Details** | One-way SHA-256 hash of IP + User-Agent. Cannot be reversed to identify user. Used for usage quotas and abuse prevention. |
+| **Purpose** | App Functionality, Product Personalization |
+| **Details** | Randomly generated UUID (v4) stored on-device in SharedPreferences. Not linked to IP address, name, or any personal information. Generated afresh on first launch or after data deletion. Used for usage quotas, feed personalization, and abuse prevention. |
 
 #### 2. Usage Data
 
@@ -66,13 +67,23 @@ The following data types are **NOT** collected:
 | **Purpose** | App Functionality |
 | **Details** | Crash reports sent to Sentry in release builds only. Contains stack traces and device info, no PII. |
 
+#### 4. Performance Data
+
+| Field | Value |
+|-------|-------|
+| **Data Type** | Other Diagnostic Data — Performance Data |
+| **Is data linked to user's identity?** | No |
+| **Is data used for tracking?** | No |
+| **Purpose** | App Functionality |
+| **Details** | Performance traces (20% sample rate via `tracesSampleRate = 0.2`) sent to Sentry in release builds only. Includes app startup time, screen load durations, and network request timings. No PII or device identifier sent. |
+
 ### Third-Party Data Sharing
 
 | Third Party | Data Shared | Purpose |
 |-------------|-------------|---------|
 | Mistral AI | Chat messages, article summaries | AI chat responses |
 | OpenAI (fallback) | Chat messages, article summaries | AI chat responses (fallback provider) |
-| Sentry | Crash data, device info | Crash reporting |
+| Sentry | Crash data, device info, performance traces (20% sample) | Crash reporting, performance monitoring |
 
 **Note:** Chat messages are sent to AI providers transiently for response generation. They are NOT stored on our servers.
 
@@ -91,7 +102,7 @@ The following data types are **NOT** collected:
 | **Is data processed ephemerally?** | No |
 | **Is collection required?** | Yes (cannot be turned off) |
 | **Purpose** | App functionality, Fraud prevention/security |
-| **Details** | Hashed device identifier for quotas and abuse prevention |
+| **Details** | Randomly generated UUID stored on-device. Not linked to IP address or personal information. Used for quotas and abuse prevention. |
 
 #### App Activity — App Interactions
 
@@ -109,6 +120,7 @@ The following data types are **NOT** collected:
 | Third Party | Data Type | Purpose |
 |-------------|-----------|---------|
 | Mistral AI / OpenAI | User-generated content (chat messages) | AI chat functionality |
+| Sentry | Crash data, device type, OS version, performance traces | Crash reporting, performance monitoring |
 
 **Note:** Chat messages are shared transiently with AI providers for response generation. Messages are not stored by Blips servers.
 
@@ -134,13 +146,13 @@ The following data types are **NOT** collected:
 
 ## Privacy Policy Reference
 
-Privacy policy URL: `https://tryblips.com/privacy.html`
+Privacy policy URL: `https://husniconsulting.ca/privacy.html`
 
 The privacy policy covers:
 - What data is collected and why
 - How data is used for personalization
 - Third-party services (Mistral AI, OpenAI, Sentry)
-- Data retention periods (90 days interactions, 24h chat quotas)
+- Data retention periods (30 days interaction events, 90 days AI chat usage records, 30 days conversation history, 24h chat quotas)
 - How to request data deletion
 - Contact information
 
@@ -151,3 +163,4 @@ The privacy policy covers:
 | Date | Change |
 |------|--------|
 | Feb 2026 | Initial documentation for App Store submissions |
+| Mar 2026 | Update version to 1.0.3+6; fix device ID description (UUID not IP hash); add Performance Data entry; update privacy URL; correct retention periods |
