@@ -9,10 +9,9 @@ MIGRATION POLICY: ADDITIVE ONLY
 - Creates videos table if it doesn't exist
 - Adds hot_score and published_date columns
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy import inspect
-
 
 # revision identifiers, used by Alembic.
 revision = 'c539d69b3ccb'

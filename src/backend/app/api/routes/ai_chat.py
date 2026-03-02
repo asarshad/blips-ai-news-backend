@@ -94,9 +94,9 @@ def get_ai_response(
             history=history_dicts
         )
     except ArticleNotFoundError:
-        raise not_found_exception("Content item", content_id)
+        raise not_found_exception("Content item", content_id) from None
     except ChatGenerationError as e:
-        raise internal_error_exception(f"Failed to generate response: {e.message}")
+        raise internal_error_exception(f"Failed to generate response: {e.message}") from e
     
     # Note: Conversation persistence removed per requirement to keep chats device-only.
     # Usage tracking is still preserved below.

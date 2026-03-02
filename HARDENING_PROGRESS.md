@@ -34,15 +34,6 @@
 
 **Status**: ✅ Complete (code done, needs runtime verification)
 
-### Task 1.4: Cold Start Prevention (Keepalive)
-- [x] Create `.github/scripts/keep_alive_ping.py` script
-- [x] Add `.github/workflows/keepalive.yml` (every 10 min)
-- [x] Script supports single-ping and multi-ping modes
-- [ ] Add `RENDER_HEALTH_URL` secret to GitHub repo
-- [ ] Verification: First request <5s after 12h inactivity
-
-**Status**: ✅ Complete (code done, needs secret config)
-
 ### Task 1.5-1.7: Critical Path Test Coverage
 - [x] Tiered feed service tests (existing - 361 lines comprehensive tests)
 - [x] Chat quota enforcement tests (created test_chat_quota.py - 10 tests)
@@ -59,15 +50,12 @@
 1. ✅ Webhook alerting service with rate limiting
 2. ✅ Ingestion stall detection (30-min job)
 3. ✅ Per-source health metrics endpoint
-4. ✅ Keepalive GitHub Action workflow
-5. ✅ Critical path unit tests
+4. ✅ Critical path unit tests
 
 **Files Created:**
 - `src/backend/app/services/alerting_service.py`
 - `src/backend/app/scheduler/tasks_health.py`
 - `src/backend/app/api/routes/metrics.py`
-- `.github/scripts/keep_alive_ping.py`
-- `.github/workflows/keepalive.yml`
 - `src/backend/tests/unit/test_chat_quota.py`
 - `src/backend/tests/unit/ingestion/test_ingestion_budget.py`
 
@@ -210,7 +198,6 @@
 - [ ] `/health` failures trigger Slack alert
 - [ ] Ingestion stall >2h triggers alert
 - [ ] Per-source metrics available at `/metrics/sources`
-- [ ] Cold start <5s verified
 - [ ] 60%+ unit test coverage on critical paths
 - [ ] Memory <300MB on low-RAM device
 - [ ] Circuit breaker protects YouTube API

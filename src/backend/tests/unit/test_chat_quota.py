@@ -15,6 +15,10 @@ from app.services.quota_manager import QuotaManager
 
 pytestmark = [pytest.mark.unit]
 
+# Pin quota limits so tests don't depend on env overrides
+_DAILY_LIMIT = 5
+_ARTICLE_LIMIT = 3
+
 
 class FakeUsageRepo:
     """Test double for usage repository."""
@@ -39,46 +43,40 @@ class FakeUsageRepo:
 class TestQuotaEnforcement:
     """Test quota enforcement at different usage levels."""
     
+    def _make_manager(self, daily_usage=0, article_usage=0):
+        """Create a QuotaManager with pinned limits (independent of env vars)."""
+        redis_client = fakeredis.FakeRedis(decode_responses=True)
+        repo = FakeUsageRepo(daily_usage=daily_usage, article_usage=article_usage)
+        manager = QuotaManager(repo, redis_client)
+        manager.max_per_day = _DAILY_LIMIT
+        manager.max_per_article = _ARTICLE_LIMIT
+        return manager
+
     def test_fresh_user_has_full_quota(self):
         """New user with no usage should have full quota."""
-        redis_client = fakeredis.FakeRedis(decode_responses=True)
-        repo = FakeUsageRepo(daily_usage=0, article_usage=0)
-        manager = QuotaManager(repo, redis_client)
-        
+        manager = self._make_manager(daily_usage=0)
         quota = manager.check_quota("new-device-123")
         
         # Should have maximum remaining
-        assert quota["remaining_daily_messages"] > 0
+        assert quota["remaining_daily_messages"] == _DAILY_LIMIT
     
     def test_user_near_limit_gets_warning(self):
         """User approaching limit should still have access but limited."""
-        redis_client = fakeredis.FakeRedis(decode_responses=True)
-        # Set usage just below daily limit (MAX_MESSAGES_PER_DAY defaults to 5)
-        repo = FakeUsageRepo(daily_usage=4, article_usage=0)
-        manager = QuotaManager(repo, redis_client)
-        
+        manager = self._make_manager(daily_usage=4)
         quota = manager.check_quota("active-device-123")
         
         assert 0 < quota["remaining_daily_messages"] <= 2
     
     def test_user_at_limit_denied(self):
         """User who has hit daily limit should be denied."""
-        redis_client = fakeredis.FakeRedis(decode_responses=True)
-        # Set usage at or above limit (assuming limit around 20-50)
-        repo = FakeUsageRepo(daily_usage=100, article_usage=0)
-        manager = QuotaManager(repo, redis_client)
-        
+        manager = self._make_manager(daily_usage=_DAILY_LIMIT)
         quota = manager.check_quota("heavy-user-device")
         
         assert quota["remaining_daily_messages"] == 0
     
     def test_article_quota_enforced(self):
         """Per-article quota should be checked when article_id provided."""
-        redis_client = fakeredis.FakeRedis(decode_responses=True)
-        # High article usage, but daily is fine
-        repo = FakeUsageRepo(daily_usage=5, article_usage=10)
-        manager = QuotaManager(repo, redis_client)
-        
+        manager = self._make_manager(daily_usage=0, article_usage=_ARTICLE_LIMIT)
         quota = manager.check_quota("user-device", article_id=123)
         
         # Article-level quota should impact result

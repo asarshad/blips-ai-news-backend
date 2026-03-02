@@ -15,8 +15,8 @@ Formula:
 The penalty is proportional to how much the topic exceeds the threshold.
 """
 
-from typing import Dict, List, Optional
 from collections import Counter
+from typing import Dict, List, Optional
 
 from app.config.scoring import diversity_config
 

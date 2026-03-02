@@ -12,22 +12,21 @@ Applies daily decay to prevent stale preferences.
 """
 
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timedelta
-from collections import defaultdict
 
-from sqlalchemy.orm import Session
-
-from app.core.logging import get_logger
 from app.core.config import get_settings
-from app.repositories.user_repo import (
-    UserProfileRepository,
-    UserPreferenceRepository,
-    InteractionEventRepository
+from app.core.logging import get_logger
+from app.models.content import (
+    ContentItem,
+    EventType,
+    InteractionEvent,
+    PrefType,
+    UserProfile,
 )
 from app.repositories.content_repo import ContentItemRepository
-from app.models.content import (
-    ContentItem, EventType, PrefType, 
-    UserProfile, UserPreference, InteractionEvent
+from app.repositories.user_repo import (
+    InteractionEventRepository,
+    UserPreferenceRepository,
+    UserProfileRepository,
 )
 
 logger = get_logger(__name__)

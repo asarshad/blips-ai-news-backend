@@ -9,31 +9,28 @@ Tests cover:
 - Edge cases: clustering false positives, playlist diversity, preference decay, dedupe
 """
 
-import pytest
 from datetime import datetime, timedelta
-from unittest.mock import Mock, MagicMock, patch
-from typing import List
+from unittest.mock import Mock
+
+import pytest
 
 from app.models.content import (
-    ContentItem, ContentType,
-    UserProfile, UserPreference, PrefType,
-    InteractionEvent, EventType
-)
-from app.services.scoring_service import (
-    ScoringService, get_source_quality_weight,
-    SCORE_WEIGHTS, RECENCY_HALF_LIFE_HOURS
+    ContentItem,
+    ContentType,
+    EventType,
 )
 from app.services.clustering_service import (
-    ClusteringService, compute_dedupe_key,
-    COMBINED_THRESHOLD
+    COMBINED_THRESHOLD,
+    ClusteringService,
+    compute_dedupe_key,
 )
-from app.services.personalization_service import (
-    PersonalizationService, EVENT_WEIGHTS
+from app.services.personalization_service import EVENT_WEIGHTS, PersonalizationService
+from app.services.playlist_service import PlaylistService
+from app.services.scoring_service import (
+    SCORE_WEIGHTS,
+    ScoringService,
+    get_source_quality_weight,
 )
-from app.services.playlist_service import (
-    PlaylistService, MAX_TOPIC_DOMINANCE
-)
-
 
 # ============================================================================
 # Fixtures
@@ -462,7 +459,7 @@ class TestPersonalizationService:
         
         mock_preference_repo.get_all_for_user = Mock(return_value=[old_pref])
         
-        service = PersonalizationService(
+        _service = PersonalizationService(
             mock_profile_repo,
             mock_preference_repo,
             mock_event_repo,

@@ -16,7 +16,7 @@ import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Optional, TypeVar
+from typing import Optional, TypeVar
 
 from app.core.logging import get_logger
 

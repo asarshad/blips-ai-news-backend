@@ -3,9 +3,10 @@ Base repository class providing common CRUD operations.
 All repositories should inherit from this base class.
 """
 
-from typing import TypeVar, Generic, Type, Optional, List
-from sqlalchemy.orm import Session
+from typing import Generic, List, Optional, Type, TypeVar
+
 from sqlalchemy import desc
+from sqlalchemy.orm import Session
 
 from app.db.base import Base
 

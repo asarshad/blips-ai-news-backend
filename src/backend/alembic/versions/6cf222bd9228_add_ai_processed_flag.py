@@ -9,10 +9,9 @@ MIGRATION POLICY: ADDITIVE ONLY
 - Adds ai_processed flag to content_items if table exists
 - Safe to run on databases with or without curation system
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy import inspect
-
 
 # revision identifiers, used by Alembic.
 revision = '6cf222bd9228'

@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_db
 from app.core.exceptions import not_found_exception
-from app.schemas.conversation import ConversationOut, ConversationHistory
 from app.repositories.content_repo import ContentItemRepository
 from app.repositories.conversation_repo import ConversationRepository
+from app.schemas.conversation import ConversationHistory, ConversationOut
 
 router = APIRouter()
 

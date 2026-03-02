@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import time
 
+from sqlalchemy.orm import Session
+
 from app.core.feature_flags import feature_flags
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.scheduler.config import LLM_RATE_LIMIT_DELAY, MAX_ITEMS_PER_RUN, MAX_LLM_CALLS_PER_RUN
 from app.scheduler.job_stats import log_job_start
-
-from sqlalchemy.orm import Session
 
 logger = get_logger(__name__)
 

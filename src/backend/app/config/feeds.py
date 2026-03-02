@@ -4,9 +4,7 @@ RSS feed sources configuration.
 Defines all RSS feeds to fetch for article ingestion.
 """
 
-from typing import List, Dict
-from pydantic_settings import BaseSettings
-from pydantic import Field
+from typing import List
 
 
 class FeedSource:

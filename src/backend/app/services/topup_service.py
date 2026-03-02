@@ -9,7 +9,6 @@ Provides non-blocking ingestion kick mechanism:
 This service does NOT block API responses - it queues background work.
 """
 
-import asyncio
 import threading
 from datetime import datetime
 from typing import Optional
@@ -20,7 +19,6 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.inventory_service import (
     InventoryHealth,
-    Surface,
     get_cached_inventory_health,
     invalidate_health_cache,
 )
@@ -145,8 +143,8 @@ def _run_topup(db_factory, priority_surfaces: list = None):
         max_runtime = settings.TOPUP_MAX_RUNTIME_SECONDS
         
         # Import here to avoid circular imports
-        from app.ingestion.checkpointing import run_checkpointed_ingestion
         from app.core.dependencies import get_redis
+        from app.ingestion.checkpointing import run_checkpointed_ingestion
         
         # Create a new database session for background work
         db = db_factory()

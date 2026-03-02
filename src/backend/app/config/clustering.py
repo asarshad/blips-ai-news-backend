@@ -4,9 +4,8 @@ Clustering configuration and tunable parameters.
 Controls how content items are grouped into clusters (same story).
 """
 
-from typing import Dict, Set
-from pydantic_settings import BaseSettings
 from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class ClusteringConfig(BaseSettings):

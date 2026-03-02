@@ -10,13 +10,14 @@ NOTE: Scoring, Clustering, and Ingestion have been moved to dedicated modules:
 - app.ingestion - Ingestion pipeline (direct RSS/YouTube fetching)
 """
 
-from app.services.ai_chat import AiChatService
-from app.services.quota_manager import QuotaManager
+from app.clustering import ClusteringService
+from app.ingestion import IngestionPipeline, create_ingestion_pipeline
 
 # Re-export from new locations for backward compatibility
 from app.ranking import ScoringService
-from app.clustering import ClusteringService
-from app.ingestion import IngestionPipeline, create_ingestion_pipeline
+from app.services.ai_chat import AiChatService
+from app.services.quota_manager import QuotaManager
+from app.services.tiered_feed_service import get_tiered_feed, invalidate_tiered_feed_cache
 
 __all__ = [
     "AiChatService",
@@ -26,4 +27,6 @@ __all__ = [
     "ClusteringService",
     "IngestionPipeline",
     "create_ingestion_pipeline",
+    "get_tiered_feed",
+    "invalidate_tiered_feed_cache",
 ]

@@ -7,6 +7,7 @@ Tests the tier selection logic, caching, and diversity mixing.
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
+import app.services.tiered_feed_service  # register module so @patch can resolve it  # noqa: F401
 from app.services.inventory_service import FreshnessTier, Surface
 
 

@@ -14,7 +14,7 @@ import secrets
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Form, Header, Query, Request
+from fastapi import APIRouter, Depends, Form, Header, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 

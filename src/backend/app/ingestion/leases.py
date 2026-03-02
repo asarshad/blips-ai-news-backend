@@ -9,10 +9,7 @@ If Redis isn't available, callers may fall back to Postgres advisory locks.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from redis.exceptions import RedisError
-
 
 LEASE_PREFIX = "blips:ingestion:lease:"
 

@@ -10,9 +10,8 @@ MIGRATION POLICY: ADDITIVE ONLY
 - All subsequent migrations must be additive (no DROP TABLE/COLUMN in upgrade)
 - Downgrade functions are for development only, never run in production
 """
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = 'e021dbf2e9df'

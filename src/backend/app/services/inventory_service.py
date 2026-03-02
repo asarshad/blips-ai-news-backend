@@ -15,10 +15,9 @@ This service powers:
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Any
-import json
+from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, and_, or_
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings

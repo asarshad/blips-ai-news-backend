@@ -9,9 +9,8 @@ MIGRATION POLICY: ADDITIVE ONLY
 - This migration adds hot_score column and creates a new unique index
 - The constraint drop/recreate is safe (converts constraint to index)
 """
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = '14a34926fe1e'

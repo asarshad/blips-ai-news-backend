@@ -11,16 +11,15 @@ This file remains for backward compatibility. Import from app.ingestion instead.
 """
 
 # Re-export from new location for backward compatibility
+# Re-export TECH_TOPICS and TECH_ENTITIES for backward compatibility
+from app.config.content import TECH_ENTITIES, TECH_TOPICS
 from app.ingestion import (
     IngestionPipeline,
     create_ingestion_pipeline,
-    extract_topics,
     extract_entities,
     extract_source,
+    extract_topics,
 )
-
-# Re-export TECH_TOPICS and TECH_ENTITIES for backward compatibility
-from app.config.content import TECH_TOPICS, TECH_ENTITIES
 
 __all__ = [
     "IngestionPipeline",

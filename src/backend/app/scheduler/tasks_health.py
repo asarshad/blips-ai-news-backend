@@ -5,7 +5,7 @@ Checks for stalled ingestion and triggers alerts when no content
 has been ingested for an extended period.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
@@ -28,6 +28,7 @@ def check_ingestion_health() -> None:
     db = SessionLocal()
     try:
         from sqlalchemy import func
+
         from app.models.content import ContentItem
         
         # Get timestamp of most recent content
@@ -86,9 +87,11 @@ def get_ingestion_metrics() -> dict:
     """
     db = SessionLocal()
     try:
-        from sqlalchemy import func
-        from app.models.content import ContentItem, ContentType
         from datetime import timedelta
+
+        from sqlalchemy import func
+
+        from app.models.content import ContentItem, ContentType
         
         now = datetime.now(timezone.utc)
         two_hours_ago = now - timedelta(hours=2)

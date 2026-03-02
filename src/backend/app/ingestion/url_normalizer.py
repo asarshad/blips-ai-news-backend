@@ -9,7 +9,7 @@ Goals:
 from __future__ import annotations
 
 import re
-from typing import Iterable
+from typing import Iterable, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 _TRACKING_PARAMS = {

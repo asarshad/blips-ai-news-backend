@@ -17,10 +17,8 @@ Constraints enforced:
 - Optional rolling window topic cap
 """
 
-from typing import List, Optional, Dict, Set, Callable, Any, Protocol
 from dataclasses import dataclass
-from collections import deque
-import hashlib
+from typing import Any, Dict, List, Optional, Protocol, Set
 
 from app.config.diversity import DiversityConstraints, get_diversity_settings
 from app.core.logging import get_logger

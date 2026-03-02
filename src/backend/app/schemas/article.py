@@ -1,7 +1,9 @@
 
+from datetime import date, datetime
 from typing import List, Optional
+
 from pydantic import BaseModel
-from datetime import datetime, date
+
 
 class Tag(BaseModel):
     name: str
@@ -46,7 +48,7 @@ class ArticleList(BaseModel):
     articles: List[Article]
 
 # Import at the end to resolve circular import
-from app.schemas.conversation import ConversationOut
+from app.schemas.conversation import ConversationOut  # noqa: E402
 
 # Update forward references
 ArticleWithConversation.model_rebuild()

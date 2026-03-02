@@ -6,11 +6,11 @@ Configures source and topic diversity constraints for different surfaces
 of content sources rather than being dominated by a single publisher.
 """
 
-from typing import Dict, Optional
-from pydantic_settings import BaseSettings
-from pydantic import Field
 from dataclasses import dataclass, field
-import os
+from typing import Optional
+
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 @dataclass

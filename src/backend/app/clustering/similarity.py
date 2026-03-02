@@ -7,8 +7,8 @@ Computes similarity between content items using:
 - Topic overlap (Jaccard index)
 """
 
-from typing import List, Dict
 from difflib import SequenceMatcher
+from typing import Dict, List
 
 from app.config.clustering import clustering_config
 

@@ -9,8 +9,7 @@ import re
 from typing import List
 from urllib.parse import urlparse
 
-from app.config.content import TECH_TOPICS, TECH_ENTITIES
-
+from app.config.content import TECH_ENTITIES, TECH_TOPICS
 
 # Domain to source name mapping
 DOMAIN_TO_SOURCE = {

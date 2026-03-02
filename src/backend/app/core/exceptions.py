@@ -4,6 +4,7 @@ These provide semantic error handling across the codebase.
 """
 
 from typing import Optional, Union
+
 from fastapi import HTTPException, status
 
 
@@ -67,7 +68,7 @@ class LLMQuotaExceededError(ExternalServiceError):
     
     def __init__(self, ceiling: float, current_spend: float):
         super().__init__(
-            f"Daily LLM cost ceiling exceeded",
+            "Daily LLM cost ceiling exceeded",
             f"Ceiling: ${ceiling:.2f}, Current: ${current_spend:.2f}"
         )
         self.ceiling = ceiling

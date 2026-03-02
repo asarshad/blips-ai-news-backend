@@ -4,16 +4,14 @@ Repository for user profiles and preferences.
 Handles user profile management and preference learning.
 """
 
-from typing import List, Optional, Dict
 from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
-from sqlalchemy import desc, func, and_
+from typing import Dict, List, Optional
 
+from sqlalchemy import desc, func
+from sqlalchemy.orm import Session
+
+from app.models.content import EventType, InteractionEvent, PrefType, UserPreference, UserProfile
 from app.repositories.base import BaseRepository
-from app.models.content import (
-    UserProfile, UserPreference, InteractionEvent,
-    PrefType, EventType
-)
 
 
 class UserProfileRepository(BaseRepository[UserProfile]):

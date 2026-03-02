@@ -448,20 +448,6 @@ The `/metrics` endpoint exposes pool statistics:
 
 ---
 
-### INC-5: Cold Start / Slow Response Times
-
-**Severity:** P3 — Medium  
-**Detection:** First request takes >5s, user complaints  
-
-**Resolution:**
-1. Verify keepalive workflow is running: Check GitHub Actions → keepalive.yml
-2. Check if `RENDER_HEALTH_URL` secret is configured
-3. If service was sleeping → first request wakes it (expected on free tier)
-4. If on paid tier and still slow → check connection pool, pending migrations
-5. Monitor: response times should be <500ms after warmup
-
----
-
 ## Editorial Control
 
 Admin portal for content curation. Full docs: [`src/backend/docs/EDITORIAL_CONTROL.md`](../src/backend/docs/EDITORIAL_CONTROL.md).

@@ -6,9 +6,8 @@ Revises: 563b452aad27, curation_system_002
 Create Date: 2025-12-25 08:43:30.168965
 
 """
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = '72112eec4950'

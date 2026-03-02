@@ -4,8 +4,8 @@ Revision ID: editorial_control_001
 Revises: curation_system_002_drop_clusters
 Create Date: 2026-02-21
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers

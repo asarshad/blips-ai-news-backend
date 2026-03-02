@@ -16,7 +16,7 @@ import time
 from collections import Counter, deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Deque, Dict, Iterable, List, Optional, Tuple
+from typing import Deque, Dict, Iterable, List, Optional
 
 from app.core.logging import get_logger
 from app.ingestion.leases import lease_key

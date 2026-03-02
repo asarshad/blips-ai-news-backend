@@ -9,21 +9,16 @@ Verifies:
 - Edge cases (small inventory, single source)
 """
 
-import pytest
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
+import pytest
+
+from app.config.diversity import DiversityConstraints, reset_diversity_settings
 from app.services.diversity_mixer import (
     DiversityMixer,
-    MixerResult,
     create_mixer_for_surface,
-    mix_feed
+    mix_feed,
 )
-from app.config.diversity import (
-    DiversityConstraints,
-    DiversitySettings,
-    reset_diversity_settings
-)
-
 
 # ============================================================================
 # Test Fixtures

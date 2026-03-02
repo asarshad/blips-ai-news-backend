@@ -15,10 +15,9 @@ This migration adds the unified content curation system:
 WARNING: Downgrade function is for development only.
 Never run downgrade in production - it will destroy user data.
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
-
 
 # revision identifiers, used by Alembic.
 revision = 'curation_system_001'

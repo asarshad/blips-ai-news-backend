@@ -11,15 +11,14 @@ Enable via: LLM_PROVIDER=fake
 
 import json
 import re
-from typing import List, Dict, Optional
+from typing import Dict, List
 
+from app.core.logging import get_logger
 from app.integrations.llm_client import (
     BaseLLMClient,
     ChatMessage,
     ChatResponse,
-    SummaryResult,
 )
-from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -153,7 +152,7 @@ TAGS: technology, innovation, ai, software, testing"""
     
     def _generate_chat_response(self, user_message: str) -> str:
         """Generate chat discussion response."""
-        return f"That's an interesting question about this article. Based on the content, here are some key points to consider:\n\n1. The main topic relates to current technology trends.\n2. There are potential implications for the broader industry.\n3. Experts have varying opinions on the long-term impact.\n\nWould you like me to elaborate on any of these points?"
+        return "That's an interesting question about this article. Based on the content, here are some key points to consider:\n\n1. The main topic relates to current technology trends.\n2. There are potential implications for the broader industry.\n3. Experts have varying opinions on the long-term impact.\n\nWould you like me to elaborate on any of these points?"
 
 
 def generate_starters_for_content(

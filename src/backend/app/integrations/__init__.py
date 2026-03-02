@@ -5,8 +5,14 @@ This module contains clients and wrappers for external APIs and services.
 Each integration is isolated from business logic and can be mocked for testing.
 """
 
+from app.integrations.llm_client import (
+    ChatMessage,
+    ChatResponse,
+    LLMClient,
+    SummaryResult,
+    get_llm_client,
+)
 from app.integrations.openai_client import OpenAIClient
-from app.integrations.llm_client import LLMClient, get_llm_client, ChatMessage, ChatResponse, SummaryResult
 from app.integrations.rss_client import RSSClient
 from app.integrations.youtube_client import YouTubeClient
 

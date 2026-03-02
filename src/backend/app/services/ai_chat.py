@@ -1,10 +1,11 @@
 
-from app.core.logging import get_logger
+from typing import Any, Dict, List, Optional
+
 from app.core.exceptions import ArticleNotFoundError, ChatGenerationError
+from app.core.logging import get_logger
+from app.integrations.llm_client import LLMClient
 from app.repositories.content_repo import ContentItemRepository
 from app.repositories.conversation_repo import ConversationRepository
-from app.integrations.llm_client import LLMClient
-from typing import Dict, Any, Optional, List
 
 logger = get_logger(__name__)
 
@@ -83,7 +84,7 @@ class AiChatService:
             raise ChatGenerationError(
                 "Failed to generate AI response",
                 details=str(e)
-            )
+            ) from e
     
     def save_conversation(self, content_item_id: int, user_message: str, ai_response: str) -> Dict[str, Any]:
         """

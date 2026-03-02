@@ -32,6 +32,7 @@ def _acquire_cleanup_lock() -> bool:
     global _cleanup_lock_token
     try:
         import uuid
+
         from app.core.dependencies import get_redis
         token = str(uuid.uuid4())
         r = get_redis()

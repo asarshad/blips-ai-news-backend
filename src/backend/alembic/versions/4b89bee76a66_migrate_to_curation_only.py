@@ -11,10 +11,9 @@ MIGRATION POLICY: REMOVES LEGACY TABLES
 - Updates usage to reference content_items
 - This is a breaking migration - data will be lost
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
-
 
 # revision identifiers, used by Alembic.
 revision = '4b89bee76a66'

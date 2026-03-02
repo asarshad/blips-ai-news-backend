@@ -9,7 +9,7 @@ see domain/editorial/service.py for that.
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import desc, func, and_
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.models.content import ContentItem, ContentType

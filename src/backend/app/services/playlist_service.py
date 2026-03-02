@@ -14,20 +14,18 @@ is immutable for that session. Use cursor-based continuation rather
 than offset pagination for swipe feeds.
 """
 
-import json
 import hashlib
-from typing import Dict, List, Optional, Set, Tuple
-from datetime import datetime, timedelta
-from collections import defaultdict
-import random
+import json
 import uuid
+from collections import defaultdict
+from typing import Dict, List, Optional, Set, Tuple
 
-from app.core.logging import get_logger
 from app.core.config import get_settings
+from app.core.logging import get_logger
+from app.models.content import ContentItem, ContentType
 from app.repositories.content_repo import ContentItemRepository
-from app.repositories.user_repo import UserProfileRepository, UserPreferenceRepository
+from app.repositories.user_repo import UserPreferenceRepository, UserProfileRepository
 from app.services.personalization_service import PersonalizationService
-from app.models.content import ContentItem, ContentType, PrefType
 
 logger = get_logger(__name__)
 
@@ -244,7 +242,7 @@ class PlaylistService:
         topic_counts: Dict[str, int] = defaultdict(int)
         source_streak: List[str] = []
         
-        for item, score in scored_candidates:
+        for item, _score in scored_candidates:
             if len(selected) >= size:
                 break
             
@@ -442,7 +440,11 @@ def create_playlist_service(
 ) -> PlaylistService:
     """Factory function to create PlaylistService with dependencies."""
     from app.repositories.content_repo import ContentItemRepository
-    from app.repositories.user_repo import UserProfileRepository, UserPreferenceRepository, InteractionEventRepository
+    from app.repositories.user_repo import (
+        InteractionEventRepository,
+        UserPreferenceRepository,
+        UserProfileRepository,
+    )
     from app.services.personalization_service import PersonalizationService
     
     content_repo = ContentItemRepository(db_session)

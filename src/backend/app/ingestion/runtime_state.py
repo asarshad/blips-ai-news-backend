@@ -12,7 +12,6 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-
 _LOCK = threading.Lock()
 _LAST: Dict[str, Any] = {
     "updated_at": None,

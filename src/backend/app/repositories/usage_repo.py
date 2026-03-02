@@ -2,13 +2,14 @@
 Usage repository for database operations on user usage tracking.
 """
 
-from typing import Optional
 from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+from typing import Optional
 
-from app.repositories.base import BaseRepository
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
 from app.models.usage import Usage
+from app.repositories.base import BaseRepository
 
 
 class UsageRepository(BaseRepository[Usage]):

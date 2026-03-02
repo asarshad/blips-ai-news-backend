@@ -1,12 +1,16 @@
-from app.models.conversation import Conversation
-from app.models.usage import Usage
 from app.models.content import (
-    ContentItem, ContentType,
-    UserProfile, UserPreference, PrefType,
-    InteractionEvent, EventType
+    ContentItem,
+    ContentType,
+    EventType,
+    InteractionEvent,
+    PrefType,
+    UserPreference,
+    UserProfile,
 )
-from app.models.ingestion_progress import IngestionProgress
+from app.models.conversation import Conversation
 from app.models.editorial import EditorialAction
+from app.models.ingestion_progress import IngestionProgress
+from app.models.usage import Usage
 
 # For Alembic to detect all models
 __all__ = [

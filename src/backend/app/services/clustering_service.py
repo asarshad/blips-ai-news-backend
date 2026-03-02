@@ -14,8 +14,8 @@ This file remains for backward compatibility. Import from app.clustering instead
 # Re-export from new location for backward compatibility
 from app.clustering import (
     ClusteringService,
-    compute_similarity,
     compute_dedupe_key,
+    compute_similarity,
 )
 
 # Re-export config for backward compatibility

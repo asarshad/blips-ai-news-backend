@@ -5,19 +5,18 @@ Orchestrates the scoring job that updates content scores periodically.
 This is a thin service that coordinates the scoring modules.
 """
 
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
-from datetime import datetime, timedelta, timezone
 
 from app.core.logging import get_logger
-from app.repositories.content_repo import ContentItemRepository
-from app.repositories.user_repo import InteractionEventRepository
 from app.models.content import ContentItem, ContentType
-
+from app.ranking.diversity import compute_diversity_boost, compute_topic_distribution
+from app.ranking.global_score import compute_global_score
 from app.ranking.quality import compute_quality_score
 from app.ranking.recency import compute_recency_score
 from app.ranking.trend import compute_trend_score
-from app.ranking.diversity import compute_diversity_boost, compute_topic_distribution
-from app.ranking.global_score import compute_global_score
+from app.repositories.content_repo import ContentItemRepository
+from app.repositories.user_repo import InteractionEventRepository
 
 logger = get_logger(__name__)
 
