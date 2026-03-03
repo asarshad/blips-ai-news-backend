@@ -227,6 +227,28 @@
         "title": "Body_ui_boost_api_v1_admin_ui_action__content_id__boost_post",
         "type": "object"
       },
+      "Body_ui_demote_api_v1_admin_ui_action__content_id__demote_post": {
+        "properties": {
+          "key": {
+            "default": "",
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "title": "Body_ui_demote_api_v1_admin_ui_action__content_id__demote_post",
+        "type": "object"
+      },
+      "Body_ui_promote_api_v1_admin_ui_action__content_id__promote_post": {
+        "properties": {
+          "key": {
+            "default": "",
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "title": "Body_ui_promote_api_v1_admin_ui_action__content_id__promote_post",
+        "type": "object"
+      },
       "Body_ui_submit_url_api_v1_admin_ui_submit_post": {
         "properties": {
           "importance_level": {
@@ -2749,109 +2771,8 @@
     },
     "/api/v1/admin/ui/": {
       "get": {
-        "operationId": "ui_content_list_api_v1_admin_ui__get",
+        "operationId": "ui_root_api_v1_admin_ui__get",
         "parameters": [
-          {
-            "in": "query",
-            "name": "day",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Day"
-            }
-          },
-          {
-            "in": "query",
-            "name": "type",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Type"
-            }
-          },
-          {
-            "in": "query",
-            "name": "source",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Source"
-            }
-          },
-          {
-            "in": "query",
-            "name": "suppressed",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Suppressed"
-            }
-          },
-          {
-            "in": "query",
-            "name": "manual_added",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Manual Added"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "required": false,
-            "schema": {
-              "default": "published_at",
-              "title": "Sort By",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "default": 1,
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
-            }
-          },
           {
             "in": "query",
             "name": "key",
@@ -2907,7 +2828,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Ui Content List",
+        "summary": "Ui Root",
         "tags": [
           "admin-ui",
           "admin-ui"
@@ -2990,6 +2911,170 @@
           }
         },
         "summary": "Ui Boost",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
+    "/api/v1/admin/ui/action/{content_id}/demote": {
+      "post": {
+        "operationId": "ui_demote_api_v1_admin_ui_action__content_id__demote_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ui_demote_api_v1_admin_ui_action__content_id__demote_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Demote",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
+    "/api/v1/admin/ui/action/{content_id}/promote": {
+      "post": {
+        "operationId": "ui_promote_api_v1_admin_ui_action__content_id__promote_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ui_promote_api_v1_admin_ui_action__content_id__promote_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Promote",
         "tags": [
           "admin-ui",
           "admin-ui"
@@ -3154,6 +3239,287 @@
           }
         },
         "summary": "Ui Unsuppress",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
+    "/api/v1/admin/ui/content": {
+      "get": {
+        "operationId": "ui_content_list_api_v1_admin_ui_content_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "day",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Day"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "suppressed",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Suppressed"
+            }
+          },
+          {
+            "in": "query",
+            "name": "manual_added",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Manual Added"
+            }
+          },
+          {
+            "in": "query",
+            "name": "curation_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Curation Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "required": false,
+            "schema": {
+              "default": "published_at",
+              "title": "Sort By",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "flash",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Flash"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Content List",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
+    "/api/v1/admin/ui/dashboard": {
+      "get": {
+        "operationId": "ui_dashboard_api_v1_admin_ui_dashboard_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "day",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Day"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Dashboard",
         "tags": [
           "admin-ui",
           "admin-ui"
@@ -4000,7 +4366,7 @@
     },
     "/api/v1/inventory/health": {
       "get": {
-        "description": "Get overall inventory health across all surfaces.\n\nReturns tier counts, freshness metrics, and health status for:\n- Articles\n- Videos  \n- Reels\n\nIncludes top-up priority if any surface is below threshold.\nThis endpoint is cached (60s TTL) and does not trigger ingestion.",
+        "description": "Get overall inventory health across all surfaces.\n\nReturns tier counts, freshness metrics, and health status for:\n- Articles\n- Videos\n- Reels\n\nAlso includes the two-tier pipeline summary (CANDIDATE vs PROMOTED counts\nand newest timestamps per type) for operational visibility.\n\nIncludes top-up priority if any surface is below threshold.\nThis endpoint is cached (60s TTL) and does not trigger ingestion.",
         "operationId": "get_inventory_health_api_v1_inventory_health_get",
         "responses": {
           "200": {
@@ -4167,6 +4533,66 @@
           }
         },
         "summary": "Get Extraction Samples",
+        "tags": [
+          "metrics",
+          "metrics"
+        ]
+      }
+    },
+    "/api/v1/metrics/signal": {
+      "get": {
+        "description": "Get Coverage Guarantee and Quality Gate metrics.\n\nReturns:\n- signal_urls_seen / signal_urls_added (last N hours)\n- promote_runs, promoted_count (last N hours)\n- duplicate_ratio per source (signal URLs that were already in content_items)\n- top_sources_by_share: per-source contribution to the PROMOTED feed\n- pipeline_summary: CANDIDATE vs PROMOTED counts per content type\n\nRequires ADMIN_API_KEY.",
+        "operationId": "get_signal_metrics_api_v1_metrics_signal_get",
+        "parameters": [
+          {
+            "description": "Look-back window in hours",
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "description": "Look-back window in hours",
+              "maximum": 168,
+              "minimum": 1,
+              "title": "Hours",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Signal Metrics Api V1 Metrics Signal Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Signal Metrics",
         "tags": [
           "metrics",
           "metrics"
