@@ -14,23 +14,26 @@ from unittest.mock import Mock
 
 import pytest
 
+from app.clustering import ClusteringService, compute_dedupe_key
+from app.config.clustering import clustering_config
+from app.config.scoring import scoring_weights
 from app.models.content import (
     ContentItem,
     ContentType,
     EventType,
 )
-from app.services.clustering_service import (
-    COMBINED_THRESHOLD,
-    ClusteringService,
-    compute_dedupe_key,
-)
+from app.ranking import ScoringService
+from app.ranking.quality import compute_source_weight as get_source_quality_weight
 from app.services.personalization_service import EVENT_WEIGHTS, PersonalizationService
 from app.services.playlist_service import PlaylistService
-from app.services.scoring_service import (
-    SCORE_WEIGHTS,
-    ScoringService,
-    get_source_quality_weight,
-)
+
+COMBINED_THRESHOLD = clustering_config.combined_threshold
+SCORE_WEIGHTS = {
+    "quality": scoring_weights.quality,
+    "trend": scoring_weights.trend,
+    "recency": scoring_weights.recency,
+    "diversity": scoring_weights.diversity,
+}
 
 # ============================================================================
 # Fixtures
