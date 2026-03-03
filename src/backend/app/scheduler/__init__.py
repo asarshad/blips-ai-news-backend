@@ -20,7 +20,9 @@ from app.scheduler.tasks import (
     run_clustering_job,
     run_data_cleanup_job,
     run_preference_decay_job,
+    run_promotion_job,
     run_scoring_job,
+    run_signal_ingestion_job,
 )
 
 logger = get_logger(__name__)
@@ -123,10 +125,37 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             coalesce=True,
             misfire_grace_time=300,
         )
-        
+
+        # ── Coverage Guarantee: signal ingestion (every 60 min by default) ──
+        signal_minutes = int(getattr(settings, "SIGNAL_INTERVAL_MINUTES", 60) or 60)
+        scheduler.add_job(
+            run_signal_ingestion_job,
+            IntervalTrigger(minutes=max(signal_minutes, 15)),
+            id="signal_ingestion_job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
+        )
+
+        # ── Quality Gate: promotion scoring (every 30 minutes) ──────────────
+        scheduler.add_job(
+            run_promotion_job,
+            IntervalTrigger(minutes=30),
+            id="promotion_job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
+        )
+
         scheduler.start()
         logger.info(f"Started background scheduler - fetching news every {fetch_human}")
-        logger.info("Curation jobs: scoring (hourly), clustering (15min), decay (daily), AI retry (15min), cleanup (daily), ingestion health (30min)")
+        logger.info(
+            "Curation jobs: scoring (hourly), clustering (15min), decay (daily), "
+            "AI retry (15min), cleanup (daily), health (30min), "
+            f"signals ({signal_minutes}min), promotion (30min)"
+        )
         
         return scheduler
         
@@ -144,4 +173,6 @@ __all__ = [
     "run_preference_decay_job",
     "run_backfill_job",
     "retry_ai_processing",
+    "run_signal_ingestion_job",
+    "run_promotion_job",
 ]

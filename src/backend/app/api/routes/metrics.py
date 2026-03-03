@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_admin_key
@@ -214,3 +215,135 @@ def get_extraction_samples(
         "count": len(samples),
         "samples": samples,
     }
+
+
+@router.get("/signal", dependencies=[Depends(require_admin_key)])
+def get_signal_metrics(
+    hours: int = Query(24, ge=1, le=168, description="Look-back window in hours"),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Get Coverage Guarantee and Quality Gate metrics.
+
+    Returns:
+    - signal_urls_seen / signal_urls_added (last N hours)
+    - promote_runs, promoted_count (last N hours)
+    - duplicate_ratio per source (signal URLs that were already in content_items)
+    - top_sources_by_share: per-source contribution to the PROMOTED feed
+    - pipeline_summary: CANDIDATE vs PROMOTED counts per content type
+
+    Requires ADMIN_API_KEY.
+    """
+    try:
+        from app.models.content import ContentItem, ContentStatus
+        from app.models.signal import EnqueueStatus, SignalURL
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        cutoff_naive = cutoff.replace(tzinfo=None)
+
+        # ── Signal URL counters ───────────────────────────────────────────
+        signal_seen = int(
+            db.query(func.count(SignalURL.id))
+            .filter(SignalURL.first_seen_at >= cutoff_naive)
+            .scalar() or 0
+        )
+        signal_added = int(
+            db.query(func.count(SignalURL.id))
+            .filter(
+                SignalURL.enqueue_status == EnqueueStatus.INGESTED,
+                SignalURL.enqueued_at >= cutoff_naive,
+            )
+            .scalar() or 0
+        )
+
+        # Status breakdown
+        status_rows = (
+            db.query(SignalURL.enqueue_status, func.count(SignalURL.id))
+            .filter(SignalURL.first_seen_at >= cutoff_naive)
+            .group_by(SignalURL.enqueue_status)
+            .all()
+        )
+        signal_by_status = {
+            (row[0].value if row[0] else "unknown"): row[1] for row in status_rows
+        }
+
+        # Duplicate ratio per signal source
+        source_stats_rows = (
+            db.query(SignalURL.signal_source, SignalURL.enqueue_status, func.count(SignalURL.id))
+            .filter(SignalURL.first_seen_at >= cutoff_naive)
+            .group_by(SignalURL.signal_source, SignalURL.enqueue_status)
+            .all()
+        )
+        source_totals: Dict[str, int] = {}
+        source_dupes: Dict[str, int] = {}
+        for row in source_stats_rows:
+            src = row[0].value if row[0] else "unknown"
+            status = row[1]
+            cnt = row[2]
+            source_totals[src] = source_totals.get(src, 0) + cnt
+            if status == EnqueueStatus.DUPLICATE:
+                source_dupes[src] = source_dupes.get(src, 0) + cnt
+
+        duplicate_ratio = {
+            src: round(source_dupes.get(src, 0) / max(total, 1), 3)
+            for src, total in source_totals.items()
+        }
+
+        # ── Promotion pipeline counts ─────────────────────────────────────
+        pipeline_rows = (
+            db.query(ContentItem.type, ContentItem.curation_status, func.count(ContentItem.id))
+            .filter(
+                ContentItem.published_at >= cutoff_naive,
+                ContentItem.is_suppressed.is_(False),
+            )
+            .group_by(ContentItem.type, ContentItem.curation_status)
+            .all()
+        )
+        pipeline: Dict[str, Any] = {}
+        for row in pipeline_rows:
+            type_key = row[0].value.lower() if row[0] else "unknown"
+            status_key = row[1].value.lower() if row[1] else "promoted"
+            if type_key not in pipeline:
+                pipeline[type_key] = {}
+            pipeline[type_key][status_key] = row[2]
+
+        # ── Top sources by share in PROMOTED feed ─────────────────────────
+        source_share_rows = (
+            db.query(ContentItem.source, func.count(ContentItem.id).label("cnt"))
+            .filter(
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.published_at >= cutoff_naive,
+                ContentItem.is_suppressed.is_(False),
+            )
+            .group_by(ContentItem.source)
+            .order_by(func.count(ContentItem.id).desc())
+            .limit(20)
+            .all()
+        )
+        top_sources = [{"source": r[0], "promoted_count": r[1]} for r in source_share_rows]
+        total_promoted = sum(r[1] for r in source_share_rows)
+        for s in top_sources:
+            s["share_pct"] = round(s["promoted_count"] / max(total_promoted, 1) * 100, 1)
+
+        return {
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "window_hours": hours,
+            "signal": {
+                "signal_urls_seen": signal_seen,
+                "signal_urls_added": signal_added,
+                "by_status": signal_by_status,
+                "duplicate_ratio_by_source": duplicate_ratio,
+            },
+            "promotion": {
+                "pipeline_counts": pipeline,
+                "total_promoted_in_window": total_promoted,
+            },
+            "top_sources_by_share": top_sources,
+        }
+
+    except Exception as exc:
+        logger.error("Error getting signal metrics: %s", exc, exc_info=True)
+        return {
+            "error": str(exc),
+            "as_of": datetime.now(timezone.utc).isoformat(),
+        }
+

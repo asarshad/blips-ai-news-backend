@@ -1,0 +1,383 @@
+"""Promotion Service — Quality Gate for the two-tier pipeline.
+
+Responsibilities:
+1. Score all CANDIDATE content items using multi-factor promotion scoring.
+2. Promote the top-N items per rolling window to PROMOTED status.
+3. Persist promotion_score on every evaluated item (for observability).
+
+Promotion Score Formula (all components 0-1 before weighting):
+
+    promotion_score = (
+        W_SOURCE   * source_quality        # publisher trust
+      + W_CLUSTER  * cluster_hotness       # multi-source coverage + signal hits
+      + W_RECENCY  * recency               # time decay
+      - W_CLICKBAIT * clickbait_penalty    # title quality gate
+      - W_DEDUP    * duplicate_penalty     # cluster crowding penalty
+    )
+
+Defaults:
+    W_SOURCE   = 0.25
+    W_CLUSTER  = 0.30
+    W_RECENCY  = 0.25
+    W_CLICKBAIT = 0.10
+    W_DEDUP    = 0.10
+
+Promotion threshold:  PROMOTE_MIN_SCORE  (default 0.30)
+Max promoted per run: TOP_N_PROMOTED     (default 50 per content type per 6-hour window)
+"""
+
+from __future__ import annotations
+
+import math
+import re
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Tuple
+
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.core.logging import get_logger
+from app.models.content import ContentItem, ContentStatus, ContentType
+from app.ranking.quality import compute_source_weight
+
+logger = get_logger(__name__)
+
+
+# ── Configuration ─────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class PromotionConfig:
+    """Tunable weights and thresholds for the promotion scorer."""
+
+    # Score component weights (must sum to 1 when penalties are zero)
+    w_source: float = 0.25
+    w_cluster: float = 0.30
+    w_recency: float = 0.25
+    w_clickbait: float = 0.10
+    w_duplicate: float = 0.10
+
+    # Minimum promotion score to be promoted
+    min_score: float = 0.30
+
+    # Max items promoted per type per promotion run
+    top_n_per_type: int = 50
+
+    # Rolling window (hours) to evaluate candidates over
+    window_hours: int = 48
+
+    # Recency half-life (hours) for exponential decay
+    recency_half_life_hours: float = 12.0
+
+    # Maximum signal_hits bonus (caps contribution at this value)
+    signal_hits_cap: int = 5
+
+
+_DEFAULT_CONFIG = PromotionConfig()
+
+
+# ── Clickbait detection ───────────────────────────────────────────────────────
+
+# Regex pattern list – case-insensitive
+_CLICKBAIT_PATTERNS: list[re.Pattern[str]] = [re.compile(p, re.IGNORECASE) for p in [
+    r"you won't believe",
+    r"shocking(?:ly)?",
+    r"mind.?blow",
+    r"this one (?:trick|tip|weird)",
+    r"(?:top|best)\s+\d+\s+(?:ways|tips|tricks|secrets|hacks)",
+    r"(?:doctors?|experts?|scientists?)\s+(?:hate|love|don't want you)",
+    r"what happens next",
+    r"gone (?:wrong|viral|crazy)",
+    r"can'?t believe",
+    r"secret(?:s)? (?:they|nobody|no one)",
+    r"clickbait",
+    r"!{3,}",          # Three or more exclamation marks
+    r"\?{2,}",          # Two or more question marks
+]]
+
+# ALLCAPS title check: more than 40 % of alpha chars uppercase
+_ALLCAPS_THRESHOLD = 0.4
+
+
+def compute_clickbait_penalty(title: str) -> float:
+    """Return a penalty [0.0, 1.0] based on clickbait signals in the title.
+
+    0.0 = clean title, 1.0 = maximum clickbait.
+    """
+    if not title:
+        return 0.0
+
+    score = 0.0
+
+    # Pattern hits
+    for pat in _CLICKBAIT_PATTERNS:
+        if pat.search(title):
+            score += 0.20
+
+    # All-caps ratio
+    alpha = [c for c in title if c.isalpha()]
+    if alpha:
+        upper_ratio = sum(1 for c in alpha if c.isupper()) / len(alpha)
+        if upper_ratio > _ALLCAPS_THRESHOLD:
+            score += 0.30
+
+    # Title length extremes (very short < 10 chars OR very long > 200 chars)
+    if len(title) < 10 or len(title) > 200:
+        score += 0.10
+
+    return min(score, 1.0)
+
+
+# ── Recency score ─────────────────────────────────────────────────────────────
+
+
+def compute_promotion_recency(published_at: datetime, half_life_hours: float) -> float:
+    """Exponential decay recency score: 1.0 when fresh, 0 → stale."""
+    if published_at.tzinfo is None:
+        published_at = published_at.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    hours_old = max(0.0, (now - published_at).total_seconds() / 3600)
+    return math.pow(0.5, hours_old / half_life_hours)
+
+
+# ── Cluster hotness ───────────────────────────────────────────────────────────
+
+
+def compute_cluster_hotness(
+    cluster_id: Optional[str],
+    signal_hits: int,
+    cluster_sizes: Dict[str, int],
+    signal_hits_cap: int,
+) -> float:
+    """Combine cluster size (multi-source coverage) with signal hits [0, 1]."""
+    # Cluster coverage: log-scaled number of items in the same cluster
+    cluster_size = cluster_sizes.get(cluster_id or "", 1)
+    # log2(1)=0 ... log2(8)=3; cap to [0,1] where 8+ items = fully hot
+    cluster_component = min(math.log2(max(cluster_size, 1)) / 3.0, 1.0)
+
+    # Signal component: normalise signal_hits to [0, 1]
+    signal_component = min(signal_hits, signal_hits_cap) / signal_hits_cap
+
+    # Equal weight between cluster coverage and signal hits
+    return (cluster_component + signal_component) / 2.0
+
+
+# ── Duplicate density penalty ─────────────────────────────────────────────────
+
+
+def compute_duplicate_penalty(cluster_id: Optional[str], cluster_sizes: Dict[str, int]) -> float:
+    """Penalise items in over-crowded clusters to avoid showing redundant news.
+
+    cluster_size=1 → 0.0 penalty
+    cluster_size=10+ → 0.5 max penalty
+    """
+    size = cluster_sizes.get(cluster_id or "", 1)
+    if size <= 2:
+        return 0.0
+    # Soft cap: log-scale so very large clusters get a moderate penalty
+    return min(math.log2(size - 1) / 4.0, 0.5)
+
+
+# ── Per-item scoring ──────────────────────────────────────────────────────────
+
+
+def score_candidate(
+    item: ContentItem,
+    cluster_sizes: Dict[str, int],
+    config: PromotionConfig,
+) -> float:
+    """Compute the promotion score for a single ContentItem.
+
+    Returns a value in roughly [-0.2, 1.0].  The hard floor in
+    run_promotion_job() is config.min_score.
+    """
+    source_quality = compute_source_weight(item.source or "")
+    cluster_hotness = compute_cluster_hotness(
+        item.cluster_id, item.signal_hits or 0, cluster_sizes, config.signal_hits_cap
+    )
+    recency = compute_promotion_recency(item.published_at, config.recency_half_life_hours)
+    clickbait = compute_clickbait_penalty(item.title or "")
+    duplicate_penalty = compute_duplicate_penalty(item.cluster_id, cluster_sizes)
+
+    score = (
+        config.w_source   * source_quality
+        + config.w_cluster  * cluster_hotness
+        + config.w_recency  * recency
+        - config.w_clickbait * clickbait
+        - config.w_duplicate * duplicate_penalty
+    )
+    return round(score, 4)
+
+
+# ── Result type ───────────────────────────────────────────────────────────────
+
+
+@dataclass
+class PromotionResult:
+    """Stats from a single promotion run."""
+    candidates_evaluated: int = 0
+    promoted_count: int = 0
+    already_promoted_rescored: int = 0
+    errors: List[str] = field(default_factory=list)
+
+
+# ── Main service ──────────────────────────────────────────────────────────────
+
+
+class PromotionService:
+    """Orchestrates the CANDIDATE→PROMOTED promotion pipeline.
+
+    Usage::
+
+        svc = PromotionService(db)
+        result = svc.run_promotion_job()
+    """
+
+    def __init__(self, db: Session, config: PromotionConfig = _DEFAULT_CONFIG) -> None:
+        self.db = db
+        self.config = config
+
+    # ── Cluster catalogue ─────────────────────────────────────────────────
+
+    def _get_cluster_sizes(self, hours_back: int) -> Dict[str, int]:
+        """Return a mapping cluster_id → item count for recent items."""
+        cutoff = datetime.utcnow() - timedelta(hours=hours_back)
+        rows = (
+            self.db.query(ContentItem.cluster_id, func.count(ContentItem.id))
+            .filter(
+                ContentItem.cluster_id.isnot(None),
+                ContentItem.published_at >= cutoff,
+                ContentItem.is_suppressed.is_(False),
+            )
+            .group_by(ContentItem.cluster_id)
+            .all()
+        )
+        return {row[0]: row[1] for row in rows if row[0]}
+
+    # ── Candidate fetch ───────────────────────────────────────────────────
+
+    def _get_candidates(self, content_type: ContentType) -> List[ContentItem]:
+        cutoff = datetime.utcnow() - timedelta(hours=self.config.window_hours)
+        return (
+            self.db.query(ContentItem)
+            .filter(
+                ContentItem.type == content_type,
+                ContentItem.curation_status == ContentStatus.CANDIDATE,
+                ContentItem.published_at >= cutoff,
+                ContentItem.is_suppressed.is_(False),
+            )
+            .order_by(ContentItem.published_at.desc())
+            .all()
+        )
+
+    # ── Re-score existing PROMOTED items ──────────────────────────────────
+
+    def _rescore_promoted(
+        self,
+        content_type: ContentType,
+        cluster_sizes: Dict[str, int],
+    ) -> int:
+        """Refresh promotion_score on PROMOTED items (no status change)."""
+        cutoff = datetime.utcnow() - timedelta(hours=self.config.window_hours)
+        promoted_items = (
+            self.db.query(ContentItem)
+            .filter(
+                ContentItem.type == content_type,
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.published_at >= cutoff,
+            )
+            .all()
+        )
+        count = 0
+        for item in promoted_items:
+            item.promotion_score = score_candidate(item, cluster_sizes, self.config)
+            count += 1
+        return count
+
+    # ── Main run ──────────────────────────────────────────────────────────
+
+    def run_promotion_job(self) -> PromotionResult:
+        """Score all CANDIDATE items and promote the best ones.
+
+        Runs independently per content type (ARTICLE, VIDEO) so that
+        each surface has its own top-N allocation.
+
+        REEL content is always PROMOTED by default (short-form video is
+        assumed high fidelity from curated channels).
+        """
+        result = PromotionResult()
+
+        try:
+            cluster_sizes = self._get_cluster_sizes(hours_back=self.config.window_hours * 2)
+
+            for content_type in (ContentType.ARTICLE, ContentType.VIDEO):
+                try:
+                    promoted, evaluated, rescored = self._promote_type(
+                        content_type, cluster_sizes
+                    )
+                    result.promoted_count += promoted
+                    result.candidates_evaluated += evaluated
+                    result.already_promoted_rescored += rescored
+                except Exception as exc:
+                    msg = f"{content_type.value} promotion failed: {exc}"
+                    logger.error("[promotion] %s", msg)
+                    result.errors.append(msg)
+
+            self.db.commit()
+
+        except Exception as exc:
+            self.db.rollback()
+            msg = f"Promotion run failed: {exc}"
+            logger.error("[promotion] %s", msg)
+            result.errors.append(msg)
+
+        logger.info(
+            "[promotion] Run complete: evaluated=%d promoted=%d rescored=%d errors=%d",
+            result.candidates_evaluated,
+            result.promoted_count,
+            result.already_promoted_rescored,
+            len(result.errors),
+        )
+        return result
+
+    def _promote_type(
+        self,
+        content_type: ContentType,
+        cluster_sizes: Dict[str, int],
+    ) -> Tuple[int, int, int]:
+        """Score and promote CANDIDATEs for a single content type.
+
+        Returns (promoted_count, evaluated_count, rescored_promoted_count).
+        """
+        candidates = self._get_candidates(content_type)
+        evaluated = len(candidates)
+
+        # Score every candidate
+        scored: List[Tuple[float, ContentItem]] = []
+        for item in candidates:
+            s = score_candidate(item, cluster_sizes, self.config)
+            item.promotion_score = s
+            scored.append((s, item))
+
+        # Sort descending by promotion score
+        scored.sort(key=lambda t: t[0], reverse=True)
+
+        promoted = 0
+        for rank, (s, item) in enumerate(scored):
+            if rank >= self.config.top_n_per_type:
+                break
+            if s < self.config.min_score:
+                break
+            item.curation_status = ContentStatus.PROMOTED
+            promoted += 1
+
+        rescored = self._rescore_promoted(content_type, cluster_sizes)
+
+        logger.info(
+            "[promotion] %s: evaluated=%d promoted=%d (threshold=%.2f)",
+            content_type.value,
+            evaluated,
+            promoted,
+            self.config.min_score,
+        )
+        return promoted, evaluated, rescored

@@ -7,7 +7,7 @@ of content sources rather than being dominated by a single publisher.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Dict, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -37,6 +37,10 @@ class DiversityConstraints:
         {"max_source_per_window": 4},
         {"disable_all": True}
     ])
+    # Minimum items per topic category guaranteed in the output.
+    # Keys match the first element of ContentItem.topics (case-sensitive).
+    # E.g. {"AI": 1, "Security": 1} ensures at least one item from each.
+    per_category_minimums: Dict[str, int] = field(default_factory=dict)
 
 
 # Default configurations for each surface
@@ -46,6 +50,7 @@ DEFAULT_ARTICLE_DIVERSITY = DiversityConstraints(
     max_topic_per_window=3,
     allow_consecutive_same_source=False,
     min_inventory_for_constraints=8,
+    per_category_minimums={"AI": 1, "Security": 1},
 )
 
 DEFAULT_VIDEO_DIVERSITY = DiversityConstraints(
@@ -120,6 +125,7 @@ class DiversitySettings(BaseSettings):
             max_topic_per_window=self.articles_max_topic,
             allow_consecutive_same_source=self.articles_allow_consecutive,
             min_inventory_for_constraints=self.articles_min_inventory,
+            per_category_minimums=DEFAULT_ARTICLE_DIVERSITY.per_category_minimums,
         )
     
     def get_video_constraints(self) -> DiversityConstraints:

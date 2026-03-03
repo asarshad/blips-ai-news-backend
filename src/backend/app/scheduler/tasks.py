@@ -15,6 +15,8 @@ from app.scheduler.tasks_curation import (
 )
 from app.scheduler.tasks_health import check_ingestion_health, get_ingestion_metrics
 from app.scheduler.tasks_ingestion import fetch_and_process_news
+from app.scheduler.tasks_promotion import run_promotion_job
+from app.scheduler.tasks_signals import run_signal_ingestion_job
 
 __all__ = [
     "check_ingestion_health",
@@ -25,5 +27,7 @@ __all__ = [
     "run_clustering_job",
     "run_data_cleanup_job",
     "run_preference_decay_job",
+    "run_promotion_job",
     "run_scoring_job",
+    "run_signal_ingestion_job",
 ]

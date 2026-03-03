@@ -42,6 +42,12 @@ class ContentItemRepository(BaseRepository[ContentItem]):
             ContentItem.canonical_url == canonical_url
         ).first()
 
+    def get_by_canonical_key(self, canonical_key: str) -> Optional[ContentItem]:
+        """Get content item by canonical key (sha256 hash of normalized URL)."""
+        return self.db.query(ContentItem).filter(
+            ContentItem.canonical_key == canonical_key
+        ).first()
+
     def count_created_on_date(
         self,
         content_type: ContentType,
@@ -69,29 +75,34 @@ class ContentItemRepository(BaseRepository[ContentItem]):
     ) -> List[ContentItem]:
         """
         Get recent content items of a specific type.
-        
+
+        Only PROMOTED items are returned – CANDIDATE items are hidden from
+        the default feed until they pass the quality gate.
+
         Args:
             content_type: ARTICLE, VIDEO, or REEL
             limit: Maximum number of items
             offset: Pagination offset
             hours_back: Only include items from the last N hours
             ai_processed_only: Only return AI-processed content (default True)
-            
+
         Returns:
             List of content items ordered by global_score
         """
+        from app.models.content import ContentStatus
         cutoff = datetime.utcnow() - timedelta(hours=hours_back)
-        
+
         query = self.db.query(ContentItem).filter(
             ContentItem.type == content_type,
             ContentItem.published_at >= cutoff,
             ContentItem.is_suppressed.is_(False),
+            ContentItem.curation_status == ContentStatus.PROMOTED,
             _ENGLISH_FILTER,
         )
-        
+
         if ai_processed_only:
             query = query.filter(ContentItem.ai_processed.is_(True))
-        
+
         return query.order_by(
             desc(ContentItem.global_score),
             desc(ContentItem.published_at)
@@ -106,19 +117,24 @@ class ContentItemRepository(BaseRepository[ContentItem]):
     def get_unprocessed_by_ai(self, limit: int = 100, hours_back: int = 168) -> List[ContentItem]:
         """
         Get content items that need AI processing.
-        
+
+        Only returns PROMOTED items – CANDIDATE items are intentionally skipped
+        to avoid spending LLM tokens on content that may never reach the feed.
+
         Args:
             limit: Maximum number of items to return
             hours_back: Only include items from the last N hours (default 7 days)
-            
+
         Returns:
-            List of content items without AI processing
+            List of content items without AI processing, PROMOTED status only
         """
+        from app.models.content import ContentStatus
         cutoff = datetime.utcnow() - timedelta(hours=hours_back)
         return self.db.query(ContentItem).filter(
             ContentItem.ai_processed.is_(False),
             ContentItem.published_at >= cutoff,
             ContentItem.is_suppressed.is_(False),
+            ContentItem.curation_status == ContentStatus.PROMOTED,
         ).order_by(desc(ContentItem.published_at)).limit(limit).all()
     
     def mark_ai_processed(self, item_id: int, summary: str, topics: List[str] = None) -> bool:

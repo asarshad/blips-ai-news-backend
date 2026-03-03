@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.models.content import ContentItem, ContentType
+from app.models.content import ContentItem, ContentStatus, ContentType
 
 logger = get_logger(__name__)
 
@@ -180,10 +180,12 @@ def compute_surface_health(
     backfill_cutoff = now - timedelta(hours=cfg["backfill_hours"])
     evergreen_cutoff = now - timedelta(days=cfg["evergreen_days"])
     
-    # Base query filters
+    # Base query filters – only PROMOTED items count toward inventory health;
+    # CANDIDATE stubs are invisible in feeds and must not inflate tier counts.
     base_filter = and_(
         ContentItem.type == content_type,
         ContentItem.is_suppressed.is_(False),
+        ContentItem.curation_status == ContentStatus.PROMOTED,
     )
     
     # Tier A: published_at within fresh window
@@ -366,3 +368,53 @@ def invalidate_health_cache():
     global _cached_health, _cache_timestamp
     _cached_health = None
     _cache_timestamp = None
+
+
+# ── Pipeline counts (CANDIDATE vs PROMOTED) ──────────────────────────────────
+
+
+def get_pipeline_counts(db: Session) -> Dict[str, Any]:
+    """Return per-type CANDIDATE and PROMOTED counts.
+
+    Used by /inventory/health to give visibility into the two-tier pipeline.
+    Returns the newest timestamp for each tier so operators can see
+    whether the promotion job is running.
+    """
+    from sqlalchemy import func as sa_func
+
+
+    window_hours = 48
+    cutoff = datetime.utcnow() - timedelta(hours=window_hours)
+
+    rows = (
+        db.query(
+            ContentItem.type,
+            ContentItem.curation_status,
+            sa_func.count(ContentItem.id).label("cnt"),
+            sa_func.max(ContentItem.created_at).label("newest"),
+        )
+        .filter(
+            ContentItem.published_at >= cutoff,
+            ContentItem.is_suppressed.is_(False),
+        )
+        .group_by(ContentItem.type, ContentItem.curation_status)
+        .all()
+    )
+
+    # Structure: {type_name: {status: {count, newest_at}}}
+    result: Dict[str, Any] = {}
+    for row in rows:
+        type_name = row.type.value.lower() + "s"  # "articles", "videos", "reels"
+        status_name = row.curation_status.value.lower() if row.curation_status else "promoted"
+        if type_name not in result:
+            result[type_name] = {}
+        result[type_name][status_name] = {
+            "count": row.cnt,
+            "newest_at": row.newest.isoformat() if row.newest else None,
+        }
+
+    return {
+        "window_hours": window_hours,
+        "per_type": result,
+    }
+

@@ -56,6 +56,12 @@ FEATURE_DEFAULTS = {
     
     # Personalization/recommendations
     "personalization": True,
+
+    # Coverage Guarantee: pull trending URLs from HN, GitHub, YT Trending
+    "signals": True,
+
+    # Quality Gate: promote CANDIDATE items to PROMOTED based on scoring
+    "promotion": True,
 }
 
 # Production defaults - more conservative
@@ -67,6 +73,8 @@ PROD_DEFAULTS = {
     "videos": True,         # Low risk
     "clustering": True,     # Low risk, local computation
     "personalization": True, # Low risk, local computation
+    "signals": True,        # Coverage Guarantee - ON in prod
+    "promotion": True,      # Quality Gate - ON in prod
 }
 
 # Redis key prefix for feature flags
