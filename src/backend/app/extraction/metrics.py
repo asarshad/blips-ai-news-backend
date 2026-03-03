@@ -56,6 +56,8 @@ class ExtractionMetrics:
         self._image_ok = 0
         self._image_missing = 0
         self._image_invalid = 0
+        # Cumulative non-daily counter: never reset on day rollover
+        self._language_filtered: int = 0
         self._sources: Dict[str, _SourceHealth] = defaultdict(_SourceHealth)
         self._day: date = datetime.now(timezone.utc).date()
         self._samples: deque[Dict[str, Any]] = deque(maxlen=100)  # Last N samples for debug
@@ -127,6 +129,18 @@ class ExtractionMetrics:
             }
             self._samples.append(sample)  # deque(maxlen=100) auto-evicts oldest
 
+    def record_language_filtered(self, lang: str) -> None:  # noqa: ARG002 — lang reserved for future per-language breakdown
+        """Increment the cumulative language-filter rejection counter.
+
+        This counter is **not** reset on UTC day rollover — it is a
+        lifetime total so operators can see the all-time rejection volume.
+
+        Args:
+            lang: BCP-47 language code that was rejected, e.g. ``"es"``.
+        """
+        with self._lock:
+            self._language_filtered += 1
+
     def get_counters(self) -> Dict[str, Any]:
         """Return current counter snapshot."""
         with self._lock:
@@ -139,6 +153,7 @@ class ExtractionMetrics:
                 "image_ok_total": self._image_ok,
                 "image_missing_total": self._image_missing,
                 "image_invalid_total": self._image_invalid,
+                "content_filtered_language_total": self._language_filtered,
             }
 
     def get_source_health(self) -> Dict[str, Any]:

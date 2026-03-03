@@ -142,7 +142,12 @@ class ContentItem(Base):
     
     # Deduplication
     dedupe_key = Column(String(128), nullable=True, index=True)
-    
+
+    # Language of the content (ISO 639-1 code, e.g. "en", "es").
+    # NULL means pre-existing rows ingested before language detection was added;
+    # they should be treated as "en" by feed queries (IS NULL OR = 'en').
+    language = Column(String(10), nullable=True, index=True)
+
     # Video-specific fields
     duration_seconds = Column(Integer, nullable=True)
     
