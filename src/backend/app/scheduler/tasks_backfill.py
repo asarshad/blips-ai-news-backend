@@ -16,7 +16,7 @@ def run_backfill_job():
 
     db = SessionLocal()
     try:
-        from app.services.ingestion_pipeline import create_ingestion_pipeline
+        from app.ingestion import create_ingestion_pipeline
 
         pipeline = create_ingestion_pipeline(db)
         result = pipeline.run_backfill(hours_back=168, limit=1000)  # 7 days
