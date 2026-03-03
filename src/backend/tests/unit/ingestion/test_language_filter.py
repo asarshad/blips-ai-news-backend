@@ -15,6 +15,7 @@ _mod = importlib.util.module_from_spec(_spec)
 sys.modules["language_filter"] = _mod
 _spec.loader.exec_module(_mod)
 is_english = _mod.is_english
+detect_language = _mod.detect_language
 _MIN_DETECT_LENGTH = _mod._MIN_DETECT_LENGTH
 
 
@@ -82,31 +83,25 @@ class TestIsEnglish:
         # Should not error out, and should detect as English
         assert is_english("Test article", long_desc) is True
 
-    def test_detection_failure_returns_true(self):
-        """When langdetect raises an exception, we default to allowing content."""
-        with patch("app.ingestion.language_filter.is_english.__module__"):
-            # Simulate langdetect.detect raising an exception
-            with patch.dict("sys.modules", {"langdetect": MagicMock()}):
-                import sys
-                mock_langdetect = sys.modules["langdetect"]
-                mock_langdetect.detect.side_effect = Exception("Detection failed")
-                # Need to re-import or call directly
-                # Actually, let's test via the actual function with a mock
-                pass
-
     def test_langdetect_exception_returns_true_safe_default(self):
-        """Verify safe default when langdetect.detect raises."""
-        with patch("langdetect.detect", side_effect=Exception("Cannot detect")):
+        """Verify safe default when langdetect.detect_langs raises."""
+        with patch("langdetect.detect_langs", side_effect=Exception("Cannot detect")):
             assert is_english("Some ambiguous text that might fail detection") is True
 
     def test_langdetect_returns_english(self):
         """Verify behavior when langdetect returns 'en'."""
-        with patch("langdetect.detect", return_value="en"):
+        mock_result = MagicMock()
+        mock_result.lang = "en"
+        mock_result.prob = 0.99
+        with patch("langdetect.detect_langs", return_value=[mock_result]):
             assert is_english("A normal English article about technology") is True
 
     def test_langdetect_returns_non_english(self):
         """Verify rejection when langdetect returns non-English."""
-        with patch("langdetect.detect", return_value="es"):
+        mock_result = MagicMock()
+        mock_result.lang = "es"
+        mock_result.prob = 0.95
+        with patch("langdetect.detect_langs", return_value=[mock_result]):
             assert is_english("This text is detected as Spanish by mock") is False
 
     def test_none_description_handled(self):
@@ -146,3 +141,62 @@ class TestIsEnglishRealWorldExamples:
             "Revisión completa del nuevo procesador Intel Core Ultra 300",
             "En este video hacemos una revisión detallada del nuevo procesador de Intel."
         ) is False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# detect_language
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestDetectLanguage:
+    """Tests for detect_language() which returns (lang_code, confidence)."""
+
+    def test_english_returns_en(self):
+        lang, prob = detect_language("Apple announces breakthrough AI chip for Mac")
+        assert lang == "en"
+        assert prob > 0.5
+
+    def test_spanish_returns_es(self):
+        lang, prob = detect_language(
+            "Las mejores aplicaciones para tu teléfono Android en 2026"
+        )
+        assert lang == "es"
+        assert prob > 0.0
+
+    def test_french_returns_fr(self):
+        lang, prob = detect_language(
+            "Les meilleures technologies de l'année selon les experts"
+        )
+        assert lang == "fr"
+        assert prob > 0.0
+
+    def test_short_text_returns_none(self):
+        short = "AI news"
+        assert len(short) < _MIN_DETECT_LENGTH
+        lang, prob = detect_language(short)
+        assert lang is None
+        assert prob == 0.0
+
+    def test_empty_title_returns_none(self):
+        lang, prob = detect_language("")
+        assert lang is None
+        assert prob == 0.0
+
+    def test_exception_returns_none(self):
+        with patch("langdetect.detect_langs", side_effect=Exception("fail")):
+            lang, prob = detect_language("Some text long enough to trigger detection")
+            assert lang is None
+            assert prob == 0.0
+
+    def test_description_improves_detection(self):
+        """Passing a description alongside the title gives context."""
+        lang, prob = detect_language(
+            "Tech Review",
+            "This article covers the latest innovations in artificial intelligence.",
+        )
+        assert lang == "en"
+
+    def test_confidence_in_zero_one_range(self):
+        lang, prob = detect_language("The latest developments in quantum computing")
+        assert lang is not None
+        assert 0.0 <= prob <= 1.0

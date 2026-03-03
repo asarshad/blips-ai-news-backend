@@ -26,7 +26,7 @@ from app.extraction.pipeline import (
     run_extraction,
 )
 from app.ingestion.extractors import extract_entities, extract_source, extract_topics
-from app.ingestion.language_filter import is_english
+from app.ingestion.language_filter import detect_language, is_non_english
 from app.ingestion.url_normalizer import normalize_url
 from app.integrations.llm_client import LLMClient
 from app.integrations.rss_client import FeedEntry, RSSClient
@@ -113,7 +113,14 @@ class IngestionPipeline:
             return None
 
         # Language gate: reject non-English content before spending LLM tokens
-        if not is_english(entry.title, entry.content):
+        detected_lang, _conf = detect_language(entry.title, entry.content)
+        if is_non_english(detected_lang):
+            logger.info(
+                "[language_filter] Skipping non-English article (lang=%s): %s",
+                detected_lang,
+                entry.title[:120],
+            )
+            extraction_metrics.record_language_filtered(detected_lang)
             return None
 
         # ── Content extraction pipeline ───────────────────────────────────
@@ -205,6 +212,7 @@ class IngestionPipeline:
             dedupe_key=dedupe_key,
             ai_processed=ai_processed,
             conversation_starters=inline_starters,
+            language=detected_lang or "en",
         )
         
         # Apply quality scoring with role-based modifiers
@@ -319,7 +327,14 @@ class IngestionPipeline:
             return None
 
         # Language gate: reject non-English videos before spending LLM tokens
-        if not is_english(entry.title, entry.summary):
+        detected_lang, _conf = detect_language(entry.title, entry.summary)
+        if is_non_english(detected_lang):
+            logger.info(
+                "[language_filter] Skipping non-English video (lang=%s): %s",
+                detected_lang,
+                entry.title[:120],
+            )
+            extraction_metrics.record_language_filtered(detected_lang)
             return None
         
         # Generate AI summary + conversation starters (skip for reels - metadata only)
@@ -377,9 +392,8 @@ class IngestionPipeline:
             dedupe_key=dedupe_key,
             ai_processed=ai_processed,
             conversation_starters=inline_starters,
+            language=detected_lang or "en",
         )
-        
-        # Apply quality modifier from channel tier
         base_quality = compute_source_weight(source)
         content_item.quality_score = base_quality * quality_modifier
         content_item.recency_score = 1.0

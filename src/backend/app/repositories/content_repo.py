@@ -13,6 +13,10 @@ from sqlalchemy.orm import Session
 from app.models.content import ContentItem, ContentType
 from app.repositories.base import BaseRepository
 
+# Items with language=NULL are legacy rows inserted before language detection
+# was added. Treat them as English to avoid breaking the feed for existing data.
+_ENGLISH_FILTER = or_(ContentItem.language == "en", ContentItem.language.is_(None))
+
 
 class ContentItemRepository(BaseRepository[ContentItem]):
     """Repository for ContentItem CRUD and query operations."""
@@ -82,6 +86,7 @@ class ContentItemRepository(BaseRepository[ContentItem]):
             ContentItem.type == content_type,
             ContentItem.published_at >= cutoff,
             ContentItem.is_suppressed.is_(False),
+            _ENGLISH_FILTER,
         )
         
         if ai_processed_only:
@@ -269,7 +274,8 @@ class ContentItemRepository(BaseRepository[ContentItem]):
             or_(
                 ContentItem.cluster_id.is_(None),
                 ContentItem.is_cluster_canonical == 1
-            )
+            ),
+            _ENGLISH_FILTER,
         )
         
         # Filter for AI-processed content only (unless explicitly disabled)
@@ -297,7 +303,8 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         # Query items and aggregate topics
         items = self.db.query(ContentItem).filter(
             ContentItem.type == content_type,
-            ContentItem.published_at >= cutoff
+            ContentItem.published_at >= cutoff,
+            _ENGLISH_FILTER,
         ).all()
         
         topic_counts = {}

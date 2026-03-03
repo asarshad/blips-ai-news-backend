@@ -9,7 +9,7 @@ dependency chain (FastAPI, etc.), keeping it testable in isolation.
 """
 
 import logging
-from typing import Optional
+from typing import Optional, Tuple
 
 # Seed langdetect for deterministic results (uses random sampling internally).
 # Without this, identical text can return different languages across calls.
@@ -22,49 +22,83 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # Minimum text length for reliable detection.
-# Very short strings (<20 chars) produce unreliable results.
-_MIN_DETECT_LENGTH = 20
+# langdetect recommends at least 50 chars; 30 is a pragmatic minimum that
+# still catches most non-English content while avoiding false rejections on
+# short-but-valid titles.
+_MIN_DETECT_LENGTH = 30
+
+
+def detect_language(
+    title: str, description: Optional[str] = None
+) -> Tuple[Optional[str], float]:
+    """Detect the BCP-47 language code for the given text.
+
+    Concatenates title + first 500 chars of description for better accuracy.
+
+    Returns:
+        (lang_code, confidence) where lang_code is e.g. "en", "es", "fr".
+        (None, 0.0) is returned when the text is too short to detect reliably
+        or when detection raises an exception.
+    """
+    if not title or not title.strip():
+        return None, 0.0
+
+    text = title.strip()
+    if description:
+        text = f"{text} {description[:500].strip()}"
+
+    if len(text) < _MIN_DETECT_LENGTH:
+        return None, 0.0
+
+    try:
+        from langdetect import detect_langs
+
+        results = detect_langs(text)
+        if results:
+            top = results[0]
+            return top.lang, top.prob
+    except Exception as exc:
+        logger.debug("Language detection failed for '%s': %s", title[:80], exc)
+
+    return None, 0.0
+
+
+def is_non_english(lang: Optional[str]) -> bool:
+    """Return True if a detected language code should cause the item to be rejected.
+
+    Centralises the rejection condition so that service.py does not re-implement
+    it inline.  Always returns False for None (safe default / inconclusive).
+    """
+    return lang is not None and lang != "en"
 
 
 def is_english(title: str, description: Optional[str] = None) -> bool:
     """Check if the given text is English.
 
-    Concatenates title + first 500 chars of description for better accuracy.
     Returns True (safe default) on detection failure — curated sources are
-    overwhelmingly English, so we only reject high-confidence non-English.
+    overwhelmingly English, so non-English content is rejected only when
+    detection succeeds with a concrete non-en language code.
 
     Args:
         title: Content title (required).
         description: Optional content body/description.
 
     Returns:
-        True if the content appears to be English or detection fails.
-        False if a non-English language is detected with confidence.
+        True if the content appears to be English or detection is inconclusive.
+        False only if a non-English language is detected.
     """
-    if not title or not title.strip():
+    lang, _prob = detect_language(title, description)
+
+    if lang is None:
+        # Too short or detection failed — allow through (safe default)
         return True
 
-    text = title.strip()
-    if description:
-        text = f"{text} {description[:500].strip()}"
+    if is_non_english(lang):
+        logger.warning(
+            "Non-English content detected (lang=%s): %s",
+            lang,
+            title[:100],
+        )
+        return False
 
-    # Too short for reliable detection — allow through
-    if len(text) < _MIN_DETECT_LENGTH:
-        return True
-
-    try:
-        from langdetect import detect
-
-        lang = detect(text)
-        if lang != "en":
-            logger.warning(
-                "Non-English content detected (lang=%s): %s",
-                lang,
-                title[:100],
-            )
-            return False
-        return True
-    except Exception as e:
-        # Detection failure (e.g., ambiguous text) — safe default is allow
-        logger.debug("Language detection failed for '%s': %s", title[:80], e)
-        return True
+    return True
