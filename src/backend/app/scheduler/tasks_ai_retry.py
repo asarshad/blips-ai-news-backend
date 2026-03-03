@@ -68,7 +68,7 @@ def process_ai_summaries():
                     stats.items_processed += 1
                     continue
 
-                text = item.description or item.title
+                text = item.content_text or item.description or item.title
 
                 if item.type == ContentType.ARTICLE:
                     result = llm_client.summarize_article(item.title, text)

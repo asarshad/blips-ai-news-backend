@@ -148,6 +148,19 @@ class Settings(BaseSettings):
     # Reels quality enforcement (defense-in-depth)
     REEL_MAX_DURATION_SECONDS: int = 180  # 3 minutes — anything longer is a VIDEO
 
+    # ------------------------------------------------------------------
+    # Content extraction (Phase: extraction hardening)
+    # ------------------------------------------------------------------
+    EXTRACTION_ENABLED: bool = True
+    EXTRACTION_CONNECT_TIMEOUT: float = 10.0
+    EXTRACTION_READ_TIMEOUT: float = 20.0
+    EXTRACTION_MAX_RETRIES: int = 3
+    EXTRACTION_BACKOFF_BASE: float = 1.5
+    EXTRACTION_DOMAIN_MIN_INTERVAL: float = 1.0   # seconds between requests to same domain
+    EXTRACTION_MIN_TEXT_WORDS: int = 100            # minimum words for "good" text
+    EXTRACTION_IDEAL_TEXT_WORDS: int = 300           # word count for 1.0 quality score
+    SOURCE_HEALTH_DEGRADED_THRESHOLD: float = 0.3  # below this, mark source degraded
+
     # Minimum fresh counts per surface (triggers top-up if below)
     MIN_FRESH_ARTICLES: int = 30
     MIN_FRESH_VIDEOS: int = 25

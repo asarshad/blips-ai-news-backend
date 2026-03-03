@@ -19,6 +19,12 @@ from app.clustering.dedupe import compute_dedupe_key
 from app.clustering.service import ClusteringService
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.extraction.metrics import extraction_metrics
+from app.extraction.pipeline import (
+    ExtractionResult,
+    RSSEntryData,
+    run_extraction,
+)
 from app.ingestion.extractors import extract_entities, extract_source, extract_topics
 from app.ingestion.language_filter import is_english
 from app.ingestion.url_normalizer import normalize_url
@@ -109,32 +115,89 @@ class IngestionPipeline:
         # Language gate: reject non-English content before spending LLM tokens
         if not is_english(entry.title, entry.content):
             return None
-        
+
+        # ── Content extraction pipeline ───────────────────────────────────
+        extraction: Optional[ExtractionResult] = None
+        extraction_enabled = getattr(settings, "EXTRACTION_ENABLED", True)
+
+        if extraction_enabled and normalized_url:
+            try:
+                rss_data = RSSEntryData(
+                    title=entry.title,
+                    description=entry.content,
+                    image_url=entry.image_url,
+                    published_date=entry.published_date,
+                )
+                extraction = run_extraction(normalized_url, rss_entry=rss_data)
+
+                # Record metrics
+                feed_name = getattr(entry, "feed_name", "") or source
+                extraction_metrics.record(extraction, source_name=feed_name)
+
+                # Use canonical_url for stronger dedup if available
+                if extraction.canonical_url and extraction.canonical_url != normalized_url:
+                    existing_canon = self.content_repo.get_by_canonical_url(extraction.canonical_url)
+                    if existing_canon:
+                        logger.debug(f"Article already ingested (canonical_url): {entry.title}")
+                        return None
+            except Exception as exc:
+                logger.warning(f"Extraction failed for {entry.title}, using RSS data: {exc}")
+                extraction = None
+
+        # Determine best content for summarization
+        article_text = None
+        if extraction and extraction.main_text:
+            article_text = extraction.main_text
+        elif extraction and extraction.excerpt_fallback:
+            article_text = extraction.excerpt_fallback
+        elif entry.content:
+            article_text = entry.content
+
+        # Determine final image (validated absolute URL or None)
+        final_image_url: Optional[str] = None
+        if extraction:
+            final_image_url = extraction.image_url  # Already validated & absolute or None
+        elif entry.image_url:
+            from app.extraction.normalize import validate_image_url
+            final_image_url = validate_image_url(entry.image_url)
+
+        # Determine canonical_url
+        final_canonical_url = None
+        if extraction and extraction.canonical_url:
+            final_canonical_url = extraction.canonical_url
+
+        # Determine published_at
+        final_published_at = entry.published_date or datetime.utcnow()
+        if extraction and extraction.published_at:
+            final_published_at = extraction.published_at
+
         # Generate AI summary + conversation starters in one LLM call
         summary = None
         ai_processed = False
         inline_starters = None
         try:
-            if self.llm_client.is_configured() and entry.content:
-                result = self.llm_client.summarize_article(entry.title, entry.content)
+            if self.llm_client.is_configured() and article_text:
+                result = self.llm_client.summarize_article(entry.title, article_text)
                 summary = result.summary
                 inline_starters = result.conversation_starters
                 ai_processed = bool(summary and len(summary.strip()) > 50)
         except Exception as e:
             logger.warning(f"Failed to summarize article {entry.title}: {e}")
-        
-        topics = extract_topics(entry.title, summary or entry.content[:500] if entry.content else "")
+
+        topics = extract_topics(entry.title, summary or (article_text[:500] if article_text else ""))
         entities = extract_entities(entry.title, summary or "")
-        
+
         content_item = ContentItem(
             type=ContentType.ARTICLE,
             source=source,
             source_url=normalized_url or entry.url,
-            published_at=entry.published_date or datetime.utcnow(),
-            title=entry.title,
+            canonical_url=final_canonical_url,
+            published_at=final_published_at,
+            title=extraction.title if extraction and extraction.title else entry.title,
             description=entry.content[:500] if entry.content else None,
+            content_text=article_text[:8000] if article_text else None,
             summary=summary,
-            image_url=entry.image_url,
+            image_url=final_image_url,  # Validated: absolute URL or None, never empty string
             video_url=None,
             duration_seconds=None,
             topics=topics,

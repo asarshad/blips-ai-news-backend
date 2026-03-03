@@ -1,0 +1,194 @@
+"""Tests for app.extraction.fetcher — SSRF protection, fetch logic, rate limiter."""
+
+from __future__ import annotations
+
+import time
+from unittest.mock import MagicMock, patch
+
+from app.extraction.fetcher import (
+    _is_private_host,
+    _rate_limit_domain,
+    fetch_url,
+)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# _is_private_host
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestIsPrivateHost:
+    """_is_private_host should detect all non-globally-routable addresses."""
+
+    def test_loopback_ipv4(self):
+        # 127.0.0.1 is loopback
+        with patch("socket.getaddrinfo") as mock_ga:
+            mock_ga.return_value = [(None, None, None, None, ("127.0.0.1", 0))]
+            assert _is_private_host("localhost") is True
+
+    def test_private_rfc1918_class_c(self):
+        with patch("socket.getaddrinfo") as mock_ga:
+            mock_ga.return_value = [(None, None, None, None, ("192.168.1.100", 0))]
+            assert _is_private_host("internal.host") is True
+
+    def test_link_local(self):
+        with patch("socket.getaddrinfo") as mock_ga:
+            mock_ga.return_value = [(None, None, None, None, ("169.254.169.254", 0))]
+            assert _is_private_host("metadata.local") is True
+
+    def test_public_ip_allowed(self):
+        with patch("socket.getaddrinfo") as mock_ga:
+            mock_ga.return_value = [(None, None, None, None, ("93.184.216.34", 0))]
+            assert _is_private_host("example.com") is False
+
+    def test_dns_failure_returns_false(self):
+        """If DNS resolution fails, we allow the request (fail will happen at connect)."""
+        import socket as _socket
+
+        with patch("socket.getaddrinfo", side_effect=_socket.gaierror("nxdomain")):
+            assert _is_private_host("nonexistent.invalid") is False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# fetch_url — SSRF blocking
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestFetchUrlSsrf:
+    """fetch_url must reject private hosts before any HTTP connection is made."""
+
+    def _mock_private(self, host_ip: str):
+        """Patch getaddrinfo to resolve to a private IP."""
+        return patch(
+            "app.extraction.fetcher.socket.getaddrinfo",
+            return_value=[(None, None, None, None, (host_ip, 0))],
+        )
+
+    def test_localhost_blocked(self):
+        with self._mock_private("127.0.0.1"):
+            result = fetch_url("http://localhost/secret")
+        assert result.error is not None
+        assert "SSRF" in result.error
+        assert result.status_code == 0
+
+    def test_private_ip_blocked(self):
+        with self._mock_private("10.0.0.1"):
+            result = fetch_url("http://10.0.0.1/data")
+        assert result.error is not None
+        assert "SSRF" in result.error
+
+    def test_metadata_service_blocked(self):
+        with self._mock_private("169.254.169.254"):
+            result = fetch_url("http://169.254.169.254/latest/meta-data/")
+        assert result.error is not None
+        assert "SSRF" in result.error
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# fetch_url — happy path
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestFetchUrlHappyPath:
+    """fetch_url should return populated FetchResult on HTTP 200."""
+
+    def _mock_public_host(self):
+        """Patch DNS to return a public IP."""
+        return patch(
+            "app.extraction.fetcher.socket.getaddrinfo",
+            return_value=[(None, None, None, None, ("93.184.216.34", 0))],
+        )
+
+    def _mock_http_response(self, status: int, body: bytes = b"<html><body>Hi</body></html>"):
+        mock_resp = MagicMock()
+        mock_resp.status_code = status
+        mock_resp.content = body
+        mock_resp.text = body.decode("utf-8")
+        mock_resp.encoding = "utf-8"
+        mock_resp.headers = {"Content-Type": "text/html", "ETag": '"abc123"'}
+        return mock_resp
+
+    def test_200_returns_html(self):
+        mock_resp = self._mock_http_response(200)
+        with self._mock_public_host():
+            with patch("app.extraction.fetcher._get_client") as mock_client:
+                mock_client.return_value.get.return_value = mock_resp
+                with patch("app.extraction.fetcher._rate_limit_domain"):
+                    result = fetch_url("https://example.com/article")
+
+        assert result.status_code == 200
+        assert "Hi" in result.html
+        assert result.etag == '"abc123"'
+        assert result.error is None
+        assert result.not_modified is False
+
+    def test_304_not_modified(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 304
+        mock_resp.headers = {"ETag": '"abc123"', "Last-Modified": "Mon, 01 Jan 2024 00:00:00 GMT"}
+        with self._mock_public_host():
+            with patch("app.extraction.fetcher._get_client") as mock_client:
+                mock_client.return_value.get.return_value = mock_resp
+                with patch("app.extraction.fetcher._rate_limit_domain"):
+                    result = fetch_url(
+                        "https://example.com/article",
+                        etag='"abc123"',
+                    )
+
+        assert result.status_code == 304
+        assert result.not_modified is True
+        assert result.error is None
+
+    def test_elapsed_always_defined_when_max_retries_zero(self):
+        """elapsed_ms must be set even when max_retries=0 (loop body never runs)."""
+        with self._mock_public_host():
+            with patch("app.extraction.fetcher.get_settings") as mock_settings:
+                settings = MagicMock()
+                settings.EXTRACTION_MAX_RETRIES = 0
+                settings.EXTRACTION_DOMAIN_MIN_INTERVAL = 0.0
+                mock_settings.return_value = settings
+                with patch("app.extraction.fetcher._rate_limit_domain"):
+                    result = fetch_url("https://example.com/article")
+
+        # Should not raise NameError; elapsed_ms defaults to 0.0
+        assert isinstance(result.elapsed_ms, float)
+        assert result.error is not None  # "All retries exhausted" or similar
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# _rate_limit_domain — lock released before sleeping
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestRateLimitDomain:
+    """The domain lock must be released before time.sleep() is called."""
+
+    def test_lock_released_before_sleep(self):
+        """Verify that sleep is called *outside* the lock.
+
+        Approach: patch time.sleep to assert that _domain_lock is NOT held
+        when sleep is invoked.  If it were held, acquiring the lock inside
+        the sleep callback would deadlock (Lock is not re-entrant).
+        """
+        from app.extraction import fetcher as fetcher_module
+
+        lock_held_during_sleep = []
+
+        def fake_sleep(duration):
+            # Try to acquire the lock non-blocking; if we can, it's been released
+            acquired = fetcher_module._domain_lock.acquire(blocking=False)
+            lock_held_during_sleep.append(not acquired)
+            if acquired:
+                fetcher_module._domain_lock.release()
+
+        # Force a wait by setting last request to now
+        fetcher_module._domain_last_request["__test_domain__"] = time.monotonic()
+
+        with patch("app.extraction.fetcher.time.sleep", side_effect=fake_sleep):
+            # Use a 0.01s interval to ensure the wait fires
+            _rate_limit_domain("__test_domain__", min_interval=0.01)
+
+        # If this assertion fails, the lock was held during sleep → bug
+        assert not any(lock_held_during_sleep), (
+            "time.sleep was called while _domain_lock was held — threads on "
+            "other domains would be serialized unnecessarily"
+        )
