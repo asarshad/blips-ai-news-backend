@@ -230,7 +230,7 @@ class RSSClient:
         
         return ""
     
-    def _extract_image_url(self, entry, article_url: str) -> str:
+    def _extract_image_url(self, entry, _article_url: str) -> str:
         """Extract featured image URL from feed entry or article page."""
         # Check media content
         if hasattr(entry, 'media_content') and entry.media_content:
