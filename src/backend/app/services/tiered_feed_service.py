@@ -356,6 +356,13 @@ def tiered_item_to_dict(tiered: TieredItem) -> Dict[str, Any]:
         result["category"] = item.topics[0] if item.topics else "Technology"
         result["duration_seconds"] = item.duration_seconds
         result["hot_score"] = int(item.global_score * 100) if item.global_score else 0
+
+    # Optional extraction debug fields (only when DEBUG_ROUTES_ENABLED)
+    if settings.DEBUG_ROUTES_ENABLED:
+        result["_debug"] = {
+            "canonical_url": getattr(item, "canonical_url", None),
+            "has_content_text": bool(getattr(item, "content_text", None)),
+        }
     
     return result
 

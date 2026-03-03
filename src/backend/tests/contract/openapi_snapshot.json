@@ -4067,6 +4067,112 @@
         ]
       }
     },
+    "/api/v1/metrics/extraction": {
+      "get": {
+        "description": "Get content extraction pipeline metrics.\n\nReturns:\n    - Global counters: ok/fallback/failed totals for extraction and images\n    - Per-source health scores with fail rates\n    - Degraded sources (health below threshold)\n\nRequires ADMIN_API_KEY.",
+        "operationId": "get_extraction_metrics_api_v1_metrics_extraction_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Extraction Metrics Api V1 Metrics Extraction Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Extraction Metrics",
+        "tags": [
+          "metrics",
+          "metrics"
+        ]
+      }
+    },
+    "/api/v1/metrics/extraction/samples": {
+      "get": {
+        "description": "Get recent extraction samples for debugging.\n\nReturns the last N extraction results with source_url, canonical_url,\nextraction_status, extractor_used, image_status, etc.\n\nRequires ADMIN_API_KEY.",
+        "operationId": "get_extraction_samples_api_v1_metrics_extraction_samples_get",
+        "parameters": [
+          {
+            "description": "Number of recent samples",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Number of recent samples",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Extraction Samples Api V1 Metrics Extraction Samples Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Extraction Samples",
+        "tags": [
+          "metrics",
+          "metrics"
+        ]
+      }
+    },
     "/api/v1/metrics/sources": {
       "get": {
         "description": "Get per-source ingestion health metrics.\n\nReturns:\n    - Per-feed status: last success, items ingested today, retry counts\n    - Per-source aggregates: total inserted today, average success rate\n    - Problem feeds: any with status=failed or high retry counts\n    \nRequires ADMIN_API_KEY.",

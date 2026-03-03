@@ -32,6 +32,12 @@ class ContentItemRepository(BaseRepository[ContentItem]):
             ContentItem.dedupe_key == dedupe_key
         ).first()
 
+    def get_by_canonical_url(self, canonical_url: str) -> Optional[ContentItem]:
+        """Get content item by canonical URL."""
+        return self.db.query(ContentItem).filter(
+            ContentItem.canonical_url == canonical_url
+        ).first()
+
     def count_created_on_date(
         self,
         content_type: ContentType,

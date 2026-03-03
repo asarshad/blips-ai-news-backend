@@ -2,20 +2,25 @@
 Metrics API endpoints for operational monitoring.
 
 These endpoints provide detailed insights into system health and performance.
+Includes extraction pipeline metrics and per-source health scoring.
 """
 
 from datetime import date, datetime, timedelta, timezone
+from typing import Any, Dict
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_admin_key
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
+from app.extraction.metrics import extraction_metrics
 from app.models.ingestion_progress import IngestionProgress
 from app.models.source import SourceDailyStat
 
 logger = get_logger(__name__)
+settings = get_settings()
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 
@@ -152,3 +157,60 @@ def get_source_health_metrics(db: Session = Depends(get_db)):
             "error": str(e),
             "as_of": datetime.now(timezone.utc).isoformat(),
         }
+
+
+@router.get("/extraction", dependencies=[Depends(require_admin_key)])
+def get_extraction_metrics() -> Dict[str, Any]:
+    """
+    Get content extraction pipeline metrics.
+
+    Returns:
+        - Global counters: ok/fallback/failed totals for extraction and images
+        - Per-source health scores with fail rates
+        - Degraded sources (health below threshold)
+
+    Requires ADMIN_API_KEY.
+    """
+    counters = extraction_metrics.get_counters()
+    source_health = extraction_metrics.get_source_health()
+
+    threshold = getattr(settings, "SOURCE_HEALTH_DEGRADED_THRESHOLD", 0.3)
+    degraded = [
+        name
+        for name in source_health
+        if extraction_metrics.is_source_degraded(name, threshold)
+    ]
+
+    return {
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "counters": counters,
+        "source_health": source_health,
+        "degraded_sources": degraded,
+        "config": {
+            "extraction_enabled": getattr(settings, "EXTRACTION_ENABLED", True),
+            "connect_timeout": getattr(settings, "EXTRACTION_CONNECT_TIMEOUT", 10),
+            "read_timeout": getattr(settings, "EXTRACTION_READ_TIMEOUT", 20),
+            "domain_min_interval": getattr(settings, "EXTRACTION_DOMAIN_MIN_INTERVAL", 1.0),
+            "health_degraded_threshold": threshold,
+        },
+    }
+
+
+@router.get("/extraction/samples", dependencies=[Depends(require_admin_key)])
+def get_extraction_samples(
+    limit: int = Query(20, ge=1, le=100, description="Number of recent samples"),
+) -> Dict[str, Any]:
+    """
+    Get recent extraction samples for debugging.
+
+    Returns the last N extraction results with source_url, canonical_url,
+    extraction_status, extractor_used, image_status, etc.
+
+    Requires ADMIN_API_KEY.
+    """
+    samples = extraction_metrics.get_samples(limit=limit)
+    return {
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "count": len(samples),
+        "samples": samples,
+    }
