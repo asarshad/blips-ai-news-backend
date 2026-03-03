@@ -120,8 +120,14 @@ _REFRESH_LUA = (
 )
 
 
-def refresh_worker_lock() -> bool:
-    """Refresh the worker lock TTL — only if we still own it."""
+def refresh_worker_lock() -> bool | None:
+    """Refresh the worker lock TTL — only if we still own it.
+
+    Returns:
+        True  — lock refreshed successfully.
+        False — lock is now owned by another process (fatal: worker should stop).
+        None  — transient Redis error (caller should tolerate a few retries).
+    """
     try:
         redis_client = get_redis()
         result = redis_client.eval(
@@ -132,8 +138,8 @@ def refresh_worker_lock() -> bool:
             return False
         return True
     except RedisError as e:
-        logger.warning(f"Failed to refresh worker lock: {e}")
-        return False
+        logger.warning(f"Failed to refresh worker lock (transient Redis error): {e}")
+        return None
 
 
 def _acquire_lock_with_retry(max_attempts: int = 10, base_delay: float = 5.0) -> bool:
@@ -238,12 +244,36 @@ def run_worker():
         logger.error(f"Initial fetch failed (non-fatal): {e}\n" + traceback.format_exc())
     sys.stdout.flush()
 
-    # Keep the worker running and refresh lock
+    # Keep the worker running and refresh lock.
+    # Tolerate transient Redis errors (returns None) — only exit on a
+    # definitive lock-lost (returns False) or sustained unavailability.
+    _MAX_REDIS_FAILURES = 5  # ~5 minutes of Redis unavailability before giving up
+    _redis_failure_count = 0
+
     logger.info("Worker running. Press Ctrl+C to stop.")
     sys.stdout.flush()
     try:
         while not _stop_event.is_set():
-            if not refresh_worker_lock():
+            result = refresh_worker_lock()
+            if result is True:
+                # Healthy — reset the failure counter
+                _redis_failure_count = 0
+            elif result is None:
+                # Transient Redis error — allow a few consecutive misses before
+                # treating it as fatal (one blip should never kill the worker).
+                _redis_failure_count += 1
+                logger.warning(
+                    f"Redis refresh failed ({_redis_failure_count}/{_MAX_REDIS_FAILURES}); "
+                    "will retry next cycle"
+                )
+                if _redis_failure_count >= _MAX_REDIS_FAILURES:
+                    logger.error(
+                        f"Redis unreachable for {_redis_failure_count} consecutive cycles "
+                        "— shutting down"
+                    )
+                    break
+            else:
+                # result is False — another process definitively owns the lock
                 logger.error("Lost worker lock — shutting down to avoid dual execution")
                 break
             _stop_event.wait(timeout=60)  # Wakes immediately on signal
