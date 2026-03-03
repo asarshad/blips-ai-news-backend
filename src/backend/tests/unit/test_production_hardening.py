@@ -221,6 +221,6 @@ class TestMistralTimeout:
                 if MockMistral.called:
                     call_kwargs = MockMistral.call_args
                     # Should have timeout_ms in kwargs (Mistral SDK uses milliseconds)
-                    assert "timeout_ms" in (
-                        call_kwargs.kwargs or {}
-                    ), "Mistral client should be initialized with timeout_ms parameter"
+                    assert "timeout_ms" in (call_kwargs.kwargs or {}), (
+                        "Mistral client should be initialized with timeout_ms parameter"
+                    )

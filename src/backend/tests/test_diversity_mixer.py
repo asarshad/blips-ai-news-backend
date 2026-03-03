@@ -72,9 +72,9 @@ class TestNoConsecutiveSameSource:
 
         # Check no consecutive same source
         for i in range(len(sources) - 1):
-            assert (
-                sources[i] != sources[i + 1]
-            ), f"Consecutive same source at position {i}: {sources}"
+            assert sources[i] != sources[i + 1], (
+                f"Consecutive same source at position {i}: {sources}"
+            )
 
     def test_three_sources(self):
         """Should handle three sources without consecutive same."""
