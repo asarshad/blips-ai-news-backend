@@ -164,9 +164,9 @@ class TestReelClassificationIngestion:
 
         source = inspect.getsource(IngestionPipeline.ingest_youtube_entry)
         # The new code should check is_long_duration FIRST
-        assert (
-            "is_long_duration" in source
-        ), "Ingestion must check for long duration and force VIDEO type"
+        assert "is_long_duration" in source, (
+            "Ingestion must check for long duration and force VIDEO type"
+        )
 
     def test_classification_priority_order(self):
         """
@@ -188,9 +188,9 @@ class TestReelClassificationIngestion:
         short_elif = source.index("elif is_short_duration")
         url_elif = source.index("elif is_shorts_url")
 
-        assert (
-            long_if < short_elif < url_elif
-        ), "Classification must check long_duration first, then short_duration, then URL pattern"
+        assert long_if < short_elif < url_elif, (
+            "Classification must check long_duration first, then short_duration, then URL pattern"
+        )
 
 
 # ---------------------------------------------------------------------------
