@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from app.models.content import ContentItem, ContentType
+from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.editorial import EditorialAction
 
 
@@ -34,6 +34,7 @@ class EditorialRepository:
         source: Optional[str] = None,
         suppressed: Optional[bool] = None,
         manual_added: Optional[bool] = None,
+        curation_status: Optional[str] = None,
         sort_by: str = "published_at",
         page: int = 1,
         page_size: int = 50,
@@ -62,6 +63,11 @@ class EditorialRepository:
 
         if manual_added is not None:
             query = query.filter(ContentItem.manual_added == manual_added)
+
+        if curation_status is not None:
+            cs = curation_status.upper()
+            if cs in ContentStatus.__members__:
+                query = query.filter(ContentItem.curation_status == ContentStatus[cs])
 
         total = query.count()
 
@@ -151,6 +157,50 @@ class EditorialRepository:
             action_type="UNSUPPRESS",
             old_value={"is_suppressed": True},
             new_value={"is_suppressed": False},
+            actor=actor,
+        )
+        self.db.commit()
+        self.db.refresh(item)
+        return item
+
+    def promote(self, content_id: int, actor: str) -> Optional[ContentItem]:
+        """Manually promote a CANDIDATE item to PROMOTED."""
+        item = self.get_content_by_id(content_id)
+        if item is None:
+            return None
+        old_status = item.curation_status
+        if old_status == ContentStatus.PROMOTED:
+            return item  # idempotent
+        item.curation_status = ContentStatus.PROMOTED
+        item.last_modified_by = actor
+        item.last_modified_at = datetime.now(tz=None)
+        self._log_action(
+            content_id=content_id,
+            action_type="PROMOTE",
+            old_value={"curation_status": old_status.value if old_status else None},
+            new_value={"curation_status": ContentStatus.PROMOTED.value},
+            actor=actor,
+        )
+        self.db.commit()
+        self.db.refresh(item)
+        return item
+
+    def demote(self, content_id: int, actor: str) -> Optional[ContentItem]:
+        """Manually demote a PROMOTED item back to CANDIDATE."""
+        item = self.get_content_by_id(content_id)
+        if item is None:
+            return None
+        old_status = item.curation_status
+        if old_status == ContentStatus.CANDIDATE:
+            return item  # idempotent
+        item.curation_status = ContentStatus.CANDIDATE
+        item.last_modified_by = actor
+        item.last_modified_at = datetime.now(tz=None)
+        self._log_action(
+            content_id=content_id,
+            action_type="DEMOTE",
+            old_value={"curation_status": old_status.value if old_status else None},
+            new_value={"curation_status": ContentStatus.CANDIDATE.value},
             actor=actor,
         )
         self.db.commit()
