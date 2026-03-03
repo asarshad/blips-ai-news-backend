@@ -17,9 +17,9 @@ def run_scoring_job():
 
     db = SessionLocal()
     try:
+        from app.ranking import ScoringService
         from app.repositories.content_repo import ContentItemRepository
         from app.repositories.user_repo import InteractionEventRepository
-        from app.services.scoring_service import ScoringService
 
         content_repo = ContentItemRepository(db)
         event_repo = InteractionEventRepository(db)
@@ -48,8 +48,8 @@ def run_clustering_job():
 
     db = SessionLocal()
     try:
+        from app.clustering import ClusteringService
         from app.repositories.content_repo import ContentItemRepository
-        from app.services.clustering_service import ClusteringService
 
         content_repo = ContentItemRepository(db)
         clustering = ClusteringService(content_repo)
