@@ -52,7 +52,7 @@ def compute_cluster_score(
 
 def compute_engagement_score(
     events: List[Dict[str, any]],
-    time_window_hours: int = 24,
+    _time_window_hours: int = 24,
 ) -> float:
     """
     Compute trend signal from user engagement.

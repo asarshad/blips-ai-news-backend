@@ -69,7 +69,7 @@ WORKER_LOCK_KEY = "worker_lock"
 WORKER_LOCK_TTL = 300  # 5 minutes
 
 
-def signal_handler(signum, frame):
+def signal_handler(signum, _frame):
     """Handle shutdown signals gracefully.
 
     Sets the shared stop event so in-flight ingestion / ThreadPoolExecutors
