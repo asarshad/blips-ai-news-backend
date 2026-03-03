@@ -1,4 +1,3 @@
-
 from datetime import datetime
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
@@ -15,6 +14,6 @@ class Conversation(Base):
     message = Column(Text)
     sender = Column(String)  # "user" or "ai"
     timestamp = Column(DateTime, default=datetime.utcnow)
-    
+
     # Relationships
     content_item = relationship("ContentItem", back_populates="conversations")

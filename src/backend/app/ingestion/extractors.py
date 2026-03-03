@@ -41,91 +41,91 @@ DOMAIN_TO_SOURCE = {
 def extract_topics(title: str, content: str, max_topics: int = 5) -> List[str]:
     """
     Extract tech topics from title and content.
-    
+
     Uses keyword matching against a predefined list of tech topics.
-    
+
     Args:
         title: Content title
         content: Content body/summary
         max_topics: Maximum topics to return
-        
+
     Returns:
         List of matched topics (lowercase)
-        
+
     Example:
         >>> extract_topics("Apple announces new AI features", "...")
         ['apple', 'ai', 'artificial intelligence']
     """
     text = f"{title} {content}".lower()
     found_topics = []
-    
+
     for topic in TECH_TOPICS:
         # Match whole words only
-        pattern = r'\b' + re.escape(topic) + r'\b'
+        pattern = r"\b" + re.escape(topic) + r"\b"
         if re.search(pattern, text):
             found_topics.append(topic)
-    
+
     return found_topics[:max_topics]
 
 
 def extract_entities(title: str, content: str, max_entities: int = 5) -> List[str]:
     """
     Extract named entities from title and content.
-    
+
     Uses keyword matching against a predefined list of tech entities
     (companies, products, people).
-    
+
     Args:
         title: Content title
         content: Content body/summary
         max_entities: Maximum entities to return
-        
+
     Returns:
         List of matched entities (lowercase)
-        
+
     Example:
         >>> extract_entities("Tim Cook unveils iPhone 16", "...")
         ['tim cook', 'apple', 'iphone']
     """
     text = f"{title} {content}".lower()
     found_entities = []
-    
+
     for entity in TECH_ENTITIES:
         # Match whole words only
-        pattern = r'\b' + re.escape(entity) + r'\b'
+        pattern = r"\b" + re.escape(entity) + r"\b"
         if re.search(pattern, text):
             found_entities.append(entity)
-    
+
     return found_entities[:max_entities]
 
 
 def extract_source(url: str) -> str:
     """
     Extract source name from URL.
-    
+
     Uses domain mapping for known sources, falls back to
     extracting and capitalizing the domain name.
-    
+
     Args:
         url: Content URL
-        
+
     Returns:
         Human-readable source name
-        
+
     Example:
         >>> extract_source("https://techcrunch.com/2024/01/01/...")
         'TechCrunch'
     """
     if not url:
         return "Unknown"
-    
+
     url_lower = url.lower()
-    
+
     # Check known domains
     for domain, source in DOMAIN_TO_SOURCE.items():
         if domain in url_lower:
             return source
-    
+
     # Extract domain as fallback
     try:
         parsed = urlparse(url)
@@ -139,11 +139,11 @@ def extract_source(url: str) -> str:
 def extract_source_from_youtube_channel(channel_name: str, url: str) -> str:
     """
     Extract source name from YouTube channel info.
-    
+
     Args:
         channel_name: YouTube channel name
         url: YouTube video URL
-        
+
     Returns:
         Channel name or "YouTube" as fallback
     """

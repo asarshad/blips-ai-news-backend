@@ -23,7 +23,9 @@ class IngestionProgress(Base):
 
     # Scope
     day_utc = Column(Date, nullable=False, index=True)
-    source_type = Column(String(32), nullable=False, index=True)  # rss | youtube_video | youtube_reel
+    source_type = Column(
+        String(32), nullable=False, index=True
+    )  # rss | youtube_video | youtube_reel
     feed_name = Column(String(255), nullable=False, index=True)
 
     # Targets / counters
@@ -35,7 +37,9 @@ class IngestionProgress(Base):
     last_item_cursor = Column(String(2048), nullable=True)
 
     # Status
-    status = Column(String(32), nullable=False, default="running")  # running | complete | failed | disabled
+    status = Column(
+        String(32), nullable=False, default="running"
+    )  # running | complete | failed | disabled
     last_error = Column(Text, nullable=True)
 
     # Retry/backoff (scheduler should skip rows until retry_at)

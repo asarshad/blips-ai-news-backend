@@ -23,10 +23,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Use a plain print() fallback in case the import itself fails.
 try:
     from app.core.logging import get_logger, setup_logging
+
     setup_logging()
     logger = get_logger(__name__)
 except Exception as _log_exc:  # noqa: BLE001
     import logging
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -44,6 +46,7 @@ try:
     from app.core.dependencies import get_redis
     from app.scheduler import init_scheduler
     from app.scheduler.tasks import fetch_and_process_news
+
     _heavy_imports_ok = True
 except Exception as _import_exc:  # noqa: BLE001
     logger.critical(
@@ -81,6 +84,7 @@ def signal_handler(signum, _frame):
     # Also propagate to the ingestion checkpointing module.
     try:
         from app.ingestion.checkpointing import STOP_EVENT
+
         STOP_EVENT.set()
     except Exception:
         pass
@@ -90,7 +94,7 @@ def acquire_worker_lock() -> bool:
     """
     Acquire a distributed lock to ensure only one worker runs.
     Uses a unique token so only the owning process can refresh/release.
-    
+
     Returns:
         True if lock acquired, False otherwise
     """
@@ -198,7 +202,7 @@ def run_worker():
 
     logger.info("Worker lock acquired successfully")
     sys.stdout.flush()
-    
+
     # Initialize scheduler (retry on transient failure)
     for attempt in range(1, 4):
         try:
@@ -231,9 +235,7 @@ def run_worker():
         fetch_and_process_news()
         logger.info("Initial fetch completed")
     except Exception as e:
-        logger.error(
-            f"Initial fetch failed (non-fatal): {e}\n" + traceback.format_exc()
-        )
+        logger.error(f"Initial fetch failed (non-fatal): {e}\n" + traceback.format_exc())
     sys.stdout.flush()
 
     # Keep the worker running and refresh lock

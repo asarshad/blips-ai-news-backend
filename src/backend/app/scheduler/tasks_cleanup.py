@@ -34,6 +34,7 @@ def _acquire_cleanup_lock() -> bool:
         import uuid
 
         from app.core.dependencies import get_redis
+
         token = str(uuid.uuid4())
         r = get_redis()
         acquired = bool(r.set(CLEANUP_LOCK_KEY, token, nx=True, ex=CLEANUP_LOCK_TTL))
@@ -55,6 +56,7 @@ def _release_cleanup_lock() -> None:
         return
     try:
         from app.core.dependencies import get_redis
+
         r = get_redis()
         lua = (
             "if redis.call('get', KEYS[1]) == ARGV[1] then "
@@ -92,6 +94,7 @@ def run_data_cleanup_job() -> dict:
         # Record last run timestamp in Redis for observability
         try:
             from app.core.dependencies import get_redis
+
             r = get_redis()
             r.setex("blips:cleanup:last_run_at", 86400 * 2, datetime.utcnow().isoformat())
         except Exception:

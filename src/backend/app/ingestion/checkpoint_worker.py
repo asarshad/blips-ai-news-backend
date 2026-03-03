@@ -94,7 +94,9 @@ def process_progress_row_batch(
     from app.models.ingestion_progress import IngestionProgress
 
     progress = db.query(IngestionProgress).filter(IngestionProgress.id == row_id).one()
-    logger.info(f"Processing row: id={row_id} type={progress.source_type} feed={progress.feed_name} target={progress.target} ingested={progress.items_ingested} status={progress.status}")
+    logger.info(
+        f"Processing row: id={row_id} type={progress.source_type} feed={progress.feed_name} target={progress.target} ingested={progress.items_ingested} status={progress.status}"
+    )
 
     # Respect backoff.
     now = datetime.utcnow()
@@ -106,9 +108,16 @@ def process_progress_row_batch(
 
     max_attempts_multiplier = _int_env("INGESTION_MAX_ATTEMPTS_MULTIPLIER", 30)
     max_attempts_min = _int_env("INGESTION_MAX_ATTEMPTS_MIN", 50)
-    max_attempts = max(int(max_attempts_min), int(progress.target or 0) * int(max_attempts_multiplier))
-    if int(progress.items_attempted or 0) >= max_attempts and int(progress.items_ingested or 0) < int(progress.target or 0):
-        repo.mark_failed(row_id, f"Exhausted attempts: attempted={int(progress.items_attempted or 0)} max={max_attempts}")
+    max_attempts = max(
+        int(max_attempts_min), int(progress.target or 0) * int(max_attempts_multiplier)
+    )
+    if int(progress.items_attempted or 0) >= max_attempts and int(
+        progress.items_ingested or 0
+    ) < int(progress.target or 0):
+        repo.mark_failed(
+            row_id,
+            f"Exhausted attempts: attempted={int(progress.items_attempted or 0)} max={max_attempts}",
+        )
         return {"row_id": row_id, "status": "exhausted", "inserted": 0, "attempted": 0}
 
     scope_key = f"{day_utc.isoformat()}:{progress.source_type}:{progress.feed_name}"
@@ -141,19 +150,32 @@ def process_progress_row_batch(
                 return {"row_id": row_id, "status": "failed", "inserted": 0}
 
             max_entries = int(os.getenv("RSS_ENTRIES_PER_FEED", "50"))
-            logger.info(f"RSS fetch: feed={progress.feed_name} url={cfg.url} max_entries={max_entries}")
+            logger.info(
+                f"RSS fetch: feed={progress.feed_name} url={cfg.url} max_entries={max_entries}"
+            )
             entries = rss.fetch_feed(cfg.url, max_entries=max_entries)
             if not entries:
                 logger.info(f"RSS fetch: feed={progress.feed_name} no entries returned")
                 return {"row_id": row_id, "status": "no_entries", "inserted": 0, "attempted": 0}
 
             remaining = max(0, int(progress.target) - int(progress.items_ingested))
-            logger.info(f"RSS ingestion: feed={progress.feed_name} entries={len(entries)} target={progress.target} ingested={progress.items_ingested} remaining={remaining}")
+            logger.info(
+                f"RSS ingestion: feed={progress.feed_name} entries={len(entries)} target={progress.target} ingested={progress.items_ingested} remaining={remaining}"
+            )
 
-            reserved = budget_repo.reserve(day=day_utc, content_type=ContentType.ARTICLE, want=min(batch_size, remaining))
+            reserved = budget_repo.reserve(
+                day=day_utc, content_type=ContentType.ARTICLE, want=min(batch_size, remaining)
+            )
             if reserved <= 0:
-                logger.info(f"RSS budget full: feed={progress.feed_name} - ARTICLE budget exhausted")
-                return {"row_id": row_id, "status": "skipped_type_full", "inserted": 0, "attempted": 0}
+                logger.info(
+                    f"RSS budget full: feed={progress.feed_name} - ARTICLE budget exhausted"
+                )
+                return {
+                    "row_id": row_id,
+                    "status": "skipped_type_full",
+                    "inserted": 0,
+                    "attempted": 0,
+                }
 
             new_window = min(batch_size, max(1, remaining))
             multiplier = max(1, _int_env("INGESTION_CANDIDATE_MULTIPLIER", 5))
@@ -186,7 +208,9 @@ def process_progress_row_batch(
                         "source": source,
                         "source_url": source_url,
                         "canonical_url": source_url,
-                        "canonical_key": canonical_key_for_article(canonical_url=source_url, source_url=source_url),
+                        "canonical_key": canonical_key_for_article(
+                            canonical_url=source_url, source_url=source_url
+                        ),
                         "ingestion_day": day_utc,
                         "is_suppressed": False,
                         "published_at": e.published_date or datetime.utcnow(),
@@ -262,8 +286,10 @@ def process_progress_row_batch(
 
                 db.query(IngestionProgress).filter(IngestionProgress.id == row_id).update(
                     {
-                        IngestionProgress.items_ingested: IngestionProgress.items_ingested + inserted,
-                        IngestionProgress.items_attempted: IngestionProgress.items_attempted + attempted,
+                        IngestionProgress.items_ingested: IngestionProgress.items_ingested
+                        + inserted,
+                        IngestionProgress.items_attempted: IngestionProgress.items_attempted
+                        + attempted,
                         IngestionProgress.last_item_cursor: new_cursor,
                         IngestionProgress.status: "complete"
                         if (int(progress.items_ingested) + inserted) >= int(progress.target)
@@ -287,7 +313,7 @@ def process_progress_row_batch(
             logger.info(
                 "YT channel config: name=%s content_format=%s",
                 cfg.name,
-                cfg.content_format.value if cfg.content_format else "None"
+                cfg.content_format.value if cfg.content_format else "None",
             )
 
             max_videos = int(os.getenv("YT_VIDEOS_PER_CHANNEL", "30"))
@@ -295,7 +321,7 @@ def process_progress_row_batch(
             if not entries:
                 logger.info("YT fetch: no entries from %s", progress.feed_name)
                 return {"row_id": row_id, "status": "no_entries", "inserted": 0, "attempted": 0}
-            
+
             # Debug: log is_short for each entry
             shorts_count = sum(1 for e in entries if e.is_short)
             logger.info(
@@ -303,18 +329,25 @@ def process_progress_row_batch(
                 progress.feed_name,
                 len(entries),
                 shorts_count,
-                len(entries) - shorts_count
+                len(entries) - shorts_count,
             )
-            
+
             want_reel = progress.source_type == "youtube_reel"
 
             remaining = max(0, int(progress.target) - int(progress.items_ingested))
 
             budget_type = ContentType.REEL if want_reel else ContentType.VIDEO
-            reserved = budget_repo.reserve(day=day_utc, content_type=budget_type, want=min(batch_size, remaining))
+            reserved = budget_repo.reserve(
+                day=day_utc, content_type=budget_type, want=min(batch_size, remaining)
+            )
             if reserved <= 0:
                 logger.info("YT budget full for %s (type=%s)", progress.feed_name, budget_type)
-                return {"row_id": row_id, "status": "skipped_type_full", "inserted": 0, "attempted": 0}
+                return {
+                    "row_id": row_id,
+                    "status": "skipped_type_full",
+                    "inserted": 0,
+                    "attempted": 0,
+                }
 
             new_window = min(batch_size, max(1, remaining))
             multiplier = max(1, _int_env("INGESTION_CANDIDATE_MULTIPLIER", 5))
@@ -355,7 +388,7 @@ def process_progress_row_batch(
                     return
 
                 # Language gate: skip non-English content
-                if not is_english(e.title, getattr(e, 'summary', None)):
+                if not is_english(e.title, getattr(e, "summary", None)):
                     skipped_reasons.setdefault("non_english", 0)
                     skipped_reasons["non_english"] += 1
                     return
@@ -463,8 +496,10 @@ def process_progress_row_batch(
 
                 db.query(IngestionProgress).filter(IngestionProgress.id == row_id).update(
                     {
-                        IngestionProgress.items_ingested: IngestionProgress.items_ingested + inserted,
-                        IngestionProgress.items_attempted: IngestionProgress.items_attempted + attempted,
+                        IngestionProgress.items_ingested: IngestionProgress.items_ingested
+                        + inserted,
+                        IngestionProgress.items_attempted: IngestionProgress.items_attempted
+                        + attempted,
                         IngestionProgress.last_item_cursor: new_cursor,
                         IngestionProgress.status: "complete"
                         if (int(progress.items_ingested) + inserted) >= int(progress.target)
@@ -483,19 +518,29 @@ def process_progress_row_batch(
             return {"row_id": row_id, "status": "failed", "inserted": 0}
 
         if inserted or attempted:
-            logger.info("Progress persisted: %s attempted=%s inserted=%s", scope_key, attempted, inserted)
+            logger.info(
+                "Progress persisted: %s attempted=%s inserted=%s", scope_key, attempted, inserted
+            )
         return {"row_id": row_id, "status": "ok", "inserted": inserted, "attempted": attempted}
 
     except Exception as e:
         logger.exception("Ingestion failed for %s", scope_key)
         try:
             retry_count = int(progress.retry_count or 0)
-            delay = min(retry_max_seconds, max(retry_base_seconds, retry_base_seconds * (2 ** retry_count)))
+            delay = min(
+                retry_max_seconds, max(retry_base_seconds, retry_base_seconds * (2**retry_count))
+            )
             retry_at = datetime.utcnow() + timedelta(seconds=int(delay))
             repo.schedule_retry(row_id=row_id, error=str(e), retry_at=retry_at)
         except Exception:
             pass
-        return {"row_id": row_id, "status": "failed", "inserted": 0, "attempted": 0, "error": str(e)}
+        return {
+            "row_id": row_id,
+            "status": "failed",
+            "inserted": 0,
+            "attempted": 0,
+            "error": str(e),
+        }
 
     finally:
         if redis_client is not None:

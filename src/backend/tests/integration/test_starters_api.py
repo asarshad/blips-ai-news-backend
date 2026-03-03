@@ -28,6 +28,7 @@ def _use_fake_llm():
 def client():
     """Create a test client with the app."""
     from app.main import app
+
     with TestClient(app) as test_client:
         yield test_client
 
@@ -103,7 +104,7 @@ class TestStartersEndpoints:
         """Starters are generated for an article without cached starters."""
         resp = client.get(f"/api/v1/starters/{sample_article.id}")
         assert resp.status_code == 200
-        
+
         data = resp.json()
         assert data["content_id"] == sample_article.id
         assert isinstance(data["starters"], list)
@@ -115,7 +116,7 @@ class TestStartersEndpoints:
         """Starters are generated for a video without cached starters."""
         resp = client.get(f"/api/v1/starters/{sample_video.id}")
         assert resp.status_code == 200
-        
+
         data = resp.json()
         assert data["content_id"] == sample_video.id
         assert isinstance(data["starters"], list)
@@ -127,12 +128,12 @@ class TestStartersEndpoints:
         resp1 = client.get(f"/api/v1/starters/{sample_article.id}")
         assert resp1.status_code == 200
         starters1 = resp1.json()["starters"]
-        
+
         # Second call returns cached (same starters)
         resp2 = client.get(f"/api/v1/starters/{sample_article.id}")
         assert resp2.status_code == 200
         starters2 = resp2.json()["starters"]
-        
+
         assert starters1 == starters2
 
     def test_regenerate_starters_via_query_param(self, client, sample_article):
@@ -140,11 +141,11 @@ class TestStartersEndpoints:
         # First call
         resp1 = client.get(f"/api/v1/starters/{sample_article.id}")
         assert resp1.status_code == 200
-        
+
         # Regenerate
         resp2 = client.get(f"/api/v1/starters/{sample_article.id}?regenerate=true")
         assert resp2.status_code == 200
-        
+
         # FakeLLM returns consistent responses, so values may be same
         # but the endpoint should work without error
         assert "starters" in resp2.json()
@@ -154,11 +155,11 @@ class TestStartersEndpoints:
         # Generate via GET first
         resp1 = client.get(f"/api/v1/starters/{sample_article.id}")
         assert resp1.status_code == 200
-        
+
         # Force regenerate via POST
         resp2 = client.post(f"/api/v1/starters/{sample_article.id}/generate")
         assert resp2.status_code == 200
-        
+
         data = resp2.json()
         assert data["content_id"] == sample_article.id
         assert isinstance(data["starters"], list)
@@ -176,18 +177,16 @@ class TestStartersPersistence:
         """Generated starters are persisted to the DB."""
         from app.db.base import SessionLocal
         from app.models.content import ContentItem
-        
+
         # Generate starters via API
         resp = client.get(f"/api/v1/starters/{sample_article.id}")
         assert resp.status_code == 200
         api_starters = resp.json()["starters"]
-        
+
         # Verify persisted in DB
         db = SessionLocal()
         try:
-            item = db.query(ContentItem).filter(
-                ContentItem.id == sample_article.id
-            ).first()
+            item = db.query(ContentItem).filter(ContentItem.id == sample_article.id).first()
             assert item is not None
             assert item.conversation_starters is not None
             assert item.conversation_starters.get("starters") == api_starters
@@ -202,13 +201,13 @@ class TestFakeLLMIntegration:
         """FakeLLM provides valid starters structure."""
         resp = client.get(f"/api/v1/starters/{sample_article.id}")
         assert resp.status_code == 200
-        
+
         data = resp.json()
         # FakeLLM should return starters containing content-specific references
         starters = data["starters"]
-        
+
         # At minimum, we should have some starters
         assert len(starters) >= 1
-        
+
         # Fallback should also be present
         assert len(data["fallback"]) >= 1

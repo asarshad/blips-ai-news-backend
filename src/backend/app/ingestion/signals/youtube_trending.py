@@ -46,9 +46,7 @@ def fetch_yt_trending(
         List of SignalItem with YouTube watch URLs.
     """
     if not api_key:
-        logger.info(
-            "[yt_trending_signal] YOUTUBE_API_KEY not configured – skipping YT trending"
-        )
+        logger.info("[yt_trending_signal] YOUTUBE_API_KEY not configured – skipping YT trending")
         return []
 
     params = {

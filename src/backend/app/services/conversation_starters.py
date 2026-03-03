@@ -25,23 +25,24 @@ DEFAULT_FALLBACK_STARTERS = [
 
 class StarterGenerationError(Exception):
     """Raised when starter generation fails."""
+
     pass
 
 
 def get_starter_prompt(title: str, summary: str, content_type: ContentType) -> str:
     """
     Build the prompt for generating conversation starters.
-    
+
     Args:
         title: Content title
         summary: Content summary
         content_type: Type of content (ARTICLE, VIDEO, REEL)
-        
+
     Returns:
         Formatted prompt string
     """
     content_type_label = content_type.value.lower()
-    
+
     return f"""You are a helpful assistant that generates conversation starter questions for a tech news app.
 
 Given the following {content_type_label}:
@@ -73,13 +74,13 @@ Respond ONLY with valid JSON in this exact format:
 def parse_starters_response(response_text: str) -> Dict[str, List[str]]:
     """
     Parse LLM response into structured starters.
-    
+
     Args:
         response_text: Raw LLM response
-        
+
     Returns:
         Dict with "starters" and "fallback" lists
-        
+
     Raises:
         StarterGenerationError: If parsing fails
     """
@@ -94,29 +95,29 @@ def parse_starters_response(response_text: str) -> Dict[str, List[str]]:
         if text.endswith("```"):
             text = text[:-3]
         text = text.strip()
-        
+
         data = json.loads(text)
-        
+
         starters = data.get("starters", [])
         fallback = data.get("fallback", DEFAULT_FALLBACK_STARTERS)
-        
+
         # Validate
         if not isinstance(starters, list) or len(starters) == 0:
             raise StarterGenerationError("No starters in response")
-        
+
         # Filter empty strings and truncate to 120 chars
         starters = [s.strip() for s in starters if isinstance(s, str) and s.strip()]
         starters = [s[:117] + "..." if len(s) > 120 else s for s in starters]
-        
+
         fallback_list = fallback[:3] if fallback else DEFAULT_FALLBACK_STARTERS
         fallback_list = [s.strip() for s in fallback_list if isinstance(s, str) and s.strip()]
         fallback_list = [s[:117] + "..." if len(s) > 120 else s for s in fallback_list]
-        
+
         return {
             "starters": starters[:5],  # Limit to 5
             "fallback": fallback_list if fallback_list else DEFAULT_FALLBACK_STARTERS,
         }
-        
+
     except json.JSONDecodeError as e:
         logger.warning(f"Failed to parse starters JSON: {e}")
         raise StarterGenerationError(f"Invalid JSON response: {e}") from e
@@ -125,80 +126,78 @@ def parse_starters_response(response_text: str) -> Dict[str, List[str]]:
 class ConversationStartersService:
     """
     Service for generating and managing conversation starters.
-    
+
     Usage:
         service = ConversationStartersService(llm_client)
         starters = service.generate_starters(content_item)
-        
+
         # Or generate for a batch during ingestion
         service.generate_for_batch(content_items, db_session)
     """
-    
+
     def __init__(self, llm_client: Optional[LLMClient] = None):
         """
         Initialize the service.
-        
+
         Args:
             llm_client: LLM client instance. If None, creates default.
         """
         self._llm_client = llm_client
-    
+
     @property
     def llm_client(self) -> LLMClient:
         """Lazy-load LLM client."""
         if self._llm_client is None:
             self._llm_client = LLMClient()
         return self._llm_client
-    
+
     def generate_starters(
-        self,
-        content_item: ContentItem,
-        force_regenerate: bool = False
+        self, content_item: ContentItem, force_regenerate: bool = False
     ) -> Dict[str, List[str]]:
         """
         Generate conversation starters for a content item.
-        
+
         Args:
             content_item: The content item to generate starters for
             force_regenerate: If True, regenerate even if starters exist
-            
+
         Returns:
             Dict with "starters" and "fallback" lists
         """
         # Return existing starters if available
         if content_item.conversation_starters and not force_regenerate:
             return content_item.conversation_starters
-        
+
         # Check if LLM is configured
         if not self.llm_client.is_configured():
             logger.warning("LLM not configured, using default starters")
             return self._get_default_starters(content_item)
-        
+
         try:
             prompt = get_starter_prompt(
                 title=content_item.title,
                 summary=content_item.summary or content_item.description or "",
-                content_type=content_item.type
+                content_type=content_item.type,
             )
-            
+
             response = self.llm_client.chat(
-                messages=[ChatMessage(role="user", content=prompt)],
-                max_tokens=300,
-                temperature=0.7
+                messages=[ChatMessage(role="user", content=prompt)], max_tokens=300, temperature=0.7
             )
-            
+
             starters = parse_starters_response(response.content)
             logger.info(f"Generated starters for content_id={content_item.id}")
             return starters
-            
+
         except Exception as e:
             logger.error(f"Failed to generate starters for content_id={content_item.id}: {e}")
             return self._get_default_starters(content_item)
-    
+
     def _get_default_starters(self, content_item: ContentItem) -> Dict[str, List[str]]:
         """Generate default starters based on content metadata."""
-        short_title = content_item.title[:40] + "..." if len(content_item.title) > 40 else content_item.title
-        
+        short_title = (
+            content_item.title[:40] + "..." if len(content_item.title) > 40 else content_item.title
+        )
+
         if content_item.type == ContentType.VIDEO:
             starters = [
                 f"What are the key takeaways from '{short_title}'?",
@@ -216,26 +215,24 @@ class ConversationStartersService:
                 "Can you break down the key points?",
                 "How does this compare to similar developments?",
             ]
-        
+
         return {
             "starters": starters,
             "fallback": DEFAULT_FALLBACK_STARTERS,
         }
-    
+
     def generate_and_persist(
-        self,
-        content_item: ContentItem,
-        force_regenerate: bool = False
+        self, content_item: ContentItem, force_regenerate: bool = False
     ) -> Dict[str, List[str]]:
         """
         Generate starters and update the content item in place.
-        
+
         Note: Caller is responsible for committing the session.
-        
+
         Args:
             content_item: Content item to update
             force_regenerate: If True, regenerate even if starters exist
-            
+
         Returns:
             The generated starters
         """

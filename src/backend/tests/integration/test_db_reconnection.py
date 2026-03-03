@@ -13,11 +13,13 @@ pytestmark = [pytest.mark.integration]
 
 def _get_engine():
     from app.db.base import engine
+
     return engine
 
 
 def _get_session():
     from app.db.base import SessionLocal
+
     return SessionLocal()
 
 

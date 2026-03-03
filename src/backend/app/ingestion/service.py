@@ -59,11 +59,11 @@ DAILY_TARGET_REELS = settings.DAILY_TARGET_REELS
 class IngestionPipeline:
     """
     Pipeline for ingesting content into the curation system.
-    
+
     Fetches directly from RSS feeds and YouTube channels,
     extracts metadata, and triggers clustering/scoring.
     """
-    
+
     def __init__(
         self,
         db: Session,
@@ -81,17 +81,17 @@ class IngestionPipeline:
         self.rss_client = rss_client or RSSClient()
         self.youtube_client = youtube_client or YouTubeClient()
         self.llm_client = llm_client or LLMClient()
-    
+
     def ingest_rss_entry(self, entry: FeedEntry) -> Optional[ContentItem]:
         """
         Ingest an RSS feed entry directly into content_items.
-        
+
         Uses enhanced metadata from the new feed configuration system
         for better quality scoring and role-based ranking.
-        
+
         Args:
             entry: FeedEntry from RSS client (with role metadata)
-            
+
         Returns:
             Created ContentItem or None if duplicate
         """
@@ -106,7 +106,7 @@ class IngestionPipeline:
 
         source = extract_source(normalized_url or entry.url)
         dedupe_key = compute_dedupe_key(entry.title, source)
-        
+
         existing = self.content_repo.get_by_dedupe_key(dedupe_key)
         if existing:
             logger.debug(f"Article already ingested: {entry.title}")
@@ -143,7 +143,9 @@ class IngestionPipeline:
 
                 # Use canonical_url for stronger dedup if available
                 if extraction.canonical_url and extraction.canonical_url != normalized_url:
-                    existing_canon = self.content_repo.get_by_canonical_url(extraction.canonical_url)
+                    existing_canon = self.content_repo.get_by_canonical_url(
+                        extraction.canonical_url
+                    )
                     if existing_canon:
                         logger.debug(f"Article already ingested (canonical_url): {entry.title}")
                         return None
@@ -166,6 +168,7 @@ class IngestionPipeline:
             final_image_url = extraction.image_url  # Already validated & absolute or None
         elif entry.image_url:
             from app.extraction.normalize import validate_image_url
+
             final_image_url = validate_image_url(entry.image_url)
 
         # Determine canonical_url
@@ -191,7 +194,9 @@ class IngestionPipeline:
         except Exception as e:
             logger.warning(f"Failed to summarize article {entry.title}: {e}")
 
-        topics = extract_topics(entry.title, summary or (article_text[:500] if article_text else ""))
+        topics = extract_topics(
+            entry.title, summary or (article_text[:500] if article_text else "")
+        )
         entities = extract_entities(entry.title, summary or "")
 
         content_item = ContentItem(
@@ -214,19 +219,19 @@ class IngestionPipeline:
             conversation_starters=inline_starters,
             language=detected_lang or "en",
         )
-        
+
         # Apply quality scoring with role-based modifiers
         # Use base_quality_weight from feed config if available, else compute from source
         base_quality = entry.base_quality_weight or compute_source_weight(source)
-        
+
         # Apply quality tier modifier
         quality_modifier = 1.0
         if entry.quality_tier:
             quality_modifier = get_rss_quality_modifier(entry.quality_tier)
-        
+
         content_item.quality_score = base_quality * quality_modifier
         content_item.recency_score = 1.0
-        
+
         self.db.add(content_item)
         try:
             self.db.commit()
@@ -239,24 +244,24 @@ class IngestionPipeline:
         except Exception:
             self.db.rollback()
             raise
-        
+
         self.clustering.cluster_new_item(content_item)
         self._update_scores(content_item)
-        
+
         # Starters were included in the summary LLM call.
         # Fall back to title-based defaults only if the LLM didn't produce them.
         if not content_item.conversation_starters:
             self._generate_starters_fallback(content_item)
-        
+
         # Log role info if available
         role_info = ""
         if entry.feed_role:
             role_info = f" [{entry.feed_role.value}]"
-        
+
         status = "with AI summary" if ai_processed else "without AI summary"
         logger.info(f"Ingested article{role_info} {status}: {entry.title} -> {content_item.id}")
         return content_item
-    
+
     def ingest_youtube_entry(
         self,
         entry: VideoEntry,
@@ -264,14 +269,14 @@ class IngestionPipeline:
     ) -> Optional[ContentItem]:
         """
         Ingest a YouTube video entry directly into content_items.
-        
+
         Uses enhanced metadata from the new channel configuration system
         for better classification and quality scoring.
-        
+
         Args:
             entry: VideoEntry from YouTube client (with role metadata)
             content_type: VIDEO or REEL (can be overridden by entry.is_short)
-            
+
         Returns:
             Created ContentItem or None if duplicate
         """
@@ -281,15 +286,21 @@ class IngestionPipeline:
             duration_seconds = self.youtube_client.get_video_duration(entry.video_id)
         except Exception as e:
             logger.warning(f"Failed to get duration for video {entry.title}: {e}")
-        
+
         # Classify as REEL if it's a Short.
         # Priority: known duration > URL pattern > entry metadata hint.
         # If we have a concrete duration, that is authoritative.
         if content_type == ContentType.VIDEO:
-            is_short = getattr(entry, 'is_short', False)
+            is_short = getattr(entry, "is_short", False)
             is_shorts_url = entry.video_url and "/shorts/" in entry.video_url
-            is_short_duration = duration_seconds is not None and duration_seconds <= settings.REEL_MAX_DURATION_SECONDS
-            is_long_duration = duration_seconds is not None and duration_seconds > settings.REEL_MAX_DURATION_SECONDS
+            is_short_duration = (
+                duration_seconds is not None
+                and duration_seconds <= settings.REEL_MAX_DURATION_SECONDS
+            )
+            is_long_duration = (
+                duration_seconds is not None
+                and duration_seconds > settings.REEL_MAX_DURATION_SECONDS
+            )
 
             if is_long_duration:
                 # Authoritative: known duration > 180s → always VIDEO
@@ -307,12 +318,16 @@ class IngestionPipeline:
                     f"Reel classified by metadata hint only (no duration): "
                     f"{entry.title} [{entry.video_id}]"
                 )
-        
+
         source = entry.source or "YouTube"
         # YouTube titles repeat frequently (series/weekly formats). Use video_id for stable dedupe.
-        dedupe_key = f"yt:{entry.video_id}" if entry.video_id else compute_dedupe_key(entry.title, source)
+        dedupe_key = (
+            f"yt:{entry.video_id}" if entry.video_id else compute_dedupe_key(entry.title, source)
+        )
 
-        normalized_video_url = normalize_url(entry.video_url) if entry.video_url else entry.video_url
+        normalized_video_url = (
+            normalize_url(entry.video_url) if entry.video_url else entry.video_url
+        )
 
         # Strong idempotency: source_url is unique in DB.
         if normalized_video_url:
@@ -320,7 +335,7 @@ class IngestionPipeline:
             if existing_by_url:
                 logger.debug(f"Video already ingested (source_url): {entry.title}")
                 return None
-        
+
         existing = self.content_repo.get_by_dedupe_key(dedupe_key)
         if existing:
             logger.debug(f"Video already ingested: {entry.title}")
@@ -336,12 +351,12 @@ class IngestionPipeline:
             )
             extraction_metrics.record_language_filtered(detected_lang)
             return None
-        
+
         # Generate AI summary + conversation starters (skip for reels - metadata only)
         summary = entry.summary
         ai_processed = False
         inline_starters = None
-        
+
         # Skip AI summarization for REEL content type
         if content_type == ContentType.REEL:
             # Reels use metadata only, no summarization
@@ -350,13 +365,17 @@ class IngestionPipeline:
             try:
                 if self.llm_client.is_configured() and summary:
                     # Check if summary is generic
-                    is_generic = "Watch this video" in summary or "Subscribe" in summary.lower() or len(summary.strip()) < 50
+                    is_generic = (
+                        "Watch this video" in summary
+                        or "Subscribe" in summary.lower()
+                        or len(summary.strip()) < 50
+                    )
                     if is_generic:
                         # Try to get transcript
                         transcript = self.youtube_client.get_transcript(entry.video_id)
                         if transcript:
                             summary = transcript[:5000]
-                    
+
                     video_result = self.llm_client.summarize_video(entry.title, summary)
                     ai_summary = video_result.summary
                     inline_starters = video_result.conversation_starters
@@ -365,16 +384,16 @@ class IngestionPipeline:
                         ai_processed = True
             except Exception as e:
                 logger.warning(f"Failed to summarize video {entry.title}: {e}")
-        
+
         # Apply quality tier modifier from channel config
-        channel_quality_tier = getattr(entry, 'quality_tier', None)
+        channel_quality_tier = getattr(entry, "quality_tier", None)
         quality_modifier = 1.0
         if channel_quality_tier:
             quality_modifier = get_quality_weight_modifier(channel_quality_tier)
-        
+
         topics = extract_topics(entry.title, summary or "")
         entities = extract_entities(entry.title, summary or "")
-        
+
         content_item = ContentItem(
             type=content_type,
             source=source,
@@ -397,7 +416,7 @@ class IngestionPipeline:
         base_quality = compute_source_weight(source)
         content_item.quality_score = base_quality * quality_modifier
         content_item.recency_score = 1.0
-        
+
         self.db.add(content_item)
         try:
             self.db.commit()
@@ -409,25 +428,27 @@ class IngestionPipeline:
         except Exception:
             self.db.rollback()
             raise
-        
+
         self.clustering.cluster_new_item(content_item)
         self._update_scores(content_item)
-        
+
         # Starters were included in the summary LLM call.
         # Fall back to title-based defaults only if the LLM didn't produce them.
         if content_type != ContentType.REEL and not content_item.conversation_starters:
             self._generate_starters_fallback(content_item)
-        
+
         # Log role info if available
         role_info = ""
-        channel_role = getattr(entry, 'channel_role', None)
+        channel_role = getattr(entry, "channel_role", None)
         if channel_role:
             role_info = f" [{channel_role.value}]"
-        
+
         status = "with AI summary" if ai_processed else "without AI summary"
-        logger.info(f"Ingested {content_type.value}{role_info} {status}: {entry.title} -> {content_item.id}")
+        logger.info(
+            f"Ingested {content_type.value}{role_info} {status}: {entry.title} -> {content_item.id}"
+        )
         return content_item
-    
+
     def run_backfill(
         self,
         hours_back: int = 72,
@@ -717,7 +738,9 @@ class IngestionPipeline:
             logger.info(f"Ingestion attempt {attempt_num} complete: {stats}")
 
             # If we didn't ingest anything new, don't spin forever.
-            if (stats["articles_ingested"] + stats["videos_ingested"] + stats["reels_ingested"]) == 0:
+            if (
+                stats["articles_ingested"] + stats["videos_ingested"] + stats["reels_ingested"]
+            ) == 0:
                 logger.warning(
                     "No new items ingested in attempt %s; stopping early (remaining targets may not be reachable with current sources)",
                     attempt_num,
@@ -726,7 +749,7 @@ class IngestionPipeline:
 
             if ingest_until_targets and catchup_sleep_seconds > 0:
                 time.sleep(catchup_sleep_seconds)
-    
+
     def _update_scores(self, content_item: ContentItem) -> None:
         """Update scores for a newly ingested item."""
         scores = self.scoring.score_single_item(content_item)
@@ -743,6 +766,7 @@ class IngestionPipeline:
         """Persist title-based default starters when the summary LLM call didn't produce them."""
         try:
             from app.services.conversation_starters import ConversationStartersService
+
             defaults = ConversationStartersService()._get_default_starters(content_item)
             content_item.conversation_starters = defaults
             self.db.commit()
@@ -758,13 +782,13 @@ def create_ingestion_pipeline(db: Session) -> IngestionPipeline:
     from app.ranking.service import ScoringService
     from app.repositories.content_repo import ContentItemRepository
     from app.repositories.user_repo import InteractionEventRepository
-    
+
     content_repo = ContentItemRepository(db)
     event_repo = InteractionEventRepository(db)
-    
+
     clustering = ClusteringService(content_repo)
     scoring = ScoringService(content_repo, event_repo)
-    
+
     return IngestionPipeline(
         db=db,
         content_repo=content_repo,

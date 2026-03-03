@@ -42,6 +42,7 @@ def fetch_and_process_news():
     # in the feed right away instead of waiting for the next ai_retry tick.
     try:
         from app.scheduler.tasks_ai_retry import process_ai_summaries
+
         logger.info("[fetch_news] Running immediate AI summarization…")
         process_ai_summaries()
         logger.info("[fetch_news] AI summarization complete")

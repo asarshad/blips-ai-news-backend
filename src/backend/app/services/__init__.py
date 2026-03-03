@@ -6,7 +6,7 @@ business logic for the application.
 
 NOTE: Scoring, Clustering, and Ingestion have been moved to dedicated modules:
 - app.ranking - Scoring functionality
-- app.clustering - Clustering functionality  
+- app.clustering - Clustering functionality
 - app.ingestion - Ingestion pipeline (direct RSS/YouTube fetching)
 """
 

@@ -27,34 +27,24 @@ from pydantic_settings import BaseSettings
 class ScoringWeights(BaseSettings):
     """
     Weights for the global score formula.
-    
+
     Must sum to 1.0 for normalized output.
     """
-    
+
     quality: float = Field(
-        default=0.40,
-        ge=0.0, le=1.0,
-        description="Weight for source quality and completeness"
+        default=0.40, ge=0.0, le=1.0, description="Weight for source quality and completeness"
     )
     trend: float = Field(
-        default=0.30,
-        ge=0.0, le=1.0,
-        description="Weight for trending/engagement signals"
+        default=0.30, ge=0.0, le=1.0, description="Weight for trending/engagement signals"
     )
-    recency: float = Field(
-        default=0.20,
-        ge=0.0, le=1.0,
-        description="Weight for content freshness"
-    )
+    recency: float = Field(default=0.20, ge=0.0, le=1.0, description="Weight for content freshness")
     diversity: float = Field(
-        default=0.10,
-        ge=0.0, le=1.0,
-        description="Weight for diversity boost/penalty"
+        default=0.10, ge=0.0, le=1.0, description="Weight for diversity boost/penalty"
     )
-    
+
     class Config:
         env_prefix = "SCORING_WEIGHT_"
-    
+
     def validate_sum(self) -> bool:
         """Verify weights sum to 1.0."""
         total = self.quality + self.trend + self.recency + self.diversity
@@ -64,29 +54,21 @@ class ScoringWeights(BaseSettings):
 class RecencyConfig(BaseSettings):
     """
     Configuration for recency score calculation.
-    
+
     Uses exponential decay: score = 2^(-hours_old / half_life)
-    
+
     At half_life hours, score = 0.5
     At 2*half_life hours, score = 0.25
     """
-    
+
     half_life_hours: int = Field(
-        default=24,
-        ge=1, le=168,
-        description="Hours until score drops to 50%"
+        default=24, ge=1, le=168, description="Hours until score drops to 50%"
     )
     max_age_hours: int = Field(
-        default=168,
-        ge=24, le=720,
-        description="Max age to consider (7 days)"
+        default=168, ge=24, le=720, description="Max age to consider (7 days)"
     )
-    min_score: float = Field(
-        default=0.01,
-        ge=0.0, le=0.5,
-        description="Floor for recency score"
-    )
-    
+    min_score: float = Field(default=0.01, ge=0.0, le=0.5, description="Floor for recency score")
+
     class Config:
         env_prefix = "RECENCY_"
 
@@ -94,21 +76,17 @@ class RecencyConfig(BaseSettings):
 class DiversityConfig(BaseSettings):
     """
     Configuration for diversity scoring.
-    
+
     Penalizes over-representation of single topics in feed.
     """
-    
+
     max_topic_dominance: float = Field(
-        default=0.40,
-        ge=0.1, le=0.8,
-        description="Max % of feed from one topic"
+        default=0.40, ge=0.1, le=0.8, description="Max % of feed from one topic"
     )
     penalty_factor: float = Field(
-        default=0.5,
-        ge=0.0, le=1.0,
-        description="How much to penalize dominant topics"
+        default=0.5, ge=0.0, le=1.0, description="How much to penalize dominant topics"
     )
-    
+
     class Config:
         env_prefix = "DIVERSITY_"
 
@@ -116,24 +94,20 @@ class DiversityConfig(BaseSettings):
 class TrendConfig(BaseSettings):
     """
     Configuration for trend score calculation.
-    
+
     Trend score = cluster_weight * cluster_score + engagement_weight * engagement_score
-    
+
     Note: Keep engagement_weight low (<30%) in early-stage products
     to prevent gaming and ensure quality content surfaces.
     """
-    
+
     cluster_weight: float = Field(
-        default=0.80,
-        ge=0.0, le=1.0,
-        description="Weight for cluster size signal"
+        default=0.80, ge=0.0, le=1.0, description="Weight for cluster size signal"
     )
     engagement_weight: float = Field(
-        default=0.20,
-        ge=0.0, le=1.0,
-        description="Weight for user engagement (keep low initially)"
+        default=0.20, ge=0.0, le=1.0, description="Weight for user engagement (keep low initially)"
     )
-    
+
     class Config:
         env_prefix = "TREND_"
 
@@ -155,7 +129,6 @@ SOURCE_QUALITY_WEIGHTS: Dict[str, float] = {
     "wired": 0.85,
     "the new stack": 0.85,
     "infoq": 0.85,
-    
     # Company official blogs (0.70-0.95 - down-ranked for primary sources)
     "google": 0.70,
     "microsoft": 0.70,
@@ -165,7 +138,6 @@ SOURCE_QUALITY_WEIGHTS: Dict[str, float] = {
     "meta": 0.70,
     "aws": 0.80,
     "google cloud": 0.80,
-    
     # Major tech outlets (0.70-0.80)
     "venturebeat": 0.80,
     "smashing magazine": 0.80,
@@ -179,14 +151,12 @@ SOURCE_QUALITY_WEIGHTS: Dict[str, float] = {
     "dark reading": 0.75,
     "hacker news": 0.70,
     "mashable": 0.70,
-    
     # YouTube creators (quality varies, 0.70-0.90)
     "mkbhd": 0.90,
     "dave2d": 0.85,
     "linus tech tips": 0.80,
     "austin evans": 0.75,
     "unbox therapy": 0.70,
-    
     # Default for unknown sources
     "default": 0.50,
 }
@@ -197,22 +167,22 @@ SOURCE_QUALITY_WEIGHTS: Dict[str, float] = {
 # Higher weight = stronger signal of quality/interest
 # Keys are string event type names to avoid circular imports with models
 ENGAGEMENT_WEIGHTS: Dict[str, int] = {
-    "view_10s": 1,         # Mild interest
-    "open_source": 3,      # Strong interest
-    "share": 5,            # Endorsement
-    "save": 5,             # Bookmarked for later
-    "chat_start": 6,       # Deep engagement
-    "chat_message": 1,     # Continued engagement
+    "view_10s": 1,  # Mild interest
+    "open_source": 3,  # Strong interest
+    "share": 5,  # Endorsement
+    "save": 5,  # Bookmarked for later
+    "chat_start": 6,  # Deep engagement
+    "chat_message": 1,  # Continued engagement
 }
 
 
 def get_source_quality(source: str) -> float:
     """
     Get quality weight for a source.
-    
+
     Args:
         source: Source name (will be lowercased)
-        
+
     Returns:
         Quality weight between 0.0 and 1.0
     """
@@ -223,15 +193,15 @@ def get_source_quality(source: str) -> float:
 def get_engagement_weight(event_type: str) -> int:
     """
     Get weight for an engagement event type.
-    
+
     Args:
         event_type: The type of engagement event (string name)
-        
+
     Returns:
         Integer weight for the event
     """
     # Handle both string and enum types
-    key = event_type.value if hasattr(event_type, 'value') else str(event_type).lower()
+    key = event_type.value if hasattr(event_type, "value") else str(event_type).lower()
     return ENGAGEMENT_WEIGHTS.get(key, 1)
 
 

@@ -9,7 +9,7 @@ from typing import List
 
 class YouTubeChannel:
     """Represents a single YouTube channel source."""
-    
+
     def __init__(
         self,
         name: str,
@@ -17,7 +17,7 @@ class YouTubeChannel:
         category: str = "Tech",
         quality_weight: float = 0.5,
         is_shorts_channel: bool = False,
-        enabled: bool = True
+        enabled: bool = True,
     ):
         self.name = name
         self.channel_id = channel_id

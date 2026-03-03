@@ -1,6 +1,5 @@
 """Tests for app.extraction.text_extract — cascading text extraction."""
 
-
 from app.extraction.text_extract import (
     TextResult,
     extract_text,
@@ -38,7 +37,6 @@ def _make_long_text(word_count: int = 300) -> str:
 
 
 class TestTrafilaturaExtraction:
-
     def test_extracts_article_text(self):
         body = _make_long_text(300)
         html = _article_html(body)
@@ -59,7 +57,6 @@ class TestTrafilaturaExtraction:
 
 
 class TestReadabilityExtraction:
-
     def test_extracts_article_text(self):
         body = _make_long_text(300)
         html = _article_html(body)
@@ -81,7 +78,6 @@ class TestReadabilityExtraction:
 
 
 class TestExtractText:
-
     def test_no_html_falls_back_to_rss(self):
         rss_desc = "This is the RSS description for the article."
         result = extract_text(html="", url=None, rss_description=rss_desc)

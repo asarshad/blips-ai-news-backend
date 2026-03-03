@@ -65,7 +65,9 @@ def run_checkpointed_ingestion(
     budget_repo = IngestionBudgetRepository(db)
 
     defaults = _build_defaults()
-    created = repo.ensure_rows(day_utc=day, defaults=[(d.source_type, d.feed_name, d.target) for d in defaults])
+    created = repo.ensure_rows(
+        day_utc=day, defaults=[(d.source_type, d.feed_name, d.target) for d in defaults]
+    )
     if created:
         logger.info("Created %s ingestion_progress rows for %s", created, day.isoformat())
 
@@ -80,7 +82,12 @@ def run_checkpointed_ingestion(
     owner = _owner_token()
     ttl_ms = int(os.getenv("INGESTION_LEASE_TTL_MS", "60000"))
 
-    ingest_until_targets = os.getenv("INGEST_UNTIL_TARGETS", "true").lower() in ("true", "1", "yes", "on")
+    ingest_until_targets = os.getenv("INGEST_UNTIL_TARGETS", "true").lower() in (
+        "true",
+        "1",
+        "yes",
+        "on",
+    )
     poll_seconds = float(os.getenv("INGESTION_POLL_SECONDS", "30"))
     max_seconds = int(os.getenv("INGEST_CATCHUP_MAX_SECONDS", "600"))
     max_workers = int(os.getenv("INGESTION_MAX_WORKERS", "1"))
@@ -131,7 +138,9 @@ def run_checkpointed_ingestion(
 
             budget_rows = sdb.query(IngestionBudget).filter(IngestionBudget.day == day).all()
             remaining_by_type = {
-                b.content_type.value: max(0, int(b.target or 0) - int(b.inserted or 0) - int(b.reserved or 0))
+                b.content_type.value: max(
+                    0, int(b.target or 0) - int(b.inserted or 0) - int(b.reserved or 0)
+                )
                 for b in budget_rows
             }
 
@@ -149,7 +158,9 @@ def run_checkpointed_ingestion(
                 ct = _ct_for_source_type(r.source_type)
                 if remaining_by_type.get(ct, 0) <= 0:
                     continue
-                tasks.append(TaskRef(row_id=int(r.id), source_type=r.source_type, feed_name=r.feed_name))
+                tasks.append(
+                    TaskRef(row_id=int(r.id), source_type=r.source_type, feed_name=r.feed_name)
+                )
 
             return tasks
         finally:

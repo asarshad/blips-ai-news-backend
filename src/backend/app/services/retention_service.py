@@ -39,6 +39,7 @@ MAX_DELETE_BATCH = 5000
 @dataclass
 class CleanupResult:
     """Results from a retention cleanup run."""
+
     started_at: datetime = field(default_factory=datetime.utcnow)
     ended_at: Optional[datetime] = None
     content_items_deleted: int = 0
@@ -108,7 +109,9 @@ def run_retention_cleanup(db: Session) -> CleanupResult:
 
     # --- ingestion_progress ---
     _cleanup_table(
-        db, now, result,
+        db,
+        now,
+        result,
         table="ingestion_progress",
         column="created_at",
         days=settings.RETAIN_INGESTION_PROGRESS_DAYS,
@@ -117,7 +120,9 @@ def run_retention_cleanup(db: Session) -> CleanupResult:
 
     # --- ingestion_budgets (keyed by day column, not created_at) ---
     _cleanup_table(
-        db, now, result,
+        db,
+        now,
+        result,
         table="ingestion_budgets",
         column="day",
         days=settings.RETAIN_INGESTION_PROGRESS_DAYS,
@@ -127,7 +132,9 @@ def run_retention_cleanup(db: Session) -> CleanupResult:
 
     # --- source_daily_stats (keyed by day column) ---
     _cleanup_table(
-        db, now, result,
+        db,
+        now,
+        result,
         table="source_daily_stats",
         column="day",
         days=settings.RETAIN_INGESTION_PROGRESS_DAYS,
@@ -137,7 +144,9 @@ def run_retention_cleanup(db: Session) -> CleanupResult:
 
     # --- editorial_actions ---
     _cleanup_table(
-        db, now, result,
+        db,
+        now,
+        result,
         table="editorial_actions",
         column="created_at",
         days=settings.RETAIN_EDITORIAL_DAYS,
@@ -146,7 +155,9 @@ def run_retention_cleanup(db: Session) -> CleanupResult:
 
     # --- interaction_events ---
     _cleanup_table(
-        db, now, result,
+        db,
+        now,
+        result,
         table="interaction_events",
         column="created_at",
         days=settings.RETAIN_EVENTS_DAYS,
@@ -155,7 +166,9 @@ def run_retention_cleanup(db: Session) -> CleanupResult:
 
     # --- conversations ---
     _cleanup_table(
-        db, now, result,
+        db,
+        now,
+        result,
         table="conversations",
         column="timestamp",
         days=settings.RETAIN_CONVERSATIONS_DAYS,
@@ -164,7 +177,9 @@ def run_retention_cleanup(db: Session) -> CleanupResult:
 
     # --- usage ---
     _cleanup_table(
-        db, now, result,
+        db,
+        now,
+        result,
         table="usage",
         column="timestamp",
         days=settings.RETAIN_USAGE_DAYS,
@@ -182,6 +197,7 @@ def run_retention_cleanup(db: Session) -> CleanupResult:
 # ------------------------------------------------------------------
 # Internal helpers
 # ------------------------------------------------------------------
+
 
 def _cleanup_content_items(db: Session, now: datetime, result: CleanupResult) -> None:
     """

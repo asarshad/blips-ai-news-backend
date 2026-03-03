@@ -13,6 +13,11 @@ repos:
         args: ["--config", "src/backend/pyproject.toml"]
         files: '^src/backend/'
         types_or: [python]
+      - id: ruff-format
+        name: ruff format
+        args: ["--config", "src/backend/pyproject.toml"]
+        files: '^src/backend/'
+        types_or: [python]
   # ── Unit + contract tests (runs on push only) ─────────────────────
   - repo: local
     hooks:

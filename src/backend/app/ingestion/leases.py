@@ -67,7 +67,11 @@ def release_lease(redis_client, *, key: str, owner_token: str) -> bool:
                     pipe.reset()
                     return False
 
-                current_str = current.decode("utf-8") if isinstance(current, (bytes, bytearray)) else str(current)
+                current_str = (
+                    current.decode("utf-8")
+                    if isinstance(current, (bytes, bytearray))
+                    else str(current)
+                )
                 if current_str != owner_token:
                     pipe.reset()
                     return False
@@ -88,7 +92,9 @@ def release_lease(redis_client, *, key: str, owner_token: str) -> bool:
         # Last resort: non-atomic best-effort.
         try:
             current = redis_client.get(key)
-            current_str = current.decode("utf-8") if isinstance(current, (bytes, bytearray)) else str(current)
+            current_str = (
+                current.decode("utf-8") if isinstance(current, (bytes, bytearray)) else str(current)
+            )
             if current is not None and current_str == owner_token:
                 return int(redis_client.delete(key) or 0) == 1
         except RedisError:

@@ -16,10 +16,11 @@ router = APIRouter()
 
 class StartersResponse(BaseModel):
     """Response model for conversation starters."""
+
     content_id: int
     starters: List[str]
     fallback: List[str]
-    
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -45,32 +46,29 @@ def get_starters(
 ):
     """
     Get conversation starters for a content item.
-    
+
     Args:
         content_id: ID of the content item
         regenerate: If True, regenerate starters even if cached
-        
+
     Returns:
         StartersResponse with starters and fallback questions
     """
     content_repo = ContentItemRepository(db)
     content_item = content_repo.get_by_id(content_id)
-    
+
     if not content_item:
         raise not_found_exception("Content item", content_id)
-    
+
     # Get or generate starters
     starters_service = get_starters_service()
-    
+
     if regenerate or not content_item.conversation_starters:
-        starters = starters_service.generate_and_persist(
-            content_item,
-            force_regenerate=regenerate
-        )
+        starters = starters_service.generate_and_persist(content_item, force_regenerate=regenerate)
         db.commit()
     else:
         starters = content_item.conversation_starters
-    
+
     return StartersResponse(
         content_id=content_id,
         starters=starters.get("starters", []),
@@ -85,22 +83,19 @@ def generate_starters(
 ):
     """
     Force regenerate conversation starters for a content item.
-    
+
     Use this endpoint to explicitly regenerate starters (e.g., after content update).
     """
     content_repo = ContentItemRepository(db)
     content_item = content_repo.get_by_id(content_id)
-    
+
     if not content_item:
         raise not_found_exception("Content item", content_id)
-    
+
     starters_service = get_starters_service()
-    starters = starters_service.generate_and_persist(
-        content_item,
-        force_regenerate=True
-    )
+    starters = starters_service.generate_and_persist(content_item, force_regenerate=True)
     db.commit()
-    
+
     return StartersResponse(
         content_id=content_id,
         starters=starters.get("starters", []),

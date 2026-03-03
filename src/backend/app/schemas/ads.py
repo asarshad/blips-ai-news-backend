@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 # Ad tracking / metadata sub-models
 # ---------------------------------------------------------------------------
 
+
 class AdTracking(BaseModel):
     """Optional pixel/beacon URLs for impression and click attribution."""
 
@@ -32,6 +33,7 @@ class AdMetadata(BaseModel):
 # ---------------------------------------------------------------------------
 # Core ad payload
 # ---------------------------------------------------------------------------
+
 
 class AdItem(BaseModel):
     """A single ad slot payload returned as part of a feed response.
@@ -59,6 +61,7 @@ class AdItem(BaseModel):
 # ---------------------------------------------------------------------------
 # Server-side ad configuration (returned by GET /config)
 # ---------------------------------------------------------------------------
+
 
 class AdsConfig(BaseModel):
     """Server-side ad feature flag bundle.

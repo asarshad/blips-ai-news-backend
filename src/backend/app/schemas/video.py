@@ -1,4 +1,3 @@
-
 from datetime import datetime
 from typing import List, Optional
 
@@ -25,9 +24,7 @@ class Video(VideoBase):
     id: int
     created_at: datetime
 
-    model_config = {
-        "from_attributes": True
-    }
+    model_config = {"from_attributes": True}
 
 
 class VideoList(BaseModel):

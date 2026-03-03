@@ -61,20 +61,21 @@ def get_surface_health(
 ):
     """
     Get inventory health for a specific surface.
-    
+
     Args:
         surface: One of 'articles', 'videos', 'reels'
-        
+
     Returns tier counts, freshness metrics, and source distribution.
     """
     try:
         surf = Surface(surface.lower())
     except ValueError:
         from fastapi import HTTPException
+
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid surface '{surface}'. Must be one of: articles, videos, reels"
+            detail=f"Invalid surface '{surface}'. Must be one of: articles, videos, reels",
         ) from None
-    
+
     health = compute_surface_health(db, surf)
     return health.to_dict()

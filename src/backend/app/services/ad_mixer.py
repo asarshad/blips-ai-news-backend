@@ -63,6 +63,7 @@ def _make_placeholder_ad(placement_id: str, index: int) -> Dict[str, Any]:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def inject_ads(
     items: List[Dict[str, Any]],
     *,
@@ -143,6 +144,7 @@ def inject_ads(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _canary_bucket(fingerprint: Optional[str]) -> int:
     """Map a request fingerprint to a 0-99 bucket for canary rollout."""

@@ -24,7 +24,6 @@ _FETCH_URL_PATCH = "app.extraction.fetcher.fetch_url"
 
 
 class TestTryParseDate:
-
     def test_iso_with_timezone(self):
         dt = _try_parse_date("2024-06-15T10:30:00Z")
         assert dt is not None
@@ -197,9 +196,13 @@ class TestRunExtractionWithFetch:
 
     @patch(_FETCH_URL_PATCH)
     def test_rss_fallback_when_page_has_no_image(self, mock_fetch):
-        html = """<!DOCTYPE html>
+        html = (
+            """<!DOCTYPE html>
 <html><head><title>No Image</title></head>
-<body><article><p>""" + " ".join(["content"] * 200) + """</p></article></body></html>"""
+<body><article><p>"""
+            + " ".join(["content"] * 200)
+            + """</p></article></body></html>"""
+        )
         mock_fetch.return_value = self._make_fetch_result(html)
 
         rss = RSSEntryData(image_url="https://example.com/rss-fallback.jpg")
@@ -237,7 +240,6 @@ class TestRunExtractionWithFetch:
 
 
 class TestDataclasses:
-
     def test_extraction_result_defaults(self):
         r = ExtractionResult(source_url="https://example.com")
         assert r.extraction_status == ExtractionStatus.FAILED

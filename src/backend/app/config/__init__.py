@@ -47,7 +47,6 @@ __all__ = [
     "Settings",
     "get_settings",
     "settings",
-    
     # Scoring
     "ScoringWeights",
     "RecencyConfig",
@@ -61,11 +60,9 @@ __all__ = [
     "recency_config",
     "diversity_config",
     "trend_config",
-    
     # Clustering
     "ClusteringConfig",
     "clustering_config",
-    
     # Content
     "TECH_TOPICS",
     "TECH_ENTITIES",
@@ -73,13 +70,11 @@ __all__ = [
     "normalize_entity",
     "is_known_topic",
     "is_known_entity",
-    
     # Feeds
     "FeedSource",
     "get_all_feeds",
     "get_feed_urls",
     "get_feeds_by_category",
-    
     # YouTube
     "YouTubeChannel",
     "get_all_channels",

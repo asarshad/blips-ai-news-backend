@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 # Enums
 # ---------------------------------------------------------------------------
 
+
 class EditorialActionType(str, Enum):
     ADD = "ADD"
     BOOST = "BOOST"
@@ -23,8 +24,10 @@ class EditorialActionType(str, Enum):
 # Content listing
 # ---------------------------------------------------------------------------
 
+
 class ContentFilter(BaseModel):
     """Query parameters for /admin/editorial/content."""
+
     day: Optional[date] = None
     content_type: Optional[str] = Field(None, alias="type")
     source: Optional[str] = None
@@ -37,6 +40,7 @@ class ContentFilter(BaseModel):
 
 class ContentItemSummary(BaseModel):
     """Lightweight representation for list endpoints."""
+
     id: int
     title: str
     source: str
@@ -68,6 +72,7 @@ class PaginatedContentResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Content detail
 # ---------------------------------------------------------------------------
+
 
 class EditorialActionRecord(BaseModel):
     id: int
@@ -105,6 +110,7 @@ class ContentItemDetail(ContentItemSummary):
 # Submission
 # ---------------------------------------------------------------------------
 
+
 class SubmitURLRequest(BaseModel):
     url: str = Field(..., min_length=5, max_length=2048)
     importance_level: int = Field(0, ge=0, le=3)
@@ -128,6 +134,7 @@ class SubmitURLResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Boost / Suppress
 # ---------------------------------------------------------------------------
+
 
 class BoostRequest(BaseModel):
     level: int = Field(..., ge=0, le=3)

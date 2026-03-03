@@ -18,7 +18,9 @@ class IngestionBudgetRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def get(self, *, day: date, content_type: ContentType, for_update: bool = False) -> Optional[IngestionBudget]:
+    def get(
+        self, *, day: date, content_type: ContentType, for_update: bool = False
+    ) -> Optional[IngestionBudget]:
         q = self.db.query(IngestionBudget).filter(
             IngestionBudget.day == day,
             IngestionBudget.content_type == content_type,

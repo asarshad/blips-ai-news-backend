@@ -21,6 +21,7 @@ from app.models.signal import SignalSource
 
 # ── _detect_content_type ─────────────────────────────────────────────────────
 
+
 class TestDetectContentType:
     def test_youtube_watch_url(self):
         assert _detect_content_type("https://www.youtube.com/watch?v=abc123") == ContentType.VIDEO
@@ -32,7 +33,10 @@ class TestDetectContentType:
         assert _detect_content_type("https://github.com/openai/whisper") == ContentType.ARTICLE
 
     def test_hn_link(self):
-        assert _detect_content_type("https://news.ycombinator.com/item?id=12345") == ContentType.ARTICLE
+        assert (
+            _detect_content_type("https://news.ycombinator.com/item?id=12345")
+            == ContentType.ARTICLE
+        )
 
     def test_blog_url(self):
         assert _detect_content_type("https://example.com/blog/my-post") == ContentType.ARTICLE
@@ -42,6 +46,7 @@ class TestDetectContentType:
 
 
 # ── _find_existing ────────────────────────────────────────────────────────────
+
 
 class TestFindExisting:
     def _make_repo(self, *, source_url=None, canonical_url=None, canonical_key=None):
@@ -91,8 +96,11 @@ class TestFindExisting:
 
 # ── _build_candidate_stub ─────────────────────────────────────────────────────
 
+
 class TestBuildCandidateStub:
-    def _make_item(self, source: SignalSource = SignalSource.HN_TOP, title: str = "Test") -> SignalItem:
+    def _make_item(
+        self, source: SignalSource = SignalSource.HN_TOP, title: str = "Test"
+    ) -> SignalItem:
         return SignalItem(
             raw_url="https://example.com/article",
             signal_source=source,
@@ -174,6 +182,7 @@ class TestBuildCandidateStub:
 
 # ── run_signal_ingestion (orchestrator) ──────────────────────────────────────
 
+
 def _make_signal_row(hit_count: int = 1):
     row = MagicMock()
     row.hit_count = hit_count
@@ -211,7 +220,9 @@ def _patch_orchestrator(
         patch("app.ingestion.signal_ingestion.fetch_hn_best", return_value=hn_best or []),
         patch("app.ingestion.signal_ingestion.fetch_github_trending", return_value=github or []),
         patch("app.ingestion.signal_ingestion._fetch_yt_safe", return_value=yt or []),
-        patch("app.ingestion.signal_ingestion.ContentItemRepository", return_value=mock_content_repo),
+        patch(
+            "app.ingestion.signal_ingestion.ContentItemRepository", return_value=mock_content_repo
+        ),
         patch("app.ingestion.signal_ingestion.SignalURLRepository", return_value=mock_signal_repo),
         patch("app.ingestion.signal_ingestion.normalize_url", side_effect=lambda u: u),
     ]
@@ -271,21 +282,39 @@ class TestRunSignalIngestion:
 
     def test_fetch_error_recorded_but_continues(self):
         mock_db, patches, _cr, _sr = _patch_orchestrator()
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6], \
-                patch("app.ingestion.signal_ingestion.fetch_hn_top", side_effect=RuntimeError("HN down")):
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+            patch(
+                "app.ingestion.signal_ingestion.fetch_hn_top", side_effect=RuntimeError("HN down")
+            ),
+        ):
             result = run_signal_ingestion(mock_db)
 
         assert any("HN_TOP" in e for e in result.errors)
 
     def test_seen_count_matches_total_fetched(self):
         items_hn = [
-            SignalItem(raw_url=f"https://a.com/{i}", signal_source=SignalSource.HN_TOP,
-                       raw_title=f"Story {i}", signal_score=50.0)
+            SignalItem(
+                raw_url=f"https://a.com/{i}",
+                signal_source=SignalSource.HN_TOP,
+                raw_title=f"Story {i}",
+                signal_score=50.0,
+            )
             for i in range(3)
         ]
         items_github = [
-            SignalItem(raw_url=f"https://github.com/r/{i}", signal_source=SignalSource.GITHUB_TRENDING,
-                       raw_title=f"Repo {i}", signal_score=20.0)
+            SignalItem(
+                raw_url=f"https://github.com/r/{i}",
+                signal_source=SignalSource.GITHUB_TRENDING,
+                raw_title=f"Repo {i}",
+                signal_score=20.0,
+            )
             for i in range(2)
         ]
         mock_db, patches, _cr, _sr = _patch_orchestrator(hn_top=items_hn, github=items_github)

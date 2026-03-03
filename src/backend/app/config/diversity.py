@@ -17,7 +17,7 @@ from pydantic_settings import BaseSettings
 class DiversityConstraints:
     """
     Diversity constraints for a specific feed surface.
-    
+
     Attributes:
         window_size: Rolling window size for constraint checking (N items)
         max_source_per_window: Max items from same source in window (K items)
@@ -26,17 +26,20 @@ class DiversityConstraints:
         min_inventory_for_constraints: Minimum inventory to enforce constraints
         relaxation_steps: Ordered steps to relax constraints when stuck
     """
+
     window_size: int = 5
     max_source_per_window: int = 2
     max_topic_per_window: Optional[int] = None  # None = no topic cap
     allow_consecutive_same_source: bool = False
     min_inventory_for_constraints: int = 10
-    relaxation_steps: list = field(default_factory=lambda: [
-        {"allow_consecutive": True},
-        {"max_source_per_window": 3},
-        {"max_source_per_window": 4},
-        {"disable_all": True}
-    ])
+    relaxation_steps: list = field(
+        default_factory=lambda: [
+            {"allow_consecutive": True},
+            {"max_source_per_window": 3},
+            {"max_source_per_window": 4},
+            {"disable_all": True},
+        ]
+    )
     # Minimum items per topic category guaranteed in the output.
     # Keys match the first element of ContentItem.topics (case-sensitive).
     # E.g. {"AI": 1, "Security": 1} ensures at least one item from each.
@@ -73,50 +76,50 @@ DEFAULT_REEL_DIVERSITY = DiversityConstraints(
 class DiversitySettings(BaseSettings):
     """
     Diversity settings loaded from environment variables.
-    
+
     Environment variables:
         DIVERSITY_ARTICLES_WINDOW_SIZE: Window size for articles (default: 5)
         DIVERSITY_ARTICLES_MAX_SOURCE: Max source per window for articles (default: 2)
         DIVERSITY_ARTICLES_MAX_TOPIC: Max topic per window for articles (default: 3)
-        
+
         DIVERSITY_VIDEOS_WINDOW_SIZE: Window size for videos (default: 5)
         DIVERSITY_VIDEOS_MAX_SOURCE: Max source per window for videos (default: 2)
-        
+
         DIVERSITY_REELS_WINDOW_SIZE: Window size for reels (default: 4)
         DIVERSITY_REELS_MAX_SOURCE: Max source per window for reels (default: 1)
         DIVERSITY_REELS_MAX_TOPIC: Max topic per window for reels (default: 2)
-        
+
         DIVERSITY_ENABLED: Enable/disable diversity mixing (default: true)
     """
-    
+
     # Global enable flag
     enabled: bool = Field(default=True, description="Enable diversity mixing")
-    
+
     # Article settings
     articles_window_size: int = Field(default=5)
     articles_max_source: int = Field(default=2)
     articles_max_topic: Optional[int] = Field(default=3)
     articles_allow_consecutive: bool = Field(default=False)
     articles_min_inventory: int = Field(default=8)
-    
+
     # Video settings
     videos_window_size: int = Field(default=5)
     videos_max_source: int = Field(default=2)
     videos_max_topic: Optional[int] = Field(default=None)
     videos_allow_consecutive: bool = Field(default=False)
     videos_min_inventory: int = Field(default=6)
-    
+
     # Reel settings
     reels_window_size: int = Field(default=4)
     reels_max_source: int = Field(default=1)
     reels_max_topic: Optional[int] = Field(default=2)
     reels_allow_consecutive: bool = Field(default=False)
     reels_min_inventory: int = Field(default=5)
-    
+
     class Config:
         env_prefix = "DIVERSITY_"
         case_sensitive = False
-    
+
     def get_article_constraints(self) -> DiversityConstraints:
         """Get diversity constraints for articles."""
         return DiversityConstraints(
@@ -127,7 +130,7 @@ class DiversitySettings(BaseSettings):
             min_inventory_for_constraints=self.articles_min_inventory,
             per_category_minimums=DEFAULT_ARTICLE_DIVERSITY.per_category_minimums,
         )
-    
+
     def get_video_constraints(self) -> DiversityConstraints:
         """Get diversity constraints for videos."""
         return DiversityConstraints(
@@ -137,7 +140,7 @@ class DiversitySettings(BaseSettings):
             allow_consecutive_same_source=self.videos_allow_consecutive,
             min_inventory_for_constraints=self.videos_min_inventory,
         )
-    
+
     def get_reel_constraints(self) -> DiversityConstraints:
         """Get diversity constraints for reels."""
         return DiversityConstraints(

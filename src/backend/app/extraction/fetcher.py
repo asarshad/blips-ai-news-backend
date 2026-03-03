@@ -28,8 +28,7 @@ logger = get_logger(__name__)
 # ── Constants ─────────────────────────────────────────────────────────────────
 # Version-dynamic User-Agent so it stays accurate after httpx upgrades.
 USER_AGENT: str = (
-    f"BlipsBot/1.0 (+https://blips.dev/bot; content-extraction) "
-    f"httpx/{httpx.__version__}"
+    f"BlipsBot/1.0 (+https://blips.dev/bot; content-extraction) httpx/{httpx.__version__}"
 )
 MAX_RESPONSE_BYTES: int = 5 * 1024 * 1024  # 5 MB byte cap
 

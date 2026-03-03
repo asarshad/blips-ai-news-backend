@@ -105,5 +105,7 @@ def _run_migrations(postgres_url: str, _integration_env) -> None:
         pool_pre_ping=True,
     )
     db_mod.SessionLocal = sessionmaker(
-        autocommit=False, autoflush=False, bind=db_mod.engine,
+        autocommit=False,
+        autoflush=False,
+        bind=db_mod.engine,
     )

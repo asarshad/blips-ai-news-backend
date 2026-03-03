@@ -118,6 +118,7 @@ class SignalURLRepository:
     def count_seen_last_hours(self, hours: int = 24) -> int:
         """Count signal URLs first seen in the last N hours."""
         from datetime import timedelta
+
         cutoff = datetime.utcnow() - timedelta(hours=hours)
         return int(
             self.db.query(func.count(SignalURL.id))
@@ -129,6 +130,7 @@ class SignalURLRepository:
     def count_added_last_hours(self, hours: int = 24) -> int:
         """Count signal URLs that resulted in new content items in the last N hours."""
         from datetime import timedelta
+
         cutoff = datetime.utcnow() - timedelta(hours=hours)
         return int(
             self.db.query(func.count(SignalURL.id))

@@ -23,12 +23,7 @@ import types
 # heavy imports (feedparser -> cgi) that break under Python 3.13+.
 # ---------------------------------------------------------------------------
 
-_ad_mixer_path = (
-    _pathlib.Path(__file__).resolve().parents[2]
-    / "app"
-    / "services"
-    / "ad_mixer.py"
-)
+_ad_mixer_path = _pathlib.Path(__file__).resolve().parents[2] / "app" / "services" / "ad_mixer.py"
 
 # Force-replace app.services with a lightweight stub package so that
 # spec_from_file_location can treat ad_mixer.py as a sub-module.
@@ -37,9 +32,7 @@ _pkg.__path__ = [str(_ad_mixer_path.parent)]
 _pkg.__package__ = "app.services"
 sys.modules["app.services"] = _pkg
 
-_spec = importlib.util.spec_from_file_location(
-    "app.services.ad_mixer", str(_ad_mixer_path)
-)
+_spec = importlib.util.spec_from_file_location("app.services.ad_mixer", str(_ad_mixer_path))
 _mod = importlib.util.module_from_spec(_spec)
 sys.modules["app.services.ad_mixer"] = _mod
 _spec.loader.exec_module(_mod)
@@ -138,9 +131,7 @@ class TestInjectAdsRules:
         for i in range(len(result) - 1):
             is_ad_current = "ad_id" in result[i]
             is_ad_next = "ad_id" in result[i + 1]
-            assert not (is_ad_current and is_ad_next), (
-                f"Back-to-back ads at index {i} and {i + 1}"
-            )
+            assert not (is_ad_current and is_ad_next), f"Back-to-back ads at index {i} and {i + 1}"
 
 
 class TestInjectAdsPlaceholder:

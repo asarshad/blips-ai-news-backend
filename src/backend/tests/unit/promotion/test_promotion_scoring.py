@@ -25,6 +25,7 @@ from app.services.promotion_service import (
 
 # ── compute_clickbait_penalty ────────────────────────────────────────────────
 
+
 class TestClickbaitPenalty:
     def test_clean_technical_title_zero(self):
         assert compute_clickbait_penalty("Linux 6.8 Kernel Released") == 0.0
@@ -69,6 +70,7 @@ class TestClickbaitPenalty:
 
 # ── compute_cluster_hotness ──────────────────────────────────────────────────
 
+
 class TestClusterHotness:
     def test_single_item_no_signal_zero(self):
         result = compute_cluster_hotness("c1", 0, {"c1": 1}, signal_hits_cap=5)
@@ -100,6 +102,7 @@ class TestClusterHotness:
 
 # ── compute_duplicate_penalty ────────────────────────────────────────────────
 
+
 class TestDuplicatePenalty:
     def test_size_1_no_penalty(self):
         assert compute_duplicate_penalty("c1", {"c1": 1}) == 0.0
@@ -126,6 +129,7 @@ class TestDuplicatePenalty:
 
 # ── compute_promotion_recency ─────────────────────────────────────────────────
 
+
 class TestRecencyScore:
     def test_just_published_near_1(self):
         fresh = datetime.now(timezone.utc) - timedelta(minutes=5)
@@ -150,6 +154,7 @@ class TestRecencyScore:
 
 # ── score_candidate ───────────────────────────────────────────────────────────
 
+
 class TestScoreCandidate:
     def _make_item(
         self,
@@ -172,8 +177,12 @@ class TestScoreCandidate:
         assert -0.2 <= score <= 1.0
 
     def test_clickbait_title_lowers_score(self):
-        clean = score_candidate(self._make_item(title="Python 3.13 Released"), {"c1": 1}, PromotionConfig())
-        bad = score_candidate(self._make_item(title="You WON'T BELIEVE!!!"), {"c1": 1}, PromotionConfig())
+        clean = score_candidate(
+            self._make_item(title="Python 3.13 Released"), {"c1": 1}, PromotionConfig()
+        )
+        bad = score_candidate(
+            self._make_item(title="You WON'T BELIEVE!!!"), {"c1": 1}, PromotionConfig()
+        )
         assert clean > bad
 
     def test_signal_hits_raise_score(self):
@@ -192,6 +201,7 @@ class TestScoreCandidate:
 
 
 # ── PromotionService ──────────────────────────────────────────────────────────
+
 
 class TestPromotionService:
     def _make_candidate(
@@ -219,9 +229,11 @@ class TestPromotionService:
         svc = PromotionService(mock_db)
         candidate = self._make_candidate()
 
-        with patch.object(svc, "_get_cluster_sizes", return_value={"c1": 3}), \
-             patch.object(svc, "_get_candidates", return_value=[candidate]), \
-             patch.object(svc, "_rescore_promoted", return_value=0):
+        with (
+            patch.object(svc, "_get_cluster_sizes", return_value={"c1": 3}),
+            patch.object(svc, "_get_candidates", return_value=[candidate]),
+            patch.object(svc, "_rescore_promoted", return_value=0),
+        ):
             result = svc.run_promotion_job()
 
         assert candidate.curation_status == ContentStatus.PROMOTED
@@ -236,9 +248,11 @@ class TestPromotionService:
         svc = PromotionService(mock_db, config=cfg)
         candidate = self._make_candidate()
 
-        with patch.object(svc, "_get_cluster_sizes", return_value={}), \
-             patch.object(svc, "_get_candidates", return_value=[candidate]), \
-             patch.object(svc, "_rescore_promoted", return_value=0):
+        with (
+            patch.object(svc, "_get_cluster_sizes", return_value={}),
+            patch.object(svc, "_get_candidates", return_value=[candidate]),
+            patch.object(svc, "_rescore_promoted", return_value=0),
+        ):
             result = svc.run_promotion_job()
 
         assert candidate.curation_status == ContentStatus.CANDIDATE
@@ -256,9 +270,11 @@ class TestPromotionService:
                 return candidates
             return []
 
-        with patch.object(svc, "_get_cluster_sizes", return_value={}), \
-             patch.object(svc, "_get_candidates", side_effect=_get_candidates_for_type), \
-             patch.object(svc, "_rescore_promoted", return_value=0):
+        with (
+            patch.object(svc, "_get_cluster_sizes", return_value={}),
+            patch.object(svc, "_get_candidates", side_effect=_get_candidates_for_type),
+            patch.object(svc, "_rescore_promoted", return_value=0),
+        ):
             result = svc.run_promotion_job()
 
         promoted = [c for c in candidates if c.curation_status == ContentStatus.PROMOTED]
@@ -282,9 +298,11 @@ class TestPromotionService:
         svc = PromotionService(mock_db)
 
         # _get_candidates should never be called with REEL
-        with patch.object(svc, "_get_cluster_sizes", return_value={}), \
-             patch.object(svc, "_get_candidates", return_value=[]) as mock_gc, \
-             patch.object(svc, "_rescore_promoted", return_value=0):
+        with (
+            patch.object(svc, "_get_cluster_sizes", return_value={}),
+            patch.object(svc, "_get_candidates", return_value=[]) as mock_gc,
+            patch.object(svc, "_rescore_promoted", return_value=0),
+        ):
             svc.run_promotion_job()
 
         # Ensure it was only called for ARTICLE and VIDEO

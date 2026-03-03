@@ -46,7 +46,7 @@ def _parse_star_count(text: Optional[str]) -> int:
     if not m:
         return 0
     val = float(m.group(1))
-    if "k" in text[m.start():m.end() + 1]:
+    if "k" in text[m.start() : m.end() + 1]:
         val *= 1000
     return int(val)
 
@@ -72,7 +72,7 @@ def fetch_github_trending(limit: int = 30) -> List[SignalItem]:
     repo_articles = soup.select("article.Box-row")
 
     results: List[SignalItem] = []
-    for article in repo_articles[:limit * 2]:
+    for article in repo_articles[: limit * 2]:
         # Repository path e.g. "/owner/repo"
         h2 = article.find("h2")
         if not h2:

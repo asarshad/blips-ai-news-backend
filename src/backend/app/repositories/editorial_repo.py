@@ -75,7 +75,9 @@ class EditorialRepository:
         if sort_by == "created_at":
             query = query.order_by(desc(ContentItem.created_at))
         elif sort_by == "editorial_boost":
-            query = query.order_by(desc(ContentItem.editorial_boost), desc(ContentItem.published_at))
+            query = query.order_by(
+                desc(ContentItem.editorial_boost), desc(ContentItem.published_at)
+            )
         else:
             query = query.order_by(desc(ContentItem.published_at))
 
@@ -87,18 +89,10 @@ class EditorialRepository:
         return self.db.query(ContentItem).filter(ContentItem.id == content_id).first()
 
     def get_by_canonical_key(self, canonical_key: str) -> Optional[ContentItem]:
-        return (
-            self.db.query(ContentItem)
-            .filter(ContentItem.canonical_key == canonical_key)
-            .first()
-        )
+        return self.db.query(ContentItem).filter(ContentItem.canonical_key == canonical_key).first()
 
     def get_by_source_url(self, source_url: str) -> Optional[ContentItem]:
-        return (
-            self.db.query(ContentItem)
-            .filter(ContentItem.source_url == source_url)
-            .first()
-        )
+        return self.db.query(ContentItem).filter(ContentItem.source_url == source_url).first()
 
     # ------------------------------------------------------------------
     # Editorial mutations

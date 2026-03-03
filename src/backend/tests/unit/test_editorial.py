@@ -230,6 +230,7 @@ class TestAdminAuth:
         import inspect
 
         from app.core.auth import require_admin_key
+
         source = inspect.getsource(require_admin_key)
         assert "compare_digest" in source
 
@@ -238,6 +239,7 @@ class TestAdminAuth:
         import inspect
 
         from app.core.auth import require_admin_key
+
         source = inspect.getsource(require_admin_key)
         # The function should check for empty key and raise 401
         assert "not configured_key" in source or "not configured" in source

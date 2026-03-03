@@ -133,16 +133,18 @@ class TestRetentionLogic:
         """Each table handler gets called and results are aggregated."""
         from app.services.retention_service import run_retention_cleanup
 
-        db = FakeSession(results={
-            "content_items": 12,
-            "ingestion_progress": 5,
-            "ingestion_budgets": 3,
-            "source_daily_stats": 2,
-            "editorial_actions": 1,
-            "interaction_events": 20,
-            "conversations": 8,
-            "usage": 15,
-        })
+        db = FakeSession(
+            results={
+                "content_items": 12,
+                "ingestion_progress": 5,
+                "ingestion_budgets": 3,
+                "source_daily_stats": 2,
+                "editorial_actions": 1,
+                "interaction_events": 20,
+                "conversations": 8,
+                "usage": 15,
+            }
+        )
         result = run_retention_cleanup(db)
 
         assert result.content_items_deleted == 12
@@ -182,10 +184,12 @@ class TestRetentionLogic:
                 raise RuntimeError("simulated PG lock timeout")
             return original_execute(self, stmt, params)
 
-        db = FakeSession(results={
-            "ingestion_progress": 3,
-            "interaction_events": 7,
-        })
+        db = FakeSession(
+            results={
+                "ingestion_progress": 3,
+                "interaction_events": 7,
+            }
+        )
         db.execute = lambda stmt, params=None: flaky_execute(db, stmt, params)
 
         result = run_retention_cleanup(db)
@@ -244,8 +248,10 @@ class TestContentItemProtection:
             def execute(self, stmt, params=None):
                 captured_params.append(params)
                 return FakeResult(0)
+
             def commit(self):
                 pass
+
             def rollback(self):
                 pass
 
@@ -272,15 +278,19 @@ class TestGenericTableCleanup:
             def execute(self, stmt, params=None):
                 captured_params.append(params)
                 return FakeResult(5)
+
             def commit(self):
                 pass
+
             def rollback(self):
                 pass
 
         now = datetime(2025, 3, 1)
         result = CleanupResult()
         _cleanup_table(
-            CapturingSession(), now, result,
+            CapturingSession(),
+            now,
+            result,
             table="ingestion_budgets",
             column="day",
             days=14,
@@ -292,6 +302,7 @@ class TestGenericTableCleanup:
         cutoff = captured_params[0]["cutoff"]
         # Should be a date, not datetime
         from datetime import date
+
         assert isinstance(cutoff, date)
         assert not isinstance(cutoff, datetime)
 
@@ -304,15 +315,19 @@ class TestGenericTableCleanup:
             def execute(self, stmt, params=None):
                 captured_params.append(params)
                 return FakeResult(3)
+
             def commit(self):
                 pass
+
             def rollback(self):
                 pass
 
         now = datetime(2025, 3, 1, 12, 0, 0)
         result = CleanupResult()
         _cleanup_table(
-            CapturingSession(), now, result,
+            CapturingSession(),
+            now,
+            result,
             table="interaction_events",
             column="created_at",
             days=30,
@@ -341,7 +356,9 @@ class TestGenericTableCleanup:
         db = ErrorSession()
         result = CleanupResult()
         _cleanup_table(
-            db, datetime.utcnow(), result,
+            db,
+            datetime.utcnow(),
+            result,
             table="usage",
             column="timestamp",
             days=90,

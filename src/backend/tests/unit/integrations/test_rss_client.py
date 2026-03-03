@@ -8,7 +8,10 @@ pytestmark = [pytest.mark.unit]
 
 
 def test_decode_html_entities_handles_numeric_and_named_entities():
-    assert decode_html_entities("AI&#8217;s next leap &amp; what it means") == "AI\u2019s next leap & what it means"
+    assert (
+        decode_html_entities("AI&#8217;s next leap &amp; what it means")
+        == "AI\u2019s next leap & what it means"
+    )
 
 
 def test_fetch_feed_parses_fixture_xml_without_network(fixture_text):

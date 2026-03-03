@@ -1,6 +1,5 @@
 """Tests for app.extraction.metrics — thread-safe metrics collector."""
 
-
 from app.extraction.metrics import ExtractionMetrics, _SourceHealth
 from app.extraction.pipeline import ExtractionResult, ExtractionStatus, ImageStatus
 
@@ -10,7 +9,6 @@ from app.extraction.pipeline import ExtractionResult, ExtractionStatus, ImageSta
 
 
 class TestSourceHealth:
-
     def test_empty_defaults(self):
         sh = _SourceHealth()
         assert sh.total == 0
@@ -39,7 +37,6 @@ class TestSourceHealth:
 
 
 class TestExtractionMetrics:
-
     def _make_result(
         self,
         *,

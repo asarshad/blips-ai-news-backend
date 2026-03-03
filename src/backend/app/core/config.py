@@ -156,9 +156,9 @@ class Settings(BaseSettings):
     EXTRACTION_READ_TIMEOUT: float = 20.0
     EXTRACTION_MAX_RETRIES: int = 3
     EXTRACTION_BACKOFF_BASE: float = 1.5
-    EXTRACTION_DOMAIN_MIN_INTERVAL: float = 1.0   # seconds between requests to same domain
-    EXTRACTION_MIN_TEXT_WORDS: int = 100            # minimum words for "good" text
-    EXTRACTION_IDEAL_TEXT_WORDS: int = 300           # word count for 1.0 quality score
+    EXTRACTION_DOMAIN_MIN_INTERVAL: float = 1.0  # seconds between requests to same domain
+    EXTRACTION_MIN_TEXT_WORDS: int = 100  # minimum words for "good" text
+    EXTRACTION_IDEAL_TEXT_WORDS: int = 300  # word count for 1.0 quality score
     SOURCE_HEALTH_DEGRADED_THRESHOLD: float = 0.3  # below this, mark source degraded
 
     # Minimum fresh counts per surface (triggers top-up if below)
@@ -177,8 +177,8 @@ class Settings(BaseSettings):
     ADS_ENABLED: bool = False
     ADS_FEED_CARD_ENABLED: bool = False
     ADS_BANNER_ENABLED: bool = False
-    ADS_FEED_FREQUENCY: int = 0        # 1 ad every N organic items (0 = disabled)
-    ADS_CANARY_PERCENT: int = 0        # % of requests that receive ads (gradual rollout)
+    ADS_FEED_FREQUENCY: int = 0  # 1 ad every N organic items (0 = disabled)
+    ADS_CANARY_PERCENT: int = 0  # % of requests that receive ads (gradual rollout)
 
     # Top-up controls
     TOPUP_LOCK_TTL_SECONDS: int = 120
@@ -188,10 +188,10 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Redis TTL constants (seconds)
     # ------------------------------------------------------------------
-    FEED_CACHE_TTL_SECONDS: int = 300         # Feed/playlist cache
-    ITEM_CACHE_TTL_SECONDS: int = 3600        # Per-item cache (quota, sessions)
-    CONFIG_CACHE_TTL_SECONDS: int = 21600     # Config / feature flags (6 hours)
-    LEASE_TTL_SECONDS: int = 300              # Distributed locks / leases
+    FEED_CACHE_TTL_SECONDS: int = 300  # Feed/playlist cache
+    ITEM_CACHE_TTL_SECONDS: int = 3600  # Per-item cache (quota, sessions)
+    CONFIG_CACHE_TTL_SECONDS: int = 21600  # Config / feature flags (6 hours)
+    LEASE_TTL_SECONDS: int = 300  # Distributed locks / leases
 
     # ------------------------------------------------------------------
     # Data retention policy (days)

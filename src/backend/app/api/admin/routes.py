@@ -126,7 +126,9 @@ def list_content(
         try:
             parsed_day = date_type.fromisoformat(day)
         except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid day format. Use YYYY-MM-DD") from None
+            raise HTTPException(
+                status_code=400, detail="Invalid day format. Use YYYY-MM-DD"
+            ) from None
 
     repo = EditorialRepository(db)
     items, total = repo.list_content(

@@ -15,6 +15,7 @@ from typing import Optional, Tuple
 # Without this, identical text can return different languages across calls.
 try:
     from langdetect import DetectorFactory
+
     DetectorFactory.seed = 0
 except ImportError:
     pass
@@ -28,9 +29,7 @@ logger = logging.getLogger(__name__)
 _MIN_DETECT_LENGTH = 30
 
 
-def detect_language(
-    title: str, description: Optional[str] = None
-) -> Tuple[Optional[str], float]:
+def detect_language(title: str, description: Optional[str] = None) -> Tuple[Optional[str], float]:
     """Detect the BCP-47 language code for the given text.
 
     Concatenates title + first 500 chars of description for better accuracy.

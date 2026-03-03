@@ -26,11 +26,11 @@ def get_usage_stats(
     content_item_id: Optional[int] = None,
     db: Session = Depends(get_db),
     redis_client: redis.Redis = Depends(get_redis),
-    user_agent: Optional[str] = Header(None)
+    user_agent: Optional[str] = Header(None),
 ):
     """Get current quota usage statistics for the device."""
     usage_repo = UsageRepository(db)
     device_id = _get_device_id(request, user_agent)
-    
+
     quota_manager = QuotaManager(usage_repo, redis_client)
     return quota_manager.check_quota(device_id, content_item_id)

@@ -23,9 +23,7 @@ def setup_logging(level: int = logging.INFO) -> None:
     logging.basicConfig(
         level=resolved,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout)
-        ],
+        handlers=[logging.StreamHandler(sys.stdout)],
         force=True,  # override any prior basicConfig call
     )
 
@@ -33,10 +31,10 @@ def setup_logging(level: int = logging.INFO) -> None:
 def get_logger(name: str) -> logging.Logger:
     """
     Get a logger instance with the given name.
-    
+
     Args:
         name: The name for the logger (typically __name__)
-        
+
     Returns:
         A configured logger instance
     """

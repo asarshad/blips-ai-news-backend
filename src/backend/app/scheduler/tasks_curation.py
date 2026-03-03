@@ -89,7 +89,9 @@ def run_preference_decay_job():
         event_repo = InteractionEventRepository(db)
         content_repo = ContentItemRepository(db)
 
-        personalization = PersonalizationService(profile_repo, preference_repo, event_repo, content_repo)
+        personalization = PersonalizationService(
+            profile_repo, preference_repo, event_repo, content_repo
+        )
 
         result = personalization.run_decay_job()
         stats.items_processed = result.get("profiles_updated", 0) if isinstance(result, dict) else 0

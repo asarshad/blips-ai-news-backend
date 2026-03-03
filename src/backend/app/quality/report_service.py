@@ -62,14 +62,19 @@ def build_quality_report(db: Session, *, day: date) -> Dict[str, object]:
         db.query(
             ContentItem.type.label("type"),
             func.count(ContentItem.id).label("total"),
-            func.sum(func.case((ContentItem.is_suppressed.is_(True), 1), else_=0)).label("suppressed"),
+            func.sum(func.case((ContentItem.is_suppressed.is_(True), 1), else_=0)).label(
+                "suppressed"
+            ),
         )
         .filter(ContentItem.ingestion_day == day)
         .group_by(ContentItem.type)
         .all()
     )
 
-    totals_by_type = {row.type: {"total": int(row.total or 0), "suppressed": int(row.suppressed or 0)} for row in per_type}
+    totals_by_type = {
+        row.type: {"total": int(row.total or 0), "suppressed": int(row.suppressed or 0)}
+        for row in per_type
+    }
 
     type_stats: List[Dict[str, object]] = []
 
@@ -126,7 +131,9 @@ def build_quality_report(db: Session, *, day: date) -> Dict[str, object]:
     extraction = {
         "article_total": int(article_total),
         "article_with_text": int(article_with_text),
-        "article_text_coverage": round(float(article_with_text) / float(article_total), 4) if article_total else 0.0,
+        "article_text_coverage": round(float(article_with_text) / float(article_total), 4)
+        if article_total
+        else 0.0,
     }
 
     warnings: List[str] = []

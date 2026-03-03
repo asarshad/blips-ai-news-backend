@@ -23,29 +23,29 @@ def compute_similarity(
 ) -> float:
     """
     Compute overall similarity between two items.
-    
+
     Uses weighted combination of:
     - Entity overlap (weight from config)
     - Title similarity (weight from config)
     - Topic overlap (weight from config)
-    
+
     Args:
         item1_*: Attributes of first item
         item2_*: Attributes of second item
-        
+
     Returns:
         Similarity score between 0 and 1
     """
     entity_score = compute_entity_overlap(item1_entities, item2_entities)
     title_score = compute_title_similarity(item1_title, item2_title)
     topic_score = compute_topic_overlap(item1_topics, item2_topics)
-    
+
     combined = (
-        clustering_config.entity_weight * entity_score +
-        clustering_config.title_weight * title_score +
-        clustering_config.topic_weight * topic_score
+        clustering_config.entity_weight * entity_score
+        + clustering_config.title_weight * title_score
+        + clustering_config.topic_weight * topic_score
     )
-    
+
     return min(1.0, max(0.0, combined))
 
 
@@ -55,19 +55,19 @@ def compute_entity_overlap(
 ) -> float:
     """
     Compute entity overlap using Jaccard index.
-    
+
     Entities can be strings or dicts with 'name' key.
-    
+
     Args:
         entities1: List of entities from first item
         entities2: List of entities from second item
-        
+
     Returns:
         Jaccard index (0-1)
     """
     if not entities1 or not entities2:
         return 0.0
-    
+
     # Extract normalized names - handle both strings and dicts
     def get_name(e):
         if isinstance(e, str):
@@ -75,55 +75,55 @@ def compute_entity_overlap(
         elif isinstance(e, dict):
             return e.get("name", "").lower().strip()
         return ""
-    
+
     names1 = {get_name(e) for e in entities1}
     names2 = {get_name(e) for e in entities2}
-    
+
     # Remove empty strings
     names1.discard("")
     names2.discard("")
-    
+
     if not names1 or not names2:
         return 0.0
-    
+
     intersection = len(names1 & names2)
     union = len(names1 | names2)
-    
+
     return intersection / union if union > 0 else 0.0
 
 
 def compute_title_similarity(title1: str, title2: str) -> float:
     """
     Compute title similarity using sequence matching.
-    
+
     Titles are normalized before comparison:
     - Lowercase
     - Common prefixes/suffixes removed
-    
+
     Args:
         title1: First title
         title2: Second title
-        
+
     Returns:
         Similarity ratio (0-1)
     """
     t1 = normalize_title(title1)
     t2 = normalize_title(title2)
-    
+
     return SequenceMatcher(None, t1, t2).ratio()
 
 
 def normalize_title(title: str) -> str:
     """
     Normalize title for comparison.
-    
+
     Removes common news site prefixes/suffixes and converts to lowercase.
     """
     if not title:
         return ""
-    
+
     title = title.lower().strip()
-    
+
     # Common patterns to remove
     remove_patterns = [
         # Prefixes
@@ -150,10 +150,10 @@ def normalize_title(title: str) -> str:
         "- engadget",
         "- cnet",
     ]
-    
+
     for pattern in remove_patterns:
         title = title.replace(pattern, "")
-    
+
     return title.strip()
 
 
@@ -163,21 +163,21 @@ def compute_topic_overlap(
 ) -> float:
     """
     Compute topic overlap using Jaccard index.
-    
+
     Args:
         topics1: List of topics from first item
         topics2: List of topics from second item
-        
+
     Returns:
         Jaccard index (0-1)
     """
     if not topics1 or not topics2:
         return 0.0
-    
+
     set1 = {t.lower().strip() for t in topics1}
     set2 = {t.lower().strip() for t in topics2}
-    
+
     intersection = len(set1 & set2)
     union = len(set1 | set2)
-    
+
     return intersection / union if union > 0 else 0.0
