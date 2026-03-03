@@ -16,6 +16,7 @@ from app.services.inventory_service import (
     Surface,
     compute_surface_health,
     get_cached_inventory_health,
+    get_pipeline_counts,
 )
 
 logger = get_logger(__name__)
@@ -28,17 +29,29 @@ def get_inventory_health(
 ):
     """
     Get overall inventory health across all surfaces.
-    
+
     Returns tier counts, freshness metrics, and health status for:
     - Articles
-    - Videos  
+    - Videos
     - Reels
-    
+
+    Also includes the two-tier pipeline summary (CANDIDATE vs PROMOTED counts
+    and newest timestamps per type) for operational visibility.
+
     Includes top-up priority if any surface is below threshold.
     This endpoint is cached (60s TTL) and does not trigger ingestion.
     """
     health = get_cached_inventory_health(db)
-    return health.to_dict()
+    response = health.to_dict()
+
+    # Append pipeline (CANDIDATE vs PROMOTED) counts
+    try:
+        response["pipeline"] = get_pipeline_counts(db)
+    except Exception as exc:
+        logger.warning("Failed to compute pipeline counts: %s", exc)
+        response["pipeline"] = {"error": str(exc)}
+
+    return response
 
 
 @router.get("/health/{surface}", response_model=Dict[str, Any])

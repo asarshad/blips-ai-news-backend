@@ -42,6 +42,18 @@ class MixerResult:
     original_order_preserved: float  # 0.0 to 1.0 - how much original order preserved
     source_distribution: Dict[str, int]
     dropped_items: int
+    category_distribution: Dict[str, int] = None   # topic → count in output
+    source_contribution_pct: Dict[str, float] = None  # source → % of final feed
+
+    def __post_init__(self):
+        if self.category_distribution is None:
+            self.category_distribution = {}
+        if self.source_contribution_pct is None:
+            total = sum(self.source_distribution.values()) or 1
+            self.source_contribution_pct = {
+                src: round(cnt / total * 100, 1)
+                for src, cnt in self.source_distribution.items()
+            }
 
 
 class DiversityMixer:
@@ -55,13 +67,14 @@ class DiversityMixer:
     def __init__(self, constraints: DiversityConstraints):
         """
         Initialize mixer with constraints.
-        
+
         Args:
             constraints: Diversity constraints to enforce
         """
         self.constraints = constraints
-        self._relaxation_level = 0
-        self._active_constraints = self._build_active_constraints(constraints)
+        # NOTE: _active_constraints is NOT stored as instance state; it is a
+        # local variable inside mix() so that concurrent calls don't corrupt
+        # each other's relaxation level.
     
     def _build_active_constraints(
         self,
@@ -118,10 +131,11 @@ class DiversityMixer:
     def _check_consecutive_constraint(
         self,
         candidate: Any,
-        selected: List[Any]
+        selected: List[Any],
+        active_constraints: dict,
     ) -> bool:
         """Check if candidate violates consecutive same-source constraint."""
-        if self._active_constraints["allow_consecutive"]:
+        if active_constraints["allow_consecutive"]:
             return True
         
         if not selected:
@@ -135,7 +149,8 @@ class DiversityMixer:
     def _check_window_source_constraint(
         self,
         candidate: Any,
-        selected: List[Any]
+        selected: List[Any],
+        active_constraints: dict,
     ) -> bool:
         """Check if candidate violates rolling window source cap.
         
@@ -145,8 +160,8 @@ class DiversityMixer:
         The windows that include the candidate are:
         - [selected[-(w-1):], candidate] - most recent w items including candidate
         """
-        window_size = self._active_constraints["window_size"]
-        max_source = self._active_constraints["max_source_per_window"]
+        window_size = active_constraints["window_size"]
+        max_source = active_constraints["max_source_per_window"]
         
         candidate_source = self._get_source(candidate)
         
@@ -163,16 +178,17 @@ class DiversityMixer:
     def _check_window_topic_constraint(
         self,
         candidate: Any,
-        selected: List[Any]
+        selected: List[Any],
+        active_constraints: dict,
     ) -> bool:
         """Check if candidate violates rolling window topic cap."""
-        max_topic = self._active_constraints["max_topic_per_window"]
-        
+        max_topic = active_constraints["max_topic_per_window"]
+
         if max_topic is None:
             return True
-        
-        window_size = self._active_constraints["window_size"]
-        
+
+        window_size = active_constraints["window_size"]
+
         if len(selected) < window_size:
             window = selected
         else:
@@ -189,20 +205,20 @@ class DiversityMixer:
         
         return (topic_count + 1) <= max_topic
     
-    def _is_valid_candidate(self, candidate: Any, selected: List[Any]) -> bool:
+    def _is_valid_candidate(self, candidate: Any, selected: List[Any], active_constraints: dict) -> bool:
         """Check if candidate satisfies all active constraints."""
-        if self._active_constraints["disabled"]:
+        if active_constraints["disabled"]:
             return True
-        
-        if not self._check_consecutive_constraint(candidate, selected):
+
+        if not self._check_consecutive_constraint(candidate, selected, active_constraints):
             return False
-        
-        if not self._check_window_source_constraint(candidate, selected):
+
+        if not self._check_window_source_constraint(candidate, selected, active_constraints):
             return False
-        
-        if not self._check_window_topic_constraint(candidate, selected):
+
+        if not self._check_window_topic_constraint(candidate, selected, active_constraints):
             return False
-        
+
         return True
     
     def mix(
@@ -229,7 +245,9 @@ class DiversityMixer:
                 relaxation_level=0,
                 original_order_preserved=1.0,
                 source_distribution={},
-                dropped_items=0
+                dropped_items=0,
+                category_distribution={},
+                source_contribution_pct={},
             )
         
         # Check if we have enough inventory to enforce constraints
@@ -239,13 +257,18 @@ class DiversityMixer:
                 f"Inventory too small ({len(candidates)} items, {unique_sources} sources), "
                 "skipping diversity mixing"
             )
+            sliced = candidates[:target_size]
+            src_dist = self._count_sources(sliced)
+            total = sum(src_dist.values()) or 1
             return MixerResult(
-                items=candidates[:target_size],
+                items=sliced,
                 constraints_relaxed=True,
                 relaxation_level=len(self.constraints.relaxation_steps),
                 original_order_preserved=1.0,
-                source_distribution=self._count_sources(candidates[:target_size]),
-                dropped_items=max(0, len(candidates) - target_size)
+                source_distribution=src_dist,
+                dropped_items=max(0, len(candidates) - target_size),
+                category_distribution=self._count_category_distribution(sliced),
+                source_contribution_pct={s: round(c / total * 100, 1) for s, c in src_dist.items()},
             )
         
         # Greedy selection with constraint checking
@@ -253,22 +276,49 @@ class DiversityMixer:
         remaining = list(candidates)
         used_ids: Set[int] = set()
         relaxation_level = 0
-        self._active_constraints = self._build_active_constraints(
+        active_constraints = self._build_active_constraints(
             self.constraints, relaxation_level
         )
-        
+
+        # Phase 0: identify must-include items from per_category_minimums.
+        # These are the top-ranked items per category up to their minimum count.
+        # We prefer them in the greedy scan so they are selected early before
+        # target_size is reached.
+        must_include_ids: Set[int] = set()
+        if self.constraints.per_category_minimums:
+            for category, min_count in self.constraints.per_category_minimums.items():
+                found = 0
+                for c in candidates:
+                    if found >= min_count:
+                        break
+                    if self._get_primary_topic(c) == category:
+                        must_include_ids.add(self._get_id(c))
+                        found += 1
+
         while len(selected) < target_size and remaining:
             # Find first valid candidate
             valid_candidate = None
             valid_index = -1
-            
-            for i, candidate in enumerate(remaining):
-                if self._get_id(candidate) in used_ids:
-                    continue
-                if self._is_valid_candidate(candidate, selected):
-                    valid_candidate = candidate
-                    valid_index = i
-                    break
+
+            # Prefer must-include items first (guaranteed category coverage)
+            if must_include_ids:
+                for i, candidate in enumerate(remaining):
+                    cid = self._get_id(candidate)
+                    if cid in must_include_ids and cid not in used_ids:
+                        if self._is_valid_candidate(candidate, selected, active_constraints):
+                            valid_candidate = candidate
+                            valid_index = i
+                            break
+
+            # Fall back to regular greedy scan
+            if valid_candidate is None:
+                for i, candidate in enumerate(remaining):
+                    if self._get_id(candidate) in used_ids:
+                        continue
+                    if self._is_valid_candidate(candidate, selected, active_constraints):
+                        valid_candidate = candidate
+                        valid_index = i
+                        break
             
             if valid_candidate is not None:
                 # Found valid candidate
@@ -279,12 +329,12 @@ class DiversityMixer:
                 # No valid candidate found - try relaxing constraints
                 if relaxation_level < len(self.constraints.relaxation_steps):
                     relaxation_level += 1
-                    self._active_constraints = self._build_active_constraints(
+                    active_constraints = self._build_active_constraints(
                         self.constraints, relaxation_level
                     )
                     logger.debug(
                         f"Relaxing constraints to level {relaxation_level}: "
-                        f"{self._active_constraints}"
+                        f"{active_constraints}"
                     )
                 else:
                     # Fully relaxed - take next available
@@ -300,16 +350,59 @@ class DiversityMixer:
         
         # Calculate order preservation metric
         original_order = self._calculate_order_preservation(candidates, selected)
-        
+
+        # ── Safety net: force-insert any must-include items not yet placed ──
+        # This handles the edge case where constraints blocked every must-include
+        # item during the greedy pass (e.g., all items from one source).
+        for cid in must_include_ids:
+            if cid in used_ids:
+                continue
+            item = next((c for c in candidates if self._get_id(c) == cid), None)
+            if item is None:
+                continue
+            if len(selected) < target_size:
+                selected.append(item)
+                used_ids.add(cid)
+            else:
+                # Evict the last non-must-include item to make room
+                for idx in range(len(selected) - 1, -1, -1):
+                    if self._get_id(selected[idx]) not in must_include_ids:
+                        removed = selected.pop(idx)
+                        used_ids.discard(self._get_id(removed))
+                        selected.append(item)
+                        used_ids.add(cid)
+                        logger.info(
+                            "[diversity] Category minimum safety-net: evicted '%s' to "
+                            "place must-include item (topic=%s)",
+                            self._get_source(removed),
+                            self._get_primary_topic(item),
+                        )
+                        break
+
+        selected = selected[:target_size]
+
+        src_dist = self._count_sources(selected)
+        total_src = sum(src_dist.values()) or 1
         return MixerResult(
             items=selected,
             constraints_relaxed=relaxation_level > 0,
             relaxation_level=relaxation_level,
             original_order_preserved=original_order,
-            source_distribution=self._count_sources(selected),
-            dropped_items=len(candidates) - len(selected)
+            source_distribution=src_dist,
+            dropped_items=len(candidates) - len(selected),
+            category_distribution=self._count_category_distribution(selected),
+            source_contribution_pct={s: round(c / total_src * 100, 1) for s, c in src_dist.items()},
         )
     
+    def _count_category_distribution(self, items: List[Any]) -> Dict[str, int]:
+        """Count items per primary topic/category."""
+        counts: Dict[str, int] = {}
+        for item in items:
+            topic = self._get_primary_topic(item)
+            if topic:
+                counts[topic] = counts.get(topic, 0) + 1
+        return counts
+
     def _count_sources(self, items: List[Any]) -> Dict[str, int]:
         """Count items per source."""
         counts: Dict[str, int] = {}

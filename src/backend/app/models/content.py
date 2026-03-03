@@ -37,6 +37,24 @@ class ContentType(enum.Enum):
     REEL = "REEL"
 
 
+class ContentStatus(enum.Enum):
+    """Two-tier pipeline status for content items.
+
+    CANDIDATE  – ingested but not yet promoted; invisible to end-user feeds.
+                 AI summarisation is NOT run on candidates (cost control).
+    PROMOTED   – passed promotion scoring; shown in feed endpoints and eligible
+                 for AI summarisation.
+
+    NOTE: SUPPRESSED content uses the existing ``is_suppressed`` boolean flag.
+    ContentStatus only controls the candidate→promoted pipeline.
+
+    Default for newly-ingested items is CANDIDATE unless the item was added
+    manually (manual_added=True), in which case it starts as PROMOTED.
+    """
+    CANDIDATE = "CANDIDATE"
+    PROMOTED = "PROMOTED"
+
+
 class PrefType(enum.Enum):
     """Types of user preferences."""
     TOPIC = "TOPIC"
@@ -58,6 +76,7 @@ class EventType(enum.Enum):
 # Define PostgreSQL enums with create_type=False to avoid recreation errors
 # These types are created by Alembic migrations, not by SQLAlchemy
 ContentTypeEnum = PgEnum(ContentType, name='contenttype', create_type=False)
+ContentStatusEnum = PgEnum(ContentStatus, name='contentstatus', create_type=False)
 PrefTypeEnum = PgEnum(PrefType, name='preftype', create_type=False)
 EventTypeEnum = PgEnum(EventType, name='eventtype', create_type=False)
 
@@ -92,6 +111,31 @@ class ContentItem(Base):
 
     # Suppression flag (hidden from default feeds)
     is_suppressed = Column(Boolean, default=False, nullable=False, index=True)
+
+    # ── Two-tier pipeline status ───────────────────────────────────────────
+    # CANDIDATE = ingested but not yet promoted (no AI, not in feed)
+    # PROMOTED  = passed quality gate, eligible for AI + feed
+    # Default is PROMOTED for backward compatibility with pre-existing items
+    # and manually-added content.  Signal ingestion explicitly sets CANDIDATE.
+    curation_status = Column(
+        ContentStatusEnum,
+        nullable=False,
+        default=ContentStatus.PROMOTED,
+        server_default="PROMOTED",
+        index=True,
+    )
+
+    # How this item was discovered: 'rss', 'yt_ingestion', 'manual',
+    # 'signal_hn', 'signal_github', 'signal_yt_trending'
+    discovered_via = Column(String(64), nullable=True, index=True)
+
+    # Number of distinct signal sources (HN/GitHub/YT trending) that
+    # referenced this URL – used as a hotness booster in promotion scoring.
+    signal_hits = Column(Integer, default=0, nullable=False)
+
+    # Promotion score computed by PromotionService (refreshed each run).
+    promotion_score = Column(Float, nullable=True, index=True)
+    # ─────────────────────────────────────────────────────────────────────
 
     # ── Editorial control fields ──────────────────────────────────────────
     editorial_boost = Column(Integer, default=0, nullable=False, index=True)
@@ -167,6 +211,8 @@ class ContentItem(Base):
         Index('ix_content_cluster_type', 'cluster_id', 'type'),
         # Topic-based queries (for personalization)
         Index('ix_content_type_score', 'type', 'global_score'),
+        # Promotion pipeline: find CANDIDATEs for a given type quickly
+        Index('ix_content_curation_type_score', 'curation_status', 'type', 'promotion_score'),
     )
     
     def __repr__(self):
