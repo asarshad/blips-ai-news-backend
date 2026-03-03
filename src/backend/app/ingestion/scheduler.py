@@ -164,7 +164,9 @@ class IngestionScheduler:
         self._last_cycle_status: str = "init"
 
     def stats(self) -> SchedulerStats:
-        per_type_active = Counter(_content_type_for_source_type(t.source_type) for t in self._active.values())
+        per_type_active = Counter(
+            _content_type_for_source_type(t.source_type) for t in self._active.values()
+        )
         return SchedulerStats(
             max_workers=self.config.max_workers,
             active_workers=len(self._active),
@@ -197,7 +199,9 @@ class IngestionScheduler:
 
     def _type_has_capacity(self, source_type: str) -> bool:
         ct = _content_type_for_source_type(source_type)
-        active = Counter(_content_type_for_source_type(t.source_type) for t in self._active.values())
+        active = Counter(
+            _content_type_for_source_type(t.source_type) for t in self._active.values()
+        )
         if ct == "ARTICLE":
             return active.get(ct, 0) < self.config.max_workers_article
         if ct == "VIDEO":
@@ -247,7 +251,9 @@ class IngestionScheduler:
         process_task_batch(row_id, batch_size) runs one batch and returns a dict.
         """
         start = time.monotonic()
-        sleep_for = self.config.loop_sleep_seconds if sleep_seconds is None else float(sleep_seconds)
+        sleep_for = (
+            self.config.loop_sleep_seconds if sleep_seconds is None else float(sleep_seconds)
+        )
 
         from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
@@ -298,7 +304,9 @@ class IngestionScheduler:
                     time.sleep(sleep_for)
                     continue
 
-                done, _pending = wait(set(futures.keys()), timeout=max(1.0, sleep_for), return_when=FIRST_COMPLETED)
+                done, _pending = wait(
+                    set(futures.keys()), timeout=max(1.0, sleep_for), return_when=FIRST_COMPLETED
+                )
                 for fut in done:
                     task = futures.pop(fut, None)
                     if task is None:
@@ -308,7 +316,12 @@ class IngestionScheduler:
                     try:
                         result = fut.result() or {}
                     except Exception as e:
-                        result = {"status": "failed", "error": str(e), "inserted": 0, "attempted": 0}
+                        result = {
+                            "status": "failed",
+                            "error": str(e),
+                            "inserted": 0,
+                            "attempted": 0,
+                        }
 
                     total_inserted += int(result.get("inserted") or 0)
                     total_attempted += int(result.get("attempted") or 0)

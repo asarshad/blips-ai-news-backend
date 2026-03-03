@@ -23,9 +23,7 @@ from app.config.scoring import scoring_weights
 # Configurable via env – intentionally small to prevent editorial
 # boost from completely overriding organic relevance signals.
 # At the default 0.05 a max-boost (3) adds 0.15 to the [0-1] score.
-EDITORIAL_BOOST_WEIGHT: float = float(
-    os.getenv("EDITORIAL_BOOST_WEIGHT", "0.05")
-)
+EDITORIAL_BOOST_WEIGHT: float = float(os.getenv("EDITORIAL_BOOST_WEIGHT", "0.05"))
 
 
 def compute_global_score(
@@ -41,9 +39,9 @@ def compute_global_score(
 ) -> float:
     """
     Compute the global ranking score for content.
-    
+
     Combines quality, trend, recency, diversity, and editorial signals.
-    
+
     Args:
         quality_score: Source quality and completeness (0-1)
         trend_score: Viral/hot signal (0-1)
@@ -54,7 +52,7 @@ def compute_global_score(
         trend_weight: Override trend weight
         recency_weight: Override recency weight
         diversity_weight: Override diversity weight
-        
+
     Returns:
         Global score (typically 0-1, can exceed 1.0 with editorial boost)
     """
@@ -67,19 +65,19 @@ def compute_global_score(
         recency_weight = scoring_weights.recency
     if diversity_weight is None:
         diversity_weight = scoring_weights.diversity
-    
+
     base_score = (
-        quality_weight * quality_score +
-        trend_weight * trend_score +
-        recency_weight * recency_score +
-        diversity_weight * diversity_boost
+        quality_weight * quality_score
+        + trend_weight * trend_score
+        + recency_weight * recency_score
+        + diversity_weight * diversity_boost
     )
 
     # Editorial boost is additive – it nudges but does not dominate.
     editorial_addition = editorial_boost * EDITORIAL_BOOST_WEIGHT
 
     global_score = base_score + editorial_addition
-    
+
     # Clamp to reasonable range (allow up to 1.15 for max editorial boost)
     return max(0.0, min(1.0 + 3 * EDITORIAL_BOOST_WEIGHT, global_score))
 
@@ -93,17 +91,17 @@ def explain_global_score(
 ) -> dict:
     """
     Return a breakdown of global score computation.
-    
+
     Useful for debugging and understanding why content ranks
     where it does.
-    
+
     Args:
         quality_score: Source quality and completeness (0-1)
         trend_score: Viral/hot signal (0-1)
         recency_score: Freshness signal (0-1)
         diversity_boost: Diversity modifier
         editorial_boost: Manual editorial importance (0-3)
-        
+
     Returns:
         Dictionary with component breakdown
     """
@@ -112,12 +110,15 @@ def explain_global_score(
     recency_contrib = scoring_weights.recency * recency_score
     diversity_contrib = scoring_weights.diversity * diversity_boost
     editorial_contrib = editorial_boost * EDITORIAL_BOOST_WEIGHT
-    
+
     global_score = compute_global_score(
-        quality_score, trend_score, recency_score, diversity_boost,
+        quality_score,
+        trend_score,
+        recency_score,
+        diversity_boost,
         editorial_boost=editorial_boost,
     )
-    
+
     return {
         "global_score": round(global_score, 4),
         "components": {

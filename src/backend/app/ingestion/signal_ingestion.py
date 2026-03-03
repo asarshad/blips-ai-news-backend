@@ -62,11 +62,12 @@ _MAX_STUBS_PER_RUN = 30
 @dataclass
 class SignalIngestionResult:
     """Summary of a single signal orchestrator run."""
+
     signal_urls_seen: int = 0
-    signal_urls_added: int = 0      # New signal_urls rows inserted
-    signal_hits_bumped: int = 0     # Existing content items that got signal_hits++
-    stubs_created: int = 0          # New CANDIDATE content stubs
-    stubs_skipped: int = 0          # Skipped (integrity error / content type unknown)
+    signal_urls_added: int = 0  # New signal_urls rows inserted
+    signal_hits_bumped: int = 0  # Existing content items that got signal_hits++
+    stubs_created: int = 0  # New CANDIDATE content stubs
+    stubs_skipped: int = 0  # Skipped (integrity error / content type unknown)
     errors: List[str] = field(default_factory=list)
 
 
@@ -202,10 +203,10 @@ def run_signal_ingestion(
     # ── 1. Collect raw signal items ───────────────────────────────────────
     all_items: List[SignalItem] = []
     for fetcher_name, fetch_fn, kwargs in [
-        ("HN_TOP",        fetch_hn_top,         {"limit": hn_limit}),
-        ("HN_BEST",       fetch_hn_best,         {"limit": hn_limit}),
-        ("GITHUB",        fetch_github_trending, {"limit": github_limit}),
-        ("YT_TRENDING",   _fetch_yt_safe,        {"api_key": yt_api_key, "limit": yt_limit}),
+        ("HN_TOP", fetch_hn_top, {"limit": hn_limit}),
+        ("HN_BEST", fetch_hn_best, {"limit": hn_limit}),
+        ("GITHUB", fetch_github_trending, {"limit": github_limit}),
+        ("YT_TRENDING", _fetch_yt_safe, {"api_key": yt_api_key, "limit": yt_limit}),
     ]:
         try:
             items = fetch_fn(**kwargs)

@@ -45,13 +45,16 @@ def _require_admin_key_or_query(
     configured_key = settings.ADMIN_API_KEY
     if not configured_key:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=401, detail="Admin endpoints disabled")
     provided = x_admin_key or key
     if not provided:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=401, detail="Missing admin key")
     if not secrets.compare_digest(provided, configured_key):
         from fastapi import HTTPException
+
         raise HTTPException(status_code=403, detail="Invalid admin key")
     return provided
 
@@ -79,9 +82,9 @@ def _nav(key: str, active: str = "") -> str:
         <div class="flex items-center justify-between h-14">
           <div class="flex items-center gap-1">
             <span class="text-white font-bold text-lg mr-4">⚡ Blips Admin</span>
-            {_link('/api/v1/admin/ui/dashboard', 'Dashboard', 'dashboard')}
-            {_link('/api/v1/admin/ui/content', 'Content', 'content')}
-            {_link('/api/v1/admin/ui/submit', 'Submit URL', 'submit')}
+            {_link("/api/v1/admin/ui/dashboard", "Dashboard", "dashboard")}
+            {_link("/api/v1/admin/ui/content", "Content", "content")}
+            {_link("/api/v1/admin/ui/submit", "Submit URL", "submit")}
           </div>
         </div>
       </div>
@@ -113,11 +116,11 @@ def _esc(s: str) -> str:
 
 def _badge(text: str, color: str) -> str:
     palettes = {
-        "green":  "bg-green-100 text-green-800",
+        "green": "bg-green-100 text-green-800",
         "yellow": "bg-yellow-100 text-yellow-800",
-        "red":    "bg-red-100 text-red-800",
-        "blue":   "bg-blue-100 text-blue-800",
-        "gray":   "bg-gray-100 text-gray-700",
+        "red": "bg-red-100 text-red-800",
+        "blue": "bg-blue-100 text-blue-800",
+        "gray": "bg-gray-100 text-gray-700",
         "purple": "bg-purple-100 text-purple-800",
     }
     cls = palettes.get(color, palettes["gray"])
@@ -126,16 +129,20 @@ def _badge(text: str, color: str) -> str:
 
 def _stat_card(label: str, value: str, sub: str = "", color: str = "blue") -> str:
     border = {
-        "blue": "border-blue-500", "green": "border-green-500",
-        "yellow": "border-yellow-500", "red": "border-red-500",
-        "purple": "border-purple-500", "gray": "border-gray-400",
+        "blue": "border-blue-500",
+        "green": "border-green-500",
+        "yellow": "border-yellow-500",
+        "red": "border-red-500",
+        "purple": "border-purple-500",
+        "gray": "border-gray-400",
     }.get(color, "border-blue-500")
     return f"""
     <div class="bg-white rounded-lg shadow p-5 border-l-4 {border}">
       <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</div>
       <div class="mt-1 text-3xl font-bold text-gray-900">{value}</div>
-      {f'<div class="mt-1 text-xs text-gray-500">{sub}</div>' if sub else ''}
+      {f'<div class="mt-1 text-xs text-gray-500">{sub}</div>' if sub else ""}
     </div>"""
+
 
 # ---------------------------------------------------------------------------
 # GET /admin/ui/ → redirect to dashboard
@@ -257,7 +264,8 @@ def ui_dashboard(
     signal_seen = (
         db.query(func.count(SignalURL.id))
         .filter(SignalURL.first_seen_at >= datetime.utcnow() - timedelta(hours=24))
-        .scalar() or 0
+        .scalar()
+        or 0
     )
     signal_by_status = (
         db.query(SignalURL.enqueue_status, func.count(SignalURL.id))
@@ -265,10 +273,10 @@ def ui_dashboard(
         .all()
     )
     sig_counts = {r[0].value: r[1] for r in signal_by_status}
-    sig_ingested  = sig_counts.get("INGESTED", 0)
+    sig_ingested = sig_counts.get("INGESTED", 0)
     sig_duplicate = sig_counts.get("DUPLICATE", 0)
-    sig_rejected  = sig_counts.get("REJECTED", 0)
-    sig_pending   = sig_counts.get("PENDING", 0)
+    sig_rejected = sig_counts.get("REJECTED", 0)
+    sig_pending = sig_counts.get("PENDING", 0)
 
     # Top sources for selected day (promoted)
     source_rows = (
@@ -288,7 +296,7 @@ def ui_dashboard(
     for r in source_rows:
         top_sources_html += f"""
         <div class="flex justify-between items-center py-1.5 border-b border-gray-100 last:border-0">
-          <span class="text-sm text-gray-700 truncate">{_esc(r[0] or 'Unknown')}</span>
+          <span class="text-sm text-gray-700 truncate">{_esc(r[0] or "Unknown")}</span>
           <span class="ml-2 text-sm font-semibold text-gray-900">{r[1]}</span>
         </div>"""
 
@@ -312,10 +320,10 @@ def ui_dashboard(
           <td class="px-3 py-2 text-sm">
             <a href="/api/v1/admin/ui/detail/{p.id}?key={admin_key}" class="text-blue-600 hover:underline">{p.id}</a>
           </td>
-          <td class="px-3 py-2 text-sm text-gray-800 max-w-xs truncate">{_esc((p.title or '')[:70])}</td>
-          <td class="px-3 py-2 text-sm">{p.type.value if p.type else ''}</td>
+          <td class="px-3 py-2 text-sm text-gray-800 max-w-xs truncate">{_esc((p.title or "")[:70])}</td>
+          <td class="px-3 py-2 text-sm">{p.type.value if p.type else ""}</td>
           <td class="px-3 py-2 text-sm font-mono">{score}</td>
-          <td class="px-3 py-2 text-sm">{_esc(p.discovered_via or '—')}</td>
+          <td class="px-3 py-2 text-sm">{_esc(p.discovered_via or "—")}</td>
           <td class="px-3 py-2">
             <form method="post" action="/api/v1/admin/ui/action/{p.id}/promote?key={admin_key}">
               <button class="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">Promote</button>
@@ -335,8 +343,8 @@ def ui_dashboard(
         day_table_rows += f"""
         <tr class="border-b border-gray-100">
           <td class="px-3 py-2 text-sm font-medium text-gray-700">{t}</td>
-          <td class="px-3 py-2 text-center">{_badge(str(cand), 'yellow') if cand else _badge('0', 'gray')}</td>
-          <td class="px-3 py-2 text-center">{_badge(str(prom), 'green') if prom else _badge('0', 'gray')}</td>
+          <td class="px-3 py-2 text-center">{_badge(str(cand), "yellow") if cand else _badge("0", "gray")}</td>
+          <td class="px-3 py-2 text-center">{_badge(str(prom), "green") if prom else _badge("0", "gray")}</td>
           <td class="px-3 py-2 text-center text-sm text-gray-500">{total_t}</td>
         </tr>"""
 
@@ -356,23 +364,23 @@ def ui_dashboard(
                  class="rounded border border-gray-300 text-sm px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
                  onchange="this.form.submit()">
         </form>
-        {f'<a href="?key={admin_key}&day={next_day}" class="px-2 py-1 rounded bg-white shadow text-sm hover:bg-gray-50">→</a>' if not is_today else ''}
-        {_badge('Today', 'blue') if is_today else ''}
+        {f'<a href="?key={admin_key}&day={next_day}" class="px-2 py-1 rounded bg-white shadow text-sm hover:bg-gray-50">→</a>' if not is_today else ""}
+        {_badge("Today", "blue") if is_today else ""}
       </div>
     </div>
 
     <h2 class="text-lg font-semibold text-gray-700 mb-3">Pipeline (last 48 h)</h2>
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-      {_pipeline_card('Articles', art_cand, art_prom)}
-      {_pipeline_card('Videos', vid_cand, vid_prom)}
-      {_pipeline_card('Reels', ree_cand, ree_prom)}
+      {_pipeline_card("Articles", art_cand, art_prom)}
+      {_pipeline_card("Videos", vid_cand, vid_prom)}
+      {_pipeline_card("Reels", ree_cand, ree_prom)}
     </div>
 
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-      {_stat_card('Signal URLs seen (24h)', str(signal_seen), '', 'purple')}
-      {_stat_card('Ingested → candidate', str(sig_ingested), '', 'blue')}
-      {_stat_card('Duplicates skipped', str(sig_duplicate), '', 'gray')}
-      {_stat_card('Avg promotion score', str(avg_score), f'promoted items on {day_str}', 'green')}
+      {_stat_card("Signal URLs seen (24h)", str(signal_seen), "", "purple")}
+      {_stat_card("Ingested → candidate", str(sig_ingested), "", "blue")}
+      {_stat_card("Duplicates skipped", str(sig_duplicate), "", "gray")}
+      {_stat_card("Avg promotion score", str(avg_score), f"promoted items on {day_str}", "green")}
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
@@ -396,10 +404,10 @@ def ui_dashboard(
       <div class="bg-white rounded-lg shadow p-5">
         <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Signal queue (all time)</h3>
         <div class="space-y-2">
-          <div class="flex justify-between"><span class="text-sm text-gray-600">Pending</span>{_badge(str(sig_pending), 'yellow')}</div>
-          <div class="flex justify-between"><span class="text-sm text-gray-600">Ingested</span>{_badge(str(sig_ingested), 'green')}</div>
-          <div class="flex justify-between"><span class="text-sm text-gray-600">Duplicate</span>{_badge(str(sig_duplicate), 'gray')}</div>
-          <div class="flex justify-between"><span class="text-sm text-gray-600">Rejected</span>{_badge(str(sig_rejected), 'red')}</div>
+          <div class="flex justify-between"><span class="text-sm text-gray-600">Pending</span>{_badge(str(sig_pending), "yellow")}</div>
+          <div class="flex justify-between"><span class="text-sm text-gray-600">Ingested</span>{_badge(str(sig_ingested), "green")}</div>
+          <div class="flex justify-between"><span class="text-sm text-gray-600">Duplicate</span>{_badge(str(sig_duplicate), "gray")}</div>
+          <div class="flex justify-between"><span class="text-sm text-gray-600">Rejected</span>{_badge(str(sig_rejected), "red")}</div>
         </div>
       </div>
 
@@ -477,10 +485,15 @@ def ui_content_list(
         manual = False
 
     items, total = repo.list_content(
-        day=parsed_day, content_type=type, source=source,
-        suppressed=supp, manual_added=manual,
+        day=parsed_day,
+        content_type=type,
+        source=source,
+        suppressed=supp,
+        manual_added=manual,
         curation_status=curation_status or None,
-        sort_by=sort_by, page=page, page_size=50,
+        sort_by=sort_by,
+        page=page,
+        page_size=50,
     )
 
     pages = max(1, math.ceil(total / 50))
@@ -517,10 +530,10 @@ def ui_content_list(
         <tr class="{row_bg} hover:brightness-95 border-b border-gray-100">
           <td class="px-3 py-2 text-sm text-gray-500">{i.id}</td>
           <td class="px-3 py-2 text-sm max-w-xs">
-            <a href="/api/v1/admin/ui/detail/{i.id}?key={admin_key}" class="text-blue-600 hover:underline font-medium">{_esc((i.title or '')[:65])}</a>
+            <a href="/api/v1/admin/ui/detail/{i.id}?key={admin_key}" class="text-blue-600 hover:underline font-medium">{_esc((i.title or "")[:65])}</a>
           </td>
-          <td class="px-3 py-2 text-xs text-gray-600">{i.type.value if i.type else ''}</td>
-          <td class="px-3 py-2 text-xs text-gray-600 truncate max-w-[90px]">{_esc(i.source or '')}</td>
+          <td class="px-3 py-2 text-xs text-gray-600">{i.type.value if i.type else ""}</td>
+          <td class="px-3 py-2 text-xs text-gray-600 truncate max-w-[90px]">{_esc(i.source or "")}</td>
           <td class="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{pub}</td>
           <td class="px-3 py-2">{badges}</td>
           <td class="px-3 py-2 text-xs font-mono text-gray-600">{score}</td>
@@ -541,27 +554,27 @@ def ui_content_list(
         <input type="hidden" name="key" value="{admin_key}">
         <div>
           <label class="block text-xs text-gray-500 mb-1">Day</label>
-          <input type="date" name="day" value="{day or ''}" class="w-full rounded border-gray-300 text-sm px-2 py-1">
+          <input type="date" name="day" value="{day or ""}" class="w-full rounded border-gray-300 text-sm px-2 py-1">
         </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Type</label>
-          {_sel('type', type or '', [('', 'All'), ('ARTICLE', 'Article'), ('VIDEO', 'Video'), ('REEL', 'Reel')])}
+          {_sel("type", type or "", [("", "All"), ("ARTICLE", "Article"), ("VIDEO", "Video"), ("REEL", "Reel")])}
         </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Curation</label>
-          {_sel('curation_status', curation_status or '', [('', 'All'), ('PROMOTED', 'Promoted'), ('CANDIDATE', 'Candidate')])}
+          {_sel("curation_status", curation_status or "", [("", "All"), ("PROMOTED", "Promoted"), ("CANDIDATE", "Candidate")])}
         </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Source</label>
-          <input type="text" name="source" value="{source or ''}" placeholder="filter..." class="w-full rounded border-gray-300 text-sm px-2 py-1">
+          <input type="text" name="source" value="{source or ""}" placeholder="filter..." class="w-full rounded border-gray-300 text-sm px-2 py-1">
         </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Suppressed</label>
-          {_sel('suppressed', suppressed or '', [('', 'All'), ('false', 'No'), ('true', 'Yes')])}
+          {_sel("suppressed", suppressed or "", [("", "All"), ("false", "No"), ("true", "Yes")])}
         </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Sort by</label>
-          {_sel('sort_by', sort_by, [('published_at', 'Published'), ('created_at', 'Created'), ('editorial_boost', 'Boost')])}
+          {_sel("sort_by", sort_by, [("published_at", "Published"), ("created_at", "Created"), ("editorial_boost", "Boost")])}
         </div>
         <div>
           <button type="submit" class="w-full px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">Filter</button>
@@ -572,7 +585,7 @@ def ui_content_list(
     def _page_link(p: int, label: str) -> str:
         return (
             f'<a href="?key={admin_key}&page={p}&day={day or ""}&type={type or ""}'
-            f'&source={source or ""}&suppressed={suppressed or ""}'
+            f"&source={source or ''}&suppressed={suppressed or ''}"
             f'&curation_status={curation_status or ""}&sort_by={sort_by}"'
             f' class="px-3 py-1 rounded bg-white shadow text-sm hover:bg-gray-50">{label}</a>'
         )
@@ -585,7 +598,9 @@ def ui_content_list(
 
     flash_html = ""
     if flash:
-        flash_html = f'<div class="mb-4 p-3 bg-green-100 text-green-800 rounded text-sm">{_esc(flash)}</div>'
+        flash_html = (
+            f'<div class="mb-4 p-3 bg-green-100 text-green-800 rounded text-sm">{_esc(flash)}</div>'
+        )
 
     body = f"""
     <h1 class="text-2xl font-bold text-gray-900 mb-4">Content</h1>
@@ -642,7 +657,11 @@ def ui_content_detail(
         flash_html = f'<div class="mb-4 p-3 {cls} rounded text-sm">{_esc(flash)}</div>'
 
     cs = getattr(item, "curation_status", None)
-    curation_badge = _badge("CANDIDATE", "yellow") if cs == ContentStatus.CANDIDATE else _badge("PROMOTED", "green")
+    curation_badge = (
+        _badge("CANDIDATE", "yellow")
+        if cs == ContentStatus.CANDIDATE
+        else _badge("PROMOTED", "green")
+    )
 
     badges = curation_badge + " "
     if item.is_suppressed:
@@ -697,10 +716,10 @@ def ui_content_detail(
         ts = a.created_at.strftime("%Y-%m-%d %H:%M") if a.created_at else "—"
         actions_rows += f"""<tr class="border-b border-gray-100 hover:bg-gray-50">
           <td class="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{ts}</td>
-          <td class="px-3 py-2">{_badge(a.action_type, 'blue')}</td>
-          <td class="px-3 py-2 text-xs text-gray-600">{_esc(a.actor or '')}</td>
-          <td class="px-3 py-2 text-xs text-gray-500 font-mono">{_esc(str(a.old_value or ''))}</td>
-          <td class="px-3 py-2 text-xs text-gray-500 font-mono">{_esc(str(a.new_value or ''))}</td>
+          <td class="px-3 py-2">{_badge(a.action_type, "blue")}</td>
+          <td class="px-3 py-2 text-xs text-gray-600">{_esc(a.actor or "")}</td>
+          <td class="px-3 py-2 text-xs text-gray-500 font-mono">{_esc(str(a.old_value or ""))}</td>
+          <td class="px-3 py-2 text-xs text-gray-500 font-mono">{_esc(str(a.new_value or ""))}</td>
         </tr>"""
 
     body = f"""
@@ -711,26 +730,26 @@ def ui_content_detail(
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div class="lg:col-span-2 bg-white rounded-lg shadow">
         <div class="p-5 border-b border-gray-100">
-          <h1 class="text-xl font-bold text-gray-900 leading-snug">{_esc((item.title or '')[:120])}</h1>
+          <h1 class="text-xl font-bold text-gray-900 leading-snug">{_esc((item.title or "")[:120])}</h1>
           <div class="mt-2 flex flex-wrap gap-1">{badges}</div>
         </div>
         <table class="w-full">
-          {_row('ID', str(item.id))}
-          {_row('Type', item.type.value if item.type else '—')}
-          {_row('Curation status', curation_badge)}
-          {_row('Promotion score', f"{item.promotion_score:.4f}" if getattr(item, 'promotion_score', None) else '—')}
-          {_row('Discovered via', _esc(getattr(item, 'discovered_via', None) or '—'))}
-          {_row('Signal hits', str(getattr(item, 'signal_hits', 0) or 0))}
-          {_row('Source', _esc(item.source or '—'))}
-          {_row('URL', f'<a href="{item.source_url}" target="_blank" class="text-blue-600 hover:underline text-xs break-all">{_esc((item.source_url or "")[:90])}</a>')}
-          {_row('Published', pub)}
-          {_row('Created', created)}
-          {_row('Global score', f"{item.global_score:.4f}" if item.global_score else '—')}
-          {_row('Quality score', f"{item.quality_score:.4f}" if item.quality_score else '—')}
-          {_row('Editorial boost', str(item.editorial_boost or 0))}
-          {_row('AI processed', '✅ Yes' if item.ai_processed else '⏳ No')}
-          {_row('Cluster', str(item.cluster_id) if item.cluster_id else '—')}
-          {_row('Manual added', '✅ Yes' if item.manual_added else 'No')}
+          {_row("ID", str(item.id))}
+          {_row("Type", item.type.value if item.type else "—")}
+          {_row("Curation status", curation_badge)}
+          {_row("Promotion score", f"{item.promotion_score:.4f}" if getattr(item, "promotion_score", None) else "—")}
+          {_row("Discovered via", _esc(getattr(item, "discovered_via", None) or "—"))}
+          {_row("Signal hits", str(getattr(item, "signal_hits", 0) or 0))}
+          {_row("Source", _esc(item.source or "—"))}
+          {_row("URL", f'<a href="{item.source_url}" target="_blank" class="text-blue-600 hover:underline text-xs break-all">{_esc((item.source_url or "")[:90])}</a>')}
+          {_row("Published", pub)}
+          {_row("Created", created)}
+          {_row("Global score", f"{item.global_score:.4f}" if item.global_score else "—")}
+          {_row("Quality score", f"{item.quality_score:.4f}" if item.quality_score else "—")}
+          {_row("Editorial boost", str(item.editorial_boost or 0))}
+          {_row("AI processed", "✅ Yes" if item.ai_processed else "⏳ No")}
+          {_row("Cluster", str(item.cluster_id) if item.cluster_id else "—")}
+          {_row("Manual added", "✅ Yes" if item.manual_added else "No")}
         </table>
       </div>
 

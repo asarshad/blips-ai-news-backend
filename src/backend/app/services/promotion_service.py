@@ -46,6 +46,7 @@ logger = get_logger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class PromotionConfig:
     """Tunable weights and thresholds for the promotion scorer."""
@@ -79,21 +80,24 @@ _DEFAULT_CONFIG = PromotionConfig()
 # ── Clickbait detection ───────────────────────────────────────────────────────
 
 # Regex pattern list – case-insensitive
-_CLICKBAIT_PATTERNS: list[re.Pattern[str]] = [re.compile(p, re.IGNORECASE) for p in [
-    r"you won't believe",
-    r"shocking(?:ly)?",
-    r"mind.?blow",
-    r"this one (?:trick|tip|weird)",
-    r"(?:top|best)\s+\d+\s+(?:ways|tips|tricks|secrets|hacks)",
-    r"(?:doctors?|experts?|scientists?)\s+(?:hate|love|don't want you)",
-    r"what happens next",
-    r"gone (?:wrong|viral|crazy)",
-    r"can'?t believe",
-    r"secret(?:s)? (?:they|nobody|no one)",
-    r"clickbait",
-    r"!{3,}",          # Three or more exclamation marks
-    r"\?{2,}",          # Two or more question marks
-]]
+_CLICKBAIT_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        r"you won't believe",
+        r"shocking(?:ly)?",
+        r"mind.?blow",
+        r"this one (?:trick|tip|weird)",
+        r"(?:top|best)\s+\d+\s+(?:ways|tips|tricks|secrets|hacks)",
+        r"(?:doctors?|experts?|scientists?)\s+(?:hate|love|don't want you)",
+        r"what happens next",
+        r"gone (?:wrong|viral|crazy)",
+        r"can'?t believe",
+        r"secret(?:s)? (?:they|nobody|no one)",
+        r"clickbait",
+        r"!{3,}",  # Three or more exclamation marks
+        r"\?{2,}",  # Two or more question marks
+    ]
+]
 
 # ALLCAPS title check: more than 40 % of alpha chars uppercase
 _ALLCAPS_THRESHOLD = 0.4
@@ -200,9 +204,9 @@ def score_candidate(
     duplicate_penalty = compute_duplicate_penalty(item.cluster_id, cluster_sizes)
 
     score = (
-        config.w_source   * source_quality
-        + config.w_cluster  * cluster_hotness
-        + config.w_recency  * recency
+        config.w_source * source_quality
+        + config.w_cluster * cluster_hotness
+        + config.w_recency * recency
         - config.w_clickbait * clickbait
         - config.w_duplicate * duplicate_penalty
     )
@@ -215,6 +219,7 @@ def score_candidate(
 @dataclass
 class PromotionResult:
     """Stats from a single promotion run."""
+
     candidates_evaluated: int = 0
     promoted_count: int = 0
     already_promoted_rescored: int = 0
@@ -312,9 +317,7 @@ class PromotionService:
 
             for content_type in (ContentType.ARTICLE, ContentType.VIDEO):
                 try:
-                    promoted, evaluated, rescored = self._promote_type(
-                        content_type, cluster_sizes
-                    )
+                    promoted, evaluated, rescored = self._promote_type(content_type, cluster_sizes)
                     result.promoted_count += promoted
                     result.candidates_evaluated += evaluated
                     result.already_promoted_rescored += rescored

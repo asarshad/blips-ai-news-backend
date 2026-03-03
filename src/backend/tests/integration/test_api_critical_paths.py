@@ -20,17 +20,19 @@ pytestmark = [pytest.mark.integration]
 def client():
     """Create test client with ephemeral services."""
     import os
+
     os.environ["SKIP_STARTUP_CHECKS"] = "true"
     os.environ["SKIP_CREATE_TABLES"] = "true"
-    
+
     from app.main import app
+
     with TestClient(app) as c:
         yield c
 
 
 class TestHealthEndpoint:
     """Test the /health endpoint behavior."""
-    
+
     def test_health_returns_200_when_healthy(self, client):
         """Health check should return 200 when DB and Redis are available."""
         resp = client.get("/health")
@@ -40,7 +42,7 @@ class TestHealthEndpoint:
         data = resp.json()
         assert "status" in data
         assert "database" in data or data["status"] == "healthy"
-    
+
     def test_health_response_structure(self, client):
         """Health check should return expected structure."""
         resp = client.get("/health")
@@ -55,7 +57,7 @@ class TestHealthEndpoint:
 
 class TestFeedEndpoints:
     """Test the tiered feed endpoints."""
-    
+
     def test_articles_feed_returns_list(self, client):
         """Articles feed should return a list (empty is OK for tests)."""
         resp = client.get("/api/v1/feed/articles")
@@ -65,7 +67,7 @@ class TestFeedEndpoints:
         if resp.status_code == 200:
             data = resp.json()
             assert isinstance(data, list)
-    
+
     def test_videos_feed_returns_list(self, client):
         """Videos feed should return a list."""
         resp = client.get("/api/v1/feed/videos")
@@ -73,7 +75,7 @@ class TestFeedEndpoints:
         if resp.status_code == 200:
             data = resp.json()
             assert isinstance(data, list)
-    
+
     def test_reels_feed_returns_list(self, client):
         """Reels feed should return a list."""
         resp = client.get("/api/v1/feed/reels")
@@ -81,7 +83,7 @@ class TestFeedEndpoints:
         if resp.status_code == 200:
             data = resp.json()
             assert isinstance(data, list)
-    
+
     def test_playlist_endpoint_exists(self, client):
         """Playlist endpoint should exist."""
         resp = client.get("/api/v1/feed/playlist?device_id=test123")
@@ -90,7 +92,7 @@ class TestFeedEndpoints:
 
 class TestInventoryEndpoints:
     """Test inventory health endpoints."""
-    
+
     def test_inventory_health_returns_structure(self, client):
         """Inventory health should return expected structure or 500 if DB not ready."""
         resp = client.get("/api/v1/inventory/health")
@@ -99,7 +101,7 @@ class TestInventoryEndpoints:
             data = resp.json()
             # Should have surface-level health
             assert isinstance(data, dict)
-    
+
     def test_inventory_surface_articles(self, client):
         """Per-surface inventory health for articles."""
         resp = client.get("/api/v1/inventory/health/articles")
@@ -108,18 +110,18 @@ class TestInventoryEndpoints:
 
 class TestAdminEndpoints:
     """Test admin-protected endpoints."""
-    
+
     def test_metrics_requires_admin_key(self, client):
         """Metrics endpoint should reject requests without admin key."""
         resp = client.get("/metrics")
         # Should be 401 or 403 without admin key
         assert resp.status_code in [401, 403, 422]
-    
+
     def test_metrics_with_invalid_key(self, client):
         """Metrics with invalid key should be rejected."""
         resp = client.get("/metrics", headers={"X-Admin-Key": "wrong-key"})
         assert resp.status_code in [401, 403]
-    
+
     def test_ops_status_requires_admin_key(self, client):
         """Operational status endpoint should require admin key."""
         resp = client.get("/ops/status")
@@ -128,17 +130,16 @@ class TestAdminEndpoints:
 
 class TestAIChatEndpoints:
     """Test AI chat endpoints (without actual LLM calls)."""
-    
+
     def test_chat_endpoint_exists(self, client):
         """Chat endpoint should exist and require proper params."""
-        resp = client.post("/api/v1/ai/respond", json={
-            "content_id": "test-123",
-            "message": "Hello",
-            "device_id": "test-device"
-        })
+        resp = client.post(
+            "/api/v1/ai/respond",
+            json={"content_id": "test-123", "message": "Hello", "device_id": "test-device"},
+        )
         # Will fail validation or LLM config, but endpoint should exist
         assert resp.status_code in [200, 400, 404, 422, 500]
-    
+
     def test_conversation_starters_endpoint(self, client):
         """Conversation starters endpoint should exist."""
         resp = client.get("/api/v1/starters/1")
@@ -147,7 +148,7 @@ class TestAIChatEndpoints:
 
 class TestRateLimiting:
     """Test rate limiting behavior."""
-    
+
     def test_rate_limit_headers_present(self, client):
         """Rate limit headers should be present in responses."""
         resp = client.get("/health")
@@ -158,7 +159,7 @@ class TestRateLimiting:
 
 class TestOpenAPISpec:
     """Test OpenAPI specification."""
-    
+
     def test_openapi_json_available(self, client):
         """OpenAPI spec should be available."""
         resp = client.get("/api/v1/openapi.json")
@@ -166,7 +167,7 @@ class TestOpenAPISpec:
         data = resp.json()
         assert "openapi" in data
         assert "paths" in data
-    
+
     def test_docs_endpoint_exists(self, client):
         """Swagger UI should be available."""
         resp = client.get("/docs")

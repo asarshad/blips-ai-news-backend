@@ -31,7 +31,7 @@ logger = get_logger(__name__)
 def init_scheduler() -> Optional[BackgroundScheduler]:
     """
     Initialize and start the background scheduler.
-    
+
     Returns:
         BackgroundScheduler instance, or None if initialization fails
     """
@@ -59,7 +59,7 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             coalesce=True,
             misfire_grace_time=300,
         )
-        
+
         # Add scoring job (hourly)
         scheduler.add_job(
             run_scoring_job,
@@ -70,7 +70,7 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             coalesce=True,
             misfire_grace_time=300,
         )
-        
+
         # Add clustering job (every 15 minutes)
         scheduler.add_job(
             run_clustering_job,
@@ -81,7 +81,7 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             coalesce=True,
             misfire_grace_time=120,
         )
-        
+
         # Add preference decay job (daily at 3 AM)
         scheduler.add_job(
             run_preference_decay_job,
@@ -92,7 +92,7 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             coalesce=True,
             misfire_grace_time=3600,
         )
-        
+
         # Add AI processing retry job (every 15 minutes - critical for feed freshness)
         scheduler.add_job(
             retry_ai_processing,
@@ -114,7 +114,7 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             coalesce=True,
             misfire_grace_time=3600,
         )
-        
+
         # Add ingestion health check (every 30 minutes)
         scheduler.add_job(
             check_ingestion_health,
@@ -156,9 +156,9 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             "AI retry (15min), cleanup (daily), health (30min), "
             f"signals ({signal_minutes}min), promotion (30min)"
         )
-        
+
         return scheduler
-        
+
     except Exception as e:
         logger.error(f"Error initializing scheduler: {str(e)}")
         return None

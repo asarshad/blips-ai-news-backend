@@ -50,7 +50,9 @@ class TestValidateImageUrl:
         assert validate_image_url(url) is None
 
     def test_whitespace_stripped(self):
-        assert validate_image_url("  https://example.com/img.jpg  ") == "https://example.com/img.jpg"
+        assert (
+            validate_image_url("  https://example.com/img.jpg  ") == "https://example.com/img.jpg"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -62,17 +64,26 @@ class TestMakeAbsoluteUrl:
     """make_absolute_url resolves relative URLs against a base."""
 
     def test_already_absolute(self):
-        assert make_absolute_url("https://cdn.example.com/img.jpg", "https://example.com") == "https://cdn.example.com/img.jpg"
+        assert (
+            make_absolute_url("https://cdn.example.com/img.jpg", "https://example.com")
+            == "https://cdn.example.com/img.jpg"
+        )
 
     def test_relative_path(self):
-        assert make_absolute_url("/images/hero.jpg", "https://example.com/article/1") == "https://example.com/images/hero.jpg"
+        assert (
+            make_absolute_url("/images/hero.jpg", "https://example.com/article/1")
+            == "https://example.com/images/hero.jpg"
+        )
 
     def test_relative_no_slash(self):
         result = make_absolute_url("hero.jpg", "https://example.com/article/1")
         assert result == "https://example.com/article/hero.jpg"
 
     def test_protocol_relative(self):
-        assert make_absolute_url("//cdn.example.com/img.jpg", "https://example.com") == "https://cdn.example.com/img.jpg"
+        assert (
+            make_absolute_url("//cdn.example.com/img.jpg", "https://example.com")
+            == "https://cdn.example.com/img.jpg"
+        )
 
     @pytest.mark.parametrize("url", [None, "", "   "])
     def test_empty_returns_none(self, url):
@@ -236,9 +247,7 @@ class TestBoilerplateWordCountGuard:
 
     def test_editorial_mention_preserved(self):
         # A long sentence mentioning "privacy policy" in context should NOT be stripped
-        editorial = (
-            "The company updated its privacy policy to reflect new data regulations."
-        )
+        editorial = "The company updated its privacy policy to reflect new data regulations."
         cleaned = clean_text(editorial)
         assert "privacy policy" in cleaned.lower()
 
@@ -249,8 +258,6 @@ class TestBoilerplateWordCountGuard:
         assert "Actual article text" in cleaned
 
     def test_editorial_terms_preserved(self):
-        editorial = (
-            "Users must agree to the terms of service before accessing premium content."
-        )
+        editorial = "Users must agree to the terms of service before accessing premium content."
         cleaned = clean_text(editorial)
         assert "terms of service" in cleaned.lower()

@@ -3,7 +3,7 @@ FastAPI application entry point.
 
 This module configures and creates the FastAPI application with:
 - CORS middleware
-- Request timing middleware  
+- Request timing middleware
 - Global exception handling
 - API route registration
 - Background scheduler initialization
@@ -51,7 +51,7 @@ _scheduler_lock_redis = None
 
 def _create_tables() -> None:
     """Create database tables if they don't exist.
-    
+
     In production (Render), we skip this because Alembic migrations handle schema.
     In development, we create tables automatically for convenience.
     """
@@ -59,7 +59,7 @@ def _create_tables() -> None:
     if os.getenv("RENDER") or os.getenv("SKIP_CREATE_TABLES", "").lower() == "true":
         logger.info("Skipping auto table creation (production mode - use Alembic migrations)")
         return
-    
+
     try:
         redis_client = get_redis()
         # Try to get exclusive lock for table creation
@@ -86,9 +86,10 @@ def _check_redis_connection() -> bool:
         logger.error(f"Redis connection error: {str(e)}")
         return False
 
+
 def _run_initial_fetch():
     """Run the initial news fetch in background thread if targets not met.
-    
+
     Also checks inventory health and triggers top-up if needed.
     """
     time.sleep(3)  # Give app time to fully start
@@ -100,40 +101,44 @@ def _run_initial_fetch():
         from app.models.ingestion_budget import IngestionBudget
         from app.repositories.ingestion_progress_repo import IngestionProgressRepository
         from app.services.topup_service import startup_inventory_check
-        
+
         # First: check inventory health and trigger top-up if needed
         logger.info("INITIAL FETCH: Running inventory health check...")
         startup_inventory_check(SessionLocal)
-        
+
         db = SessionLocal()
         try:
             day = get_ingestion_day()
             repo = IngestionProgressRepository(db)
-            
+
             # Log current budget status
             budgets = db.query(IngestionBudget).filter(IngestionBudget.day == day).all()
             for b in budgets:
                 remaining = max(0, int(b.target or 0) - int(b.inserted or 0) - int(b.reserved or 0))
-                logger.info(f"INITIAL FETCH: Budget {b.content_type.value} target={b.target} inserted={b.inserted} reserved={b.reserved} remaining={remaining}")
-            
+                logger.info(
+                    f"INITIAL FETCH: Budget {b.content_type.value} target={b.target} inserted={b.inserted} reserved={b.reserved} remaining={remaining}"
+                )
+
             # Check if any progress rows exist for today
             all_rows = repo.list_for_day(day_utc=day)
             incomplete = repo.list_incomplete(day_utc=day)
-            
+
             # Log incomplete breakdown by source type
             by_type = {}
             for r in incomplete:
                 by_type.setdefault(r.source_type, []).append(r.feed_name)
             for st, feeds in by_type.items():
                 logger.info(f"INITIAL FETCH: Incomplete {st}: {len(feeds)} feeds")
-            
+
             if not all_rows:
                 # Fresh start - no rows exist yet, run ingestion to create them
                 logger.info("INITIAL FETCH: No progress rows exist - running initial ingestion")
                 fetch_and_process_news()
                 logger.info("INITIAL FETCH: Completed")
             elif incomplete:
-                logger.info(f"INITIAL FETCH: {len(incomplete)} feeds incomplete - running ingestion now")
+                logger.info(
+                    f"INITIAL FETCH: {len(incomplete)} feeds incomplete - running ingestion now"
+                )
                 fetch_and_process_news()
                 logger.info("INITIAL FETCH: Completed")
             else:
@@ -147,7 +152,7 @@ def _run_initial_fetch():
 
 def _start_scheduler() -> None:
     """Initialize background scheduler and run initial fetch.
-    
+
     Preferred: run scheduler in a dedicated worker service.
     Single-service deployments may run scheduler in the API service by setting
     `SCHEDULER_ENABLED=true`. A Redis leader lock ensures only one process runs it.
@@ -157,7 +162,7 @@ def _start_scheduler() -> None:
     if not scheduler_enabled:
         logger.info("Scheduler disabled via SCHEDULER_ENABLED=false (running in worker)")
         return
-    
+
     try:
         redis_client = get_redis()
 
@@ -169,14 +174,14 @@ def _start_scheduler() -> None:
             nx=True,
             ex=SCHEDULER_LOCK_TTL_SECONDS,
         )
-        
+
         if not lock_acquired:
             logger.info("Scheduler already running on another worker - skipping scheduler init")
             # Still run initial fetch - important for resuming after restarts
             logger.info("Starting initial fetch check in background (non-leader)")
             threading.Thread(target=_run_initial_fetch, daemon=True).start()
             return
-        
+
         logger.info("Acquired scheduler lock - initializing scheduler")
         scheduler = init_scheduler()
         if scheduler:
@@ -213,10 +218,10 @@ def _start_scheduler() -> None:
             threading.Thread(target=_refresh_lock_forever, daemon=True).start()
 
             logger.info("Scheduler initialized")
-            
+
     except RedisError as e:
         logger.error(f"Error starting scheduler: {str(e)}")
-    
+
     # Always run initial fetch check regardless of scheduler lock
     # This ensures we resume ingestion after restart if targets not met
     logger.info("Starting initial fetch check in background")
@@ -245,9 +250,9 @@ async def lifespan(app: FastAPI):
     _create_tables()
     _check_redis_connection()
     _start_scheduler()
-    
+
     yield
-    
+
     # Shutdown
     # Best-effort: stop lock refresher and release lock if owned.
     global _scheduler_lock_stop_event, _scheduler_lock_token, _scheduler_lock_redis
@@ -307,6 +312,7 @@ app.state.limiter = limiter
 async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
     """Custom rate limit handler with structured error code."""
     from app.core.error_codes import ERROR_MESSAGES, ErrorCode
+
     code = ErrorCode.RATE_LIMITED
     return JSONResponse(
         status_code=429,
@@ -316,6 +322,7 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
             "message": ERROR_MESSAGES[code],
         },
     )
+
 
 app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
@@ -331,8 +338,14 @@ async def redis_health_guard(request: Request, call_next):
     """Fail-closed: reject requests if Redis is down (cached check every 5s)."""
     global _redis_last_check, _redis_healthy
 
-    _skip_paths = ("/health", "/metrics", "/docs", "/openapi.json", "/redoc",
-                   f"{settings.API_V1_STR}/openapi.json")
+    _skip_paths = (
+        "/health",
+        "/metrics",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+        f"{settings.API_V1_STR}/openapi.json",
+    )
     if request.url.path in _skip_paths:
         return await call_next(request)
 
@@ -349,6 +362,7 @@ async def redis_health_guard(request: Request, call_next):
 
     if not _redis_healthy:
         from app.core.error_codes import ERROR_MESSAGES, ErrorCode
+
         code = ErrorCode.SERVICE_UNAVAILABLE
         return JSONResponse(
             status_code=503,
@@ -366,19 +380,19 @@ async def redis_health_guard(request: Request, call_next):
 async def add_process_time_header(request: Request, call_next):
     """Add request processing time to response headers and record metrics."""
     from app.core.observability import metrics_collector
-    
+
     start_time = time.time()
     response = await call_next(request)
     latency_ms = (time.time() - start_time) * 1000
-    
+
     response.headers["X-Process-Time"] = str(latency_ms / 1000)
-    
+
     # Record metrics for non-static paths
     path = request.url.path
     if not path.startswith("/static") and path != "/favicon.ico":
         is_error = response.status_code >= 400
         metrics_collector.record_request(path, latency_ms, is_error)
-    
+
     return response
 
 
@@ -490,6 +504,7 @@ def health_check():
         # Send alert for health check failure
         try:
             from app.services.alerting_service import alert_health_check_failed
+
             alert_health_check_failed(
                 database_status=checks.get("database", "unknown"),
                 redis_status=checks.get("redis", "unknown"),
@@ -505,6 +520,7 @@ def _get_ingestion_health_metrics() -> dict:
     """Get ingestion health metrics for the /metrics endpoint."""
     try:
         from app.scheduler.tasks_health import get_ingestion_metrics
+
         return get_ingestion_metrics()
     except Exception as e:
         logger.warning(f"Failed to get ingestion health metrics: {e}")
@@ -596,7 +612,9 @@ def metrics():
                     "target": int(b.target or 0),
                     "reserved": int(b.reserved or 0),
                     "inserted": int(b.inserted or 0),
-                    "remaining": max(0, int(b.target or 0) - int(b.inserted or 0) - int(b.reserved or 0)),
+                    "remaining": max(
+                        0, int(b.target or 0) - int(b.inserted or 0) - int(b.reserved or 0)
+                    ),
                     "seen": int(b.seen or 0),
                     "suppressed": int(b.suppressed or 0),
                     "attempts": int(b.attempts or 0),
@@ -626,18 +644,20 @@ def metrics():
 def operational_status():
     """
     Comprehensive operational status endpoint (requires ADMIN_API_KEY).
-    
+
     Returns:
     - Request metrics (last 60 minutes): total requests, error rate, latencies
     - Connection pool stats: Redis and DB pool utilization
     - Service health indicators
-    
+
     Use this for operational monitoring dashboards and alerting.
     """
     from app.core.observability import get_operational_status
+
     return get_operational_status()
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

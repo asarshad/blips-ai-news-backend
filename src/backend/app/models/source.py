@@ -36,6 +36,4 @@ class SourceDailyStat(Base):
 
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    __table_args__ = (
-        PrimaryKeyConstraint("day", "source", name="pk_source_daily_stats"),
-    )
+    __table_args__ = (PrimaryKeyConstraint("day", "source", name="pk_source_daily_stats"),)

@@ -29,6 +29,7 @@ logger = get_logger(__name__)
 
 class FreshnessTier(str, Enum):
     """Content freshness tier for feed blending."""
+
     A = "A"  # Fresh: recently published
     B = "B"  # Backfill: recently added, older publication
     C = "C"  # Evergreen: older but high quality
@@ -36,6 +37,7 @@ class FreshnessTier(str, Enum):
 
 class Surface(str, Enum):
     """Content surfaces for inventory tracking."""
+
     ARTICLES = "articles"
     VIDEOS = "videos"
     REELS = "reels"
@@ -44,14 +46,15 @@ class Surface(str, Enum):
 @dataclass
 class TierCounts:
     """Counts per freshness tier."""
+
     tier_a: int = 0
     tier_b: int = 0
     tier_c: int = 0
-    
+
     @property
     def total(self) -> int:
         return self.tier_a + self.tier_b + self.tier_c
-    
+
     def to_dict(self) -> Dict[str, int]:
         return {
             "tier_a": self.tier_a,
@@ -64,8 +67,9 @@ class TierCounts:
 @dataclass
 class SourceDistribution:
     """Per-source content counts."""
+
     counts: Dict[str, int] = field(default_factory=dict)
-    
+
     def to_dict(self) -> Dict[str, int]:
         # Return top 10 sources
         return dict(sorted(self.counts.items(), key=lambda x: -x[1])[:10])
@@ -74,6 +78,7 @@ class SourceDistribution:
 @dataclass
 class SurfaceHealth:
     """Health metrics for a single surface."""
+
     surface: Surface
     tier_counts: TierCounts
     newest_item_age_seconds: Optional[int]
@@ -84,7 +89,7 @@ class SurfaceHealth:
     source_distribution: SourceDistribution
     is_healthy: bool = True
     issues: List[str] = field(default_factory=list)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "surface": self.surface.value,
@@ -103,12 +108,13 @@ class SurfaceHealth:
 @dataclass
 class InventoryHealth:
     """Overall inventory health across all surfaces."""
+
     timestamp: datetime
     surfaces: Dict[Surface, SurfaceHealth]
     is_healthy: bool = True
     needs_topup: bool = False
     topup_priority: List[Surface] = field(default_factory=list)
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "timestamp": self.timestamp.isoformat(),
@@ -157,29 +163,27 @@ def _surface_to_content_type(surface: Surface) -> ContentType:
 
 
 def compute_surface_health(
-    db: Session,
-    surface: Surface,
-    now: Optional[datetime] = None
+    db: Session, surface: Surface, now: Optional[datetime] = None
 ) -> SurfaceHealth:
     """
     Compute inventory health for a single surface.
-    
+
     Args:
         db: Database session
         surface: Which surface to evaluate
         now: Current time (for testing)
-        
+
     Returns:
         SurfaceHealth with tier counts and diagnostics
     """
     now = now or datetime.utcnow()
     cfg = _get_surface_config(surface)
     content_type = _surface_to_content_type(surface)
-    
+
     fresh_cutoff = now - timedelta(hours=cfg["fresh_hours"])
     backfill_cutoff = now - timedelta(hours=cfg["backfill_hours"])
     evergreen_cutoff = now - timedelta(days=cfg["evergreen_days"])
-    
+
     # Base query filters – only PROMOTED items count toward inventory health;
     # CANDIDATE stubs are invisible in feeds and must not inflate tier counts.
     base_filter = and_(
@@ -187,83 +191,107 @@ def compute_surface_health(
         ContentItem.is_suppressed.is_(False),
         ContentItem.curation_status == ContentStatus.PROMOTED,
     )
-    
+
     # Tier A: published_at within fresh window
-    tier_a_count = db.query(func.count(ContentItem.id)).filter(
-        base_filter,
-        ContentItem.published_at >= fresh_cutoff,
-    ).scalar() or 0
-    
+    tier_a_count = (
+        db.query(func.count(ContentItem.id))
+        .filter(
+            base_filter,
+            ContentItem.published_at >= fresh_cutoff,
+        )
+        .scalar()
+        or 0
+    )
+
     # Tier B: created_at within backfill window AND published_at older than fresh
-    tier_b_count = db.query(func.count(ContentItem.id)).filter(
-        base_filter,
-        ContentItem.created_at >= backfill_cutoff,
-        ContentItem.published_at < fresh_cutoff,
-    ).scalar() or 0
-    
+    tier_b_count = (
+        db.query(func.count(ContentItem.id))
+        .filter(
+            base_filter,
+            ContentItem.created_at >= backfill_cutoff,
+            ContentItem.published_at < fresh_cutoff,
+        )
+        .scalar()
+        or 0
+    )
+
     # Tier C: evergreen (older than fresh, within max age, high quality)
     # We use global_score > 0.3 as quality threshold
-    tier_c_count = db.query(func.count(ContentItem.id)).filter(
-        base_filter,
-        ContentItem.published_at < fresh_cutoff,
-        ContentItem.published_at >= evergreen_cutoff,
-        ContentItem.global_score >= 0.3,
-    ).scalar() or 0
-    
+    tier_c_count = (
+        db.query(func.count(ContentItem.id))
+        .filter(
+            base_filter,
+            ContentItem.published_at < fresh_cutoff,
+            ContentItem.published_at >= evergreen_cutoff,
+            ContentItem.global_score >= 0.3,
+        )
+        .scalar()
+        or 0
+    )
+
     tier_counts = TierCounts(
         tier_a=tier_a_count,
         tier_b=tier_b_count,
         tier_c=tier_c_count,
     )
-    
+
     # Reservoir count (total available content within max age)
-    reservoir_count = db.query(func.count(ContentItem.id)).filter(
-        base_filter,
-        ContentItem.published_at >= evergreen_cutoff,
-    ).scalar() or 0
-    
+    reservoir_count = (
+        db.query(func.count(ContentItem.id))
+        .filter(
+            base_filter,
+            ContentItem.published_at >= evergreen_cutoff,
+        )
+        .scalar()
+        or 0
+    )
+
     # Newest item age
-    newest = db.query(func.max(ContentItem.published_at)).filter(
-        base_filter
-    ).scalar()
+    newest = db.query(func.max(ContentItem.published_at)).filter(base_filter).scalar()
     newest_age = int((now - newest).total_seconds()) if newest else None
-    
+
     # Oldest Tier A item age
-    oldest_tier_a = db.query(func.min(ContentItem.published_at)).filter(
-        base_filter,
-        ContentItem.published_at >= fresh_cutoff,
-    ).scalar()
+    oldest_tier_a = (
+        db.query(func.min(ContentItem.published_at))
+        .filter(
+            base_filter,
+            ContentItem.published_at >= fresh_cutoff,
+        )
+        .scalar()
+    )
     oldest_tier_a_age = int((now - oldest_tier_a).total_seconds()) if oldest_tier_a else None
-    
+
     # Source distribution (for reservoir content)
-    source_dist_rows = db.query(
-        ContentItem.source,
-        func.count(ContentItem.id)
-    ).filter(
-        base_filter,
-        ContentItem.published_at >= evergreen_cutoff,
-    ).group_by(ContentItem.source).all()
-    
+    source_dist_rows = (
+        db.query(ContentItem.source, func.count(ContentItem.id))
+        .filter(
+            base_filter,
+            ContentItem.published_at >= evergreen_cutoff,
+        )
+        .group_by(ContentItem.source)
+        .all()
+    )
+
     source_distribution = SourceDistribution(
         counts={row[0] or "Unknown": row[1] for row in source_dist_rows}
     )
-    
+
     # Evaluate health and issues
     issues = []
     is_healthy = True
-    
+
     if tier_a_count < cfg["min_fresh"]:
         issues.append(f"Fresh content below minimum: {tier_a_count} < {cfg['min_fresh']}")
         is_healthy = False
-    
+
     if reservoir_count < cfg["reservoir"]:
         issues.append(f"Reservoir below target: {reservoir_count} < {cfg['reservoir']}")
         is_healthy = False
-    
+
     if newest_age and newest_age > cfg["fresh_hours"] * 3600:
         issues.append(f"No fresh content: newest is {newest_age // 3600}h old")
         is_healthy = False
-    
+
     return SurfaceHealth(
         surface=surface,
         tier_counts=tier_counts,
@@ -278,40 +306,37 @@ def compute_surface_health(
     )
 
 
-def compute_inventory_health(
-    db: Session,
-    now: Optional[datetime] = None
-) -> InventoryHealth:
+def compute_inventory_health(db: Session, now: Optional[datetime] = None) -> InventoryHealth:
     """
     Compute inventory health for all surfaces.
-    
+
     Args:
         db: Database session
         now: Current time (for testing)
-        
+
     Returns:
         InventoryHealth with per-surface metrics and top-up priorities
     """
     now = now or datetime.utcnow()
-    
+
     surfaces = {}
     topup_priority = []
-    
+
     for surface in Surface:
         health = compute_surface_health(db, surface, now)
         surfaces[surface] = health
-        
+
         if not health.is_healthy:
             topup_priority.append(surface)
-    
+
     # Sort priority by severity (lowest tier_a percentage first)
     topup_priority.sort(
         key=lambda s: surfaces[s].tier_counts.tier_a / max(surfaces[s].min_fresh_threshold, 1)
     )
-    
+
     is_healthy = all(h.is_healthy for h in surfaces.values())
     needs_topup = len(topup_priority) > 0
-    
+
     return InventoryHealth(
         timestamp=now,
         surfaces=surfaces,
@@ -326,25 +351,22 @@ _cached_health: Optional[InventoryHealth] = None
 _cache_timestamp: Optional[datetime] = None
 
 
-def get_cached_inventory_health(
-    db: Session,
-    force_refresh: bool = False
-) -> InventoryHealth:
+def get_cached_inventory_health(db: Session, force_refresh: bool = False) -> InventoryHealth:
     """
     Get inventory health with caching.
-    
+
     Args:
         db: Database session
         force_refresh: Bypass cache and recompute
-        
+
     Returns:
         InventoryHealth (cached if within TTL)
     """
     global _cached_health, _cache_timestamp
-    
+
     now = datetime.utcnow()
     ttl = settings.INVENTORY_HEALTH_CACHE_TTL
-    
+
     if (
         not force_refresh
         and _cached_health is not None
@@ -352,14 +374,16 @@ def get_cached_inventory_health(
         and (now - _cache_timestamp).total_seconds() < ttl
     ):
         return _cached_health
-    
+
     # Recompute
     health = compute_inventory_health(db, now)
     _cached_health = health
     _cache_timestamp = now
-    
-    logger.debug(f"Inventory health recomputed: healthy={health.is_healthy}, topup_priority={health.topup_priority}")
-    
+
+    logger.debug(
+        f"Inventory health recomputed: healthy={health.is_healthy}, topup_priority={health.topup_priority}"
+    )
+
     return health
 
 
@@ -381,7 +405,6 @@ def get_pipeline_counts(db: Session) -> Dict[str, Any]:
     whether the promotion job is running.
     """
     from sqlalchemy import func as sa_func
-
 
     window_hours = 48
     cutoff = datetime.utcnow() - timedelta(hours=window_hours)
@@ -417,4 +440,3 @@ def get_pipeline_counts(db: Session) -> Dict[str, Any]:
         "window_hours": window_hours,
         "per_type": result,
     }
-

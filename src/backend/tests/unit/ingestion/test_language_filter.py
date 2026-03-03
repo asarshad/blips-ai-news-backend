@@ -7,8 +7,13 @@ from unittest.mock import MagicMock, patch
 
 # Load language_filter directly to avoid the heavy app.ingestion.__init__ chain
 _filter_path = os.path.join(
-    os.path.dirname(__file__), os.pardir, os.pardir, os.pardir,
-    "app", "ingestion", "language_filter.py",
+    os.path.dirname(__file__),
+    os.pardir,
+    os.pardir,
+    os.pardir,
+    "app",
+    "ingestion",
+    "language_filter.py",
 )
 _spec = importlib.util.spec_from_file_location("language_filter", os.path.abspath(_filter_path))
 _mod = importlib.util.module_from_spec(_spec)
@@ -26,34 +31,32 @@ class TestIsEnglish:
         assert is_english("Apple announces new MacBook Pro with M5 chip") is True
 
     def test_english_title_with_description_returns_true(self):
-        assert is_english(
-            "Google releases Android 16 beta",
-            "The latest Android release brings improved notification controls and better battery management."
-        ) is True
+        assert (
+            is_english(
+                "Google releases Android 16 beta",
+                "The latest Android release brings improved notification controls and better battery management.",
+            )
+            is True
+        )
 
     def test_spanish_title_returns_false(self):
         assert is_english("Las mejores aplicaciones para tu teléfono Android en 2026") is False
 
     def test_spanish_video_title_returns_false(self):
-        assert is_english(
-            "Hardware Canucks en Español - Revisión del nuevo procesador"
-        ) is False
+        assert is_english("Hardware Canucks en Español - Revisión del nuevo procesador") is False
 
     def test_french_title_returns_false(self):
-        assert is_english(
-            "Les meilleures technologies de l'année prochaine selon les experts"
-        ) is False
+        assert (
+            is_english("Les meilleures technologies de l'année prochaine selon les experts")
+            is False
+        )
 
     def test_german_title_returns_false(self):
-        assert is_english(
-            "Die besten Smartphones des Jahres im großen Vergleichstest"
-        ) is False
+        assert is_english("Die besten Smartphones des Jahres im großen Vergleichstest") is False
 
     def test_mixed_mostly_english_returns_true(self):
         """Titles with occasional non-English words should pass if mostly English."""
-        assert is_english(
-            "Tesla's new Gigafactory breaks ground in München"
-        ) is True
+        assert is_english("Tesla's new Gigafactory breaks ground in München") is True
 
     def test_empty_title_returns_true(self):
         """Empty strings should pass (safe default)."""
@@ -72,10 +75,13 @@ class TestIsEnglish:
     def test_title_with_description_improves_detection(self):
         """Description provides additional context for detection."""
         # A short title might be ambiguous, but description helps
-        assert is_english(
-            "Tech Review",
-            "This comprehensive review covers the latest innovations in artificial intelligence and machine learning."
-        ) is True
+        assert (
+            is_english(
+                "Tech Review",
+                "This comprehensive review covers the latest innovations in artificial intelligence and machine learning.",
+            )
+            is True
+        )
 
     def test_description_is_truncated_to_500_chars(self):
         """Long descriptions should be truncated for performance."""
@@ -117,30 +123,36 @@ class TestIsEnglishRealWorldExamples:
     """Test with real-world titles from the app's content sources."""
 
     def test_techcrunch_english(self):
-        assert is_english(
-            "With co-founders leaving and an IPO looming, Elon Musk turns talk to the moon"
-        ) is True
+        assert (
+            is_english(
+                "With co-founders leaving and an IPO looming, Elon Musk turns talk to the moon"
+            )
+            is True
+        )
 
     def test_verge_english(self):
-        assert is_english(
-            "Google's Pixel 10 could be the most affordable flagship phone of 2026"
-        ) is True
+        assert (
+            is_english("Google's Pixel 10 could be the most affordable flagship phone of 2026")
+            is True
+        )
 
     def test_hardware_canucks_espanol(self):
-        assert is_english(
-            "¡El MEJOR PC Gaming que puedes armar en 2026! Guía completa de compra"
-        ) is False
+        assert (
+            is_english("¡El MEJOR PC Gaming que puedes armar en 2026! Guía completa de compra")
+            is False
+        )
 
     def test_mit_tech_review_english(self):
-        assert is_english(
-            "The Download: inside the QuitGPT movement, and EVs in Africa"
-        ) is True
+        assert is_english("The Download: inside the QuitGPT movement, and EVs in Africa") is True
 
     def test_youtube_spanish_video(self):
-        assert is_english(
-            "Revisión completa del nuevo procesador Intel Core Ultra 300",
-            "En este video hacemos una revisión detallada del nuevo procesador de Intel."
-        ) is False
+        assert (
+            is_english(
+                "Revisión completa del nuevo procesador Intel Core Ultra 300",
+                "En este video hacemos una revisión detallada del nuevo procesador de Intel.",
+            )
+            is False
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -157,16 +169,12 @@ class TestDetectLanguage:
         assert prob > 0.5
 
     def test_spanish_returns_es(self):
-        lang, prob = detect_language(
-            "Las mejores aplicaciones para tu teléfono Android en 2026"
-        )
+        lang, prob = detect_language("Las mejores aplicaciones para tu teléfono Android en 2026")
         assert lang == "es"
         assert prob > 0.0
 
     def test_french_returns_fr(self):
-        lang, prob = detect_language(
-            "Les meilleures technologies de l'année selon les experts"
-        )
+        lang, prob = detect_language("Les meilleures technologies de l'année selon les experts")
         assert lang == "fr"
         assert prob > 0.0
 

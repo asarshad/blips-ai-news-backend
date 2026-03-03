@@ -79,7 +79,9 @@ def normalize_url(url: str, extra_drop_params: Iterable[str] = ()) -> str:
     drop = set(_TRACKING_PARAMS)
     drop.update(p.lower() for p in extra_drop_params)
 
-    query_pairs = [(k, v) for (k, v) in parse_qsl(parts.query, keep_blank_values=True) if k.lower() not in drop]
+    query_pairs = [
+        (k, v) for (k, v) in parse_qsl(parts.query, keep_blank_values=True) if k.lower() not in drop
+    ]
     query = urlencode(query_pairs, doseq=True)
 
     path = parts.path or ""

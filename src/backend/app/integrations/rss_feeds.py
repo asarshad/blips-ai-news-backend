@@ -21,7 +21,7 @@ from typing import Dict, List, Optional
 class FeedRole(Enum):
     """
     Editorial role defining the feed's purpose in the content mix.
-    
+
     BREAKING: Fast-moving news, gadget launches, tech industry updates
     ANALYSIS: Deep dives, opinion, long-form context pieces
     AI: Artificial intelligence, machine learning, LLM developments
@@ -31,6 +31,7 @@ class FeedRole(Enum):
     DEV: Developer tools, tutorials, programming trends
     PRIMARY: Official company blogs (down-ranked unless corroborated)
     """
+
     BREAKING = "breaking"
     ANALYSIS = "analysis"
     AI = "ai"
@@ -44,11 +45,12 @@ class FeedRole(Enum):
 class QualityTier(Enum):
     """
     Quality tier for ranking weight modifiers.
-    
+
     PREMIUM: Top-tier publications with strong editorial standards
     STANDARD: Reliable sources with good coverage
     SUPPLEMENTAL: Niche or variable quality, useful for diversity
     """
+
     PREMIUM = "premium"
     STANDARD = "standard"
     SUPPLEMENTAL = "supplemental"
@@ -57,11 +59,12 @@ class QualityTier(Enum):
 class DecayProfile(Enum):
     """
     Decay profile controlling how quickly articles lose ranking.
-    
+
     FAST: Breaking news - stale quickly (half-life ~6 hours)
     NORMAL: Standard news cycle (half-life ~24 hours)
     SLOW: Analysis/evergreen - stays relevant longer (half-life ~48 hours)
     """
+
     FAST = "fast"
     NORMAL = "normal"
     SLOW = "slow"
@@ -69,9 +72,9 @@ class DecayProfile(Enum):
 
 # Quality tier weight modifiers
 QUALITY_TIER_MODIFIERS: Dict[QualityTier, float] = {
-    QualityTier.PREMIUM: 1.15,      # 15% boost
-    QualityTier.STANDARD: 1.0,      # No modifier
-    QualityTier.SUPPLEMENTAL: 0.85, # 15% reduction
+    QualityTier.PREMIUM: 1.15,  # 15% boost
+    QualityTier.STANDARD: 1.0,  # No modifier
+    QualityTier.SUPPLEMENTAL: 0.85,  # 15% reduction
 }
 
 # Decay profile half-life in hours
@@ -83,14 +86,14 @@ DECAY_HALF_LIFE_HOURS: Dict[DecayProfile, int] = {
 
 # Role quotas - target articles per day per role
 ROLE_QUOTAS: Dict[FeedRole, int] = {
-    FeedRole.BREAKING: 15,    # Major news coverage (expanded with new sources)
-    FeedRole.ANALYSIS: 10,    # Deep dives
-    FeedRole.AI: 6,           # AI/ML focused content
-    FeedRole.INFRA: 5,        # Cloud/backend
-    FeedRole.SECURITY: 4,     # Security news
-    FeedRole.BUSINESS: 4,     # Startups/funding
-    FeedRole.DEV: 6,          # Developer content + mobile
-    FeedRole.PRIMARY: 3,      # Official blogs (down-ranked)
+    FeedRole.BREAKING: 15,  # Major news coverage (expanded with new sources)
+    FeedRole.ANALYSIS: 10,  # Deep dives
+    FeedRole.AI: 6,  # AI/ML focused content
+    FeedRole.INFRA: 5,  # Cloud/backend
+    FeedRole.SECURITY: 4,  # Security news
+    FeedRole.BUSINESS: 4,  # Startups/funding
+    FeedRole.DEV: 6,  # Developer content + mobile
+    FeedRole.PRIMARY: 3,  # Official blogs (down-ranked)
 }
 
 
@@ -98,7 +101,7 @@ ROLE_QUOTAS: Dict[FeedRole, int] = {
 class FeedConfig:
     """
     Configuration for a single RSS feed.
-    
+
     Attributes:
         url: RSS feed URL
         name: Human-readable name for logging
@@ -110,6 +113,7 @@ class FeedConfig:
         base_quality_weight: Override for source quality (0.0-1.0)
         notes: Internal documentation
     """
+
     url: str
     name: str
     role: FeedRole
@@ -194,7 +198,6 @@ FEED_REGISTRY: List[FeedConfig] = [
         base_quality_weight=0.90,
         notes="In-depth tech journalism, science, policy",
     ),
-
     # =========================================================================
     # ANALYSIS & CONTEXT
     # Deep dives, opinion, long-form journalism
@@ -240,7 +243,6 @@ FEED_REGISTRY: List[FeedConfig] = [
         base_quality_weight=0.88,
         notes="Tech policy, society, long-form analysis",
     ),
-
     # =========================================================================
     # INFRASTRUCTURE & CLOUD
     # Cloud computing, DevOps, backend systems, enterprise
@@ -288,7 +290,6 @@ FEED_REGISTRY: List[FeedConfig] = [
         enabled=False,
         notes="Enterprise announcements, low consumer engagement",
     ),
-
     # =========================================================================
     # STARTUPS & BUSINESS
     # Funding, acquisitions, market analysis, VC
@@ -325,7 +326,6 @@ FEED_REGISTRY: List[FeedConfig] = [
     #     base_quality_weight=0.75,
     #     notes="VC/PE deals, market data",
     # ),
-
     # =========================================================================
     # SECURITY & PRIVACY
     # Cybersecurity, threats, vulnerabilities, privacy
@@ -361,7 +361,6 @@ FEED_REGISTRY: List[FeedConfig] = [
         base_quality_weight=0.75,
         notes="Enterprise security, threat intelligence",
     ),
-
     # =========================================================================
     # DEVELOPER PERSPECTIVE
     # Programming, tools, tutorials, developer culture
@@ -398,7 +397,6 @@ FEED_REGISTRY: List[FeedConfig] = [
         enabled=False,
         notes="Nearly dead since DigitalOcean acquisition",
     ),
-
     # =========================================================================
     # PRIMARY SOURCES (Official Blogs)
     # Company announcements - down-rank unless corroborated by news
@@ -446,7 +444,6 @@ FEED_REGISTRY: List[FeedConfig] = [
         enabled=False,
         notes="Press releases, covered faster by 9to5Mac/MacRumors",
     ),
-
     # =========================================================================
     # MOBILE & CONSUMER TECH (NEW)
     # Apple, Android, mobile devices, consumer gadgets
@@ -532,7 +529,6 @@ FEED_REGISTRY: List[FeedConfig] = [
         base_quality_weight=0.80,
         notes="PC hardware benchmarks, GPU reviews, components",
     ),
-
     # =========================================================================
     # AI & MACHINE LEARNING (NEW)
     # AI research, tools, industry developments
@@ -559,7 +555,6 @@ FEED_REGISTRY: List[FeedConfig] = [
         enabled=False,
         notes="Weekly AI/ML newsletter — feed URL returns 404, needs investigation",
     ),
-
     # =========================================================================
     # PRODUCT & STARTUP DISCOVERY (NEW)
     # Product launches, indie tools, startup ecosystem
@@ -574,7 +569,6 @@ FEED_REGISTRY: List[FeedConfig] = [
         base_quality_weight=0.70,
         notes="New product launches, indie tools, startup ecosystem",
     ),
-
     # =========================================================================
     # PREMIUM ANALYSIS (NEW)
     # Investigative tech journalism, premium reporting
@@ -595,6 +589,7 @@ FEED_REGISTRY: List[FeedConfig] = [
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
+
 
 def get_enabled_feeds() -> List[FeedConfig]:
     """Get all enabled feed configurations."""
@@ -637,20 +632,20 @@ def get_feed_by_url(url: str) -> Optional[FeedConfig]:
 def get_feed_stats() -> Dict:
     """
     Get statistics about the feed configuration.
-    
+
     Returns:
         Dictionary with feed counts and capacity info
     """
     enabled = get_enabled_feeds()
-    
+
     feeds_by_role = {}
     for role in FeedRole:
         role_feeds = [f for f in enabled if f.role == role]
         feeds_by_role[role.value] = len(role_feeds)
-    
+
     total_daily_cap = sum(f.daily_cap for f in enabled)
     premium_count = len([f for f in enabled if f.quality_tier == QualityTier.PREMIUM])
-    
+
     return {
         "total_feeds": len(enabled),
         "total_daily_cap": total_daily_cap,

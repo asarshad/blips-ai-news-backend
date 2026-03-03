@@ -34,7 +34,9 @@ class SourceDailyStatsRepository:
         self.db = db
 
     def get(self, *, day: date, source: str, for_update: bool = False) -> Optional[SourceDailyStat]:
-        q = self.db.query(SourceDailyStat).filter(SourceDailyStat.day == day, SourceDailyStat.source == source)
+        q = self.db.query(SourceDailyStat).filter(
+            SourceDailyStat.day == day, SourceDailyStat.source == source
+        )
         if for_update:
             q = q.with_for_update()
         return q.one_or_none()

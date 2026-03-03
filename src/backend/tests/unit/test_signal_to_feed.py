@@ -22,6 +22,7 @@ from app.services.promotion_service import PromotionService
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _make_article_signal(raw_url: str, raw_title: str, score: float = 100.0) -> SignalItem:
     return SignalItem(
         raw_url=raw_url,
@@ -61,6 +62,7 @@ def _make_stub(
 
 # ── Test: signal ingestion creates CANDIDATE stubs ────────────────────────────
 
+
 class TestSignalIngestionCreatesCandidates:
     """Verifies that run_signal_ingestion() creates CANDIDATE stubs for new URLs."""
 
@@ -92,15 +94,20 @@ class TestSignalIngestionCreatesCandidates:
 
         mock_db.add.side_effect = capture_add
 
-        with patch("app.ingestion.signal_ingestion.fetch_hn_top", return_value=signals), \
-             patch("app.ingestion.signal_ingestion.fetch_hn_best", return_value=[]), \
-             patch("app.ingestion.signal_ingestion.fetch_github_trending", return_value=[]), \
-             patch("app.ingestion.signal_ingestion._fetch_yt_safe", return_value=[]), \
-             patch("app.ingestion.signal_ingestion.ContentItemRepository",
-                   return_value=mock_content_repo), \
-             patch("app.ingestion.signal_ingestion.SignalURLRepository",
-                   return_value=mock_signal_repo), \
-             patch("app.ingestion.signal_ingestion.normalize_url", side_effect=lambda u: u):
+        with (
+            patch("app.ingestion.signal_ingestion.fetch_hn_top", return_value=signals),
+            patch("app.ingestion.signal_ingestion.fetch_hn_best", return_value=[]),
+            patch("app.ingestion.signal_ingestion.fetch_github_trending", return_value=[]),
+            patch("app.ingestion.signal_ingestion._fetch_yt_safe", return_value=[]),
+            patch(
+                "app.ingestion.signal_ingestion.ContentItemRepository",
+                return_value=mock_content_repo,
+            ),
+            patch(
+                "app.ingestion.signal_ingestion.SignalURLRepository", return_value=mock_signal_repo
+            ),
+            patch("app.ingestion.signal_ingestion.normalize_url", side_effect=lambda u: u),
+        ):
             result = run_signal_ingestion(mock_db)
 
         assert result.stubs_created == 2
@@ -127,15 +134,20 @@ class TestSignalIngestionCreatesCandidates:
 
         signals = [_make_article_signal("https://existing.com/article", "Old story")]
 
-        with patch("app.ingestion.signal_ingestion.fetch_hn_top", return_value=signals), \
-             patch("app.ingestion.signal_ingestion.fetch_hn_best", return_value=[]), \
-             patch("app.ingestion.signal_ingestion.fetch_github_trending", return_value=[]), \
-             patch("app.ingestion.signal_ingestion._fetch_yt_safe", return_value=[]), \
-             patch("app.ingestion.signal_ingestion.ContentItemRepository",
-                   return_value=mock_content_repo), \
-             patch("app.ingestion.signal_ingestion.SignalURLRepository",
-                   return_value=mock_signal_repo), \
-             patch("app.ingestion.signal_ingestion.normalize_url", side_effect=lambda u: u):
+        with (
+            patch("app.ingestion.signal_ingestion.fetch_hn_top", return_value=signals),
+            patch("app.ingestion.signal_ingestion.fetch_hn_best", return_value=[]),
+            patch("app.ingestion.signal_ingestion.fetch_github_trending", return_value=[]),
+            patch("app.ingestion.signal_ingestion._fetch_yt_safe", return_value=[]),
+            patch(
+                "app.ingestion.signal_ingestion.ContentItemRepository",
+                return_value=mock_content_repo,
+            ),
+            patch(
+                "app.ingestion.signal_ingestion.SignalURLRepository", return_value=mock_signal_repo
+            ),
+            patch("app.ingestion.signal_ingestion.normalize_url", side_effect=lambda u: u),
+        ):
             result = run_signal_ingestion(mock_db)
 
         assert result.stubs_created == 0
@@ -144,6 +156,7 @@ class TestSignalIngestionCreatesCandidates:
 
 
 # ── Test: promotion service gates the feed ────────────────────────────────────
+
 
 class TestPromotionGate:
     """Verifies that only PROMOTED items reach the feed."""
@@ -154,9 +167,11 @@ class TestPromotionGate:
         candidate = _make_stub(id_=1, status=ContentStatus.CANDIDATE, signal_hits=3)
 
         svc = PromotionService(mock_db)
-        with patch.object(svc, "_get_cluster_sizes", return_value={"c1": 4}), \
-             patch.object(svc, "_get_candidates", return_value=[candidate]), \
-             patch.object(svc, "_rescore_promoted", return_value=0):
+        with (
+            patch.object(svc, "_get_cluster_sizes", return_value={"c1": 4}),
+            patch.object(svc, "_get_candidates", return_value=[candidate]),
+            patch.object(svc, "_rescore_promoted", return_value=0),
+        ):
             result = svc.run_promotion_job()
 
         assert candidate.curation_status == ContentStatus.PROMOTED
@@ -225,6 +240,7 @@ class TestPromotionGate:
 
 # ── Test: diversity mixer respects category minimums ─────────────────────────
 
+
 class TestDiversityMixerCategoryMinimums:
     """Verifies per_category_minimums guarantee at least N items per topic."""
 
@@ -249,11 +265,18 @@ class TestDiversityMixerCategoryMinimums:
         mixer = DiversityMixer(constraints)
 
         # 8 items: 2 AI + 6 other topics
-        items = self._make_items([
-            (1, "a.com", "Cloud"), (2, "b.com", "Cloud"), (3, "c.com", "Cloud"),
-            (4, "d.com", "DevOps"), (5, "e.com", "DevOps"), (6, "f.com", "AI"),
-            (7, "g.com", "AI"), (8, "h.com", "Security"),
-        ])
+        items = self._make_items(
+            [
+                (1, "a.com", "Cloud"),
+                (2, "b.com", "Cloud"),
+                (3, "c.com", "Cloud"),
+                (4, "d.com", "DevOps"),
+                (5, "e.com", "DevOps"),
+                (6, "f.com", "AI"),
+                (7, "g.com", "AI"),
+                (8, "h.com", "Security"),
+            ]
+        )
         result = mixer.mix(items, target_size=5)
 
         ai_items = [it for it in result.items if it["topics"][0] == "AI"]
@@ -272,9 +295,13 @@ class TestDiversityMixerCategoryMinimums:
         )
         mixer = DiversityMixer(constraints)
 
-        items = self._make_items([
-            (1, "a.com", "AI"), (2, "b.com", "Cloud"), (3, "c.com", "Security"),
-        ])
+        items = self._make_items(
+            [
+                (1, "a.com", "AI"),
+                (2, "b.com", "Cloud"),
+                (3, "c.com", "Security"),
+            ]
+        )
         result = mixer.mix(items, target_size=3)
 
         security_items = [it for it in result.items if it["topics"][0] == "Security"]
@@ -295,10 +322,15 @@ class TestDiversityMixerCategoryMinimums:
         )
         mixer = DiversityMixer(constraints)
 
-        items = self._make_items([
-            (1, "a.com", "AI"), (2, "b.com", "Security"), (3, "c.com", "AI"),
-            (4, "d.com", "Cloud"), (5, "e.com", "DevOps"),
-        ])
+        items = self._make_items(
+            [
+                (1, "a.com", "AI"),
+                (2, "b.com", "Security"),
+                (3, "c.com", "AI"),
+                (4, "d.com", "Cloud"),
+                (5, "e.com", "DevOps"),
+            ]
+        )
         result = mixer.mix(items, target_size=4)
 
         assert isinstance(result.category_distribution, dict)
@@ -316,10 +348,15 @@ class TestDiversityMixerCategoryMinimums:
         )
         mixer = DiversityMixer(constraints)
 
-        items = self._make_items([
-            (1, "a.com", "AI"), (2, "b.com", "Security"), (3, "a.com", "Cloud"),
-            (4, "c.com", "DevOps"), (5, "b.com", "AI"),
-        ])
+        items = self._make_items(
+            [
+                (1, "a.com", "AI"),
+                (2, "b.com", "Security"),
+                (3, "a.com", "Cloud"),
+                (4, "c.com", "DevOps"),
+                (5, "b.com", "AI"),
+            ]
+        )
         result = mixer.mix(items, target_size=4)
 
         total_pct = sum(result.source_contribution_pct.values())

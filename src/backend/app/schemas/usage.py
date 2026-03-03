@@ -1,4 +1,3 @@
-
 from datetime import datetime
 from typing import Optional
 
@@ -11,16 +10,17 @@ class UsageBase(BaseModel):
     used_tokens: int = 0
     message_count: int = 0
 
+
 class UsageCreate(UsageBase):
     pass
+
 
 class Usage(UsageBase):
     id: int
     timestamp: datetime
-    
-    model_config = {
-        "from_attributes": True
-    }
+
+    model_config = {"from_attributes": True}
+
 
 class UsageStats(BaseModel):
     remaining_daily_messages: int

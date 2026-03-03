@@ -51,9 +51,7 @@ class TestCircuitBreaker:
         assert cb.allow_request() is True
 
     def test_half_open_closes_after_successes(self):
-        cb = CircuitBreaker(
-            "test", failure_threshold=2, recovery_timeout=1, success_threshold=2
-        )
+        cb = CircuitBreaker("test", failure_threshold=2, recovery_timeout=1, success_threshold=2)
         cb.record_failure()
         cb.record_failure()
         time.sleep(1.1)

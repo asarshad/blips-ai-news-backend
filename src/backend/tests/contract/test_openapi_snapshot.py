@@ -55,8 +55,6 @@ def test_openapi_snapshot_is_stable(request: pytest.FixtureRequest):
             "pytest -m contract --update-openapi-snapshot"
         )
 
-    expected = _strip_pydantic_schemas(
-        json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
-    )
+    expected = _strip_pydantic_schemas(json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8")))
 
     assert _normalized_json(current) == _normalized_json(expected)

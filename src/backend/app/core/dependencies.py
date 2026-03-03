@@ -16,7 +16,7 @@ def get_db() -> Generator[Session, None, None]:
     """
     Database session dependency.
     Creates a new SQLAlchemy session for each request and closes it when done.
-    
+
     Yields:
         Session: SQLAlchemy database session
     """
@@ -49,7 +49,7 @@ def get_redis() -> redis.Redis:
     """
     Redis client dependency.
     Returns a Redis client backed by a shared connection pool.
-    
+
     Returns:
         redis.Redis: Connected Redis client
     """

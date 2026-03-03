@@ -68,11 +68,7 @@ def extract_metadata(html: str, source_url: str) -> PageMetadata:
     tw_title = _meta_content(head, attrs={"name": "twitter:title"})
     html_title = head.find("title")
 
-    meta.title = (
-        og_title
-        or tw_title
-        or (html_title.get_text(strip=True) if html_title else None)
-    )
+    meta.title = og_title or tw_title or (html_title.get_text(strip=True) if html_title else None)
 
     # ── Description ───────────────────────────────────────────────────────
     og_desc = _meta_content(head, prop="og:description")
@@ -98,9 +94,7 @@ def extract_metadata(html: str, source_url: str) -> PageMetadata:
         "date",
         "pubdate",
     ]:
-        val = _meta_content(head, prop=attr_name) or _meta_content(
-            head, attrs={"name": attr_name}
-        )
+        val = _meta_content(head, prop=attr_name) or _meta_content(head, attrs={"name": attr_name})
         if val:
             meta.published_at_str = val.strip()
             break

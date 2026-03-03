@@ -26,13 +26,13 @@ def get_conversation_repo(db: Session = Depends(get_db)) -> ConversationReposito
 def get_conversations(
     content_item_id: int,
     content_repo: ContentItemRepository = Depends(get_content_repo),
-    conversation_repo: ConversationRepository = Depends(get_conversation_repo)
+    conversation_repo: ConversationRepository = Depends(get_conversation_repo),
 ):
     """Get conversation history for a content item."""
     content_item = content_repo.get_by_id(content_item_id)
     if not content_item:
         raise not_found_exception("Content item", content_item_id)
-    
+
     conversations = conversation_repo.get_content_messages(content_item_id)
     return {"content_item_id": content_item_id, "conversations": conversations}
 
@@ -43,16 +43,16 @@ def save_message(
     message: str,
     sender: str,
     content_repo: ContentItemRepository = Depends(get_content_repo),
-    conversation_repo: ConversationRepository = Depends(get_conversation_repo)
+    conversation_repo: ConversationRepository = Depends(get_conversation_repo),
 ):
     """Save a new message to the conversation history."""
     content_item = content_repo.get_by_id(content_item_id)
     if not content_item:
         raise not_found_exception("Content item", content_item_id)
-    
+
     if sender not in ("user", "ai"):
         raise HTTPException(status_code=400, detail="Invalid sender. Must be 'user' or 'ai'")
-    
+
     return conversation_repo.add_message(content_item_id, sender, message)
 
 
@@ -60,12 +60,12 @@ def save_message(
 def delete_conversation(
     content_item_id: int,
     content_repo: ContentItemRepository = Depends(get_content_repo),
-    conversation_repo: ConversationRepository = Depends(get_conversation_repo)
+    conversation_repo: ConversationRepository = Depends(get_conversation_repo),
 ):
     """Delete conversation history for a content item."""
     content_item = content_repo.get_by_id(content_item_id)
     if not content_item:
         raise not_found_exception("Content item", content_item_id)
-    
+
     conversation_repo.clear_conversation(content_item_id)
     return None

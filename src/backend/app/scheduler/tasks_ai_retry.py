@@ -46,7 +46,9 @@ def process_ai_summaries():
         llm_client = LLMClient()
 
         if not llm_client.is_configured():
-            logger.warning(f"[ai_retry] {llm_client.get_provider()} API key not configured, skipping")
+            logger.warning(
+                f"[ai_retry] {llm_client.get_provider()} API key not configured, skipping"
+            )
             return
 
         items = content_repo.get_unprocessed_by_ai(limit=MAX_ITEMS_PER_RUN, hours_back=168)
@@ -119,7 +121,7 @@ retry_ai_processing = process_ai_summaries
 
 def _backfill_starters(db: Session, llm_client, stats) -> None:
     """Backfill conversation starters for items that have summaries but no starters.
-    
+
     This ensures the feed API returns inline starters, eliminating the need
     for the mobile app to make a separate /starters/{id} API call.
     """

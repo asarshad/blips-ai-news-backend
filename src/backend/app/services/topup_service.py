@@ -36,6 +36,7 @@ def _get_redis_client():
     """Get Redis client using shared connection pool."""
     try:
         from app.core.dependencies import get_redis
+
         return get_redis()
     except Exception as e:
         logger.warning(f"Redis not available for top-up lock: {e}")
@@ -45,7 +46,7 @@ def _get_redis_client():
 def _acquire_topup_lock() -> bool:
     """
     Acquire distributed lock for top-up operation.
-    
+
     Returns:
         True if lock acquired, False if another top-up is in progress
     """
@@ -59,7 +60,7 @@ def _acquire_topup_lock() -> bool:
             return bool(acquired)
         except Exception as e:
             logger.warning(f"Redis lock failed, using local lock: {e}")
-    
+
     # Fallback to local lock
     global _topup_in_progress
     with _topup_lock:
@@ -77,7 +78,7 @@ def _release_topup_lock():
             redis_client.delete("blips:topup_lock")
         except Exception as e:
             logger.warning(f"Redis lock release failed: {e}")
-    
+
     global _topup_in_progress
     with _topup_lock:
         _topup_in_progress = False
@@ -86,10 +87,10 @@ def _release_topup_lock():
 def should_trigger_topup(health: InventoryHealth) -> bool:
     """
     Determine if top-up should be triggered based on health.
-    
+
     Args:
         health: Current inventory health
-        
+
     Returns:
         True if any surface is below thresholds
     """
@@ -99,13 +100,13 @@ def should_trigger_topup(health: InventoryHealth) -> bool:
 def trigger_topup_async(db_factory, priority_surfaces: list = None):
     """
     Trigger top-up in background thread (non-blocking).
-    
+
     Args:
         db_factory: Factory function to create database sessions
         priority_surfaces: List of surfaces to prioritize
     """
     global _last_topup_trigger
-    
+
     # Check cooldown (don't trigger too frequently)
     now = datetime.utcnow()
     if _last_topup_trigger:
@@ -114,14 +115,14 @@ def trigger_topup_async(db_factory, priority_surfaces: list = None):
         if elapsed < cooldown:
             logger.debug(f"Top-up cooldown: {cooldown - elapsed:.0f}s remaining")
             return
-    
+
     if not _acquire_topup_lock():
         logger.debug("Top-up already in progress, skipping")
         return
-    
+
     _last_topup_trigger = now
     logger.info(f"Triggering async top-up for surfaces: {priority_surfaces or 'all'}")
-    
+
     # Start background thread
     thread = threading.Thread(
         target=_run_topup,
@@ -134,18 +135,18 @@ def trigger_topup_async(db_factory, priority_surfaces: list = None):
 def _run_topup(db_factory, priority_surfaces: list = None):
     """
     Run top-up ingestion in background.
-    
+
     This is the actual ingestion work that runs in a background thread.
     """
     try:
         logger.info("Starting background top-up ingestion")
         start = datetime.utcnow()
         max_runtime = settings.TOPUP_MAX_RUNTIME_SECONDS
-        
+
         # Import here to avoid circular imports
         from app.core.dependencies import get_redis
         from app.ingestion.checkpointing import run_checkpointed_ingestion
-        
+
         # Create a new database session for background work
         db = db_factory()
         try:
@@ -155,38 +156,38 @@ def _run_topup(db_factory, priority_surfaces: list = None):
                 redis_client = get_redis()
             except Exception:
                 pass
-            
+
             # Run ingestion cycles until satisfied or timeout
             cycles = 0
             max_cycles = 5
-            
+
             while cycles < max_cycles:
                 elapsed = (datetime.utcnow() - start).total_seconds()
                 if elapsed > max_runtime:
                     logger.info(f"Top-up max runtime reached ({max_runtime}s)")
                     break
-                
+
                 # Check if we're satisfied now
                 health = get_cached_inventory_health(db, force_refresh=True)
                 if not health.needs_topup:
                     logger.info("Top-up complete: inventory thresholds met")
                     break
-                
+
                 # Run a single ingestion pass using checkpointed ingestion
                 result = run_checkpointed_ingestion(db, redis_client=redis_client)
                 logger.info(f"Top-up cycle {cycles + 1}: {result}")
                 cycles += 1
-            
+
             # Invalidate caches after top-up
             invalidate_health_cache()
             invalidate_tiered_feed_cache()
-            
+
             elapsed = (datetime.utcnow() - start).total_seconds()
             logger.info(f"Top-up finished: {cycles} cycles in {elapsed:.1f}s")
-            
+
         finally:
             db.close()
-            
+
     except Exception as e:
         logger.error(f"Top-up failed: {e}", exc_info=True)
     finally:
@@ -196,24 +197,24 @@ def _run_topup(db_factory, priority_surfaces: list = None):
 def check_and_trigger_topup(db: Session, db_factory) -> bool:
     """
     Check inventory health and trigger top-up if needed.
-    
+
     This is called from API endpoints and startup.
     It does NOT block - returns immediately after potentially queuing work.
-    
+
     Args:
         db: Database session for health check
         db_factory: Factory to create new sessions for background work
-        
+
     Returns:
         True if top-up was triggered, False otherwise
     """
     try:
         health = get_cached_inventory_health(db)
-        
+
         if should_trigger_topup(health):
             trigger_topup_async(db_factory, [s.value for s in health.topup_priority])
             return True
-        
+
         return False
     except Exception as e:
         logger.warning(f"Failed to check/trigger top-up: {e}")
@@ -223,27 +224,27 @@ def check_and_trigger_topup(db: Session, db_factory) -> bool:
 def startup_inventory_check(db_factory):
     """
     Check inventory on service startup and trigger top-up if needed.
-    
+
     This should be called from main.py during app startup.
     """
     logger.info("Running startup inventory check")
-    
+
     try:
         db = db_factory()
         try:
             health = get_cached_inventory_health(db, force_refresh=True)
-            
+
             logger.info(
                 f"Startup inventory health: healthy={health.is_healthy}, "
                 f"needs_topup={health.needs_topup}, "
                 f"priority={[s.value for s in health.topup_priority]}"
             )
-            
+
             if health.needs_topup:
                 trigger_topup_async(db_factory, [s.value for s in health.topup_priority])
-                
+
         finally:
             db.close()
-            
+
     except Exception as e:
         logger.error(f"Startup inventory check failed: {e}", exc_info=True)

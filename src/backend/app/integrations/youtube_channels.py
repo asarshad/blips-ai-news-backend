@@ -23,31 +23,34 @@ from typing import Dict, List, Optional
 class ChannelRole(str, Enum):
     """
     Content role classification for channels.
-    
+
     Roles determine:
     - Ranking weight adjustments
     - Daily quota distribution
     - Content placement (Videos vs Reels tab)
     """
-    EXPLAINER = "explainer"        # Reviews, tutorials, explainers (MKBHD, Dave2D)
-    NEWS = "news"                  # Daily tech news coverage (Bloomberg, Verge)
-    ENGINEER = "engineer"          # Deep technical content (Two Minute Papers, 3Blue1Brown)
-    AI = "ai"                      # AI/ML focused creators and explainers
-    OFFICIAL = "official"          # Primary source announcements (Apple, Google, OpenAI)
-    SHORTS = "shorts"              # Shorts/Reels native channels
+
+    EXPLAINER = "explainer"  # Reviews, tutorials, explainers (MKBHD, Dave2D)
+    NEWS = "news"  # Daily tech news coverage (Bloomberg, Verge)
+    ENGINEER = "engineer"  # Deep technical content (Two Minute Papers, 3Blue1Brown)
+    AI = "ai"  # AI/ML focused creators and explainers
+    OFFICIAL = "official"  # Primary source announcements (Apple, Google, OpenAI)
+    SHORTS = "shorts"  # Shorts/Reels native channels
 
 
 class ContentFormat(str, Enum):
     """Content format classification."""
-    LONG_FORM = "long_form"        # Standard videos (typically > 3 min)
-    SHORTS = "shorts"              # YouTube Shorts (< 60 sec typically)
-    MIXED = "mixed"                # Channel produces both formats
+
+    LONG_FORM = "long_form"  # Standard videos (typically > 3 min)
+    SHORTS = "shorts"  # YouTube Shorts (< 60 sec typically)
+    MIXED = "mixed"  # Channel produces both formats
 
 
 class QualityTier(str, Enum):
     """Quality tier for ranking weight adjustment."""
-    PREMIUM = "premium"            # Top-tier creators, weight boost
-    STANDARD = "standard"          # Normal ranking weight
+
+    PREMIUM = "premium"  # Top-tier creators, weight boost
+    STANDARD = "standard"  # Normal ranking weight
     SUPPLEMENTAL = "supplemental"  # Fill content, slight weight reduction
 
 
@@ -55,7 +58,7 @@ class QualityTier(str, Enum):
 class ChannelConfig:
     """
     Configuration for a single YouTube channel.
-    
+
     Attributes:
         channel_id: YouTube channel ID
         name: Human-readable channel name
@@ -66,6 +69,7 @@ class ChannelConfig:
         enabled: Whether channel is active for ingestion
         notes: Optional notes about the channel
     """
+
     channel_id: str
     name: str
     role: ChannelRole
@@ -74,7 +78,7 @@ class ChannelConfig:
     quality_tier: QualityTier = QualityTier.STANDARD
     enabled: bool = True
     notes: str = ""
-    
+
     @property
     def feed_url(self) -> str:
         """Generate YouTube RSS feed URL from channel ID."""
@@ -184,7 +188,6 @@ CHANNEL_REGISTRY: List[ChannelConfig] = [
         quality_tier=QualityTier.STANDARD,
         notes="Computer science explanations",
     ),
-    
     # =========================================================================
     # NEWS / COMMENTARY CHANNELS
     # Daily tech news, market analysis, industry commentary
@@ -244,7 +247,6 @@ CHANNEL_REGISTRY: List[ChannelConfig] = [
         quality_tier=QualityTier.PREMIUM,
         notes="Developer news and quick explainers",
     ),
-    
     # =========================================================================
     # ENGINEER / DEEP TECH CHANNELS
     # Technical depth, academic content, engineering explanations
@@ -307,7 +309,6 @@ CHANNEL_REGISTRY: List[ChannelConfig] = [
         quality_tier=QualityTier.STANDARD,
         notes="Web development tutorials",
     ),
-    
     # =========================================================================
     # OFFICIAL / PRIMARY SOURCE CHANNELS
     # Company announcements, keynotes, developer content
@@ -378,7 +379,6 @@ CHANNEL_REGISTRY: List[ChannelConfig] = [
         enabled=False,
         notes="Product demos and conference recordings",
     ),
-
     # =========================================================================
     # DIVERSE REVIEWER CHANNELS (NEW)
     # Broader demographic appeal, mobile-focused, lifestyle tech
@@ -456,7 +456,6 @@ CHANNEL_REGISTRY: List[ChannelConfig] = [
         quality_tier=QualityTier.STANDARD,
         notes="Phone speed tests, comparisons, budget tech",
     ),
-
     # =========================================================================
     # AI / ML FOCUSED CHANNELS (NEW)
     # AI tools, research explainers, ML developments
@@ -480,7 +479,6 @@ CHANNEL_REGISTRY: List[ChannelConfig] = [
         quality_tier=QualityTier.PREMIUM,
         notes="Deep AI research analysis, model comparisons, benchmarks",
     ),
-    
     # =========================================================================
     # SHORTS / REELS NATIVE CHANNELS
     # Channels that primarily produce short-form content
@@ -563,6 +561,7 @@ CHANNEL_REGISTRY: List[ChannelConfig] = [
 # HELPER FUNCTIONS
 # =============================================================================
 
+
 def get_enabled_channels() -> List[ChannelConfig]:
     """Get all enabled channels."""
     return [ch for ch in CHANNEL_REGISTRY if ch.enabled]
@@ -576,7 +575,8 @@ def get_channels_by_role(role: ChannelRole) -> List[ChannelConfig]:
 def get_long_form_channels() -> List[ChannelConfig]:
     """Get channels that produce long-form content."""
     return [
-        ch for ch in get_enabled_channels()
+        ch
+        for ch in get_enabled_channels()
         if ch.content_format in (ContentFormat.LONG_FORM, ContentFormat.MIXED)
     ]
 
@@ -584,7 +584,8 @@ def get_long_form_channels() -> List[ChannelConfig]:
 def get_shorts_channels() -> List[ChannelConfig]:
     """Get channels that produce shorts content."""
     return [
-        ch for ch in get_enabled_channels()
+        ch
+        for ch in get_enabled_channels()
         if ch.content_format in (ContentFormat.SHORTS, ContentFormat.MIXED)
     ]
 
@@ -614,7 +615,7 @@ def get_channel_by_name(name: str) -> Optional[ChannelConfig]:
 def get_role_quotas() -> Dict[ChannelRole, Dict[str, int]]:
     """
     Calculate daily quotas by role.
-    
+
     Returns:
         Dict mapping role to quota info (min, target, max)
     """
@@ -631,7 +632,7 @@ def get_role_quotas() -> Dict[ChannelRole, Dict[str, int]]:
 def get_quality_weight_modifier(tier: QualityTier) -> float:
     """
     Get ranking weight modifier for quality tier.
-    
+
     Returns:
         Multiplier for quality score (1.0 = no change)
     """
@@ -646,18 +647,19 @@ def get_quality_weight_modifier(tier: QualityTier) -> float:
 # STATISTICS
 # =============================================================================
 
+
 def get_channel_stats() -> Dict[str, any]:
     """Get summary statistics about channel configuration."""
     enabled = get_enabled_channels()
-    
+
     role_counts = {}
     for role in ChannelRole:
         role_counts[role.value] = len(get_channels_by_role(role))
-    
+
     total_daily_cap = sum(ch.daily_cap for ch in enabled)
     long_form_cap = sum(ch.daily_cap for ch in get_long_form_channels())
     shorts_cap = sum(ch.daily_cap for ch in get_shorts_channels())
-    
+
     return {
         "total_channels": len(enabled),
         "total_daily_cap": total_daily_cap,

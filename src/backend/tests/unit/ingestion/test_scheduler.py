@@ -59,7 +59,11 @@ def test_scheduler_respects_per_type_caps_and_lease_visibility():
     t3 = scheduler.pop_next_dispatchable()
     scheduler.mark_active(t3)
 
-    assert {t1.source_type, t2.source_type, t3.source_type} == {"rss", "youtube_video", "youtube_reel"}
+    assert {t1.source_type, t2.source_type, t3.source_type} == {
+        "rss",
+        "youtube_video",
+        "youtube_reel",
+    }
 
     # Now caps are full; further pops should return None.
     assert scheduler.pop_next_dispatchable() is None

@@ -15,18 +15,18 @@ from app.models.ingestion_progress import IngestionProgress
 
 def _interleave_by_source_type(rows: List[IngestionProgress]) -> List[IngestionProgress]:
     """Interleave rows by source_type for fair round-robin processing.
-    
+
     This ensures rss, youtube_video, and youtube_reel are processed fairly
     instead of all rss first, then all youtube_video, etc.
     """
     by_type: dict[str, list[IngestionProgress]] = defaultdict(list)
     for row in rows:
         by_type[row.source_type].append(row)
-    
+
     # Sort type keys for deterministic ordering
     type_keys = sorted(by_type.keys())
     type_lists = [by_type[k] for k in type_keys]
-    
+
     # Interleave: take one from each type in round-robin fashion
     result: List[IngestionProgress] = []
     for batch in zip_longest(*type_lists):
@@ -40,7 +40,9 @@ class IngestionProgressRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def get(self, *, day_utc: date, source_type: str, feed_name: str) -> Optional[IngestionProgress]:
+    def get(
+        self, *, day_utc: date, source_type: str, feed_name: str
+    ) -> Optional[IngestionProgress]:
         return (
             self.db.query(IngestionProgress)
             .filter(
@@ -87,7 +89,7 @@ class IngestionProgressRepository:
         - not complete
         - below target
         - retry_at is null or <= now
-        
+
         Results are interleaved by source_type for fair processing.
         """
 
@@ -100,7 +102,7 @@ class IngestionProgressRepository:
         )
         if source_types:
             q = q.filter(IngestionProgress.source_type.in_(list(source_types)))
-        
+
         rows = q.order_by(IngestionProgress.feed_name.asc()).all()
         interleaved = _interleave_by_source_type(rows)
         return interleaved[:limit]

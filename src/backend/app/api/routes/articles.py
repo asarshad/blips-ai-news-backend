@@ -40,7 +40,7 @@ def _content_item_to_article_schema(item) -> dict:
     # Extract tags from topics
     tags = [{"name": topic} for topic in (item.topics or [])]
     summary = item.summary or ""
-    
+
     return {
         "id": item.id,
         "title": item.title,
@@ -50,14 +50,14 @@ def _content_item_to_article_schema(item) -> dict:
         "published_date": item.published_at.date() if item.published_at else None,
         "created_at": item.created_at,
         "read_time_minutes": max(1, len(summary) // 200) if summary else 1,
-        "tags": tags
+        "tags": tags,
     }
 
 
 @router.get("/next", response_model=ArticleSchema)
 def get_next_article(
     current_id: Optional[int] = Query(None, description="Current article ID"),
-    content_repo: ContentItemRepository = Depends(get_content_repo)
+    content_repo: ContentItemRepository = Depends(get_content_repo),
 ):
     """
     Get the next article after the current one.
@@ -69,16 +69,16 @@ def get_next_article(
         ContentType.ARTICLE,
         limit=50,
         hours_back=168,  # 7 days
-        ai_processed_only=True
+        ai_processed_only=True,
     )
-    
+
     if not items:
         raise not_found_exception("Article", current_id or "latest")
-    
+
     if current_id is None:
         # Return most recent
         return _content_item_to_article_schema(items[0])
-    
+
     # Find current position and return next
     for i, item in enumerate(items):
         if item.id == current_id:
@@ -87,26 +87,21 @@ def get_next_article(
             else:
                 # Wrap to first
                 return _content_item_to_article_schema(items[0])
-    
+
     # Current not found, return first
     return _content_item_to_article_schema(items[0])
 
 
 @router.get("/cache", response_model=List[ArticleSchema])
-def get_cached_articles(
-    content_repo: ContentItemRepository = Depends(get_content_repo)
-):
+def get_cached_articles(content_repo: ContentItemRepository = Depends(get_content_repo)):
     """Get pre-cached articles for quick access."""
     items = content_repo.get_by_type(
-        ContentType.ARTICLE,
-        limit=5,
-        hours_back=72,
-        ai_processed_only=True
+        ContentType.ARTICLE, limit=5, hours_back=72, ai_processed_only=True
     )
-    
+
     if not items:
         raise HTTPException(status_code=404, detail="No cached articles found")
-    
+
     return [_content_item_to_article_schema(item) for item in items]
 
 
@@ -115,27 +110,27 @@ def get_recent_articles(
     response: Response,
     limit: int = Query(5, ge=1, le=50, description="Number of articles to return"),
     page: int = Query(1, ge=1, description="Page number"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Get the most recent articles using tiered freshness strategy.
-    
+
     Returns a blend of:
     - Tier A (Fresh): articles published within rolling window
     - Tier B (Backfill): articles added recently but published earlier
     - Tier C (Evergreen): older high-quality articles
-    
+
     Each article includes freshness_tier, published_age_seconds, and added_age_seconds.
     Results are diversity-mixed and cached (45s TTL) for performance.
-    
+
     Response headers include diagnostic info:
     - X-Feed-Generated-At, X-Feed-Source, X-Cache, X-Newest-Published-At, etc.
     """
     # Check inventory and trigger background top-up if needed (non-blocking)
     check_and_trigger_topup(db, SessionLocal)
-    
+
     offset = (page - 1) * limit
-    
+
     # Use cached tiered feed for better performance
     # Only show articles that have been AI-processed (have summaries)
     articles, has_more, meta = get_cached_tiered_feed(
@@ -145,14 +140,14 @@ def get_recent_articles(
         offset=offset,
         require_ai_processed=True,
     )
-    
+
     # Log tier distribution (from cached results)
     tier_counts = {}
     for a in articles:
         tier = a.get("freshness_tier", "?")
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
     logger.info(f"Articles page {page}: {tier_counts} (limit={limit})")
-    
+
     # ALWAYS add diagnostic headers (even on empty results) so debugging is
     # possible.  Previously a 404 was raised before headers were set.
     feed_meta = FeedMetadata(
@@ -166,10 +161,10 @@ def get_recent_articles(
         feed_version=compute_feed_version(articles, meta.generated_at),
     )
     feed_meta.add_headers(response)
-    
+
     if not articles and page == 1:
         raise HTTPException(status_code=404, detail="No articles found")
-    
+
     # Ad injection (noop when ADS_ENABLED is false)
     mixed, ads_injected = inject_ads(articles, placement_id="feed_fullpage")
     response.headers["X-Ads-Injected"] = str(ads_injected)
@@ -186,53 +181,43 @@ def get_recent_articles(
 def get_articles_by_tag(
     tag_name: str,
     limit: int = Query(10, ge=1, le=50, description="Number of articles to return"),
-    content_repo: ContentItemRepository = Depends(get_content_repo)
+    content_repo: ContentItemRepository = Depends(get_content_repo),
 ):
     """Get articles by tag/topic name."""
     # Get all recent articles and filter by topic (only AI-processed)
     items = content_repo.get_by_type(
-        ContentType.ARTICLE,
-        limit=200,
-        hours_back=168,
-        ai_processed_only=True
+        ContentType.ARTICLE, limit=200, hours_back=168, ai_processed_only=True
     )
-    
+
     # Filter by topic
     matching = [
-        item for item in items
-        if tag_name.lower() in [t.lower() for t in (item.topics or [])]
+        item for item in items if tag_name.lower() in [t.lower() for t in (item.topics or [])]
     ][:limit]
-    
+
     if not matching:
         raise HTTPException(status_code=404, detail=f"No articles found with tag '{tag_name}'")
-    
+
     return {"articles": [_content_item_to_article_schema(item) for item in matching]}
 
 
 @router.get("/tags", response_model=List[TagCount])
 def get_popular_tags(
     limit: int = Query(10, ge=1, le=50, description="Number of tags to return"),
-    content_repo: ContentItemRepository = Depends(get_content_repo)
+    content_repo: ContentItemRepository = Depends(get_content_repo),
 ):
     """Get the most popular tags with article counts."""
-    distribution = content_repo.get_topic_distribution(
-        ContentType.ARTICLE,
-        hours_back=168
-    )
-    
+    distribution = content_repo.get_topic_distribution(ContentType.ARTICLE, hours_back=168)
+
     return [{"name": topic, "count": count} for topic, count in distribution[:limit]]
 
 
 @router.get("/{article_id}", response_model=ArticleWithConversation)
-def get_article(
-    article_id: int,
-    content_repo: ContentItemRepository = Depends(get_content_repo)
-):
+def get_article(article_id: int, content_repo: ContentItemRepository = Depends(get_content_repo)):
     """Get a specific article by ID, including conversation history."""
     item = content_repo.get_by_id(article_id)
     if not item or item.type != ContentType.ARTICLE:
         raise not_found_exception("Article", article_id)
-    
+
     article_data = _content_item_to_article_schema(item)
     article_data["conversations"] = []
     return article_data

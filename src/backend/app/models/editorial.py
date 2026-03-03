@@ -37,7 +37,7 @@ class EditorialAction(Base):
         nullable=False,
         index=True,
     )
-    action_type = Column(Text, nullable=False)   # ADD, BOOST, SUPPRESS, UNSUPPRESS
+    action_type = Column(Text, nullable=False)  # ADD, BOOST, SUPPRESS, UNSUPPRESS
     old_value = Column(JSONB, nullable=True)
     new_value = Column(JSONB, nullable=True)
     actor = Column(Text, nullable=False)

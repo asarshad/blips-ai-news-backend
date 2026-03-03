@@ -9,14 +9,14 @@ from typing import List
 
 class FeedSource:
     """Represents a single RSS feed source."""
-    
+
     def __init__(
         self,
         name: str,
         url: str,
         category: str = "Tech",
         quality_weight: float = 0.5,
-        enabled: bool = True
+        enabled: bool = True,
     ):
         self.name = name
         self.url = url

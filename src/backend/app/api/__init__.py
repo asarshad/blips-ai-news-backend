@@ -1,4 +1,3 @@
-
 from fastapi import APIRouter
 
 from app.api.admin import admin_router as editorial_admin_router
@@ -41,4 +40,3 @@ api_router.include_router(metrics.router, tags=["metrics"])
 
 if settings.DEBUG_ROUTES_ENABLED:
     api_router.include_router(debug.router, prefix="/debug", tags=["debug"])
-

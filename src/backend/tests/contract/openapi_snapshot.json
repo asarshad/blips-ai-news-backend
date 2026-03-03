@@ -4390,7 +4390,7 @@
     },
     "/api/v1/inventory/health/{surface}": {
       "get": {
-        "description": "Get inventory health for a specific surface.\n\nArgs:\n    surface: One of 'articles', 'videos', 'reels'\n    \nReturns tier counts, freshness metrics, and source distribution.",
+        "description": "Get inventory health for a specific surface.\n\nArgs:\n    surface: One of 'articles', 'videos', 'reels'\n\nReturns tier counts, freshness metrics, and source distribution.",
         "operationId": "get_surface_health_api_v1_inventory_health__surface__get",
         "parameters": [
           {
@@ -4601,7 +4601,7 @@
     },
     "/api/v1/metrics/sources": {
       "get": {
-        "description": "Get per-source ingestion health metrics.\n\nReturns:\n    - Per-feed status: last success, items ingested today, retry counts\n    - Per-source aggregates: total inserted today, average success rate\n    - Problem feeds: any with status=failed or high retry counts\n    \nRequires ADMIN_API_KEY.",
+        "description": "Get per-source ingestion health metrics.\n\nReturns:\n    - Per-feed status: last success, items ingested today, retry counts\n    - Per-source aggregates: total inserted today, average success rate\n    - Problem feeds: any with status=failed or high retry counts\n\nRequires ADMIN_API_KEY.",
         "operationId": "get_source_health_metrics_api_v1_metrics_sources_get",
         "parameters": [
           {
@@ -5066,7 +5066,7 @@
     },
     "/api/v1/starters/{content_id}": {
       "get": {
-        "description": "Get conversation starters for a content item.\n\nArgs:\n    content_id: ID of the content item\n    regenerate: If True, regenerate starters even if cached\n    \nReturns:\n    StartersResponse with starters and fallback questions",
+        "description": "Get conversation starters for a content item.\n\nArgs:\n    content_id: ID of the content item\n    regenerate: If True, regenerate starters even if cached\n\nReturns:\n    StartersResponse with starters and fallback questions",
         "operationId": "get_starters_api_v1_starters__content_id__get",
         "parameters": [
           {

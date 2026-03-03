@@ -31,18 +31,20 @@ from app.db.base import Base
 
 class SignalSource(enum.Enum):
     """Origin of a signal URL."""
-    HN_TOP = "hn_top"            # Hacker News /topstories
-    HN_BEST = "hn_best"          # Hacker News /beststories
+
+    HN_TOP = "hn_top"  # Hacker News /topstories
+    HN_BEST = "hn_best"  # Hacker News /beststories
     GITHUB_TRENDING = "github_trending"
     YT_TRENDING = "yt_trending"  # YouTube Science & Technology most-popular
 
 
 class EnqueueStatus(enum.Enum):
     """Lifecycle state of a discovered signal URL."""
-    PENDING = "pending"       # URL seen, not yet processed
-    INGESTED = "ingested"     # Enqueued → content_item created
-    DUPLICATE = "duplicate"   # Already existed in content_items
-    REJECTED = "rejected"     # Failed URL normalization or outside tech scope
+
+    PENDING = "pending"  # URL seen, not yet processed
+    INGESTED = "ingested"  # Enqueued → content_item created
+    DUPLICATE = "duplicate"  # Already existed in content_items
+    REJECTED = "rejected"  # Failed URL normalization or outside tech scope
 
 
 # Standalone PgEnum objects (create_type=False: migration owns type creation)
@@ -56,6 +58,7 @@ class SignalURL(Base):
     The table is append-and-update: each (canonical_url, signal_source)
     pair is unique; repeat sightings bump hit_count and last_seen_at.
     """
+
     __tablename__ = "signal_urls"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -98,7 +101,9 @@ class SignalURL(Base):
 
     # ── Timestamps ─────────────────────────────────────────────────────────
     first_seen_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    last_seen_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_seen_at = Column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
     enqueued_at = Column(DateTime, nullable=True)
 
     __table_args__ = (

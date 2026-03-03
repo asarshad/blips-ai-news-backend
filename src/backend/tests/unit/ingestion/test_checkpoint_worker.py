@@ -173,7 +173,9 @@ def test_worker_reports_attempted_when_inserted_zero(monkeypatch):
     monkeypatch.setattr(checkpoint_worker, "release_lease", lambda *_args, **_kwargs: True)
 
     # Avoid real DB insert; force 0 inserted to validate attempted behavior.
-    monkeypatch.setattr(checkpoint_worker, "_insert_content_items_postgres", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(
+        checkpoint_worker, "_insert_content_items_postgres", lambda *_args, **_kwargs: 0
+    )
 
     result = checkpoint_worker.process_progress_row_batch(
         row_id=1,

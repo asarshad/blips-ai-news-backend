@@ -68,8 +68,14 @@ def canonical_key_for_article(*, canonical_url: Optional[str], source_url: str) 
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
 
 
-def canonical_key_for_youtube(*, video_id: Optional[str], source_url: str, video_url: Optional[str]) -> Optional[str]:
-    vid = video_id or extract_youtube_video_id(video_url or "") or extract_youtube_video_id(source_url or "")
+def canonical_key_for_youtube(
+    *, video_id: Optional[str], source_url: str, video_url: Optional[str]
+) -> Optional[str]:
+    vid = (
+        video_id
+        or extract_youtube_video_id(video_url or "")
+        or extract_youtube_video_id(source_url or "")
+    )
     if vid:
         return vid
     if not source_url:

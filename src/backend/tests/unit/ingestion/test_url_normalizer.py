@@ -18,6 +18,15 @@ def test_normalize_url_keeps_non_tracking_query_params():
 
 
 def test_normalize_url_canonicalizes_youtube_watch_and_shorts():
-    assert normalize_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=43") == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    assert normalize_url("https://youtu.be/dQw4w9WgXcQ") == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    assert normalize_url("https://www.youtube.com/shorts/abc123DEF45?feature=share") == "https://www.youtube.com/shorts/abc123DEF45"
+    assert (
+        normalize_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=43")
+        == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    )
+    assert (
+        normalize_url("https://youtu.be/dQw4w9WgXcQ")
+        == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    )
+    assert (
+        normalize_url("https://www.youtube.com/shorts/abc123DEF45?feature=share")
+        == "https://www.youtube.com/shorts/abc123DEF45"
+    )
