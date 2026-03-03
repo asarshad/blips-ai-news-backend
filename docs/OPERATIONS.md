@@ -494,3 +494,405 @@ Browser-based dashboard at `$HOST/admin/ui/?key=$ADMIN_KEY`.
 ```bash
 cd src/backend && alembic upgrade head
 ```
+
+---
+
+## Environment Variable Reference
+
+All configuration is managed via environment variables loaded by
+`pydantic-settings` in `app/core/config.py`.  Set values in the Render
+dashboard or in a local `.env` file.
+
+---
+
+## Core / Identity
+
+| Variable | Default | Required | Description |
+|----------|---------|----------|-------------|
+| `ENV` | `dev` | No | `dev` or `prod` — controls default behaviours |
+| `LOG_LEVEL` | `INFO` | No | Python log level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `PYTHON_VERSION` | — | Render | Render-specific; set to `3.11.4` |
+
+## Security
+
+| Variable | Default | Required | Description |
+|----------|---------|----------|-------------|
+| `ADMIN_API_KEY` | `""` | **Yes (prod)** | Protects `/admin/*`, `/metrics`, `/ops/status` |
+| `CORS_ORIGINS` | `""` | No | Comma-separated allowed origins. Defaults to `capacitor://localhost,http://localhost` |
+| `DOCS_ENABLED` | `false` | No | Expose Swagger UI at `/docs` and ReDoc at `/redoc` |
+| `DEBUG_ROUTES_ENABLED` | `false` | No | Expose debug endpoints |
+
+## Database (PostgreSQL)
+
+| Variable | Default | Required | Description |
+|----------|---------|----------|-------------|
+| `DATABASE_URL` | `postgresql://…db:5432/blips` | **Yes** | Full Postgres connection string |
+| `DB_POOL_SIZE` | `3` | No | SQLAlchemy pool core size per worker |
+| `DB_MAX_OVERFLOW` | `5` | No | Extra connections above pool_size |
+| `DB_POOL_TIMEOUT` | `30` | No | Seconds to wait for a connection |
+| `DB_POOL_RECYCLE_SECONDS` | `1800` | No | Recycle connections after N seconds |
+
+> **Render Basic-256MB Postgres** allows ~97 connections.  With 2 Gunicorn
+> workers the default (`pool_size=3 + max_overflow=5` = 8 per worker × 2 = 16)
+> plus the worker service (8) totals 24 — safely within the limit.
+
+## Redis
+
+| Variable | Default | Required | Description |
+|----------|---------|----------|-------------|
+| `REDIS_URL` | `redis://redis:6379/0` | **Yes** | Full Redis connection string |
+| `REDIS_MAX_CONNECTIONS` | `20` | No | Max connections in the shared pool |
+
+## LLM / AI
+
+| Variable | Default | Required | Description |
+|----------|---------|----------|-------------|
+| `LLM_PROVIDER` | `openai` | No | `openai`, `mistral`, or `fake` (test) |
+| `OPENAI_API_KEY` | `""` | If provider=openai | OpenAI API key |
+| `OPENAI_MODEL` | `gpt-4o-mini` | No | OpenAI model name |
+| `MISTRAL_API_KEY` | `""` | If provider=mistral | Mistral API key |
+| `MISTRAL_MODEL` | `mistral-small-latest` | No | Mistral model name |
+| `LLM_REQUEST_TIMEOUT` | `30` | No | Seconds per LLM API call |
+| `LLM_DAILY_COST_CEILING` | `5.0` | No | Max estimated daily LLM spend (USD). `0` = unlimited |
+
+## Scheduler
+
+| Variable | Default | Required | Description |
+|----------|---------|----------|-------------|
+| `SCHEDULER_ENABLED` | `true` | No | `false` on the web service; `true` on the worker |
+| `NEWS_FETCH_INTERVAL_MINUTES` | `30` | No | How often to run ingestion |
+| `SCHEDULER_LOCK_TTL_SECONDS` | `120` | No | Redis leader-lock TTL (env var, not pydantic) |
+| `SCHEDULER_LOCK_REFRESH_SECONDS` | `30` | No | Lock refresh interval (env var) |
+
+## Ingestion
+
+| Variable | Default | Required | Description |
+|----------|---------|----------|-------------|
+| `INGESTION_ENABLED` | `true` | No | Master switch for ingestion |
+| `INGESTION_CRON_DISABLED` | `false` | No | Disable scheduled cron runs |
+| `INGESTION_MAX_WORKERS` | `1` | No | Parallel ingestion workers |
+| `MAX_ITEMS_PER_RUN` | — | No | Cap items processed per scheduler run |
+| `INGEST_UNTIL_TARGETS` | `true` | No | Keep ingesting until daily targets met |
+| `INGEST_CATCHUP_MAX_SECONDS` | `1800` | No | Max seconds for catch-up loop |
+| `INGESTION_POLL_SECONDS` | `30` | No | Seconds between poll cycles |
+| `INGESTION_LEASE_TTL_MS` | `60000` | No | Feed-level lease TTL (ms) |
+| `RSS_ENTRIES_PER_FEED` | `50` | No | Max entries to fetch from each RSS feed |
+| `YT_VIDEOS_PER_CHANNEL` | `30` | No | Max videos to fetch per YouTube channel |
+| `YOUTUBE_API_KEY` | — | **Yes** | YouTube Data API v3 key |
+
+## Feature Flags (Redis-backed)
+
+These flags are managed at runtime via the admin API (`PUT /admin/flags/{name}`).
+The env-var equivalents serve as fallback defaults:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FEATURE_SUMMARIZATION_ENABLED` | `true` | Enable LLM summarization |
+| `FEATURE_INGESTION_ENABLED` | `true` | Enable content ingestion |
+
+## Caching / TTL
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FEED_CACHE_TTL_SECONDS` | `300` | Feed/playlist cache TTL |
+| `ITEM_CACHE_TTL_SECONDS` | `3600` | Per-item cache TTL |
+| `CONFIG_CACHE_TTL_SECONDS` | `21600` | Feature flag Redis TTL (6 h) |
+| `LEASE_TTL_SECONDS` | `300` | Distributed lock / lease TTL |
+
+## Data Retention
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RETAIN_CONTENT_DAYS` | `90` | content_items older than N days deleted |
+| `RETAIN_INGESTION_PROGRESS_DAYS` | `14` | ingestion_progress rows |
+| `RETAIN_EVENTS_DAYS` | `30` | interaction_events rows |
+| `RETAIN_CONVERSATIONS_DAYS` | `30` | conversations rows |
+| `RETAIN_USAGE_DAYS` | `90` | usage rows |
+| `RETAIN_EDITORIAL_DAYS` | `180` | editorial_actions rows |
+| `RETAIN_DEBUG_DAYS` | `7` | Debug / ephemeral data |
+
+## Alerting
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ALERT_ENABLED` | `false` | Enable webhook alerts |
+| `ALERT_WEBHOOK_URL` | `""` | Slack / Discord webhook URL |
+
+## Rate Limiting
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RATE_LIMIT_DEFAULT` | `60/minute` | Default per-IP rate limit |
+| `RATE_LIMIT_CHAT` | `10/minute` | Chat endpoint rate limit |
+
+## Ads (architecture only — all OFF)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ADS_ENABLED` | `false` | Master ads switch |
+| `ADS_FEED_CARD_ENABLED` | `false` | In-feed ad cards |
+| `ADS_BANNER_ENABLED` | `false` | Banner ads |
+| `ADS_FEED_FREQUENCY` | `0` | 1 ad per N organic items (`0` = off) |
+| `ADS_CANARY_PERCENT` | `0` | % of requests receiving ads |
+
+---
+
+## Render Blueprint Architecture
+
+The Blueprint (`render.yaml`) uses Render's `projects` + `environments` feature
+to deploy **two environments** from a single file:
+
+| Environment | Services | Description |
+|-------------|----------|-------------|
+| **development** | `blips-dev-api` (web) + `blips-dev-db` + `blips-dev-redis` | Single service, `SCHEDULER_ENABLED=true`, Swagger enabled |
+| **production** | `blips-api` (web) + `blips-worker` (background) + `blips-db` + `blips-redis` | API + dedicated worker, scheduler on worker only |
+
+Shared secrets (`ADMIN_API_KEY`, API keys, `LLM_PROVIDER`) are defined as
+`sync: false` on each service — set them per-service in the Render dashboard.
+
+> **Note:** `sync: false` cannot be used inside `envVarGroups` (Render ignores it),
+> so secrets must be set individually on each service.
+
+### Secrets to set in dashboard after Blueprint deploy
+
+Set on **each service** (dev-api, prod-api, prod-worker):
+```
+ADMIN_API_KEY=<strong-random-secret>
+OPENAI_API_KEY=<key>
+MISTRAL_API_KEY=<key>
+YOUTUBE_API_KEY=<key>
+LLM_PROVIDER=mistral
+```
+
+Production services only:
+```
+ENV=prod
+LOG_LEVEL=WARNING
+```
+
+---
+
+## Release Checklist
+
+Use this checklist before each release to production.
+
+## Pre-Release
+
+### Code Quality
+- [ ] All tests pass locally
+- [ ] No linting errors (`ruff check .`)
+- [ ] Code reviewed and approved
+- [ ] Feature branch merged to `develop`
+
+### Testing in Dev
+- [ ] Deployed to dev environment
+- [ ] Manual smoke test passed
+- [ ] API endpoints respond correctly
+- [ ] Background jobs running
+- [ ] No errors in logs
+
+### Database
+- [ ] Migrations are additive only (no drops)
+- [ ] Migrations tested in dev
+- [ ] Backward compatible with current code
+- [ ] No breaking schema changes
+
+### Documentation
+- [ ] README updated if needed
+- [ ] API changes documented
+- [ ] CHANGELOG updated
+
+## Release
+
+### Deploy to Production
+- [ ] Create PR from `develop` to `main`
+- [ ] PR reviewed and approved
+- [ ] Merge PR (triggers auto-deploy)
+- [ ] Monitor Render deploy logs
+
+### Verify
+- [ ] Health endpoint returns 200
+- [ ] API endpoints respond correctly
+- [ ] Background jobs running
+- [ ] Mobile app connects successfully
+- [ ] No errors in logs
+
+## Post-Release
+
+### Monitor (first 30 min)
+- [ ] Error rate normal
+- [ ] Response times normal
+- [ ] Memory/CPU usage normal
+- [ ] No user-reported issues
+
+### Document
+- [ ] Tag release in git (if major)
+- [ ] Update CHANGELOG
+- [ ] Notify team of successful release
+
+## Rollback Triggers
+
+Initiate rollback if:
+- Error rate > 5%
+- Response time > 2s (p95)
+- Any data corruption
+- Critical functionality broken
+
+## Rollback Steps
+
+1. Go to Render Dashboard → Service → Events
+2. Find last working deploy
+3. Click "Rollback to this deploy"
+4. If DB migration: `alembic downgrade -1`
+5. Verify rollback successful
+6. Investigate and fix issue
+7. Re-release when ready
+
+## Hotfix Process
+
+For critical production issues:
+
+1. Create branch from `main`: `hotfix/issue-name`
+2. Fix the issue
+3. Test locally
+4. PR directly to `main` (bypass develop)
+5. After merge, cherry-pick to `develop`
+
+---
+
+## Scaling
+
+### Web Service
+
+```yaml
+# render.yaml
+scaling:
+  minInstances: 1
+  maxInstances: 3
+  targetMemoryPercent: 80
+  targetCPUPercent: 80
+```
+
+### Worker
+
+- Single instance (scheduler uses single-leader pattern)
+- Scale by increasing job parallelism in code
+
+## Costs (Estimated)
+
+| Service | Plan | Monthly |
+|---------|------|---------|
+| Web API | Starter | $7 |
+| Worker | Starter | $7 |
+| Postgres | Starter | $7 |
+| Redis | Starter | $10 |
+| **Total** | | **~$31** |
+
+## Troubleshooting
+## Costs (Estimated)
+
+| Service | Plan | Monthly |
+|---------|------|---------|
+| Web API | Starter | $7 |
+| Worker | Starter | $7 |
+| Postgres | Starter | $7 |
+| Redis | Starter | $10 |
+| **Total** | | **~$31** |
+
+## Troubleshooting
+
+---
+
+## Inventory Health Runbook
+
+## Health Check
+
+```bash
+# Full health status
+curl -s http://localhost:8000/inventory/health | jq
+
+# Single surface
+curl -s http://localhost:8000/inventory/health/articles | jq
+```
+
+## Key Metrics
+
+| Metric | Healthy | Warning | Action |
+|--------|---------|---------|--------|
+| `tier_a` (articles) | > 30 | 10-30 | Monitor |
+| `tier_a` (articles) | - | < 10 | Check RSS feeds |
+| `needs_topup` | false | true | Auto-handled |
+| `below_min_fresh` | false | true | Check ingestion |
+
+## Quick Fixes
+
+### Force Ingestion
+```bash
+# Trigger immediate RSS fetch
+curl -X POST http://localhost:8000/admin/ingest/rss
+
+# Trigger YouTube fetch
+curl -X POST http://localhost:8000/admin/ingest/youtube
+```
+
+### Check Feed Sources
+```bash
+# List all sources with last fetch time
+curl -s http://localhost:8000/sources | jq '.[] | {name, last_fetch, is_active}'
+```
+
+### Clear Feed Cache
+```bash
+# Via Redis CLI
+redis-cli KEYS "blips:tiered_feed:*" | xargs redis-cli DEL
+```
+
+## Thresholds (Production Defaults)
+
+```
+Articles: min_fresh=30, reservoir=200
+Videos:   min_fresh=25, reservoir=150  
+Reels:    min_fresh=20, reservoir=300
+```
+
+Adjust via environment variables:
+```bash
+export MIN_FRESH_ARTICLES=50  # More aggressive threshold
+export RESERVOIR_ARTICLES=300 # Larger pool
+```
+
+## Logs to Watch
+
+```bash
+# Top-up activity
+grep "Top-up" /var/log/blips/app.log
+
+# Tier distribution
+grep "Tiered feed for" /var/log/blips/app.log
+
+# Cache hits/misses
+grep "Cache HIT\|Cache MISS" /var/log/blips/app.log
+```
+
+## Alerts
+
+Set up alerts for:
+1. `needs_topup=true` persisting > 10 minutes
+2. `tier_a` count < 10 for any surface
+3. Top-up failing with errors
+
+## Recovery Procedures
+
+### Empty Feed
+1. Check `/inventory/health` - identify which tier is empty
+2. Check `/sources` - verify feeds are active
+3. Trigger manual ingest if needed
+4. Monitor tier counts recovering
+
+### Stuck Top-Up
+1. Check Redis for lock: `redis-cli GET blips:topup_lock`
+2. If stale (> 5 min), delete: `redis-cli DEL blips:topup_lock`
+3. Top-up will restart on next API request
+
+### High Tier C Ratio
+This is normal during slow news periods. The system is working correctly by backfilling with quality content.
