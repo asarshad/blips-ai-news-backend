@@ -79,6 +79,37 @@ AI_CHANNELS: List[YouTubeChannel] = [
         category="AI",
         quality_weight=0.80,
     ),
+    YouTubeChannel(
+        name="Andrej Karpathy",
+        channel_id="UCPk8m_r6fkUSWeb5X-NuGOQ",
+        category="AI",
+        quality_weight=0.95,
+    ),
+    YouTubeChannel(
+        name="Yannic Kilcher",
+        channel_id="UCZHmQk67mSJgfCCTn7xBfew",
+        category="AI",
+        quality_weight=0.82,
+    ),
+    YouTubeChannel(
+        name="Lex Fridman",
+        channel_id="UCSHZKyawb77ixDdsGog4iWA",
+        category="AI",
+        quality_weight=0.80,
+    ),
+    # Official lab channels (supplemental)
+    YouTubeChannel(
+        name="NVIDIA",
+        channel_id="UCHuiy8bXnmK5nisYHUd1J5g",
+        category="AI",
+        quality_weight=0.72,
+    ),
+    YouTubeChannel(
+        name="Amazon Web Services",
+        channel_id="UCd6MoB9NC6JDNMYygZfxzKQ",
+        category="AI",
+        quality_weight=0.70,
+    ),
 ]
 
 # Shorts channels (for Reels)
