@@ -86,14 +86,14 @@ DECAY_HALF_LIFE_HOURS: Dict[DecayProfile, int] = {
 
 # Role quotas - target articles per day per role
 ROLE_QUOTAS: Dict[FeedRole, int] = {
-    FeedRole.BREAKING: 15,  # Major news coverage (expanded with new sources)
+    FeedRole.BREAKING: 12,  # Reduced: capped mid-tier consumer overlap
     FeedRole.ANALYSIS: 10,  # Deep dives
-    FeedRole.AI: 12,  # AI/ML focused content (expanded with primary lab blogs)
-    FeedRole.INFRA: 5,  # Cloud/backend
-    FeedRole.SECURITY: 4,  # Security news
+    FeedRole.AI: 12,  # AI/ML focused content
+    FeedRole.INFRA: 8,  # Increased: cloud-native + DevOps coverage
+    FeedRole.SECURITY: 5,  # Slight increase for security depth
     FeedRole.BUSINESS: 4,  # Startups/funding
-    FeedRole.DEV: 6,  # Developer content + mobile
-    FeedRole.PRIMARY: 3,  # Official blogs (down-ranked)
+    FeedRole.DEV: 5,  # Developer content + mobile
+    FeedRole.PRIMARY: 2,  # Official blogs (down-ranked)
 }
 
 
@@ -173,7 +173,7 @@ FEED_REGISTRY: List[FeedConfig] = [
         name="CNET",
         role=FeedRole.BREAKING,
         quality_tier=QualityTier.STANDARD,
-        daily_cap=3,
+        daily_cap=2,
         decay_profile=DecayProfile.FAST,
         base_quality_weight=0.75,
         notes="Consumer tech news and reviews",
@@ -183,7 +183,7 @@ FEED_REGISTRY: List[FeedConfig] = [
         name="ZDNet",
         role=FeedRole.BREAKING,
         quality_tier=QualityTier.STANDARD,
-        daily_cap=3,
+        daily_cap=2,
         decay_profile=DecayProfile.FAST,
         base_quality_weight=0.75,
         notes="Enterprise and consumer tech news",
@@ -474,7 +474,7 @@ FEED_REGISTRY: List[FeedConfig] = [
         name="Android Authority",
         role=FeedRole.ANALYSIS,
         quality_tier=QualityTier.STANDARD,
-        daily_cap=2,
+        daily_cap=1,
         decay_profile=DecayProfile.NORMAL,
         base_quality_weight=0.78,
         notes="Android reviews, tutorials, buying guides",
@@ -484,7 +484,7 @@ FEED_REGISTRY: List[FeedConfig] = [
         name="MacRumors",
         role=FeedRole.BREAKING,
         quality_tier=QualityTier.STANDARD,
-        daily_cap=2,
+        daily_cap=1,
         decay_profile=DecayProfile.FAST,
         base_quality_weight=0.80,
         notes="Apple rumors, product launches, buying guides",
@@ -494,7 +494,7 @@ FEED_REGISTRY: List[FeedConfig] = [
         name="XDA Developers",
         role=FeedRole.DEV,
         quality_tier=QualityTier.STANDARD,
-        daily_cap=2,
+        daily_cap=1,
         decay_profile=DecayProfile.NORMAL,
         base_quality_weight=0.75,
         notes="Mobile dev, Android mods, phone reviews",
@@ -504,7 +504,7 @@ FEED_REGISTRY: List[FeedConfig] = [
         name="Digital Trends",
         role=FeedRole.BREAKING,
         quality_tier=QualityTier.STANDARD,
-        daily_cap=2,
+        daily_cap=1,
         decay_profile=DecayProfile.FAST,
         base_quality_weight=0.75,
         notes="Consumer tech, lifestyle tech, buying guides",
@@ -514,7 +514,7 @@ FEED_REGISTRY: List[FeedConfig] = [
         name="TechRadar",
         role=FeedRole.BREAKING,
         quality_tier=QualityTier.STANDARD,
-        daily_cap=2,
+        daily_cap=1,
         decay_profile=DecayProfile.FAST,
         base_quality_weight=0.75,
         notes="Reviews, deals, consumer tech news",
@@ -687,7 +687,7 @@ FEED_REGISTRY: List[FeedConfig] = [
         name="Product Hunt",
         role=FeedRole.DEV,
         quality_tier=QualityTier.STANDARD,
-        daily_cap=3,
+        daily_cap=2,
         decay_profile=DecayProfile.FAST,
         base_quality_weight=0.70,
         notes="New product launches, indie tools, startup ecosystem",
