@@ -607,16 +607,6 @@ FEED_REGISTRY: List[FeedConfig] = [
     ),
     # ── Research publications ─────────────────────────────────────────────────
     FeedConfig(
-        url="https://rss.arxiv.org/rss/cs.AI",
-        name="arXiv cs.AI",
-        role=FeedRole.AI,
-        quality_tier=QualityTier.SUPPLEMENTAL,
-        daily_cap=3,
-        decay_profile=DecayProfile.SLOW,
-        base_quality_weight=0.78,
-        notes="Top AI papers; strict daily cap to prevent preprint flooding",
-    ),
-    FeedConfig(
         url="https://paperswithcode.com/rss",
         name="Papers With Code",
         role=FeedRole.AI,

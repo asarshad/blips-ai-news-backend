@@ -30,7 +30,6 @@ _AI_SOURCE_PRIORITY: Dict[str, float] = {
     "Stanford HAI": 0.92,
     "MIT CSAIL": 0.90,
     "Papers With Code": 0.88,
-    "arXiv cs.AI": 0.85,
     # Infrastructure
     "SemiAnalysis": 0.88,
     "NVIDIA AI Blog": 0.75,
