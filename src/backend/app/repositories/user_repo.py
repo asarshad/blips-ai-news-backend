@@ -10,7 +10,14 @@ from typing import Dict, List, Optional
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
-from app.models.content import EventType, InteractionEvent, PrefType, UserPreference, UserProfile
+from app.models.content import (
+    EventType,
+    InteractionEvent,
+    PrefType,
+    UserCategorySelection,
+    UserPreference,
+    UserProfile,
+)
 from app.repositories.base import BaseRepository
 
 
@@ -316,3 +323,74 @@ class InteractionEventRepository(BaseRepository[InteractionEvent]):
             "chat_starts": event_counts.get(EventType.CHAT_START, 0),
             "chat_messages": event_counts.get(EventType.CHAT_MESSAGE, 0),
         }
+
+
+class UserCategorySelectionRepository(BaseRepository[UserCategorySelection]):
+    """Repository for explicit user-declared category interests."""
+
+    def __init__(self, db: Session):
+        super().__init__(db, UserCategorySelection)
+
+    def get_by_device_id(self, device_id: str) -> Optional[UserCategorySelection]:
+        """Return the category selection row for a device, or None."""
+        return (
+            self.db.query(UserCategorySelection)
+            .filter(UserCategorySelection.device_id == device_id)
+            .first()
+        )
+
+    def get_selected_categories(self, device_id: str) -> List[str]:
+        """
+        Return the list of selected category strings for a device.
+
+        Returns an empty list if the user has not set any preferences yet.
+        """
+        row = self.get_by_device_id(device_id)
+        if row is None:
+            return []
+        return row.selected_categories or []
+
+    def upsert(self, device_id: str, categories: List[str]) -> UserCategorySelection:
+        """
+        Create or replace the category selection for a device.
+
+        Args:
+            device_id: User device identifier.
+            categories: Ordered list of category strings to store.
+
+        Returns:
+            The persisted UserCategorySelection row.
+        """
+        # Ensure parent profile exists
+        profile_repo = UserProfileRepository(self.db)
+        profile_repo.get_or_create(device_id)
+
+        row = self.get_by_device_id(device_id)
+        if row is None:
+            row = UserCategorySelection(
+                device_id=device_id,
+                selected_categories=categories,
+            )
+            self.db.add(row)
+        else:
+            row.selected_categories = categories
+            row.updated_at = datetime.utcnow()
+
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
+    def get_total_learned_weight(self, device_id: str) -> float:
+        """
+        Return the sum of all UserPreference weights for a device.
+
+        Used to derive the engagement_decay_factor for the personalised
+        feed score — as the user interacts more, engagement overrides
+        their declared categories.
+        """
+        result = (
+            self.db.query(func.sum(UserPreference.weight))
+            .filter(UserPreference.device_id == device_id)
+            .scalar()
+        )
+        return float(result or 0.0)
