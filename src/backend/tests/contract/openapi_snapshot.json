@@ -4495,6 +4495,66 @@
         ]
       }
     },
+    "/api/v1/metrics/ai-coverage": {
+      "get": {
+        "description": "Get AI content coverage metrics for the promoted feed.\n\nReturns ``ai_share_pct``, ``ai_cluster_hotness``, and\n``ai_source_diversity`` for items promoted in the last *hours* hours,\nso operators can verify the 40 % AI cap is holding in production.\n\nRequires ADMIN_API_KEY.",
+        "operationId": "get_ai_coverage_metrics_api_v1_metrics_ai_coverage_get",
+        "parameters": [
+          {
+            "description": "Look-back window in hours",
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "description": "Look-back window in hours",
+              "maximum": 168,
+              "minimum": 1,
+              "title": "Hours",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Ai Coverage Metrics Api V1 Metrics Ai Coverage Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Ai Coverage Metrics",
+        "tags": [
+          "metrics",
+          "metrics"
+        ]
+      }
+    },
     "/api/v1/metrics/extraction": {
       "get": {
         "description": "Get content extraction pipeline metrics.\n\nReturns:\n    - Global counters: ok/fallback/failed totals for extraction and images\n    - Per-source health scores with fail rates\n    - Degraded sources (health below threshold)\n\nRequires ADMIN_API_KEY.",
