@@ -248,6 +248,12 @@ class UserProfile(Base):
     interactions = relationship(
         "InteractionEvent", back_populates="profile", cascade="all, delete-orphan"
     )
+    category_selections = relationship(
+        "UserCategorySelection",
+        back_populates="profile",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
     def __repr__(self):
         return f"<UserProfile(device_id={self.device_id})>"
@@ -333,6 +339,46 @@ class InteractionEvent(Base):
 
     def __repr__(self):
         return f"<InteractionEvent(device={self.device_id}, content={self.content_item_id}, type={self.event_type.value})>"
+
+
+class UserCategorySelection(Base):
+    """
+    User-declared category interests set during onboarding.
+
+    Distinct from UserPreference (which stores *learned* weights from
+    interaction history).  This table stores explicit opt-in categories
+    chosen by the user (e.g. ["AI", "Security", "Open Source"]).
+
+    These drive an additive interest_boost in the personalized feed score.
+    The boost decays as the user builds up engagement-derived preferences,
+    so that actual behaviour eventually overrides declared intent.
+    """
+
+    __tablename__ = "user_category_selections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(
+        String(255),
+        ForeignKey("user_profiles.device_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+
+    # Ordered list of category strings the user selected, e.g. ["AI", "Security"]
+    selected_categories = Column(JSONB, nullable=False, default=list)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    # Relationship back to profile
+    profile = relationship("UserProfile", back_populates="category_selections")
+
+    def __repr__(self):
+        return (
+            f"<UserCategorySelection(device_id={self.device_id}, "
+            f"categories={self.selected_categories})>"
+        )
 
 
 # NOTE: ContentCluster table removed - clusters are now implicit via cluster_id on ContentItem.
