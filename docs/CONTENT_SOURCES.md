@@ -2,9 +2,11 @@
 
 All RSS feeds and YouTube channels that power the Blips News feed.
 
-**Last updated:** March 2026
+**Last updated:** April 2026
 
 > **AI Feed Governance** — AI-category items are capped at **40 % of any visible feed window**. No more than **2 consecutive AI items** may appear in sequence. Multiple publishers covering the same AI story are collapsed into a single cluster; the representative source is chosen by `global_score`. See `app/config/diversity.py` for enforcement logic and `tests/unit/test_ai_coverage.py` for cap tests.
+
+> **Inventory Health** — Category and source distribution are measured continuously via `GET /metrics/inventory/health`. Alerts fire when any single source exceeds **30 %** of the promoted window or infrastructure topics fall below **10 %** combined share. Validated by `tests/unit/test_feed_distribution.py`.
 
 ---
 
@@ -20,11 +22,11 @@ All RSS feeds and YouTube channels that power the Blips News feed.
 | 9to5Mac | Premium | 3 | Apple ecosystem news, leaks, reviews |
 | 9to5Google | Premium | 3 | Google/Android ecosystem news, Pixel, Chrome |
 | Engadget | Standard | 3 | Gadget news and reviews |
-| CNET | Standard | 3 | Consumer tech news and reviews |
-| ZDNet | Standard | 3 | Enterprise and consumer tech news |
-| MacRumors | Standard | 2 | Apple rumors, product launches, buying guides |
-| Digital Trends | Standard | 2 | Consumer tech, lifestyle tech, buying guides |
-| TechRadar | Standard | 2 | Reviews, deals, consumer tech news |
+| CNET | Standard | 2 | Consumer tech news and reviews |
+| ZDNet | Standard | 2 | Enterprise and consumer tech news |
+| MacRumors | Standard | 1 | Apple rumors, product launches, buying guides |
+| Digital Trends | Standard | 1 | Consumer tech, lifestyle tech, buying guides |
+| TechRadar | Standard | 1 | Reviews, deals, consumer tech news |
 
 ### Analysis & Context
 
@@ -35,7 +37,7 @@ All RSS feeds and YouTube channels that power the Blips News feed.
 | The Atlantic (Tech) | Premium | 2 | Tech policy, society, long-form analysis |
 | The Information | Premium | 1 | Premium tech business journalism, scoops |
 | Wired | Premium | 3 | Tech culture, long-form features, analysis |
-| Android Authority | Standard | 2 | Android reviews, tutorials, buying guides |
+| Android Authority | Standard | 1 | Android reviews, tutorials, buying guides |
 | Tom's Hardware | Standard | 2 | PC hardware benchmarks, GPU reviews |
 
 ### AI & Machine Learning — Primary Sources (Official Blogs)
@@ -68,7 +70,7 @@ All RSS feeds and YouTube channels that power the Blips News feed.
 |--------|------|-----------|-------|
 | NVIDIA AI Blog | Standard | 2 | GPU architecture, CUDA, AI hardware announcements |
 | AWS Machine Learning Blog | Standard | 2 | SageMaker, Bedrock, cloud ML tooling |
-| Azure AI Blog | Standard | 2 | Azure OpenAI Service, Copilot stack, responsible AI |
+| Azure AI Blog | Standard | 1 | Azure OpenAI Service, Copilot stack, responsible AI |
 | SemiAnalysis | Premium | 1 | Deep chip architecture analysis, TPU/GPU economics |
 
 ### Infrastructure & Cloud
@@ -77,6 +79,10 @@ All RSS feeds and YouTube channels that power the Blips News feed.
 |--------|------|-----------|-------|
 | The New Stack | Premium | 3 | Cloud native, Kubernetes, DevOps |
 | InfoQ | Premium | 3 | Software architecture, enterprise patterns |
+| CNCF Blog | Standard | 2 | Cloud Native Computing Foundation — K8s ecosystem, CNCF projects |
+| Cloudflare Blog | Premium | 2 | Network infrastructure, edge computing, security engineering |
+| Kubernetes Blog | Standard | 1 | Official K8s blog — release notes, deep dives, community |
+| HashiCorp Blog | Standard | 1 | Terraform, Vault, Nomad — infra-as-code and secrets management |
 
 ### Startups & Business
 
@@ -98,8 +104,8 @@ All RSS feeds and YouTube channels that power the Blips News feed.
 | Source | Tier | Daily Cap | Notes |
 |--------|------|-----------|-------|
 | Smashing Magazine | Standard | 2 | Web development, design, UX |
-| XDA Developers | Standard | 2 | Mobile dev, Android mods, phone reviews |
-| Product Hunt | Standard | 3 | New product launches, indie tools |
+| XDA Developers | Standard | 1 | Mobile dev, Android mods, phone reviews |
+| Product Hunt | Standard | 2 | New product launches, indie tools |
 | Hacker News | Supplemental | 3 | Community-driven, variable quality |
 
 ### Primary Sources (Official Blogs)
@@ -203,8 +209,8 @@ All RSS feeds and YouTube channels that power the Blips News feed.
 ## Totals
 
 | Type | Enabled Sources | Total Daily Cap |
-|------|-----------------|-----------------|
-| RSS Feeds | ~44 | ~100 articles/day |
+|------|-----------------|------------------|
+| RSS Feeds | ~49 | ~96 articles/day |
 | YouTube (Long-form + Mixed) | ~40 | ~80 videos/day |
 | YouTube (Shorts + Mixed) | ~17 | ~44 reels/day |
 
@@ -220,3 +226,17 @@ After deduplication and quality filtering, the target output is approximately **
 | AI cluster collapse rate | > 60 % of duplicate AI stories clustered |
 
 These targets are enforced at runtime by `DiversityMixer` category-cap logic and validated by `tests/unit/test_ai_coverage.py`.
+
+### Feed Distribution Targets
+
+| Metric | Target |
+|--------|--------|
+| Max single-source share (50-item window) | ≤ 30 % |
+| Infrastructure topic share (Cloud + DevOps + Security) | ≥ 10 % |
+| ROLE_QUOTAS: BREAKING | 12/day |
+| ROLE_QUOTAS: AI | 12/day |
+| ROLE_QUOTAS: INFRA | 8/day |
+| ROLE_QUOTAS: SECURITY | 5/day |
+| ROLE_QUOTAS: DEV | 5/day |
+
+Distribution is validated by `tests/unit/test_feed_distribution.py` and monitored in production via `GET /metrics/inventory/health`.
