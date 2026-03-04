@@ -8,7 +8,7 @@ Includes extraction pipeline metrics and per-source health scoring.
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -267,10 +267,7 @@ def get_ai_coverage_metrics(
 
     except Exception as exc:
         logger.error("Error getting AI coverage metrics: %s", exc, exc_info=True)
-        return {
-            "error": str(exc),
-            "as_of": datetime.now(timezone.utc).isoformat(),
-        }
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/signal", dependencies=[Depends(require_admin_key)])

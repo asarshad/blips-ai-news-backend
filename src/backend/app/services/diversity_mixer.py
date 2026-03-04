@@ -20,7 +20,7 @@ Constraints enforced:
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol, Set
 
-from app.config.diversity import DiversityConstraints, get_diversity_settings
+from app.config.diversity import CategoryCapConfig, DiversityConstraints, get_diversity_settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -87,6 +87,8 @@ class DiversityMixer:
             "max_source_per_window": constraints.max_source_per_window,
             "max_topic_per_window": constraints.max_topic_per_window,
             "disabled": False,
+            # Category caps are never relaxed — they are a hard editorial policy.
+            "category_caps": dict(constraints.category_caps),
         }
 
         # Apply relaxation steps
@@ -201,10 +203,89 @@ class DiversityMixer:
 
         return (topic_count + 1) <= max_topic
 
+    def _check_category_pct_constraint(
+        self,
+        candidate: Any,
+        selected: List[Any],
+        active_constraints: dict,
+    ) -> bool:
+        """
+        Check if adding the candidate would breach any per-category window-pct cap.
+
+        For each category in ``category_caps``, counts how many items in the
+        current window (of size ``window_size``) share that primary topic.
+        Returns False if adding the candidate would push the category above its
+        ``max_window_pct`` ceiling.
+        """
+        category_caps: Dict[str, CategoryCapConfig] = active_constraints.get("category_caps", {})
+        if not category_caps:
+            return True
+
+        candidate_topic = self._get_primary_topic(candidate)
+        if candidate_topic is None or candidate_topic not in category_caps:
+            return True
+
+        cap_cfg: CategoryCapConfig = category_caps[candidate_topic]
+        window_size: int = active_constraints["window_size"]
+
+        # Window that will contain the candidate (last window_size items)
+        lookback = min(len(selected), window_size - 1)
+        window = selected[-lookback:] if lookback > 0 else []
+
+        category_count = sum(
+            1 for item in window if self._get_primary_topic(item) == candidate_topic
+        )
+        # Use window_size as denominator so the cap is consistent regardless of
+        # how many items have been selected so far (avoids over-restricting the
+        # start of the feed when the window is not yet full).
+        candidate_pct = (category_count + 1) / window_size
+        return candidate_pct <= cap_cfg.max_window_pct
+
+    def _check_consecutive_category_constraint(
+        self,
+        candidate: Any,
+        selected: List[Any],
+        active_constraints: dict,
+    ) -> bool:
+        """
+        Check if the candidate would create a run of consecutive same-category items
+        that exceeds the configured ``max_consecutive`` limit.
+        """
+        category_caps: Dict[str, CategoryCapConfig] = active_constraints.get("category_caps", {})
+        if not category_caps:
+            return True
+
+        candidate_topic = self._get_primary_topic(candidate)
+        if candidate_topic is None or candidate_topic not in category_caps:
+            return True
+
+        cap_cfg: CategoryCapConfig = category_caps[candidate_topic]
+        max_consecutive: int = cap_cfg.max_consecutive
+
+        # Count how many trailing selected items share the same topic
+        consecutive = 0
+        for item in reversed(selected):
+            if self._get_primary_topic(item) == candidate_topic:
+                consecutive += 1
+            else:
+                break
+
+        # Adding the candidate would extend the run to consecutive + 1
+        return (consecutive + 1) <= max_consecutive
+
     def _is_valid_candidate(
         self, candidate: Any, selected: List[Any], active_constraints: dict
     ) -> bool:
         """Check if candidate satisfies all active constraints."""
+        # Category caps (e.g. AI ≤ 40 % of window, no more than 2 consecutive AI items)
+        # are hard editorial limits and are intentionally checked BEFORE the disabled
+        # flag so they survive all levels of constraint relaxation.
+        if not self._check_category_pct_constraint(candidate, selected, active_constraints):
+            return False
+
+        if not self._check_consecutive_category_constraint(candidate, selected, active_constraints):
+            return False
+
         if active_constraints["disabled"]:
             return True
 
@@ -329,12 +410,20 @@ class DiversityMixer:
                         f"Relaxing constraints to level {relaxation_level}: {active_constraints}"
                     )
                 else:
-                    # Fully relaxed - take next available
+                    # Fully relaxed - take next available (bypasses all constraints
+                    # including category caps). Reset relaxation afterwards so the
+                    # next item gets a fresh greedy pass; this avoids O(n²) re-scanning
+                    # when a monotype inventory exhausts all relaxation levels on every
+                    # item (e.g. 100 % AI inventory during a source outage).
                     for i, candidate in enumerate(remaining):
                         if self._get_id(candidate) not in used_ids:
                             selected.append(candidate)
                             used_ids.add(self._get_id(candidate))
                             remaining.pop(i)
+                            relaxation_level = 0
+                            active_constraints = self._build_active_constraints(
+                                self.constraints, relaxation_level
+                            )
                             break
                     else:
                         # No more candidates

@@ -4,6 +4,8 @@ All RSS feeds and YouTube channels that power the Blips News feed.
 
 **Last updated:** March 2026
 
+> **AI Feed Governance** — AI-category items are capped at **40 % of any visible feed window**. No more than **2 consecutive AI items** may appear in sequence. Multiple publishers covering the same AI story are collapsed into a single cluster; the representative source is chosen by `global_score`. See `app/config/diversity.py` for enforcement logic and `tests/unit/test_ai_coverage.py` for cap tests.
+
 ---
 
 ## RSS Feeds
@@ -36,11 +38,38 @@ All RSS feeds and YouTube channels that power the Blips News feed.
 | Android Authority | Standard | 2 | Android reviews, tutorials, buying guides |
 | Tom's Hardware | Standard | 2 | PC hardware benchmarks, GPU reviews |
 
-### AI & Machine Learning
+### AI & Machine Learning — Primary Sources (Official Blogs)
 
 | Source | Tier | Daily Cap | Notes |
 |--------|------|-----------|-------|
+| OpenAI Blog | Premium | 2 | Model releases, safety research, product launches |
+| Anthropic Blog | Premium | 2 | Claude updates, alignment research, interpretability |
+| Google DeepMind Blog | Premium | 2 | Gemini, AlphaFold, fundamental AI research |
+| Meta AI Blog | Premium | 2 | Llama family, open-source AI, infrastructure |
+| Microsoft AI Blog | Premium | 2 | Copilot, Azure AI, responsible AI posts |
+| Hugging Face Blog | Premium | 2 | OSS model releases, datasets, inference |
 | Simon Willison's Blog | Premium | 1 | LLM tools, prompt engineering, AI analysis |
+
+### AI & Machine Learning — Research
+
+| Source | Tier | Daily Cap | Notes |
+|--------|------|-----------|-------|
+| Papers With Code (trending) | Research | 2 | State-of-the-art results with reproducible code |
+| Stanford HAI | Research | 1 | Human-centred AI policy, interdisciplinary research |
+| MIT CSAIL | Research | 1 | Applied CS research from MIT's AI lab |
+
+> **Research feed policy** — Papers With Code is filtered to trending/state-of-the-art results only. Items must pass the standard promotion scorer before entering the feed. Daily caps are strict to prevent research flooding.
+
+> **Note:** arXiv cs.AI is currently disabled (removed March 2026). Volume and signal-to-noise ratio require keyword filtering before re-enabling.
+
+### AI & Machine Learning — Infrastructure & Chips
+
+| Source | Tier | Daily Cap | Notes |
+|--------|------|-----------|-------|
+| NVIDIA AI Blog | Standard | 2 | GPU architecture, CUDA, AI hardware announcements |
+| AWS Machine Learning Blog | Standard | 2 | SageMaker, Bedrock, cloud ML tooling |
+| Azure AI Blog | Standard | 2 | Azure OpenAI Service, Copilot stack, responsible AI |
+| SemiAnalysis | Premium | 1 | Deep chip architecture analysis, TPU/GPU economics |
 
 ### Infrastructure & Cloud
 
@@ -80,7 +109,9 @@ All RSS feeds and YouTube channels that power the Blips News feed.
 | Google AI Blog | Supplemental | 2 | Official AI announcements |
 | Microsoft Blog | Supplemental | 2 | Official Microsoft announcements |
 
-**Disabled feeds:** AWS Blog, Google Cloud Blog, OpenAI Blog, Apple Newsroom, CSS-Tricks, The Batch (Andrew Ng)
+**Disabled feeds:** Google Cloud Blog, Apple Newsroom, CSS-Tricks, The Batch (Andrew Ng)
+
+*Previously disabled feeds now re-enabled:* OpenAI Blog (re-enabled March 2026 under AI Primary tier), AWS Blog (re-enabled in Infrastructure tier as AWS ML Blog).
 
 ---
 
@@ -134,6 +165,9 @@ All RSS feeds and YouTube channels that power the Blips News feed.
 |---------|--------|------|-----------|-------|
 | Matt Wolfe | Mixed | Premium | 2 | AI tools roundups, weekly AI news |
 | AI Explained | Long-form | Premium | 1 | Deep AI research analysis, benchmarks |
+| Andrej Karpathy | Long-form | Premium | 1 | Neural network deep-dives, AI education |
+| Yannic Kilcher | Long-form | Standard | 1 | AI paper walkthroughs and critiques |
+| Lex Fridman | Long-form | Standard | 1 | Long-form researcher/engineer interviews |
 
 ### Official
 
@@ -153,7 +187,16 @@ All RSS feeds and YouTube channels that power the Blips News feed.
 | Jeff Geerling | Standard | 3 | Raspberry Pi and hardware shorts |
 | Technology Connections Shorts | Premium | 2 | Tech history and explainer shorts |
 
-**Disabled channels:** Ben Eater, freeCodeCamp, NVIDIA, Amazon Web Services, NileRed Shorts, and duplicate shorts entries for MKBHD/Mrwhosetheboss/Unbox Therapy (handled via mixed format on main entry)
+**Disabled channels:** Ben Eater, freeCodeCamp, NileRed Shorts, and duplicate shorts entries for MKBHD/Mrwhosetheboss/Unbox Therapy (handled via mixed format on main entry)
+
+*Previously disabled channels now re-enabled:* NVIDIA (re-enabled in AI/ML Focused tier, 1 video/day cap), Amazon Web Services (re-enabled under infrastructure coverage, 1 video/day cap).
+
+### AI / ML Focused — Official (re-enabled)
+
+| Channel | Format | Tier | Daily Cap | Notes |
+|---------|--------|------|-----------|-------|
+| NVIDIA | Mixed | Supplemental | 1 | GPU announcements, AI research demos |
+| Amazon Web Services | Long-form | Supplemental | 1 | AWS AI/ML service launches |
 
 ---
 
@@ -161,8 +204,19 @@ All RSS feeds and YouTube channels that power the Blips News feed.
 
 | Type | Enabled Sources | Total Daily Cap |
 |------|-----------------|-----------------|
-| RSS Feeds | ~30 | ~80 articles/day |
-| YouTube (Long-form + Mixed) | ~35 | ~70 videos/day |
-| YouTube (Shorts + Mixed) | ~15 | ~40 reels/day |
+| RSS Feeds | ~44 | ~100 articles/day |
+| YouTube (Long-form + Mixed) | ~40 | ~80 videos/day |
+| YouTube (Shorts + Mixed) | ~17 | ~44 reels/day |
 
 After deduplication and quality filtering, the target output is approximately **50–55 articles** and **30–40 videos/reels** per day.
+
+### AI Coverage Breakdown (target)
+
+| Metric | Target |
+|--------|--------|
+| AI share of article feed | ≤ 40 % |
+| Max consecutive AI articles | 2 |
+| AI source diversity (distinct sources in window) | ≥ 3 |
+| AI cluster collapse rate | > 60 % of duplicate AI stories clustered |
+
+These targets are enforced at runtime by `DiversityMixer` category-cap logic and validated by `tests/unit/test_ai_coverage.py`.
