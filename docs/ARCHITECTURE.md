@@ -616,6 +616,131 @@ def compute_global_score(item):
 
 ---
 
+## Personalised Feed Ranking
+
+The base `global_score` is a device-agnostic signal stored in PostgreSQL and
+refreshed every 60 minutes.  When a user sends a feed request with an
+`X-Device-ID` header, an additional in-memory re-rank pass applies three
+per-user adjustments **at serve time**:
+
+### Formula
+
+```
+final_score = global_score
+            + interest_boost
+            - staleness_decay
+            - source_dominance_penalty
+```
+
+### Components
+
+#### `global_score` (base)
+
+The pre-computed weighted combination of quality, trend, recency, and
+diversity (see [Score Components](#score-components) above).  Used as the
+starting point for all personalisation.
+
+#### `interest_boost`
+
+Additive bonus for content whose **primary topic** appears in the user's
+declared category selection (set during onboarding or settings).
+
+```
+interest_boost = INTEREST_WEIGHT × (1 - engagement_decay_factor)
+```
+
+- **`INTEREST_WEIGHT = 0.10`** (env: `INTEREST_WEIGHT`).  Calibrated to be
+  ≤ 20% of the average base score (~0.50) so declared interests **nudge** but
+  never fully override organic quality signals.
+- **`engagement_decay_factor`** (0–1): As the user accumulates interaction
+  history (learned `UserPreference` weights), the declared-interest boost
+  fades.  At `DECAY_SATURATION` total learned weight the boost reaches zero —
+  actual behaviour overrides stated preferences.
+
+Non-selected categories are *never filtered out*; every item remains
+in the feed, only the ordering changes.
+
+#### `staleness_decay` (penalty)
+
+Supplemental age penalty applied on top of the recency component already
+embedded in `global_score`.  Intentionally small to avoid double-counting.
+
+```
+staleness_decay = (1 - recency_score) × STALENESS_WEIGHT
+```
+
+- **`STALENESS_WEIGHT = 0.05`** (env: `STALENESS_WEIGHT`)
+- Fresh content (`recency_score ≈ 1.0`) → penalty ≈ 0
+- Stale content (`recency_score ≈ 0.0`) → penalty ≈ 0.05
+
+#### `source_dominance_penalty`
+
+Prevents any single source from monopolising the ranked window.
+
+```python
+share = source_count_in_window / window_size
+if share > MAX_SOURCE_PCT:
+    excess = (share - MAX_SOURCE_PCT) / (1 - MAX_SOURCE_PCT)
+    penalty = excess × DOMINANCE_WEIGHT
+```
+
+- **`MAX_SOURCE_PCT = 0.30`** (env: `DOMINANCE_MAX_SOURCE_PCT`) — sources
+  below 30% share receive zero penalty.
+- **`DOMINANCE_WEIGHT = 0.10`** (env: `DOMINANCE_WEIGHT`) — maximum penalty
+  equals the maximum interest boost, keeping the two signals balanced.
+- Does **not** hard-block any source; `diversity_mixer` handles hard source caps.
+
+### User Category Selections
+
+Declared interests are stored in the `user_category_selections` table
+(distinct from the learned `user_preferences` table):
+
+| column | type | description |
+|--------|------|-------------|
+| `device_id` | `VARCHAR` (FK) | Identifies the user (no PII) |
+| `selected_categories` | `JSONB` | Ordered list e.g. `["AI", "Security"]` |
+| `created_at` / `updated_at` | `TIMESTAMP` | Audit columns |
+
+**API**
+
+```
+GET  /api/v1/users/{device_id}/categories   → selected_categories list
+PUT  /api/v1/users/{device_id}/categories   → replace selected_categories
+```
+
+### Decay Over Time
+
+As a user engages with the app, the `PersonalizationService` accumulates
+learned preference weights in `user_preferences`.  The total of these weights
+is used to compute `engagement_decay_factor`:
+
+```
+engagement_decay_factor = min(1.0, total_learned_weight / DECAY_SATURATION)
+```
+
+where `DECAY_SATURATION = 50.0` (env: `INTEREST_DECAY_SATURATION`).
+
+*New user*: `total_learned_weight ≈ 0` → full interest_boost applies.  
+*Active user*: after sustained engagement `total_learned_weight → 50` → the
+onboarding selection is fully overridden by observed behaviour.
+
+### Architecture Notes
+
+- The device-agnostic feed is still fetched from **Redis cache** (45 s TTL);
+  the personalised re-rank runs **in memory on the cached result**, so the
+  cache is shared across all users.
+- The ranking modules live in `app/ranking/` alongside the existing scoring
+  components:
+
+  | file | responsibility |
+  |------|---------------|
+  | `interest.py` | `compute_interest_boost()`, `compute_engagement_decay_factor()` |
+  | `staleness.py` | `compute_staleness_decay()` |
+  | `dominance.py` | `compute_source_dominance_penalty()`, `build_source_counts()` |
+  | `feed_score.py` | `compute_feed_score()`, `rerank_feed()`, `explain_feed_score()` |
+
+---
+
 ## Database Schema Overview
 
 ```
