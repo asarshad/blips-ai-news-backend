@@ -19,6 +19,7 @@ from app.db.base import SessionLocal
 from app.extraction.metrics import extraction_metrics
 from app.models.ingestion_progress import IngestionProgress
 from app.models.source import SourceDailyStat
+from app.services.ai_metrics import compute_ai_feed_metrics
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -221,6 +222,55 @@ def get_extraction_samples(
         "count": len(samples),
         "samples": samples,
     }
+
+
+@router.get("/ai-coverage", dependencies=[Depends(require_admin_key)])
+def get_ai_coverage_metrics(
+    hours: int = Query(24, ge=1, le=168, description="Look-back window in hours"),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Get AI content coverage metrics for the promoted feed.
+
+    Returns ``ai_share_pct``, ``ai_cluster_hotness``, and
+    ``ai_source_diversity`` for items promoted in the last *hours* hours,
+    so operators can verify the 40 % AI cap is holding in production.
+
+    Requires ADMIN_API_KEY.
+    """
+    try:
+        from app.models.content import ContentItem, ContentStatus
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        cutoff_naive = cutoff.replace(tzinfo=None)
+
+        items = (
+            db.query(ContentItem)
+            .filter(
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.published_at >= cutoff_naive,
+                ContentItem.is_suppressed.is_(False),
+            )
+            .order_by(ContentItem.published_at.desc())
+            .all()
+        )
+
+        ai_metrics = compute_ai_feed_metrics(items)
+
+        return {
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "window_hours": hours,
+            "items_analyzed": len(items),
+            **ai_metrics,
+            "cap_breached": ai_metrics["ai_share_pct"] > 40.0,
+        }
+
+    except Exception as exc:
+        logger.error("Error getting AI coverage metrics: %s", exc, exc_info=True)
+        return {
+            "error": str(exc),
+            "as_of": datetime.now(timezone.utc).isoformat(),
+        }
 
 
 @router.get("/signal", dependencies=[Depends(require_admin_key)])

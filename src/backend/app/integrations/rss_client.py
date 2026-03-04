@@ -103,10 +103,15 @@ class RSSClient:
         entries = []
         entries_by_role: Dict[str, int] = {}
 
+        # Headroom multiplier: fetch more candidates than the daily_cap target
+        # so the quality/dedup pipeline has enough to fill the budget even after
+        # filtering.  The budget system (IngestionBudgetRepository) enforces the
+        # hard per-feed cap downstream; this is a pre-dedup fetch buffer only.
+        _FETCH_HEADROOM = 3
+
         for feed_config in self.feed_configs:
             try:
-                # Use feed's daily_cap as max entries
-                max_entries = min(entries_per_feed, feed_config.daily_cap * 3)
+                max_entries = min(entries_per_feed, feed_config.daily_cap * _FETCH_HEADROOM)
                 feed_entries = self.fetch_feed(feed_config.url, max_entries)
 
                 # Attach role metadata to entries
