@@ -332,6 +332,52 @@
         "title": "BoostResponse",
         "type": "object"
       },
+      "CategorySelectionRequest": {
+        "description": "Request body for setting category preferences.",
+        "properties": {
+          "selected_categories": {
+            "description": "Ordered list of category names the user is interested in.",
+            "example": [
+              "AI",
+              "Security",
+              "Open Source"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Selected Categories",
+            "type": "array"
+          }
+        },
+        "required": [
+          "selected_categories"
+        ],
+        "title": "CategorySelectionRequest",
+        "type": "object"
+      },
+      "CategorySelectionResponse": {
+        "description": "Response for category preference endpoints.",
+        "properties": {
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "selected_categories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Selected Categories",
+            "type": "array"
+          }
+        },
+        "required": [
+          "device_id",
+          "selected_categories"
+        ],
+        "title": "CategorySelectionResponse",
+        "type": "object"
+      },
       "ChatMessage": {
         "properties": {
           "content": {
@@ -3909,7 +3955,7 @@
     },
     "/api/v1/articles/recent": {
       "get": {
-        "description": "Get the most recent articles using tiered freshness strategy.\n\nReturns a blend of:\n- Tier A (Fresh): articles published within rolling window\n- Tier B (Backfill): articles added recently but published earlier\n- Tier C (Evergreen): older high-quality articles\n\nEach article includes freshness_tier, published_age_seconds, and added_age_seconds.\nResults are diversity-mixed and cached (45s TTL) for performance.\n\nResponse headers include diagnostic info:\n- X-Feed-Generated-At, X-Feed-Source, X-Cache, X-Newest-Published-At, etc.",
+        "description": "Get the most recent articles using tiered freshness strategy.\n\nReturns a blend of:\n- Tier A (Fresh): articles published within rolling window\n- Tier B (Backfill): articles added recently but published earlier\n- Tier C (Evergreen): older high-quality articles\n\nEach article includes freshness_tier, published_age_seconds, and added_age_seconds.\nResults are diversity-mixed and cached (45s TTL) for performance.\n\nIf X-Device-ID header is present, results are personalised:\n- Items matching the user's declared category interests receive an interest_boost.\n- Stale items receive a staleness_decay penalty.\n- Over-represented sources receive a source_dominance_penalty.\n\nResponse headers include diagnostic info:\n- X-Feed-Generated-At, X-Feed-Source, X-Cache, X-Newest-Published-At, etc.",
         "operationId": "get_recent_articles_api_v1_articles_recent_get",
         "parameters": [
           {
@@ -3937,6 +3983,22 @@
               "minimum": 1,
               "title": "Page",
               "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Device-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Device-Id"
             }
           }
         ],
@@ -5223,6 +5285,104 @@
         "summary": "Get Usage Stats",
         "tags": [
           "usage"
+        ]
+      }
+    },
+    "/api/v1/users/{device_id}/categories": {
+      "get": {
+        "description": "Return the user's declared category selections.",
+        "operationId": "get_categories_api_v1_users__device_id__categories_get",
+        "parameters": [
+          {
+            "description": "Device identifier",
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "description": "Device identifier",
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategorySelectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get declared category interests",
+        "tags": [
+          "preferences"
+        ]
+      },
+      "put": {
+        "description": "Create or replace the user's declared category selections.\n\nCategories are stored as an ordered list.  The first element is treated\nas the highest-priority interest when ranking content.",
+        "operationId": "set_categories_api_v1_users__device_id__categories_put",
+        "parameters": [
+          {
+            "description": "Device identifier",
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "description": "Device identifier",
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategorySelectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategorySelectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set declared category interests",
+        "tags": [
+          "preferences"
         ]
       }
     },
