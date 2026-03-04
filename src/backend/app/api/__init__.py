@@ -12,6 +12,7 @@ from app.api.routes import (
     events,
     inventory,
     metrics,
+    preferences,
     quality,
     session,
     starters,
@@ -31,6 +32,7 @@ api_router.include_router(starters.router, prefix="/starters", tags=["starters"]
 api_router.include_router(usage.router, prefix="/usage", tags=["usage"])
 api_router.include_router(videos.router, prefix="/videos", tags=["videos"])
 api_router.include_router(session.router, prefix="/session", tags=["session"])
+api_router.include_router(preferences.router, prefix="/users", tags=["preferences"])
 api_router.include_router(admin_routes.router, prefix="/admin", tags=["admin"])
 api_router.include_router(editorial_admin_router, tags=["admin-editorial"])
 api_router.include_router(admin_ui_router, tags=["admin-ui"])

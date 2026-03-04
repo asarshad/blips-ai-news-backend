@@ -6,7 +6,7 @@ Includes tiered freshness strategy (A/B/C) and diversity mixing.
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.api.feed_headers import FeedMetadata, compute_feed_version
@@ -16,7 +16,9 @@ from app.core.exceptions import not_found_exception
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.models.content import ContentType
+from app.ranking.feed_score import rerank_feed
 from app.repositories.content_repo import ContentItemRepository
+from app.repositories.user_repo import UserCategorySelectionRepository
 from app.schemas.article import Article as ArticleSchema
 from app.schemas.article import ArticleList, ArticleWithConversation, TagCount
 from app.services.ad_mixer import inject_ads
@@ -111,6 +113,7 @@ def get_recent_articles(
     limit: int = Query(5, ge=1, le=50, description="Number of articles to return"),
     page: int = Query(1, ge=1, description="Page number"),
     db: Session = Depends(get_db),
+    x_device_id: Optional[str] = Header(None, alias="X-Device-ID"),
 ):
     """
     Get the most recent articles using tiered freshness strategy.
@@ -122,6 +125,11 @@ def get_recent_articles(
 
     Each article includes freshness_tier, published_age_seconds, and added_age_seconds.
     Results are diversity-mixed and cached (45s TTL) for performance.
+
+    If X-Device-ID header is present, results are personalised:
+    - Items matching the user's declared category interests receive an interest_boost.
+    - Stale items receive a staleness_decay penalty.
+    - Over-represented sources receive a source_dominance_penalty.
 
     Response headers include diagnostic info:
     - X-Feed-Generated-At, X-Feed-Source, X-Cache, X-Newest-Published-At, etc.
@@ -140,6 +148,28 @@ def get_recent_articles(
         offset=offset,
         require_ai_processed=True,
     )
+
+    # ── Personalised re-ranking ───────────────────────────────────────────
+    # Apply per-user interest_boost / staleness / dominance adjustments.
+    # This happens AFTER the cached retrieval, so the DB-level cache is
+    # shared across all users and only the lightweight in-memory sort is
+    # per-user.
+    if x_device_id and articles:
+        cat_repo = UserCategorySelectionRepository(db)
+        selected = cat_repo.get_selected_categories(x_device_id)
+        total_weight = cat_repo.get_total_learned_weight(x_device_id)
+        if selected:
+            articles = rerank_feed(
+                items=articles,
+                selected_categories=selected,
+                total_learned_weight=total_weight,
+                window_size=max(len(articles), 1),
+            )
+            response.headers["X-Personalized"] = "true"
+            response.headers["X-Selected-Categories"] = ",".join(selected[:5])
+        else:
+            response.headers["X-Personalized"] = "false"
+    # ─────────────────────────────────────────────────────────────────────
 
     # Log tier distribution (from cached results)
     tier_counts = {}
