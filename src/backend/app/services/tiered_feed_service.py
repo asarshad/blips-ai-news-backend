@@ -344,6 +344,11 @@ def tiered_item_to_dict(tiered: TieredItem) -> Dict[str, Any]:
         "freshness_reason": tiered.reason,
         "published_age_seconds": tiered.published_age_seconds,
         "added_age_seconds": tiered.added_age_seconds,
+        # Ranking metadata — used by personalised re-rank pass; included in
+        # the cached payload so rerank_feed() can operate without DB access.
+        "global_score": item.global_score or 0.0,
+        "recency_score": item.recency_score or 1.0,
+        "topics": item.topics or [],
         # Conversation starters (inline to avoid separate API call)
         # Serve persisted starters; generate title-based defaults at serving
         # time if ingestion/backfill didn't populate them.
