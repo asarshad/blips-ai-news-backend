@@ -20,6 +20,7 @@ from app.extraction.metrics import extraction_metrics
 from app.models.ingestion_progress import IngestionProgress
 from app.models.source import SourceDailyStat
 from app.services.ai_metrics import compute_ai_feed_metrics
+from app.services.feed_health import compute_inventory_health
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -267,6 +268,55 @@ def get_ai_coverage_metrics(
 
     except Exception as exc:
         logger.error("Error getting AI coverage metrics: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/inventory/health", dependencies=[Depends(require_admin_key)])
+def get_inventory_health(
+    hours: int = Query(24, ge=1, le=168, description="Look-back window in hours"),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Get category and source distribution for the promoted feed inventory.
+
+    Returns per-category and per-source counts, share percentages, the
+    dominant source, and a combined infra coverage figure so operators
+    can detect single-source dominance (> 30 %) or thin infra coverage
+    (< 10 %%).
+
+    Requires ADMIN_API_KEY.
+    """
+    try:
+        from app.models.content import ContentItem, ContentStatus
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        cutoff_naive = cutoff.replace(tzinfo=None)
+
+        items = (
+            db.query(ContentItem)
+            .filter(
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.published_at >= cutoff_naive,
+                ContentItem.is_suppressed.is_(False),
+            )
+            .order_by(ContentItem.published_at.desc())
+            .all()
+        )
+
+        health = compute_inventory_health(items)
+
+        return {
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "window_hours": hours,
+            **health,
+            "alerts": {
+                "dominant_source_warning": health["dominant_source_pct"] > 30.0,
+                "infra_coverage_low": health["infra_share_pct"] < 10.0,
+            },
+        }
+
+    except Exception as exc:
+        logger.error("Error getting inventory health metrics: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

@@ -4661,6 +4661,66 @@
         ]
       }
     },
+    "/api/v1/metrics/inventory/health": {
+      "get": {
+        "description": "Get category and source distribution for the promoted feed inventory.\n\nReturns per-category and per-source counts, share percentages, the\ndominant source, and a combined infra coverage figure so operators\ncan detect single-source dominance (> 30 %) or thin infra coverage\n(< 10 %%).\n\nRequires ADMIN_API_KEY.",
+        "operationId": "get_inventory_health_api_v1_metrics_inventory_health_get",
+        "parameters": [
+          {
+            "description": "Look-back window in hours",
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "description": "Look-back window in hours",
+              "maximum": 168,
+              "minimum": 1,
+              "title": "Hours",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Inventory Health Api V1 Metrics Inventory Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Inventory Health",
+        "tags": [
+          "metrics",
+          "metrics"
+        ]
+      }
+    },
     "/api/v1/metrics/signal": {
       "get": {
         "description": "Get Coverage Guarantee and Quality Gate metrics.\n\nReturns:\n- signal_urls_seen / signal_urls_added (last N hours)\n- promote_runs, promoted_count (last N hours)\n- duplicate_ratio per source (signal URLs that were already in content_items)\n- top_sources_by_share: per-source contribution to the PROMOTED feed\n- pipeline_summary: CANDIDATE vs PROMOTED counts per content type\n\nRequires ADMIN_API_KEY.",
