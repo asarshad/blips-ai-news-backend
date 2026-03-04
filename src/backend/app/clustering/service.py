@@ -16,6 +16,32 @@ from app.repositories.content_repo import ContentItemRepository
 
 logger = get_logger(__name__)
 
+# Ordered list of primary/authoritative AI sources used when electing a cluster
+# representative.  Higher index = lower priority (first entry wins ties).
+_AI_SOURCE_PRIORITY: Dict[str, float] = {
+    # Primary lab blogs — most authoritative
+    "OpenAI Blog": 1.00,
+    "Anthropic Blog": 1.00,
+    "Google DeepMind Blog": 1.00,
+    "Meta AI Blog": 0.98,
+    "Microsoft AI Blog": 0.95,
+    "Hugging Face Blog": 0.95,
+    # Academic research
+    "Stanford HAI": 0.92,
+    "MIT CSAIL": 0.90,
+    "Papers With Code": 0.88,
+    "arXiv cs.AI": 0.85,
+    # Infrastructure
+    "SemiAnalysis": 0.88,
+    "NVIDIA AI Blog": 0.75,
+    "AWS Machine Learning Blog": 0.72,
+    "Azure AI Blog": 0.70,
+    # High-quality general tech (partial AI coverage)
+    "MIT Technology Review": 0.80,
+    "Simon Willison's Blog": 0.82,
+    # Default fallback — anything not in this map gets 0.50
+}
+
 
 class ClusteringService:
     """
@@ -139,7 +165,10 @@ class ClusteringService:
         Update canonical items for all active clusters.
 
         For each cluster and content type, the item with the highest
-        global_score is marked as canonical.
+        ``global_score`` is marked as canonical.  For AI-category clusters
+        (primary topic == "AI"), the score is augmented by an authoritative-
+        source bonus so that e.g. the OpenAI Blog is preferred over an
+        aggregator that republished the same story.
         """
         active_cluster_ids = self.content_repo.get_active_cluster_ids(
             hours_back=clustering_config.window_hours
@@ -157,9 +186,35 @@ class ClusteringService:
                     if item.is_cluster_canonical == 1:
                         self.content_repo.set_cluster(item.id, cluster_id, is_canonical=False)
 
-                # Mark highest scoring as canonical
-                best_item = max(items, key=lambda x: x.global_score)
+                # Mark highest scoring as canonical (with AI source bonus)
+                best_item = max(items, key=lambda x: self._canonical_score(x))
                 self.content_repo.set_cluster(best_item.id, cluster_id, is_canonical=True)
+
+    @staticmethod
+    def _canonical_score(item: ContentItem) -> float:
+        """
+        Compute a composite score for canonical-item election.
+
+        For AI-category items the ``global_score`` is blended with a small
+        authoritative-source bonus (up to +0.05) so that primary lab blogs
+        win ties over aggregators without completely overriding quality.
+        """
+        topics = item.topics or []
+        primary_topic = topics[0] if topics else None
+
+        # Unscored items get 0.0 regardless of topic — don't award AI bonus to
+        # items that have never been quality-scored.
+        if item.global_score is None:
+            return 0.0
+
+        base = item.global_score
+
+        if primary_topic == "AI":
+            source_priority = _AI_SOURCE_PRIORITY.get(item.source, 0.50)
+            # Blend: 95 % quality, 5 % source authority
+            return base * 0.95 + source_priority * 0.05
+
+        return base
 
     def get_cluster_stats(self) -> Dict[str, any]:
         """Get statistics about clustering."""

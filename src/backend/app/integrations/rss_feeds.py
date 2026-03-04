@@ -88,7 +88,7 @@ DECAY_HALF_LIFE_HOURS: Dict[DecayProfile, int] = {
 ROLE_QUOTAS: Dict[FeedRole, int] = {
     FeedRole.BREAKING: 15,  # Major news coverage (expanded with new sources)
     FeedRole.ANALYSIS: 10,  # Deep dives
-    FeedRole.AI: 6,  # AI/ML focused content
+    FeedRole.AI: 12,  # AI/ML focused content (expanded with primary lab blogs)
     FeedRole.INFRA: 5,  # Cloud/backend
     FeedRole.SECURITY: 4,  # Security news
     FeedRole.BUSINESS: 4,  # Startups/funding
@@ -530,10 +530,71 @@ FEED_REGISTRY: List[FeedConfig] = [
         notes="PC hardware benchmarks, GPU reviews, components",
     ),
     # =========================================================================
-    # AI & MACHINE LEARNING (NEW)
-    # AI research, tools, industry developments
-    # Target: 4-6 articles/day
+    # AI & MACHINE LEARNING
+    # Official lab blogs, research publications, AI infrastructure
+    # Target: 10-12 articles/day (capped at 40 % of any window by DiversityMixer)
     # =========================================================================
+    # ── Primary lab blogs ─────────────────────────────────────────────────────
+    FeedConfig(
+        url="https://openai.com/news/rss.xml",
+        name="OpenAI Blog",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=2,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.88,
+        notes="Model releases, safety research, product launches",
+    ),
+    FeedConfig(
+        url="https://www.anthropic.com/rss.xml",
+        name="Anthropic Blog",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=2,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.88,
+        notes="Claude updates, alignment research, interpretability",
+    ),
+    FeedConfig(
+        url="https://deepmind.google/blog/rss.xml",
+        name="Google DeepMind Blog",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=2,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.92,
+        notes="Gemini, AlphaFold, fundamental AI research",
+    ),
+    FeedConfig(
+        url="https://ai.meta.com/blog/rss/",
+        name="Meta AI Blog",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=2,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.85,
+        notes="Llama family, open-source AI, infrastructure",
+    ),
+    FeedConfig(
+        url="https://blogs.microsoft.com/ai/feed/",
+        name="Microsoft AI Blog",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=2,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.85,
+        notes="Copilot, Azure AI, responsible AI posts",
+    ),
+    FeedConfig(
+        url="https://huggingface.co/blog/feed.xml",
+        name="Hugging Face Blog",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=2,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.88,
+        notes="OSS model releases, datasets, inference",
+    ),
     FeedConfig(
         url="https://simonwillison.net/atom/everything/",
         name="Simon Willison's Blog",
@@ -543,6 +604,78 @@ FEED_REGISTRY: List[FeedConfig] = [
         decay_profile=DecayProfile.SLOW,
         base_quality_weight=0.92,
         notes="LLM tools, prompt engineering, AI analysis from Django co-creator",
+    ),
+    # ── Research publications ─────────────────────────────────────────────────
+    FeedConfig(
+        url="https://rss.arxiv.org/rss/cs.AI",
+        name="arXiv cs.AI",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.SUPPLEMENTAL,
+        daily_cap=3,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.78,
+        notes="Top AI papers; strict daily cap to prevent preprint flooding",
+    ),
+    FeedConfig(
+        url="https://paperswithcode.com/rss",
+        name="Papers With Code",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=2,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.80,
+        notes="State-of-the-art results with reproducible code",
+    ),
+    FeedConfig(
+        url="https://hai.stanford.edu/news/feed",
+        name="Stanford HAI",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.90,
+        notes="Human-centred AI policy, interdisciplinary research",
+    ),
+    FeedConfig(
+        url="https://news.csail.mit.edu/feed/",
+        name="MIT CSAIL",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.88,
+        notes="Applied CS research from MIT's AI lab",
+    ),
+    # ── AI infrastructure & chips ─────────────────────────────────────────────
+    FeedConfig(
+        url="https://blogs.nvidia.com/blog/category/artificial-intelligence/feed/",
+        name="NVIDIA AI Blog",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=2,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.78,
+        notes="GPU architecture, CUDA, AI hardware announcements",
+    ),
+    FeedConfig(
+        url="https://aws.amazon.com/blogs/machine-learning/feed/",
+        name="AWS Machine Learning Blog",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=2,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.75,
+        notes="SageMaker, Bedrock, cloud ML tooling",
+    ),
+    FeedConfig(
+        url="https://www.semianalysis.com/feed",
+        name="SemiAnalysis",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.90,
+        notes="Deep chip architecture analysis, TPU/GPU economics",
     ),
     FeedConfig(
         url="https://www.deeplearning.ai/the-batch/feed/",

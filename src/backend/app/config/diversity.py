@@ -14,6 +14,23 @@ from pydantic_settings import BaseSettings
 
 
 @dataclass
+class CategoryCapConfig:
+    """
+    Per-category cap applied inside the rolling diversity window.
+
+    Attributes:
+        max_window_pct: Maximum fraction of the window that may be items whose
+            primary topic matches this category (0.0–1.0). E.g. 0.40 means
+            the AI category may contribute at most 40 % of any window.
+        max_consecutive: Maximum number of back-to-back items from this
+            category before the mixer must insert a different-category item.
+    """
+
+    max_window_pct: float = 1.0  # 1.0 = effectively no limit
+    max_consecutive: int = 999  # 999 = effectively no limit
+
+
+@dataclass
 class DiversityConstraints:
     """
     Diversity constraints for a specific feed surface.
@@ -25,6 +42,12 @@ class DiversityConstraints:
         allow_consecutive_same_source: Hard constraint - no back-to-back same source
         min_inventory_for_constraints: Minimum inventory to enforce constraints
         relaxation_steps: Ordered steps to relax constraints when stuck
+        per_category_minimums: Guaranteed minimum items per topic category in output.
+        category_caps: Per-category window-percentage and consecutive caps.
+            Keys must match the first element of ContentItem.topics exactly
+            (case-sensitive). Example::
+
+                {"AI": CategoryCapConfig(max_window_pct=0.40, max_consecutive=2)}
     """
 
     window_size: int = 5
@@ -44,6 +67,8 @@ class DiversityConstraints:
     # Keys match the first element of ContentItem.topics (case-sensitive).
     # E.g. {"AI": 1, "Security": 1} ensures at least one item from each.
     per_category_minimums: Dict[str, int] = field(default_factory=dict)
+    # Per-category window caps (pct + consecutive limits).
+    category_caps: Dict[str, CategoryCapConfig] = field(default_factory=dict)
 
 
 # Default configurations for each surface
@@ -54,6 +79,8 @@ DEFAULT_ARTICLE_DIVERSITY = DiversityConstraints(
     allow_consecutive_same_source=False,
     min_inventory_for_constraints=8,
     per_category_minimums={"AI": 1, "Security": 1},
+    # AI cap: at most 40 % of any window; never 3-in-a-row.
+    category_caps={"AI": CategoryCapConfig(max_window_pct=0.40, max_consecutive=2)},
 )
 
 DEFAULT_VIDEO_DIVERSITY = DiversityConstraints(
@@ -62,6 +89,7 @@ DEFAULT_VIDEO_DIVERSITY = DiversityConstraints(
     max_topic_per_window=None,  # Videos often have less topic diversity
     allow_consecutive_same_source=False,
     min_inventory_for_constraints=6,
+    category_caps={"AI": CategoryCapConfig(max_window_pct=0.40, max_consecutive=2)},
 )
 
 DEFAULT_REEL_DIVERSITY = DiversityConstraints(
@@ -70,6 +98,7 @@ DEFAULT_REEL_DIVERSITY = DiversityConstraints(
     max_topic_per_window=2,
     allow_consecutive_same_source=False,
     min_inventory_for_constraints=5,
+    category_caps={"AI": CategoryCapConfig(max_window_pct=0.40, max_consecutive=2)},
 )
 
 
@@ -129,6 +158,7 @@ class DiversitySettings(BaseSettings):
             allow_consecutive_same_source=self.articles_allow_consecutive,
             min_inventory_for_constraints=self.articles_min_inventory,
             per_category_minimums=DEFAULT_ARTICLE_DIVERSITY.per_category_minimums,
+            category_caps=DEFAULT_ARTICLE_DIVERSITY.category_caps,
         )
 
     def get_video_constraints(self) -> DiversityConstraints:
@@ -139,6 +169,7 @@ class DiversitySettings(BaseSettings):
             max_topic_per_window=self.videos_max_topic,
             allow_consecutive_same_source=self.videos_allow_consecutive,
             min_inventory_for_constraints=self.videos_min_inventory,
+            category_caps=DEFAULT_VIDEO_DIVERSITY.category_caps,
         )
 
     def get_reel_constraints(self) -> DiversityConstraints:
@@ -149,6 +180,7 @@ class DiversitySettings(BaseSettings):
             max_topic_per_window=self.reels_max_topic,
             allow_consecutive_same_source=self.reels_allow_consecutive,
             min_inventory_for_constraints=self.reels_min_inventory,
+            category_caps=DEFAULT_REEL_DIVERSITY.category_caps,
         )
 
 
