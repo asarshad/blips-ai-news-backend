@@ -83,6 +83,7 @@ class ScoringService:
                     quality_score=scores["quality"],
                     trend_score=scores["trend"],
                     recency_score=scores["recency"],
+                    diversity_boost=scores["diversity"],
                     global_score=scores["global"],
                 )
 
