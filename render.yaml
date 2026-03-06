@@ -195,7 +195,7 @@ projects:
             region: oregon
             rootDir: src/backend
             buildCommand: pip install -r requirements.txt
-            startCommand: python -m app.worker
+            startCommand: python -u -m app.worker
             envVars:
               - key: PYTHON_VERSION
                 value: "3.11.4"
