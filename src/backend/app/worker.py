@@ -70,6 +70,8 @@ _worker_lock_token: str = f"{os.getpid()}:{uuid.uuid4()}"
 
 WORKER_LOCK_KEY = "worker_lock"
 WORKER_LOCK_TTL = 300  # 5 minutes
+LOCK_REACQUIRE_ATTEMPTS = 3
+LOCK_REACQUIRE_DELAY_SECONDS = 5.0
 
 
 def signal_handler(signum, _frame):
@@ -140,6 +142,73 @@ def refresh_worker_lock() -> bool | None:
     except RedisError as e:
         logger.warning(f"Failed to refresh worker lock (transient Redis error): {e}")
         return None
+
+
+def _probe_worker_lock_state() -> str:
+    """Inspect lock ownership state.
+
+    Returns:
+        "ours"    -> lock token matches this process
+        "other"   -> lock is owned by another process
+        "missing" -> key is absent (possible TTL expiry/eviction)
+        "unknown" -> Redis unavailable while probing
+    """
+    try:
+        redis_client = get_redis()
+        raw_owner = redis_client.get(WORKER_LOCK_KEY)
+        if raw_owner is None:
+            return "missing"
+
+        owner = (
+            raw_owner.decode("utf-8", errors="replace")
+            if isinstance(raw_owner, (bytes, bytearray))
+            else str(raw_owner)
+        )
+        if owner == _worker_lock_token:
+            return "ours"
+        return "other"
+    except RedisError as e:
+        logger.warning(f"Unable to probe worker lock owner (transient Redis error): {e}")
+        return "unknown"
+
+
+def _attempt_lock_reacquire() -> bool:
+    """Try to recover from a lock refresh miss without spawning dual workers.
+
+    We only attempt reacquire when the key appears missing/unknown. If another
+    token is definitively present, we return False immediately to avoid dual
+    execution.
+    """
+    for attempt in range(1, LOCK_REACQUIRE_ATTEMPTS + 1):
+        state = _probe_worker_lock_state()
+        if state == "ours":
+            logger.warning("Worker lock refresh missed, but ownership is still ours")
+            return True
+        if state == "other":
+            logger.error("Worker lock is owned by another process; cannot reacquire safely")
+            return False
+
+        if acquire_worker_lock():
+            logger.warning(
+                "Worker lock was missing and has been reacquired "
+                f"(attempt {attempt}/{LOCK_REACQUIRE_ATTEMPTS})"
+            )
+            return True
+
+        if attempt < LOCK_REACQUIRE_ATTEMPTS:
+            logger.warning(
+                "Worker lock not reacquired yet "
+                f"(attempt {attempt}/{LOCK_REACQUIRE_ATTEMPTS}); retrying in "
+                f"{LOCK_REACQUIRE_DELAY_SECONDS:.0f}s"
+            )
+            _stop_event.wait(timeout=LOCK_REACQUIRE_DELAY_SECONDS)
+            if _stop_event.is_set():
+                return False
+
+    logger.error(
+        f"Failed to reacquire worker lock after {LOCK_REACQUIRE_ATTEMPTS} attempts; shutting down"
+    )
+    return False
 
 
 def _acquire_lock_with_retry(max_attempts: int = 10, base_delay: float = 5.0) -> bool:
@@ -273,8 +342,14 @@ def run_worker():
                     )
                     break
             else:
-                # result is False — another process definitively owns the lock
-                logger.error("Lost worker lock — shutting down to avoid dual execution")
+                # result is False — refresh CAS failed. Attempt a safe recovery
+                # if the lock key was evicted/expired, but still exit if another
+                # process definitively owns the lock.
+                logger.warning("Worker lock refresh reported ownership loss; validating state")
+                if _attempt_lock_reacquire():
+                    _redis_failure_count = 0
+                    continue
+                logger.error("Lost worker lock and recovery failed — shutting down")
                 break
             _stop_event.wait(timeout=60)  # Wakes immediately on signal
     except (KeyboardInterrupt, SystemExit):
