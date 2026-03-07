@@ -8,6 +8,7 @@ This is a thin service that coordinates the clustering modules.
 import uuid
 from typing import Dict, List, Optional
 
+from app.clustering.dedupe import is_near_duplicate_simhash
 from app.clustering.similarity import compute_similarity
 from app.config.clustering import clustering_config
 from app.core.logging import get_logger
@@ -88,6 +89,8 @@ class ClusteringService:
                 item2_title=candidate.title,
                 item2_topics=candidate.topics or [],
             )
+            if self._is_near_duplicate(item, candidate):
+                score = max(score, clustering_config.combined_threshold + 0.10)
 
             if score >= clustering_config.combined_threshold and score > best_score:
                 best_score = score
@@ -108,6 +111,8 @@ class ClusteringService:
                 item2_title=candidate.title,
                 item2_topics=candidate.topics or [],
             )
+            if self._is_near_duplicate(item, candidate):
+                score = max(score, clustering_config.combined_threshold + 0.10)
 
             if score >= clustering_config.combined_threshold:
                 cluster_id = self._create_cluster([item, candidate])
@@ -214,6 +219,17 @@ class ClusteringService:
             return base * 0.95 + source_priority * 0.05
 
         return base
+
+    @staticmethod
+    def _is_near_duplicate(item: ContentItem, candidate: ContentItem) -> bool:
+        """Near-duplicate check using title simhash for article items."""
+        if item.type != ContentType.ARTICLE or candidate.type != ContentType.ARTICLE:
+            return False
+        return is_near_duplicate_simhash(
+            item.simhash,
+            candidate.simhash,
+            max_distance=3,
+        )
 
     def get_cluster_stats(self) -> Dict[str, any]:
         """Get statistics about clustering."""
