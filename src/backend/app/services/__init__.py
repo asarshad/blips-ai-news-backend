@@ -17,11 +17,13 @@ from app.ingestion import IngestionPipeline, create_ingestion_pipeline
 from app.ranking import ScoringService
 from app.services.ai_chat import AiChatService
 from app.services.quota_manager import QuotaManager
+from app.services.source_quality_service import SourceQualityService
 from app.services.tiered_feed_service import get_tiered_feed, invalidate_tiered_feed_cache
 
 __all__ = [
     "AiChatService",
     "QuotaManager",
+    "SourceQualityService",
     # Re-exports
     "ScoringService",
     "ClusteringService",
