@@ -324,7 +324,9 @@ class EditorialRepository:
         self.db.refresh(item)
         return item
 
-    def approve(self, content_id: int, actor: str, note: Optional[str] = None) -> Optional[ContentItem]:
+    def approve(
+        self, content_id: int, actor: str, note: Optional[str] = None
+    ) -> Optional[ContentItem]:
         """Approve a candidate and promote it for feed visibility."""
         return self._set_review_state(
             content_id=content_id,
@@ -391,7 +393,9 @@ class EditorialRepository:
         self.db.refresh(item)
         return item
 
-    def reject(self, content_id: int, actor: str, note: Optional[str] = None) -> Optional[ContentItem]:
+    def reject(
+        self, content_id: int, actor: str, note: Optional[str] = None
+    ) -> Optional[ContentItem]:
         """Reject content from editorial queue and suppress it."""
         return self._set_review_state(
             content_id=content_id,
@@ -402,7 +406,9 @@ class EditorialRepository:
             note=note,
         )
 
-    def hold(self, content_id: int, actor: str, note: Optional[str] = None) -> Optional[ContentItem]:
+    def hold(
+        self, content_id: int, actor: str, note: Optional[str] = None
+    ) -> Optional[ContentItem]:
         """Place content on hold while keeping it available for later review."""
         return self._set_review_state(
             content_id=content_id,

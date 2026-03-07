@@ -456,7 +456,9 @@ class TestAuditLogCreation:
         item = FakeContentItem(id=15)
         session.query.return_value.filter.return_value.first.return_value = item
 
-        action = repo.add_reviewer_note(content_id=15, actor="reviewer", note="Needs clearer source")
+        action = repo.add_reviewer_note(
+            content_id=15, actor="reviewer", note="Needs clearer source"
+        )
 
         assert action is not None
         session.add.assert_called_once()

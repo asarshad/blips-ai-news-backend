@@ -135,7 +135,9 @@ class MultiFactorRankingService:
             promotion_component = _clamp(float(promotion_raw), 0.0, 1.0)
 
         personalization_component = _clamp(float(personalization_score or 0.0), 0.0, 1.0)
-        source_component = _clamp(compute_source_weight(getattr(item, "source", "") or ""), 0.0, 1.0)
+        source_component = _clamp(
+            compute_source_weight(getattr(item, "source", "") or ""), 0.0, 1.0
+        )
         editorial_level = _clamp(float(getattr(item, "editorial_boost", 0) or 0), 0.0, 3.0)
         editorial_component = editorial_level / 3.0
         freshness_component = self.compute_freshness_score(item, now=now)

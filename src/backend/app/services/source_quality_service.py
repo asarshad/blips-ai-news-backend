@@ -122,7 +122,9 @@ class SourceQualityService:
         except Exception:
             return {}
 
-    def _iter_recent_stats(self, *, source_name: str, day_utc: date, window_days: int) -> Iterable[SourceDailyStat]:
+    def _iter_recent_stats(
+        self, *, source_name: str, day_utc: date, window_days: int
+    ) -> Iterable[SourceDailyStat]:
         since = day_utc - timedelta(days=max(1, window_days) - 1)
         return (
             self.db.query(SourceDailyStat)
