@@ -1253,6 +1253,20 @@
         "title": "EditorialActionRecord",
         "type": "object"
       },
+      "EditorialActionType": {
+        "enum": [
+          "ADD",
+          "BOOST",
+          "SUPPRESS",
+          "UNSUPPRESS",
+          "APPROVE",
+          "REJECT",
+          "HOLD",
+          "REQUEST_CHANGES"
+        ],
+        "title": "EditorialActionType",
+        "type": "string"
+      },
       "EventPayload": {
         "description": "Shared payload for impression and click events.",
         "properties": {
@@ -1900,6 +1914,67 @@
           "top_source_share"
         ],
         "title": "QualityTypeRow",
+        "type": "object"
+      },
+      "ReviewActionRequest": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "title": "ReviewActionRequest",
+        "type": "object"
+      },
+      "ReviewActionResponse": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/EditorialActionType"
+          },
+          "content_id": {
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "curation_status": {
+            "title": "Curation Status",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "suppressed": {
+            "title": "Suppressed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "content_id",
+          "action",
+          "curation_status",
+          "suppressed",
+          "message"
+        ],
+        "title": "ReviewActionResponse",
         "type": "object"
       },
       "StartersResponse": {
@@ -2613,6 +2688,76 @@
         ]
       }
     },
+    "/api/v1/admin/editorial/content/{content_id}/approve": {
+      "post": {
+        "description": "Approve and promote content into feed-eligible state.",
+        "operationId": "approve_content_api_v1_admin_editorial_content__content_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReviewActionRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Content",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
     "/api/v1/admin/editorial/content/{content_id}/boost": {
       "post": {
         "description": "Set editorial boost level (0-3).",
@@ -2670,6 +2815,216 @@
           }
         },
         "summary": "Boost Content",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
+    "/api/v1/admin/editorial/content/{content_id}/hold": {
+      "post": {
+        "description": "Put content on hold for later review.",
+        "operationId": "hold_content_api_v1_admin_editorial_content__content_id__hold_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReviewActionRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hold Content",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
+    "/api/v1/admin/editorial/content/{content_id}/reject": {
+      "post": {
+        "description": "Reject content and suppress it from serving surfaces.",
+        "operationId": "reject_content_api_v1_admin_editorial_content__content_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReviewActionRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject Content",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
+    "/api/v1/admin/editorial/content/{content_id}/request-changes": {
+      "post": {
+        "description": "Request changes and return content to candidate state.",
+        "operationId": "request_changes_content_api_v1_admin_editorial_content__content_id__request_changes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReviewActionRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request Changes Content",
         "tags": [
           "admin-editorial",
           "admin-editorial"

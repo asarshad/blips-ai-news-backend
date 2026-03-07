@@ -19,7 +19,10 @@ from app.api.admin.schemas import (
     ContentItemDetail,
     ContentItemSummary,
     EditorialActionRecord,
+    EditorialActionType,
     PaginatedContentResponse,
+    ReviewActionRequest,
+    ReviewActionResponse,
     SubmitURLRequest,
     SubmitURLResponse,
     SuppressResponse,
@@ -329,4 +332,104 @@ def unsuppress_content(
         content_id=item.id,
         suppressed=False,
         message="Content unsuppressed",
+    )
+
+
+def _review_action_response(
+    *,
+    item,
+    action: EditorialActionType,
+    note: Optional[str],
+    message: str,
+) -> ReviewActionResponse:
+    return ReviewActionResponse(
+        content_id=item.id,
+        action=action,
+        curation_status=item.curation_status.value if item.curation_status else "CANDIDATE",
+        suppressed=bool(item.is_suppressed),
+        note=note,
+        message=message,
+    )
+
+
+@router.post("/editorial/content/{content_id}/approve", response_model=ReviewActionResponse)
+def approve_content(
+    content_id: int,
+    body: Optional[ReviewActionRequest] = None,
+    db: Session = Depends(get_db),
+):
+    """Approve and promote content into feed-eligible state."""
+    repo = EditorialRepository(db)
+    note = body.note if body else None
+    item = repo.approve(content_id, actor=ACTOR, note=note)
+    if not item:
+        raise HTTPException(status_code=404, detail="Content not found")
+    return _review_action_response(
+        item=item,
+        action=EditorialActionType.APPROVE,
+        note=note,
+        message="Content approved",
+    )
+
+
+@router.post("/editorial/content/{content_id}/reject", response_model=ReviewActionResponse)
+def reject_content(
+    content_id: int,
+    body: Optional[ReviewActionRequest] = None,
+    db: Session = Depends(get_db),
+):
+    """Reject content and suppress it from serving surfaces."""
+    repo = EditorialRepository(db)
+    note = body.note if body else None
+    item = repo.reject(content_id, actor=ACTOR, note=note)
+    if not item:
+        raise HTTPException(status_code=404, detail="Content not found")
+    return _review_action_response(
+        item=item,
+        action=EditorialActionType.REJECT,
+        note=note,
+        message="Content rejected",
+    )
+
+
+@router.post("/editorial/content/{content_id}/hold", response_model=ReviewActionResponse)
+def hold_content(
+    content_id: int,
+    body: Optional[ReviewActionRequest] = None,
+    db: Session = Depends(get_db),
+):
+    """Put content on hold for later review."""
+    repo = EditorialRepository(db)
+    note = body.note if body else None
+    item = repo.hold(content_id, actor=ACTOR, note=note)
+    if not item:
+        raise HTTPException(status_code=404, detail="Content not found")
+    return _review_action_response(
+        item=item,
+        action=EditorialActionType.HOLD,
+        note=note,
+        message="Content placed on hold",
+    )
+
+
+@router.post(
+    "/editorial/content/{content_id}/request-changes",
+    response_model=ReviewActionResponse,
+)
+def request_changes_content(
+    content_id: int,
+    body: Optional[ReviewActionRequest] = None,
+    db: Session = Depends(get_db),
+):
+    """Request changes and return content to candidate state."""
+    repo = EditorialRepository(db)
+    note = body.note if body else None
+    item = repo.request_changes(content_id, actor=ACTOR, note=note)
+    if not item:
+        raise HTTPException(status_code=404, detail="Content not found")
+    return _review_action_response(
+        item=item,
+        action=EditorialActionType.REQUEST_CHANGES,
+        note=note,
+        message="Changes requested",
     )

@@ -22,6 +22,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.domain.editorial.service import EditorialService, _extract_domain
+from app.models.content import ContentStatus
 from app.ranking.global_score import (
     EDITORIAL_BOOST_WEIGHT,
     compute_global_score,
@@ -58,6 +59,7 @@ class FakeContentItem:
         self.type = kwargs.get("type", None)
         self.source = kwargs.get("source", "")
         self.title = kwargs.get("title", "Test")
+        self.curation_status = kwargs.get("curation_status", ContentStatus.CANDIDATE)
         self.published_at = kwargs.get("published_at", datetime.now(timezone.utc))
         self.created_at = kwargs.get("created_at", datetime.now(timezone.utc))
         self.quality_score = kwargs.get("quality_score", 0.5)
@@ -225,6 +227,77 @@ class TestEditorialRepository:
         counts = repo.candidate_queue_counts()
 
         assert counts == {"ARTICLE": 3, "VIDEO": 1}
+
+    def test_approve_sets_promoted_and_unsuppressed(self):
+        repo, session = self._make_repo()
+        item = FakeContentItem(
+            id=10,
+            curation_status=ContentStatus.CANDIDATE,
+            is_suppressed=True,
+        )
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        result = repo.approve(10, "reviewer", note="Looks good")
+
+        assert result is item
+        assert item.curation_status == ContentStatus.PROMOTED
+        assert item.is_suppressed is False
+        session.add.assert_called_once()
+        session.commit.assert_called_once()
+
+    def test_reject_sets_candidate_and_suppressed(self):
+        repo, session = self._make_repo()
+        item = FakeContentItem(
+            id=11,
+            curation_status=ContentStatus.PROMOTED,
+            is_suppressed=False,
+        )
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        result = repo.reject(11, "reviewer", note="Off-topic")
+
+        assert result is item
+        assert item.curation_status == ContentStatus.CANDIDATE
+        assert item.is_suppressed is True
+        session.add.assert_called_once()
+        session.commit.assert_called_once()
+
+    def test_hold_sets_candidate_without_suppression(self):
+        repo, session = self._make_repo()
+        item = FakeContentItem(
+            id=12,
+            curation_status=ContentStatus.PROMOTED,
+            is_suppressed=False,
+        )
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        result = repo.hold(12, "reviewer")
+
+        assert result is item
+        assert item.curation_status == ContentStatus.CANDIDATE
+        assert item.is_suppressed is False
+        session.add.assert_called_once()
+        session.commit.assert_called_once()
+
+    def test_request_changes_sets_candidate_and_logs_note(self):
+        repo, session = self._make_repo()
+        item = FakeContentItem(
+            id=13,
+            curation_status=ContentStatus.PROMOTED,
+            is_suppressed=False,
+        )
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        result = repo.request_changes(13, "reviewer", note="Needs better title")
+
+        assert result is item
+        assert item.curation_status == ContentStatus.CANDIDATE
+        assert item.is_suppressed is False
+        session.add.assert_called_once()
+        logged_action = session.add.call_args[0][0]
+        assert logged_action.action_type == "REQUEST_CHANGES"
+        assert logged_action.new_value.get("note") == "Needs better title"
+        session.commit.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

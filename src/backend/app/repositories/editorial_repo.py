@@ -278,6 +278,98 @@ class EditorialRepository:
         self.db.refresh(item)
         return item
 
+    def _set_review_state(
+        self,
+        *,
+        content_id: int,
+        actor: str,
+        action_type: str,
+        curation_status: Optional[ContentStatus] = None,
+        suppressed: Optional[bool] = None,
+        note: Optional[str] = None,
+    ) -> Optional[ContentItem]:
+        """Apply editorial review state transition + audit log entry."""
+        item = self.get_content_by_id(content_id)
+        if item is None:
+            return None
+
+        old_state = {
+            "curation_status": item.curation_status.value if item.curation_status else None,
+            "is_suppressed": bool(item.is_suppressed),
+        }
+
+        if curation_status is not None:
+            item.curation_status = curation_status
+        if suppressed is not None:
+            item.is_suppressed = suppressed
+
+        item.last_modified_by = actor
+        item.last_modified_at = datetime.now(tz=None)
+
+        new_state = {
+            "curation_status": item.curation_status.value if item.curation_status else None,
+            "is_suppressed": bool(item.is_suppressed),
+        }
+        if note:
+            new_state["note"] = note
+
+        self._log_action(
+            content_id=content_id,
+            action_type=action_type,
+            old_value=old_state,
+            new_value=new_state,
+            actor=actor,
+        )
+        self.db.commit()
+        self.db.refresh(item)
+        return item
+
+    def approve(self, content_id: int, actor: str, note: Optional[str] = None) -> Optional[ContentItem]:
+        """Approve a candidate and promote it for feed visibility."""
+        return self._set_review_state(
+            content_id=content_id,
+            actor=actor,
+            action_type="APPROVE",
+            curation_status=ContentStatus.PROMOTED,
+            suppressed=False,
+            note=note,
+        )
+
+    def reject(self, content_id: int, actor: str, note: Optional[str] = None) -> Optional[ContentItem]:
+        """Reject content from editorial queue and suppress it."""
+        return self._set_review_state(
+            content_id=content_id,
+            actor=actor,
+            action_type="REJECT",
+            curation_status=ContentStatus.CANDIDATE,
+            suppressed=True,
+            note=note,
+        )
+
+    def hold(self, content_id: int, actor: str, note: Optional[str] = None) -> Optional[ContentItem]:
+        """Place content on hold while keeping it available for later review."""
+        return self._set_review_state(
+            content_id=content_id,
+            actor=actor,
+            action_type="HOLD",
+            curation_status=ContentStatus.CANDIDATE,
+            suppressed=False,
+            note=note,
+        )
+
+    def request_changes(
+        self, content_id: int, actor: str, note: Optional[str] = None
+    ) -> Optional[ContentItem]:
+        """Return content for changes; stays as candidate and unsuppressed."""
+        return self._set_review_state(
+            content_id=content_id,
+            actor=actor,
+            action_type="REQUEST_CHANGES",
+            curation_status=ContentStatus.CANDIDATE,
+            suppressed=False,
+            note=note,
+        )
+
     # ------------------------------------------------------------------
     # Audit log
     # ------------------------------------------------------------------
