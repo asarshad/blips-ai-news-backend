@@ -41,6 +41,10 @@ MIN_PLAYLIST_SIZE = 20
 # Diversity constraints
 MAX_TOPIC_DOMINANCE = 0.40  # 40% max for any single topic
 MAX_CONSECUTIVE_SAME_SOURCE = 3
+SOURCE_CAP_WINDOW_SIZE = 5
+MAX_SOURCE_PER_WINDOW = 2
+CATEGORY_CAP_WINDOW_SIZE = 5
+MAX_CATEGORY_SHARE_PER_WINDOW = 0.40
 MIN_UNIQUE_SOURCES = 3
 
 # Content freshness
@@ -241,6 +245,14 @@ class PlaylistService:
             if not self._check_topic_diversity(item, topic_counts, len(selected)):
                 continue
 
+            # Check source cap in rolling window
+            if not self._check_window_source_cap(item, selected):
+                continue
+
+            # Check category cap in rolling window
+            if not self._check_window_category_cap(item, selected):
+                continue
+
             # Check source rotation
             if not self._check_source_rotation(item, source_streak):
                 continue
@@ -291,6 +303,37 @@ class PlaylistService:
             return False
 
         return True
+
+    def _check_window_source_cap(self, item: ContentItem, selected: List[ContentItem]) -> bool:
+        """Enforce max same-source items in rolling window."""
+        source = (item.source or "").lower()
+        if not source:
+            return True
+
+        lookback = min(len(selected), SOURCE_CAP_WINDOW_SIZE - 1)
+        window = selected[-lookback:] if lookback > 0 else []
+        source_count = sum(1 for candidate in window if (candidate.source or "").lower() == source)
+        return (source_count + 1) <= MAX_SOURCE_PER_WINDOW
+
+    def _check_window_category_cap(self, item: ContentItem, selected: List[ContentItem]) -> bool:
+        """Enforce max per-category share in rolling window."""
+        topics = item.topics or []
+        if not topics:
+            return True
+
+        primary = str(topics[0]).lower()
+        if not primary:
+            return True
+
+        max_per_window = max(1, int(CATEGORY_CAP_WINDOW_SIZE * MAX_CATEGORY_SHARE_PER_WINDOW))
+        lookback = min(len(selected), CATEGORY_CAP_WINDOW_SIZE - 1)
+        window = selected[-lookback:] if lookback > 0 else []
+        category_count = 0
+        for candidate in window:
+            candidate_topics = candidate.topics or []
+            if candidate_topics and str(candidate_topics[0]).lower() == primary:
+                category_count += 1
+        return (category_count + 1) <= max_per_window
 
     def _format_item(self, item: ContentItem) -> Dict:
         """Format content item for API response."""
