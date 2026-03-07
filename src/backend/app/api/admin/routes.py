@@ -12,6 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.admin.schemas import (
+    ApprovePublishRequest,
+    ApprovePublishResponse,
     BoostRequest,
     BoostResponse,
     CandidateQueueItem,
@@ -30,6 +32,7 @@ from app.api.admin.schemas import (
 from app.core.dependencies import get_db
 from app.domain.editorial.service import EditorialService
 from app.repositories.editorial_repo import EditorialRepository
+from app.services.tiered_feed_service import invalidate_tiered_feed_cache
 
 router = APIRouter()
 
@@ -432,4 +435,38 @@ def request_changes_content(
         action=EditorialActionType.REQUEST_CHANGES,
         note=note,
         message="Changes requested",
+    )
+
+
+@router.post(
+    "/editorial/content/{content_id}/approve-publish",
+    response_model=ApprovePublishResponse,
+)
+def approve_publish_content(
+    content_id: int,
+    body: ApprovePublishRequest,
+    db: Session = Depends(get_db),
+):
+    """Approve candidate content and publish it to top of playlist ordering."""
+    repo = EditorialRepository(db)
+    item = repo.approve_and_publish(
+        content_id=content_id,
+        actor=ACTOR,
+        boost_level=body.boost_level,
+        note=body.note,
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Content not found")
+
+    # Ensure feed surfaces pull the new item immediately.
+    invalidate_tiered_feed_cache()
+
+    return ApprovePublishResponse(
+        content_id=item.id,
+        curation_status=item.curation_status.value if item.curation_status else "PROMOTED",
+        suppressed=bool(item.is_suppressed),
+        editorial_boost=item.editorial_boost or 0,
+        published_at=item.published_at,
+        note=body.note,
+        message="Content approved and published to top",
     )

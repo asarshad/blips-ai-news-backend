@@ -299,6 +299,30 @@ class TestEditorialRepository:
         assert logged_action.new_value.get("note") == "Needs better title"
         session.commit.assert_called_once()
 
+    def test_approve_publish_promotes_sets_now_and_boost(self):
+        repo, session = self._make_repo()
+        old_time = datetime(2025, 1, 1)
+        item = FakeContentItem(
+            id=14,
+            editorial_boost=1,
+            is_suppressed=True,
+            published_at=old_time,
+        )
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        result = repo.approve_and_publish(14, "editor", boost_level=3, note="priority story")
+
+        assert result is item
+        assert item.curation_status.value == "PROMOTED"
+        assert item.is_suppressed is False
+        assert item.editorial_boost == 3
+        assert item.published_at > old_time
+        session.add.assert_called_once()
+        logged_action = session.add.call_args[0][0]
+        assert logged_action.action_type == "APPROVE_PUBLISH"
+        assert logged_action.new_value.get("note") == "priority story"
+        session.commit.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # 4. Ranking integration — editorial_boost affects global_score

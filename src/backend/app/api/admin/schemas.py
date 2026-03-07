@@ -188,3 +188,18 @@ class ReviewActionResponse(BaseModel):
     suppressed: bool
     note: Optional[str] = None
     message: str
+
+
+class ApprovePublishRequest(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=1000)
+    boost_level: int = Field(default=3, ge=0, le=3)
+
+
+class ApprovePublishResponse(BaseModel):
+    content_id: int
+    curation_status: str
+    suppressed: bool
+    editorial_boost: int
+    published_at: datetime
+    note: Optional[str] = None
+    message: str

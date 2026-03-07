@@ -335,6 +335,62 @@ class EditorialRepository:
             note=note,
         )
 
+    def approve_and_publish(
+        self,
+        content_id: int,
+        actor: str,
+        *,
+        boost_level: int = 3,
+        note: Optional[str] = None,
+    ) -> Optional[ContentItem]:
+        """
+        Approve content and publish it to the top of feed ordering.
+
+        Promotion is applied by:
+        - setting curation_status to PROMOTED
+        - clearing suppression
+        - bumping published_at to now
+        - applying at least the provided editorial boost
+        """
+        item = self.get_content_by_id(content_id)
+        if item is None:
+            return None
+
+        old_state = {
+            "curation_status": item.curation_status.value if item.curation_status else None,
+            "is_suppressed": bool(item.is_suppressed),
+            "published_at": item.published_at.isoformat() if item.published_at else None,
+            "editorial_boost": item.editorial_boost or 0,
+        }
+
+        now = datetime.now(tz=None)
+        item.curation_status = ContentStatus.PROMOTED
+        item.is_suppressed = False
+        item.published_at = now
+        item.editorial_boost = max(item.editorial_boost or 0, int(boost_level))
+        item.last_modified_by = actor
+        item.last_modified_at = now
+
+        new_state = {
+            "curation_status": item.curation_status.value,
+            "is_suppressed": bool(item.is_suppressed),
+            "published_at": item.published_at.isoformat(),
+            "editorial_boost": item.editorial_boost,
+        }
+        if note:
+            new_state["note"] = note
+
+        self._log_action(
+            content_id=content_id,
+            action_type="APPROVE_PUBLISH",
+            old_value=old_state,
+            new_value=new_state,
+            actor=actor,
+        )
+        self.db.commit()
+        self.db.refresh(item)
+        return item
+
     def reject(self, content_id: int, actor: str, note: Optional[str] = None) -> Optional[ContentItem]:
         """Reject content from editorial queue and suppress it."""
         return self._set_review_state(
