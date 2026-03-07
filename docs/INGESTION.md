@@ -30,6 +30,28 @@ This backend supports restart-resilient ingestion that continues until per-feed 
 - `INGESTION_LEASE_TTL_MS` (default: `60000`): per-feed lease TTL
 - `INGESTION_TARGET_DEFAULTS`: JSON mapping `{ "rss:TechCrunch": 3, "youtube_video:Bloomberg Technology": 2 }`
 
+## Source Registry v1 (TLDR-derived shortlist)
+
+To avoid ingesting from an unbounded long tail, the backend now includes a
+TLDR-derived source registry snapshot and shortlist builder:
+
+- Snapshot file:
+  `src/backend/app/config/data/tldr_domain_counts_2026_03_06.csv`
+- Registry module:
+  `src/backend/app/config/source_registry.py`
+
+How v1 shortlist generation works:
+
+1. Start from 1,351 unique domains observed in TLDR source crawl.
+2. Apply `min_mentions >= 6`.
+3. Exclude noisy/platform/sponsor domains (for example: `x.com`,
+   `threadreaderapp.com`, `advertise.tldr.tech`).
+4. Keep at most `120` domains for the operational shortlist.
+
+This shortlist is used as a deterministic source inventory for policy and
+ranking integration tasks in later phases (tiering, promotion/demotion,
+discovery rotation).
+
 ## Observability
 
 - `GET /health` returns 200 only if DB is reachable.
