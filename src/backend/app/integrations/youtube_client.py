@@ -7,6 +7,7 @@ channel configuration for balanced content ingestion.
 
 import os
 import re
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -273,6 +274,13 @@ class YouTubeClient:
 
         # Best-effort cache to avoid repeated scraping.
         self._duration_cache_seconds: Dict[str, Optional[int]] = {}
+        # Shared retry budget for feed fetches in this client instance/run.
+        self._retry_budget_remaining = max(0, int(os.getenv("CONNECTOR_RETRY_BUDGET", "40")))
+        self._max_retries = max(0, int(os.getenv("CONNECTOR_MAX_RETRIES", "2")))
+        self._timeout_seconds = max(1.0, float(os.getenv("CONNECTOR_TIMEOUT_SECONDS", "15")))
+        self._backoff_base_seconds = max(
+            0.0, float(os.getenv("CONNECTOR_BACKOFF_BASE_SECONDS", "0.5"))
+        )
 
     def _reset_daily_counts_if_needed(self):
         """Reset daily counts at UTC midnight."""
@@ -603,7 +611,7 @@ class YouTubeClient:
                 config.name,
                 config.content_format.value if config.content_format else "None",
             )
-            feed = feedparser.parse(config.feed_url)
+            feed = self._parse_feed_with_retries(config.feed_url)
 
             if feed.bozo:
                 logger.warning(f"Feed parsing issue for {config.feed_url}: {feed.bozo_exception}")
@@ -767,7 +775,7 @@ class YouTubeClient:
 
         try:
             logger.info(f"Fetching YouTube feed: {feed_url}")
-            feed = feedparser.parse(feed_url)
+            feed = self._parse_feed_with_retries(feed_url)
 
             if feed.bozo:
                 logger.warning(f"Feed parsing issue for {feed_url}: {feed.bozo_exception}")
@@ -813,6 +821,57 @@ class YouTubeClient:
             raise
 
         return videos
+
+    def _parse_feed_with_retries(self, feed_url: str):
+        """Fetch + parse a YouTube RSS feed using bounded retry and backoff."""
+        if feed_url.lstrip().startswith("<"):
+            return feedparser.parse(feed_url)
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+        }
+        attempts = self._max_retries + 1
+
+        for attempt in range(1, attempts + 1):
+            try:
+                if not self._breaker.allow_request():
+                    logger.warning("Circuit open - skipping feed fetch for %s", feed_url)
+                    break
+
+                response = requests.get(feed_url, headers=headers, timeout=self._timeout_seconds)
+                response.raise_for_status()
+                self._breaker.record_success()
+                return feedparser.parse(response.content)
+            except requests.RequestException as exc:
+                self._breaker.record_failure()
+                last_attempt = attempt >= attempts
+                budget_exhausted = self._retry_budget_remaining <= 0
+                if last_attempt or budget_exhausted:
+                    logger.warning(
+                        "YouTube feed fetch failed (url=%s attempt=%s/%s budget_left=%s): %s",
+                        feed_url,
+                        attempt,
+                        attempts,
+                        self._retry_budget_remaining,
+                        exc,
+                    )
+                    break
+
+                self._retry_budget_remaining -= 1
+                delay = self._backoff_base_seconds * (2 ** (attempt - 1))
+                logger.warning(
+                    "YouTube feed retry scheduled (url=%s next_attempt=%s/%s delay=%.2fs budget_left=%s)",
+                    feed_url,
+                    attempt + 1,
+                    attempts,
+                    delay,
+                    self._retry_budget_remaining,
+                )
+                if delay > 0:
+                    time.sleep(delay)
+
+        # Empty parsed feed keeps call-sites simple and safe.
+        return feedparser.parse(b"")
 
     def _extract_channel_id_from_url(self, url: str) -> Optional[str]:
         """Extract channel ID from feed URL."""

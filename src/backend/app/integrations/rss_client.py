@@ -9,7 +9,9 @@ high-quality content ingestion.
 """
 
 import html
+import os
 import random
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -89,6 +91,13 @@ class RSSClient:
         self.feed_configs = feed_configs or get_enabled_feeds()
         # Build URL -> config lookup
         self._config_by_url = {f.url: f for f in self.feed_configs}
+        # Shared retry budget for this client instance/run.
+        self._retry_budget_remaining = max(0, int(os.getenv("CONNECTOR_RETRY_BUDGET", "40")))
+        self._max_retries = max(0, int(os.getenv("CONNECTOR_MAX_RETRIES", "2")))
+        self._timeout_seconds = max(1.0, float(os.getenv("CONNECTOR_TIMEOUT_SECONDS", "15")))
+        self._backoff_base_seconds = max(
+            0.0, float(os.getenv("CONNECTOR_BACKOFF_BASE_SECONDS", "0.5"))
+        )
 
     def fetch_all_feeds(self, entries_per_feed: int = 10) -> List[FeedEntry]:
         """
@@ -153,15 +162,15 @@ class RSSClient:
         try:
             logger.info(f"Fetching feed: {feed_url}")
 
-            # Use requests with user-agent to avoid blocking
-            headers = {"User-Agent": random.choice(self.USER_AGENTS)}
-            try:
-                response = requests.get(feed_url, headers=headers, timeout=15)
-                response.raise_for_status()
-                feed = feedparser.parse(response.content)
-            except requests.RequestException as e:
-                logger.warning(f"Direct fetch failed for {feed_url}, trying feedparser: {e}")
+            # Allow tests / explicit XML input to bypass network.
+            if feed_url.lstrip().startswith("<"):
                 feed = feedparser.parse(feed_url)
+            else:
+                content = self._fetch_feed_content_with_retries(feed_url)
+                if content is None:
+                    logger.warning(f"Feed fetch failed after retries: {feed_url}")
+                    return []
+                feed = feedparser.parse(content)
 
             if feed.bozo and feed.bozo_exception:
                 logger.warning(f"Feed parse warning for {feed_url}: {feed.bozo_exception}")
@@ -213,6 +222,45 @@ class RSSClient:
             raise
 
         return entries
+
+    def _fetch_feed_content_with_retries(self, feed_url: str) -> Optional[bytes]:
+        """Fetch RSS bytes with retry/backoff bounded by a shared per-run budget."""
+        headers = {"User-Agent": random.choice(self.USER_AGENTS)}
+        attempts = self._max_retries + 1
+
+        for attempt in range(1, attempts + 1):
+            try:
+                response = requests.get(feed_url, headers=headers, timeout=self._timeout_seconds)
+                response.raise_for_status()
+                return response.content
+            except requests.RequestException as exc:
+                last_attempt = attempt >= attempts
+                budget_exhausted = self._retry_budget_remaining <= 0
+                if last_attempt or budget_exhausted:
+                    logger.warning(
+                        "RSS fetch failed (url=%s attempt=%s/%s budget_left=%s): %s",
+                        feed_url,
+                        attempt,
+                        attempts,
+                        self._retry_budget_remaining,
+                        exc,
+                    )
+                    return None
+
+                self._retry_budget_remaining -= 1
+                delay = self._backoff_base_seconds * (2 ** (attempt - 1))
+                logger.warning(
+                    "RSS fetch retry scheduled (url=%s next_attempt=%s/%s delay=%.2fs budget_left=%s)",
+                    feed_url,
+                    attempt + 1,
+                    attempts,
+                    delay,
+                    self._retry_budget_remaining,
+                )
+                if delay > 0:
+                    time.sleep(delay)
+
+        return None
 
     # _extract_article_content removed — we now use RSS descriptions
     # only (no full-page scraping) to respect copyright and avoid SSRF.

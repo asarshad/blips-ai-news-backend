@@ -1,4 +1,5 @@
 import datetime as dt
+from unittest.mock import Mock
 
 import pytest
 
@@ -39,3 +40,51 @@ def test_rss_only_mode_skips_articles_without_description():
 
     result = client._get_rss_description(FakeEntry())
     assert result == ""
+
+
+def test_fetch_feed_retries_then_succeeds(monkeypatch, fixture_text):
+    xml = fixture_text("rss/sample_feed.xml").encode("utf-8")
+    client = RSSClient(feed_configs=[])
+    monkeypatch.setenv("CONNECTOR_MAX_RETRIES", "2")
+    monkeypatch.setenv("CONNECTOR_RETRY_BUDGET", "2")
+    monkeypatch.setattr(client, "_timeout_seconds", 1.0)
+    monkeypatch.setattr(client, "_max_retries", 2)
+    monkeypatch.setattr(client, "_retry_budget_remaining", 2)
+    monkeypatch.setattr(client, "_backoff_base_seconds", 0.0)
+
+    calls = {"n": 0}
+
+    import requests
+
+    # First call raises generic Exception, so use RequestException to match codepath.
+    def _fake_get_request_exc(*_args, **_kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise requests.RequestException("transient")
+        resp = Mock()
+        resp.content = xml
+        resp.raise_for_status.return_value = None
+        return resp
+
+    monkeypatch.setattr(requests, "get", _fake_get_request_exc)
+    entries = client.fetch_feed("https://example.com/feed.xml", max_entries=10)
+
+    assert calls["n"] == 2
+    assert len(entries) == 1
+
+
+def test_fetch_feed_stops_when_retry_budget_exhausted(monkeypatch):
+    client = RSSClient(feed_configs=[])
+    monkeypatch.setattr(client, "_timeout_seconds", 1.0)
+    monkeypatch.setattr(client, "_max_retries", 3)
+    monkeypatch.setattr(client, "_retry_budget_remaining", 0)
+    monkeypatch.setattr(client, "_backoff_base_seconds", 0.0)
+
+    import requests
+
+    def _always_fail(*_args, **_kwargs):
+        raise requests.RequestException("boom")
+
+    monkeypatch.setattr(requests, "get", _always_fail)
+    entries = client.fetch_feed("https://example.com/feed.xml", max_entries=10)
+    assert entries == []

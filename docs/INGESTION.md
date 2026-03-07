@@ -29,6 +29,10 @@ This backend supports restart-resilient ingestion that continues until per-feed 
 - `INGESTION_POLL_SECONDS` (default: `30`): sleep between loops when targets not met
 - `INGESTION_LEASE_TTL_MS` (default: `60000`): per-feed lease TTL
 - `INGESTION_TARGET_DEFAULTS`: JSON mapping `{ "rss:TechCrunch": 3, "youtube_video:Bloomberg Technology": 2 }`
+- `CONNECTOR_MAX_RETRIES` (default: `2`): max retry attempts per RSS/YouTube feed fetch
+- `CONNECTOR_RETRY_BUDGET` (default: `40`): total retry attempts allowed per client run
+- `CONNECTOR_TIMEOUT_SECONDS` (default: `15`): HTTP timeout for RSS/YouTube feed fetch calls
+- `CONNECTOR_BACKOFF_BASE_SECONDS` (default: `0.5`): exponential backoff base for connector retries
 
 ## Source Registry v1 (TLDR-derived shortlist)
 
