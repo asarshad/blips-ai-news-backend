@@ -1337,7 +1337,8 @@
           "APPROVE",
           "REJECT",
           "HOLD",
-          "REQUEST_CHANGES"
+          "REQUEST_CHANGES",
+          "NOTE"
         ],
         "title": "EditorialActionType",
         "type": "string"
@@ -2050,6 +2051,48 @@
           "message"
         ],
         "title": "ReviewActionResponse",
+        "type": "object"
+      },
+      "ReviewerNoteRequest": {
+        "properties": {
+          "note": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "title": "ReviewerNoteRequest",
+        "type": "object"
+      },
+      "ReviewerNoteResponse": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/EditorialActionType"
+          },
+          "content_id": {
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content_id",
+          "action",
+          "note",
+          "message"
+        ],
+        "title": "ReviewerNoteResponse",
         "type": "object"
       },
       "StartersResponse": {
@@ -3163,6 +3206,69 @@
           }
         },
         "summary": "Request Changes Content",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
+    "/api/v1/admin/editorial/content/{content_id}/note": {
+      "post": {
+        "description": "Attach a reviewer note to the editorial audit log.",
+        "operationId": "add_reviewer_note_api_v1_admin_editorial_content__content_id__note_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewerNoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewerNoteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Reviewer Note",
         "tags": [
           "admin-editorial",
           "admin-editorial"

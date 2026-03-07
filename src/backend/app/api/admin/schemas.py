@@ -22,6 +22,7 @@ class EditorialActionType(str, Enum):
     REJECT = "REJECT"
     HOLD = "HOLD"
     REQUEST_CHANGES = "REQUEST_CHANGES"
+    NOTE = "NOTE"
 
 
 # ---------------------------------------------------------------------------
@@ -202,4 +203,15 @@ class ApprovePublishResponse(BaseModel):
     editorial_boost: int
     published_at: datetime
     note: Optional[str] = None
+    message: str
+
+
+class ReviewerNoteRequest(BaseModel):
+    note: str = Field(..., min_length=1, max_length=1000)
+
+
+class ReviewerNoteResponse(BaseModel):
+    content_id: int
+    action: EditorialActionType
+    note: str
     message: str

@@ -414,6 +414,22 @@ class TestAuditLogCreation:
         assert audit_record.new_value == {"editorial_boost": 3}
         assert audit_record.actor == "editor"
 
+    def test_add_reviewer_note_writes_note_action(self):
+        session = MagicMock()
+        repo = EditorialRepository(session)
+        item = FakeContentItem(id=15)
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        action = repo.add_reviewer_note(content_id=15, actor="reviewer", note="Needs clearer source")
+
+        assert action is not None
+        session.add.assert_called_once()
+        audit_record = session.add.call_args[0][0]
+        assert audit_record.action_type == "NOTE"
+        assert audit_record.new_value == {"note": "Needs clearer source"}
+        assert audit_record.actor == "reviewer"
+        session.commit.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # 7. Explain score includes editorial component
