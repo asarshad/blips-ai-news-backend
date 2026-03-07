@@ -25,6 +25,7 @@ from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentType
 from app.repositories.content_repo import ContentItemRepository
 from app.repositories.user_repo import UserPreferenceRepository, UserProfileRepository
+from app.services.multi_factor_ranking_service import MultiFactorRankingService
 from app.services.personalization_service import PersonalizationService
 
 logger = get_logger(__name__)
@@ -69,12 +70,14 @@ class PlaylistService:
         profile_repo: UserProfileRepository,
         preference_repo: UserPreferenceRepository,
         personalization_service: PersonalizationService,
+        ranking_service: Optional[MultiFactorRankingService] = None,
         redis_client=None,
     ):
         self.content_repo = content_repo
         self.profile_repo = profile_repo
         self.preference_repo = preference_repo
         self.personalization = personalization_service
+        self.ranking_service = ranking_service or MultiFactorRankingService()
         self.redis = redis_client
 
     def get_playlist(
@@ -202,18 +205,14 @@ class PlaylistService:
     def _score_candidates(
         self, device_id: str, candidates: List[ContentItem]
     ) -> List[Tuple[ContentItem, float]]:
-        """Score candidates with global + personalization scores."""
+        """Score candidates with multi-factor ranking."""
         scored = []
 
         for item in candidates:
-            # Base score is global_score
-            base_score = item.global_score or 0.5
-
-            # Add personalization boost
             personalization = self.personalization.compute_personalization_score(device_id, item)
-
-            # Combined score: 60% global, 40% personalization
-            final_score = 0.60 * base_score + 0.40 * personalization
+            final_score = self.ranking_service.score_item(
+                item, personalization_score=personalization
+            )
 
             scored.append((item, final_score))
 
