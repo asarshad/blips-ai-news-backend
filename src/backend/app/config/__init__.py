@@ -33,6 +33,7 @@ from app.config.scoring import (
     scoring_weights,
     trend_config,
 )
+from app.config.settings import Settings, get_settings, settings
 from app.config.source_registry import (
     DEFAULT_MAX_DOMAINS,
     DEFAULT_MIN_MENTIONS,
@@ -48,7 +49,6 @@ from app.config.source_registry import (
     normalize_domain,
     registered_domain,
 )
-from app.config.settings import Settings, get_settings, settings
 from app.config.source_tiering import (
     BLOCKED_DOMAINS,
     CORE_DOMAINS,
@@ -59,7 +59,11 @@ from app.config.source_tiering import (
     get_domain_policy,
     get_domain_tier,
     is_allowed_domain,
+)
+from app.config.source_tiering import (
     normalize_domain as normalize_source_domain,
+)
+from app.config.source_tiering import (
     registered_domain as registered_source_domain,
 )
 from app.config.youtube import (

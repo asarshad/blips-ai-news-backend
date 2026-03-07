@@ -5,8 +5,8 @@ from app.models.content import ContentItem, ContentType
 from app.services.playlist_service import (
     CATEGORY_CAP_WINDOW_SIZE,
     MAX_SOURCE_PER_WINDOW,
-    PlaylistService,
     SOURCE_CAP_WINDOW_SIZE,
+    PlaylistService,
 )
 
 
