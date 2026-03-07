@@ -138,6 +138,28 @@ near-duplicate detection:
   distance is small, allowing cluster joins even when entity/topic extraction
   is sparse.
 
+## Candidate Provenance + Audit Trail
+
+Signal ingestion now records candidate lineage and lifecycle events for
+traceability and post-hoc review.
+
+Schema additions:
+
+- `content_items` provenance columns:
+  - `candidate_first_seen_at`
+  - `candidate_signal_source`
+  - `candidate_raw_title`
+- New table: `candidate_audit_events`
+  - `canonical_url`, `signal_source`, `discovered_via`
+  - `event_type` (`created`, `duplicate`, `rejected`, `skipped`)
+  - optional `reason` and structured `payload`
+
+Implementation points:
+
+- Model: `src/backend/app/models/candidate_audit.py`
+- Migration: `src/backend/alembic/versions/candidate_audit_001.py`
+- Signal integration: `src/backend/app/ingestion/signal_ingestion.py`
+
 ## Inspecting progress (SQL)
 
 ```sql
