@@ -1338,7 +1338,9 @@
           "REJECT",
           "HOLD",
           "REQUEST_CHANGES",
-          "NOTE"
+          "NOTE",
+          "PROMOTE",
+          "DEMOTE"
         ],
         "title": "EditorialActionType",
         "type": "string"
@@ -1817,6 +1819,29 @@
           "formats"
         ],
         "title": "PreferencesResponse",
+        "type": "object"
+      },
+      "PromoteResponse": {
+        "properties": {
+          "content_id": {
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "curation_status": {
+            "title": "Curation Status",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content_id",
+          "curation_status",
+          "message"
+        ],
+        "title": "PromoteResponse",
         "type": "object"
       },
       "QualityBudgetRow": {
@@ -3072,6 +3097,122 @@
         ]
       }
     },
+    "/api/v1/admin/editorial/content/{content_id}/note": {
+      "post": {
+        "description": "Attach a reviewer note to the editorial audit log.",
+        "operationId": "add_reviewer_note_api_v1_admin_editorial_content__content_id__note_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewerNoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewerNoteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Reviewer Note",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
+    "/api/v1/admin/editorial/content/{content_id}/promote": {
+      "post": {
+        "description": "Promote a candidate item to the feed-visible tier.",
+        "operationId": "promote_content_api_v1_admin_editorial_content__content_id__promote_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromoteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Promote Content",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
     "/api/v1/admin/editorial/content/{content_id}/reject": {
       "post": {
         "description": "Reject content and suppress it from serving surfaces.",
@@ -3206,69 +3347,6 @@
           }
         },
         "summary": "Request Changes Content",
-        "tags": [
-          "admin-editorial",
-          "admin-editorial"
-        ]
-      }
-    },
-    "/api/v1/admin/editorial/content/{content_id}/note": {
-      "post": {
-        "description": "Attach a reviewer note to the editorial audit log.",
-        "operationId": "add_reviewer_note_api_v1_admin_editorial_content__content_id__note_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "content_id",
-            "required": true,
-            "schema": {
-              "title": "Content Id",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Admin-Key",
-            "required": false,
-            "schema": {
-              "title": "X-Admin-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReviewerNoteRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReviewerNoteResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Add Reviewer Note",
         "tags": [
           "admin-editorial",
           "admin-editorial"
