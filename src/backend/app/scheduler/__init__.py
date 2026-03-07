@@ -4,6 +4,7 @@ Scheduler module for background task scheduling.
 Uses APScheduler to run periodic tasks like news fetching.
 """
 
+import os
 from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -28,6 +29,50 @@ from app.scheduler.tasks import (
 logger = get_logger(__name__)
 
 
+def _bounded_ingestion_minutes(value: int) -> int:
+    """Clamp ingestion cadence to the supported continuous range (5-15 minutes)."""
+    if value < 5:
+        logger.warning(
+            "Ingestion scheduler minutes %s is below minimum; clamping to 5 minutes", value
+        )
+        return 5
+    if value > 15:
+        logger.warning(
+            "Ingestion scheduler minutes %s is above maximum; clamping to 15 minutes", value
+        )
+        return 15
+    return value
+
+
+def _resolve_ingestion_minutes() -> int:
+    """Resolve ingestion schedule cadence with backward-compatible fallback."""
+    # Preferred knob for continuous ingestion cadence.
+    raw = os.getenv("INGESTION_SCHEDULER_MINUTES")
+    if raw is not None:
+        try:
+            return _bounded_ingestion_minutes(int(raw))
+        except ValueError:
+            logger.warning(
+                "Invalid INGESTION_SCHEDULER_MINUTES=%r; falling back to NEWS_FETCH_INTERVAL_MINUTES",
+                raw,
+            )
+
+    # Backward-compatible fallback.
+    legacy_minutes = int(getattr(settings, "NEWS_FETCH_INTERVAL_MINUTES", 0) or 0)
+    if legacy_minutes > 0:
+        return _bounded_ingestion_minutes(legacy_minutes)
+
+    # Legacy hours are no longer suitable for continuous ingestion loops.
+    legacy_hours = int(getattr(settings, "NEWS_FETCH_INTERVAL_HOURS", 0) or 0)
+    if legacy_hours > 0:
+        logger.warning(
+            "NEWS_FETCH_INTERVAL_HOURS=%s is deprecated for ingestion cadence; defaulting to 15 minutes",
+            legacy_hours,
+        )
+
+    return 15
+
+
 def init_scheduler() -> Optional[BackgroundScheduler]:
     """
     Initialize and start the background scheduler.
@@ -38,16 +83,10 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
     try:
         scheduler = BackgroundScheduler()
 
-        # Fetch cadence: prefer minutes (Render sets NEWS_FETCH_INTERVAL_MINUTES).
-        fetch_minutes = int(getattr(settings, "NEWS_FETCH_INTERVAL_MINUTES", 0) or 0)
-        fetch_hours = int(getattr(settings, "NEWS_FETCH_INTERVAL_HOURS", 0) or 0)
-        if fetch_minutes > 0:
-            fetch_trigger = IntervalTrigger(minutes=fetch_minutes)
-            fetch_human = f"{fetch_minutes} minutes"
-        else:
-            # Backward-compatible fallback.
-            fetch_trigger = IntervalTrigger(hours=max(fetch_hours, 1))
-            fetch_human = f"{max(fetch_hours, 1)} hours"
+        # Continuous ingestion runs every 5-15 minutes.
+        fetch_minutes = _resolve_ingestion_minutes()
+        fetch_trigger = IntervalTrigger(minutes=fetch_minutes)
+        fetch_human = f"{fetch_minutes} minutes"
 
         # Add job for news and video fetching
         scheduler.add_job(
@@ -166,6 +205,7 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
 
 __all__ = [
     "init_scheduler",
+    "_resolve_ingestion_minutes",
     "fetch_and_process_news",
     "run_scoring_job",
     "run_clustering_job",
