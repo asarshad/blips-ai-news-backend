@@ -16,7 +16,7 @@ from app.ingestion.extractors import extract_entities, extract_source, extract_t
 from app.ingestion.language_filter import is_english
 from app.ingestion.leases import claim_lease, lease_key, release_lease
 from app.ingestion.url_normalizer import normalize_url
-from app.models.content import ContentItem, ContentType
+from app.models.content import ContentItem, ContentStatus, ContentType
 from app.repositories.ingestion_budget_repo import IngestionBudgetRepository
 from app.repositories.ingestion_progress_repo import IngestionProgressRepository
 
@@ -205,6 +205,8 @@ def process_progress_row_batch(
                 values.append(
                     {
                         "type": ContentType.ARTICLE,
+                        "curation_status": ContentStatus.CANDIDATE,
+                        "discovered_via": "rss_ingestion",
                         "source": source,
                         "source_url": source_url,
                         "canonical_url": source_url,
@@ -213,6 +215,7 @@ def process_progress_row_batch(
                         ),
                         "ingestion_day": day_utc,
                         "is_suppressed": False,
+                        "signal_hits": 0,
                         "published_at": e.published_date or datetime.utcnow(),
                         "title": e.title,
                         "description": (e.content or "")[:500] if e.content else None,
@@ -401,6 +404,8 @@ def process_progress_row_batch(
                 values.append(
                     {
                         "type": ContentType.REEL if is_reel else ContentType.VIDEO,
+                        "curation_status": ContentStatus.CANDIDATE,
+                        "discovered_via": "yt_ingestion",
                         "source": e.source or "YouTube",
                         "source_url": source_url,
                         "canonical_url": source_url,
@@ -411,6 +416,7 @@ def process_progress_row_batch(
                         ),
                         "ingestion_day": day_utc,
                         "is_suppressed": False,
+                        "signal_hits": 0,
                         "published_at": datetime.utcnow(),
                         "title": e.title,
                         "description": (e.summary or "")[:500] if e.summary else None,
