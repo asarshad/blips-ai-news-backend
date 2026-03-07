@@ -18,6 +18,10 @@ class EditorialActionType(str, Enum):
     BOOST = "BOOST"
     SUPPRESS = "SUPPRESS"
     UNSUPPRESS = "UNSUPPRESS"
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"
+    HOLD = "HOLD"
+    REQUEST_CHANGES = "REQUEST_CHANGES"
 
 
 # ---------------------------------------------------------------------------
@@ -170,4 +174,17 @@ class SuppressResponse(BaseModel):
 class BoostResponse(BaseModel):
     content_id: int
     editorial_boost: int
+    message: str
+
+
+class ReviewActionRequest(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+class ReviewActionResponse(BaseModel):
+    content_id: int
+    action: EditorialActionType
+    curation_status: str
+    suppressed: bool
+    note: Optional[str] = None
     message: str
