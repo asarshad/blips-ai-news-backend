@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 from app.config.source_tiering import get_domain_policy, is_allowed_domain
 from app.ingestion.canonical import canonical_key_for_article, extract_youtube_video_id
 from app.ingestion.signals import SignalItem
+from app.ingestion.signals.discovery_feeds import fetch_discovery_leads
 from app.ingestion.signals.github_trending import fetch_github_trending
 from app.ingestion.signals.hacker_news import fetch_hn_best, fetch_hn_top
 from app.ingestion.signals.youtube_trending import fetch_yt_trending
@@ -51,6 +52,7 @@ _SIGNAL_SOURCE_LABELS: Dict[SignalSource, str] = {
     SignalSource.HN_BEST: "signal_hn",
     SignalSource.GITHUB_TRENDING: "signal_github",
     SignalSource.YT_TRENDING: "signal_yt_trending",
+    SignalSource.DISCOVERY_LEADS: "signal_discovery",
 }
 
 # Max article/video stub candidates created per orchestrator run
@@ -185,6 +187,9 @@ def run_signal_ingestion(
     hn_limit: int = 50,
     github_limit: int = 25,
     yt_limit: int = 30,
+    discovery_limit: int = 25,
+    discovery_per_source_limit: int = 5,
+    discovery_enabled: bool = True,
     max_stubs: int = _MAX_STUBS_PER_RUN,
 ) -> SignalIngestionResult:
     """Fetch all signal sources and cross-check / enqueue new URLs.
@@ -195,6 +200,9 @@ def run_signal_ingestion(
         hn_limit:    Max items to fetch from each HN endpoint.
         github_limit: Max repos from GitHub Trending.
         yt_limit:    Max videos from YouTube Trending.
+        discovery_limit: Max links from discovery feed fetcher.
+        discovery_per_source_limit: Max links per discovery feed source.
+        discovery_enabled: Include discovery feed fetcher in this run.
         max_stubs:   Cap on new CANDIDATE stubs created per run.
 
     Returns:
@@ -206,12 +214,25 @@ def run_signal_ingestion(
 
     # ── 1. Collect raw signal items ───────────────────────────────────────
     all_items: List[SignalItem] = []
-    for fetcher_name, fetch_fn, kwargs in [
+    fetchers = [
         ("HN_TOP", fetch_hn_top, {"limit": hn_limit}),
         ("HN_BEST", fetch_hn_best, {"limit": hn_limit}),
         ("GITHUB", fetch_github_trending, {"limit": github_limit}),
         ("YT_TRENDING", _fetch_yt_safe, {"api_key": yt_api_key, "limit": yt_limit}),
-    ]:
+    ]
+    if discovery_enabled:
+        fetchers.append(
+            (
+                "DISCOVERY_FEEDS",
+                fetch_discovery_leads,
+                {
+                    "limit": discovery_limit,
+                    "per_source_limit": discovery_per_source_limit,
+                },
+            )
+        )
+
+    for fetcher_name, fetch_fn, kwargs in fetchers:
         try:
             items = fetch_fn(**kwargs)
             all_items.extend(items)

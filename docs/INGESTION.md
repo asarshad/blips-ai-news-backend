@@ -102,6 +102,27 @@ weight adjustments:
   - score <= `0.45` -> demote source weight by `-0.05` (min `0.40`)
   - otherwise hold
 
+## Discovery Leads Pipeline (Substack/Beehiiv)
+
+Signal ingestion now includes an optional discovery-feed lane for long-tail
+coverage (especially newsletters and creator-led technical analysis):
+
+- Fetcher module:
+  `src/backend/app/ingestion/signals/discovery_feeds.py`
+- Signal source enum value:
+  `discovery_leads`
+- Candidate stub label:
+  `discovered_via = signal_discovery`
+
+Scheduler controls:
+
+- `DISCOVERY_SIGNAL_ENABLED` (default: `true`)
+- `DISCOVERY_SIGNAL_LIMIT` (default: `25`)
+- `DISCOVERY_SIGNAL_PER_SOURCE_LIMIT` (default: `5`)
+
+The discovery lane runs through the same canonicalization, dedupe, and
+promotion gate as existing signal sources.
+
 ## Inspecting progress (SQL)
 
 ```sql

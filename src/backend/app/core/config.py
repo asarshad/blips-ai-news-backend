@@ -112,6 +112,11 @@ class Settings(BaseSettings):
     RSS_ENTRIES_PER_FEED: int = 50
     YT_VIDEOS_PER_CHANNEL: int = 30
 
+    # Discovery signal ingest (Substack/Beehiiv lead pipeline)
+    DISCOVERY_SIGNAL_ENABLED: bool = True
+    DISCOVERY_SIGNAL_LIMIT: int = 25
+    DISCOVERY_SIGNAL_PER_SOURCE_LIMIT: int = 5
+
     # Personalization weights (topic/entity/source/format)
     PERSONALIZATION_TOPIC_WEIGHT: float = 0.35
     PERSONALIZATION_ENTITY_WEIGHT: float = 0.30
