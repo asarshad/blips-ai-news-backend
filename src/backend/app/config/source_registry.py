@@ -16,9 +16,7 @@ from urllib.parse import urlparse
 SOURCE_REGISTRY_VERSION = "tldr-shortlist-v1-2026-03-06"
 
 # Snapshot generated from /tldr_sources/domain_counts.csv (1,351 unique domains).
-_DOMAIN_COUNTS_PATH = (
-    Path(__file__).resolve().parent / "data" / "tldr_domain_counts_2026_03_06.csv"
-)
+_DOMAIN_COUNTS_PATH = Path(__file__).resolve().parent / "data" / "tldr_domain_counts_2026_03_06.csv"
 
 DEFAULT_MIN_MENTIONS = 6
 DEFAULT_MAX_DOMAINS = 120

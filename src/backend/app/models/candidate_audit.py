@@ -29,7 +29,9 @@ class CandidateAuditEvent(Base):
     canonical_url = Column(String(2048), nullable=False, index=True)
     signal_source = Column(String(64), nullable=False, index=True)
     discovered_via = Column(String(64), nullable=True, index=True)
-    event_type = Column(String(32), nullable=False, index=True)  # created|duplicate|rejected|skipped
+    event_type = Column(
+        String(32), nullable=False, index=True
+    )  # created|duplicate|rejected|skipped
 
     reason = Column(Text, nullable=True)
     payload = Column(JSONB, nullable=True)
