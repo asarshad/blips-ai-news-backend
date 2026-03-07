@@ -32,7 +32,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 _PLACEHOLDER_SPONSOR = "Blips Sponsor"
-_PLACEHOLDER_CLICK = "https://husniconsulting.ca"
+_PLACEHOLDER_CLICK = "https://blips.tech"
 
 
 def _make_placeholder_ad(placement_id: str, index: int) -> Dict[str, Any]:

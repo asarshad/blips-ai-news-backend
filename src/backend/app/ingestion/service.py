@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.clustering.dedupe import compute_dedupe_key
+from app.clustering.dedupe import compute_dedupe_key, compute_title_simhash
 from app.clustering.service import ClusteringService
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -199,13 +199,14 @@ class IngestionPipeline:
         )
         entities = extract_entities(entry.title, summary or "")
 
+        final_title = extraction.title if extraction and extraction.title else entry.title
         content_item = ContentItem(
             type=ContentType.ARTICLE,
             source=source,
             source_url=normalized_url or entry.url,
             canonical_url=final_canonical_url,
             published_at=final_published_at,
-            title=extraction.title if extraction and extraction.title else entry.title,
+            title=final_title,
             description=entry.content[:500] if entry.content else None,
             content_text=article_text[:8000] if article_text else None,
             summary=summary,
@@ -215,6 +216,7 @@ class IngestionPipeline:
             topics=topics,
             entities=entities,
             dedupe_key=dedupe_key,
+            simhash=compute_title_simhash(final_title),
             ai_processed=ai_processed,
             conversation_starters=inline_starters,
             language=detected_lang or "en",
@@ -409,6 +411,7 @@ class IngestionPipeline:
             topics=topics,
             entities=entities,
             dedupe_key=dedupe_key,
+            simhash=compute_title_simhash(entry.title),
             ai_processed=ai_processed,
             conversation_starters=inline_starters,
             language=detected_lang or "en",

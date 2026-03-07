@@ -18,6 +18,13 @@ class EditorialActionType(str, Enum):
     BOOST = "BOOST"
     SUPPRESS = "SUPPRESS"
     UNSUPPRESS = "UNSUPPRESS"
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"
+    HOLD = "HOLD"
+    REQUEST_CHANGES = "REQUEST_CHANGES"
+    NOTE = "NOTE"
+    PROMOTE = "PROMOTE"
+    DEMOTE = "DEMOTE"
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +74,27 @@ class PaginatedContentResponse(BaseModel):
     page: int
     page_size: int
     pages: int
+
+
+class CandidateQueueItem(ContentItemSummary):
+    """Candidate review queue item with ingestion provenance fields."""
+
+    curation_status: str
+    discovered_via: Optional[str] = None
+    signal_hits: int = 0
+    promotion_score: Optional[float] = None
+    candidate_first_seen_at: Optional[datetime] = None
+    candidate_signal_source: Optional[str] = None
+    candidate_raw_title: Optional[str] = None
+
+
+class CandidateQueueResponse(BaseModel):
+    items: List[CandidateQueueItem]
+    total: int
+    page: int
+    page_size: int
+    pages: int
+    pending_by_type: Dict[str, int]
 
 
 # ---------------------------------------------------------------------------
@@ -149,4 +177,49 @@ class SuppressResponse(BaseModel):
 class BoostResponse(BaseModel):
     content_id: int
     editorial_boost: int
+    message: str
+
+
+class ReviewActionRequest(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+class ReviewActionResponse(BaseModel):
+    content_id: int
+    action: EditorialActionType
+    curation_status: str
+    suppressed: bool
+    note: Optional[str] = None
+    message: str
+
+
+class ApprovePublishRequest(BaseModel):
+    note: Optional[str] = Field(default=None, max_length=1000)
+    boost_level: int = Field(default=3, ge=0, le=3)
+
+
+class ApprovePublishResponse(BaseModel):
+    content_id: int
+    curation_status: str
+    suppressed: bool
+    editorial_boost: int
+    published_at: datetime
+    note: Optional[str] = None
+    message: str
+
+
+class ReviewerNoteRequest(BaseModel):
+    note: str = Field(..., min_length=1, max_length=1000)
+
+
+class ReviewerNoteResponse(BaseModel):
+    content_id: int
+    action: EditorialActionType
+    note: str
+    message: str
+
+
+class PromoteResponse(BaseModel):
+    content_id: int
+    curation_status: str
     message: str

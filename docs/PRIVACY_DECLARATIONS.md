@@ -146,7 +146,7 @@ The following data types are **NOT** collected:
 
 ## Privacy Policy Reference
 
-Privacy policy URL: `https://husniconsulting.ca/privacy.html`
+Privacy policy URL: `https://blips.tech/privacy.html`
 
 The privacy policy covers:
 - What data is collected and why

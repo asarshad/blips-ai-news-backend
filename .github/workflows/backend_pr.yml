@@ -46,11 +46,9 @@ jobs:
         run: |
           ruff check app/ tests/
 
-      - name: Unit + contract tests
+      - name: QA gates (missing tests + coverage)
         env:
           PYTHONWARNINGS: "ignore:urllib3 v2 only supports OpenSSL.*"
           PYTHONPATH: ${{ github.workspace }}/src/backend
         run: |
-          pytest tests/unit tests/contract
-
-
+          python scripts/qa_gates.py --min-coverage 50 --base-ref origin/main

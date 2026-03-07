@@ -36,6 +36,7 @@ class SignalSource(enum.Enum):
     HN_BEST = "hn_best"  # Hacker News /beststories
     GITHUB_TRENDING = "github_trending"
     YT_TRENDING = "yt_trending"  # YouTube Science & Technology most-popular
+    DISCOVERY_LEADS = "discovery_leads"  # Substack/Beehiiv discovery feeds
 
 
 class EnqueueStatus(enum.Enum):

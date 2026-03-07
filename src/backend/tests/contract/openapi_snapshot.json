@@ -47,6 +47,81 @@
         "title": "AppConfigResponse",
         "type": "object"
       },
+      "ApprovePublishRequest": {
+        "properties": {
+          "boost_level": {
+            "default": 3,
+            "maximum": 3.0,
+            "minimum": 0.0,
+            "title": "Boost Level",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "title": "ApprovePublishRequest",
+        "type": "object"
+      },
+      "ApprovePublishResponse": {
+        "properties": {
+          "content_id": {
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "curation_status": {
+            "title": "Curation Status",
+            "type": "string"
+          },
+          "editorial_boost": {
+            "title": "Editorial Boost",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          },
+          "suppressed": {
+            "title": "Suppressed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "content_id",
+          "curation_status",
+          "suppressed",
+          "editorial_boost",
+          "published_at",
+          "message"
+        ],
+        "title": "ApprovePublishResponse",
+        "type": "object"
+      },
       "Article": {
         "properties": {
           "created_at": {
@@ -330,6 +405,244 @@
           "message"
         ],
         "title": "BoostResponse",
+        "type": "object"
+      },
+      "CandidateQueueItem": {
+        "description": "Candidate review queue item with ingestion provenance fields.",
+        "properties": {
+          "candidate_first_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate First Seen At"
+          },
+          "candidate_raw_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Raw Title"
+          },
+          "candidate_signal_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Candidate Signal Source"
+          },
+          "canonical_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Url"
+          },
+          "cluster_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Id"
+          },
+          "content_type": {
+            "title": "Content Type",
+            "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "curation_status": {
+            "title": "Curation Status",
+            "type": "string"
+          },
+          "discovered_via": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discovered Via"
+          },
+          "editorial_boost": {
+            "default": 0,
+            "title": "Editorial Boost",
+            "type": "integer"
+          },
+          "freshness_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freshness Tier"
+          },
+          "global_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Global Score"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "manual_added": {
+            "default": false,
+            "title": "Manual Added",
+            "type": "boolean"
+          },
+          "promotion_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promotion Score"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "quality_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quality Score"
+          },
+          "signal_hits": {
+            "default": 0,
+            "title": "Signal Hits",
+            "type": "integer"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          },
+          "suppressed": {
+            "default": false,
+            "title": "Suppressed",
+            "type": "boolean"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "source",
+          "source_url",
+          "content_type",
+          "curation_status"
+        ],
+        "title": "CandidateQueueItem",
+        "type": "object"
+      },
+      "CandidateQueueResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateQueueItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "pages": {
+            "title": "Pages",
+            "type": "integer"
+          },
+          "pending_by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Pending By Type",
+            "type": "object"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size",
+          "pages",
+          "pending_by_type"
+        ],
+        "title": "CandidateQueueResponse",
         "type": "object"
       },
       "CategorySelectionRequest": {
@@ -1015,6 +1328,21 @@
         "title": "EditorialActionRecord",
         "type": "object"
       },
+      "EditorialActionType": {
+        "enum": [
+          "ADD",
+          "BOOST",
+          "SUPPRESS",
+          "UNSUPPRESS",
+          "APPROVE",
+          "REJECT",
+          "HOLD",
+          "REQUEST_CHANGES",
+          "NOTE"
+        ],
+        "title": "EditorialActionType",
+        "type": "string"
+      },
       "EventPayload": {
         "description": "Shared payload for impression and click events.",
         "properties": {
@@ -1664,6 +1992,109 @@
         "title": "QualityTypeRow",
         "type": "object"
       },
+      "ReviewActionRequest": {
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "title": "ReviewActionRequest",
+        "type": "object"
+      },
+      "ReviewActionResponse": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/EditorialActionType"
+          },
+          "content_id": {
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "curation_status": {
+            "title": "Curation Status",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "suppressed": {
+            "title": "Suppressed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "content_id",
+          "action",
+          "curation_status",
+          "suppressed",
+          "message"
+        ],
+        "title": "ReviewActionResponse",
+        "type": "object"
+      },
+      "ReviewerNoteRequest": {
+        "properties": {
+          "note": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "title": "ReviewerNoteRequest",
+        "type": "object"
+      },
+      "ReviewerNoteResponse": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/EditorialActionType"
+          },
+          "content_id": {
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content_id",
+          "action",
+          "note",
+          "message"
+        ],
+        "title": "ReviewerNoteResponse",
+        "type": "object"
+      },
       "StartersResponse": {
         "description": "Response model for conversation starters.",
         "example": {
@@ -1968,6 +2399,145 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/admin/editorial/candidates": {
+      "get": {
+        "description": "List pending CANDIDATE items for editorial review triage.",
+        "operationId": "list_candidate_queue_api_v1_admin_editorial_candidates_get",
+        "parameters": [
+          {
+            "description": "ARTICLE|VIDEO|REEL",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "ARTICLE|VIDEO|REEL",
+              "title": "Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "discovered_via",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Discovered Via"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_signal_hits",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Min Signal Hits",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "required": false,
+            "schema": {
+              "default": "priority",
+              "pattern": "^(priority|first_seen|published_at)$",
+              "title": "Sort By",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateQueueResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Candidate Queue",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
     "/api/v1/admin/editorial/content": {
       "get": {
         "description": "List content with editorial filters.",
@@ -2236,6 +2806,139 @@
         ]
       }
     },
+    "/api/v1/admin/editorial/content/{content_id}/approve": {
+      "post": {
+        "description": "Approve and promote content into feed-eligible state.",
+        "operationId": "approve_content_api_v1_admin_editorial_content__content_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReviewActionRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Content",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
+    "/api/v1/admin/editorial/content/{content_id}/approve-publish": {
+      "post": {
+        "description": "Approve candidate content and publish it to top of playlist ordering.",
+        "operationId": "approve_publish_content_api_v1_admin_editorial_content__content_id__approve_publish_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovePublishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovePublishResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Publish Content",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
     "/api/v1/admin/editorial/content/{content_id}/boost": {
       "post": {
         "description": "Set editorial boost level (0-3).",
@@ -2293,6 +2996,279 @@
           }
         },
         "summary": "Boost Content",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
+    "/api/v1/admin/editorial/content/{content_id}/hold": {
+      "post": {
+        "description": "Put content on hold for later review.",
+        "operationId": "hold_content_api_v1_admin_editorial_content__content_id__hold_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReviewActionRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Hold Content",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
+    "/api/v1/admin/editorial/content/{content_id}/reject": {
+      "post": {
+        "description": "Reject content and suppress it from serving surfaces.",
+        "operationId": "reject_content_api_v1_admin_editorial_content__content_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReviewActionRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject Content",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
+    "/api/v1/admin/editorial/content/{content_id}/request-changes": {
+      "post": {
+        "description": "Request changes and return content to candidate state.",
+        "operationId": "request_changes_content_api_v1_admin_editorial_content__content_id__request_changes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReviewActionRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewActionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request Changes Content",
+        "tags": [
+          "admin-editorial",
+          "admin-editorial"
+        ]
+      }
+    },
+    "/api/v1/admin/editorial/content/{content_id}/note": {
+      "post": {
+        "description": "Attach a reviewer note to the editorial audit log.",
+        "operationId": "add_reviewer_note_api_v1_admin_editorial_content__content_id__note_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewerNoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewerNoteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Reviewer Note",
         "tags": [
           "admin-editorial",
           "admin-editorial"

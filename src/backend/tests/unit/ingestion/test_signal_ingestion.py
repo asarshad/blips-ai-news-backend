@@ -16,6 +16,7 @@ from app.ingestion.signal_ingestion import (
     run_signal_ingestion,
 )
 from app.ingestion.signals import SignalItem
+from app.models.candidate_audit import CandidateAuditEvent
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.signal import SignalSource
 
@@ -156,6 +157,14 @@ class TestBuildCandidateStub:
         )
         assert stub.discovered_via == "signal_yt_trending"
 
+    def test_discovered_via_discovery_leads(self):
+        stub = _build_candidate_stub(
+            "https://speedrun.substack.com/p/issue",
+            self._make_item(source=SignalSource.DISCOVERY_LEADS),
+            ContentType.ARTICLE,
+        )
+        assert stub.discovered_via == "signal_discovery"
+
     def test_video_type_sets_video_url(self):
         url = "https://www.youtube.com/watch?v=abc123"
         stub = _build_candidate_stub(url, self._make_item(), ContentType.VIDEO)
@@ -170,6 +179,16 @@ class TestBuildCandidateStub:
         )
         assert stub.signal_hits == 1
 
+    def test_candidate_provenance_fields_are_set(self):
+        stub = _build_candidate_stub(
+            "https://example.com/article",
+            self._make_item(source=SignalSource.HN_TOP, title="From signal"),
+            ContentType.ARTICLE,
+        )
+        assert stub.candidate_first_seen_at is not None
+        assert stub.candidate_signal_source == SignalSource.HN_TOP.value
+        assert stub.candidate_raw_title == "From signal"
+
     def test_title_truncated_to_1000_chars(self):
         long_title = "A" * 1500
         stub = _build_candidate_stub(
@@ -178,6 +197,21 @@ class TestBuildCandidateStub:
             ContentType.ARTICLE,
         )
         assert len(stub.title) <= 1000
+
+    def test_quality_score_seeded_from_domain_policy(self):
+        core_stub = _build_candidate_stub(
+            "https://techcrunch.com/post",
+            self._make_item(),
+            ContentType.ARTICLE,
+        )
+        discovery_stub = _build_candidate_stub(
+            "https://example.com/post",
+            self._make_item(),
+            ContentType.ARTICLE,
+        )
+
+        assert core_stub.quality_score == 0.9
+        assert discovery_stub.quality_score == 0.62
 
 
 # ── run_signal_ingestion (orchestrator) ──────────────────────────────────────
@@ -196,6 +230,7 @@ def _patch_orchestrator(
     hn_best=None,
     github=None,
     yt=None,
+    discovery=None,
     existing_item=None,
     signal_row=None,
 ):
@@ -220,6 +255,7 @@ def _patch_orchestrator(
         patch("app.ingestion.signal_ingestion.fetch_hn_best", return_value=hn_best or []),
         patch("app.ingestion.signal_ingestion.fetch_github_trending", return_value=github or []),
         patch("app.ingestion.signal_ingestion._fetch_yt_safe", return_value=yt or []),
+        patch("app.ingestion.signal_ingestion.fetch_discovery_leads", return_value=discovery or []),
         patch(
             "app.ingestion.signal_ingestion.ContentItemRepository", return_value=mock_content_repo
         ),
@@ -238,13 +274,28 @@ class TestRunSignalIngestion:
             signal_score=150.0,
         )
         mock_db, patches, _cr, _sr = _patch_orchestrator(hn_top=[sample])
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+            patches[7],
+        ):
             result = run_signal_ingestion(mock_db)
 
         assert result.signal_urls_seen == 1
         assert result.signal_urls_added == 1
         assert result.stubs_created == 1
         assert result.signal_hits_bumped == 0
+        audit_events = [
+            c.args[0]
+            for c in mock_db.add.call_args_list
+            if c.args and isinstance(c.args[0], CandidateAuditEvent)
+        ]
+        assert any(evt.event_type == "created" for evt in audit_events)
 
     def test_existing_url_bumps_signal_hits(self):
         existing = MagicMock(spec=ContentItem)
@@ -256,12 +307,27 @@ class TestRunSignalIngestion:
             signal_score=80.0,
         )
         mock_db, patches, _cr, _sr = _patch_orchestrator(hn_top=[sample], existing_item=existing)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+            patches[7],
+        ):
             result = run_signal_ingestion(mock_db)
 
         assert result.stubs_created == 0
         assert result.signal_hits_bumped == 1
         assert existing.signal_hits == 3
+        audit_events = [
+            c.args[0]
+            for c in mock_db.add.call_args_list
+            if c.args and isinstance(c.args[0], CandidateAuditEvent)
+        ]
+        assert any(evt.event_type == "duplicate" for evt in audit_events)
 
     def test_stubs_capped_at_max_stubs(self):
         items = [
@@ -274,7 +340,16 @@ class TestRunSignalIngestion:
             for i in range(5)
         ]
         mock_db, patches, _cr, _sr = _patch_orchestrator(hn_top=items)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+            patches[7],
+        ):
             result = run_signal_ingestion(mock_db, max_stubs=3)
 
         assert result.stubs_created == 3
@@ -290,6 +365,7 @@ class TestRunSignalIngestion:
             patches[4],
             patches[5],
             patches[6],
+            patches[7],
             patch(
                 "app.ingestion.signal_ingestion.fetch_hn_top", side_effect=RuntimeError("HN down")
             ),
@@ -318,7 +394,58 @@ class TestRunSignalIngestion:
             for i in range(2)
         ]
         mock_db, patches, _cr, _sr = _patch_orchestrator(hn_top=items_hn, github=items_github)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+            patches[7],
+        ):
             result = run_signal_ingestion(mock_db)
 
         assert result.signal_urls_seen == 5
+
+    def test_blocked_domain_is_rejected_by_policy(self):
+        blocked = SignalItem(
+            raw_url="https://x.com/some/thread",
+            signal_source=SignalSource.HN_TOP,
+            raw_title="Blocked source",
+            signal_score=12.0,
+        )
+        mock_db, patches, _cr, _sr = _patch_orchestrator(hn_top=[blocked])
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+            result = run_signal_ingestion(mock_db)
+
+        assert result.signal_urls_seen == 1
+        assert result.domain_rejected == 1
+        assert result.signal_urls_added == 0
+        assert result.stubs_created == 0
+
+    def test_discovery_feed_items_are_processed(self):
+        items_discovery = [
+            SignalItem(
+                raw_url=f"https://speedrun.substack.com/p/post-{i}",
+                signal_source=SignalSource.DISCOVERY_LEADS,
+                raw_title=f"Discovery {i}",
+                signal_score=42,
+            )
+            for i in range(2)
+        ]
+        mock_db, patches, _cr, _sr = _patch_orchestrator(discovery=items_discovery)
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+            patches[7],
+        ):
+            result = run_signal_ingestion(mock_db)
+
+        assert result.signal_urls_seen == 2
+        assert result.stubs_created == 2

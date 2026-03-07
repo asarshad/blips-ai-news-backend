@@ -17,6 +17,19 @@ def test_normalize_url_keeps_non_tracking_query_params():
     assert normalize_url(url) == "https://example.com/article?id=123"
 
 
+def test_normalize_url_strips_www_and_amp_suffixes():
+    url_amp = "https://www.example.com/news/breaking/amp/?utm_source=rss"
+    assert normalize_url(url_amp) == "https://example.com/news/breaking"
+
+    url_amp_host = "https://amp.example.com/news/story/?feature=share"
+    assert normalize_url(url_amp_host) == "https://example.com/news/story"
+
+
+def test_normalize_url_strips_extended_tracking_params():
+    url = "https://example.com/a?source=rss&trk=abc&si=123&id=42"
+    assert normalize_url(url) == "https://example.com/a?id=42"
+
+
 def test_normalize_url_canonicalizes_youtube_watch_and_shorts():
     assert (
         normalize_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=43")
