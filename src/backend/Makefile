@@ -6,7 +6,7 @@ PYTEST     := $(PYTHON) -m pytest
 RUFF       := $(PYTHON) -m ruff
 PYTHONPATH ?= .
 
-.PHONY: help verify lint format fmt-check test unit contract qa-gates migrate clean
+.PHONY: help verify lint format fmt-check test unit contract qa-gates ci-parity migrate clean
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -37,6 +37,9 @@ contract: ## Run contract/snapshot tests only
 
 qa-gates: ## Enforce missing-test detector + coverage threshold
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/qa_gates.py --min-coverage 50
+
+ci-parity: ## Mirror GitHub backend CI checks locally (lint + unit + contract)
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/ci_parity.py
 
 # ── Database ──────────────────────────────────────────────────────────────────
 migrate: ## Apply pending Alembic migrations
