@@ -23,6 +23,8 @@ from app.api.admin.schemas import (
     EditorialActionRecord,
     EditorialActionType,
     PaginatedContentResponse,
+    ReviewerNoteRequest,
+    ReviewerNoteResponse,
     ReviewActionRequest,
     ReviewActionResponse,
     SubmitURLRequest,
@@ -469,4 +471,28 @@ def approve_publish_content(
         published_at=item.published_at,
         note=body.note,
         message="Content approved and published to top",
+    )
+
+
+@router.post("/editorial/content/{content_id}/note", response_model=ReviewerNoteResponse)
+def add_reviewer_note(
+    content_id: int,
+    body: ReviewerNoteRequest,
+    db: Session = Depends(get_db),
+):
+    """Attach a reviewer note to the editorial audit log."""
+    repo = EditorialRepository(db)
+    action = repo.add_reviewer_note(
+        content_id=content_id,
+        actor=ACTOR,
+        note=body.note,
+    )
+    if action is None:
+        raise HTTPException(status_code=404, detail="Content not found")
+
+    return ReviewerNoteResponse(
+        content_id=content_id,
+        action=EditorialActionType.NOTE,
+        note=body.note,
+        message="Reviewer note recorded",
     )

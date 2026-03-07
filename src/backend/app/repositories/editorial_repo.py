@@ -480,3 +480,29 @@ class EditorialRepository:
             .limit(limit)
             .all()
         )
+
+    def add_reviewer_note(
+        self,
+        *,
+        content_id: int,
+        actor: str,
+        note: str,
+    ) -> Optional[EditorialAction]:
+        """Append a reviewer note to the editorial audit log."""
+        item = self.get_content_by_id(content_id)
+        if item is None:
+            return None
+
+        now = datetime.now(tz=None)
+        item.last_modified_by = actor
+        item.last_modified_at = now
+
+        action = self._log_action(
+            content_id=content_id,
+            action_type="NOTE",
+            old_value=None,
+            new_value={"note": note},
+            actor=actor,
+        )
+        self.db.commit()
+        return action
