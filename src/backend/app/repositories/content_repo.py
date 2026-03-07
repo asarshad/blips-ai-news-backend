@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import desc, func, or_
 from sqlalchemy.orm import Session
 
-from app.models.content import ContentItem, ContentType
+from app.models.content import ContentItem, ContentStatus, ContentType
 from app.repositories.base import BaseRepository
 
 # Items with language=NULL are legacy rows inserted before language detection
@@ -282,6 +282,8 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         query = self.db.query(ContentItem).filter(
             ContentItem.type == content_type,
             ContentItem.published_at >= cutoff,
+            ContentItem.is_suppressed.is_(False),
+            ContentItem.curation_status == ContentStatus.PROMOTED,
             # Include canonical items OR items without clusters
             or_(ContentItem.cluster_id.is_(None), ContentItem.is_cluster_canonical == 1),
             _ENGLISH_FILTER,

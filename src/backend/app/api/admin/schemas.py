@@ -23,6 +23,8 @@ class EditorialActionType(str, Enum):
     HOLD = "HOLD"
     REQUEST_CHANGES = "REQUEST_CHANGES"
     NOTE = "NOTE"
+    PROMOTE = "PROMOTE"
+    DEMOTE = "DEMOTE"
 
 
 # ---------------------------------------------------------------------------
@@ -214,4 +216,10 @@ class ReviewerNoteResponse(BaseModel):
     content_id: int
     action: EditorialActionType
     note: str
+    message: str
+
+
+class PromoteResponse(BaseModel):
+    content_id: int
+    curation_status: str
     message: str

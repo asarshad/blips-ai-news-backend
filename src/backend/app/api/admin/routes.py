@@ -23,6 +23,7 @@ from app.api.admin.schemas import (
     EditorialActionRecord,
     EditorialActionType,
     PaginatedContentResponse,
+    PromoteResponse,
     ReviewerNoteRequest,
     ReviewerNoteResponse,
     ReviewActionRequest,
@@ -291,6 +292,29 @@ def boost_content(
         content_id=item.id,
         editorial_boost=item.editorial_boost,
         message=f"Boost set to {body.level}",
+    )
+
+
+# ------------------------------------------------------------------
+# POST /admin/editorial/content/{id}/promote
+# ------------------------------------------------------------------
+
+
+@router.post("/editorial/content/{content_id}/promote", response_model=PromoteResponse)
+def promote_content(
+    content_id: int,
+    db: Session = Depends(get_db),
+):
+    """Promote a candidate item to the feed-visible tier."""
+    repo = EditorialRepository(db)
+    item = repo.promote(content_id, actor=ACTOR)
+    if not item:
+        raise HTTPException(status_code=404, detail="Content not found")
+
+    return PromoteResponse(
+        content_id=item.id,
+        curation_status=item.curation_status.value if item.curation_status else "PROMOTED",
+        message="Content promoted",
     )
 
 
