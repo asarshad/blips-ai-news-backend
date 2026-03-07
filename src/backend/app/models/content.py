@@ -131,7 +131,7 @@ class ContentItem(Base):
     )
 
     # How this item was discovered: 'rss', 'yt_ingestion', 'manual',
-    # 'signal_hn', 'signal_github', 'signal_yt_trending'
+    # 'signal_hn', 'signal_github', 'signal_yt_trending', 'signal_discovery'
     discovered_via = Column(String(64), nullable=True, index=True)
 
     # Number of distinct signal sources (HN/GitHub/YT trending) that
