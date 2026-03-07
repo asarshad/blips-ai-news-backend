@@ -6,14 +6,14 @@ PYTEST     := $(PYTHON) -m pytest
 RUFF       := $(PYTHON) -m ruff
 PYTHONPATH ?= .
 
-.PHONY: help verify lint format fmt-check test unit contract migrate clean
+.PHONY: help verify lint format fmt-check test unit contract qa-gates migrate clean
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 	  awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
 # ── Full CI-equivalent check (run before opening a PR) ────────────────────────
-verify: fmt-check lint unit contract ## Run format-check + lint + unit + contract tests
+verify: fmt-check lint qa-gates ## Run format-check + lint + QA gates (missing tests + coverage)
 
 # ── Code quality ──────────────────────────────────────────────────────────────
 lint: ## Check code with ruff (no fixes applied)
@@ -34,6 +34,9 @@ unit: ## Run unit tests only (fast)
 
 contract: ## Run contract/snapshot tests only
 	PYTHONPATH=$(PYTHONPATH) $(PYTEST) tests/contract -q
+
+qa-gates: ## Enforce missing-test detector + coverage threshold
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/qa_gates.py --min-coverage 50
 
 # ── Database ──────────────────────────────────────────────────────────────────
 migrate: ## Apply pending Alembic migrations
