@@ -6,7 +6,7 @@ PYTEST     := $(PYTHON) -m pytest
 RUFF       := $(PYTHON) -m ruff
 PYTHONPATH ?= .
 
-.PHONY: help verify lint format fmt-check test unit contract qa-gates ci-parity migrate clean
+.PHONY: help verify lint format fmt-check test unit contract qa-gates ci-parity migrate rollout-validate clean
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -47,6 +47,10 @@ migrate: ## Apply pending Alembic migrations
 
 migrate-check: ## Show current Alembic revision
 	PYTHONPATH=$(PYTHONPATH) $(PYTHON) -m alembic current
+
+# ── Rollout validation ───────────────────────────────────────────────────────
+rollout-validate: ## Run controlled rollout health checks (requires API running)
+	PYTHONPATH=$(PYTHONPATH) $(PYTHON) scripts/post_launch_validation.py
 
 # ── Housekeeping ──────────────────────────────────────────────────────────────
 clean: ## Remove Python cache files
