@@ -179,6 +179,21 @@ class TestBuildCandidateStub:
         )
         assert len(stub.title) <= 1000
 
+    def test_quality_score_seeded_from_domain_policy(self):
+        core_stub = _build_candidate_stub(
+            "https://techcrunch.com/post",
+            self._make_item(),
+            ContentType.ARTICLE,
+        )
+        discovery_stub = _build_candidate_stub(
+            "https://example.com/post",
+            self._make_item(),
+            ContentType.ARTICLE,
+        )
+
+        assert core_stub.quality_score == 0.9
+        assert discovery_stub.quality_score == 0.62
+
 
 # ── run_signal_ingestion (orchestrator) ──────────────────────────────────────
 
@@ -322,3 +337,19 @@ class TestRunSignalIngestion:
             result = run_signal_ingestion(mock_db)
 
         assert result.signal_urls_seen == 5
+
+    def test_blocked_domain_is_rejected_by_policy(self):
+        blocked = SignalItem(
+            raw_url="https://x.com/some/thread",
+            signal_source=SignalSource.HN_TOP,
+            raw_title="Blocked source",
+            signal_score=12.0,
+        )
+        mock_db, patches, _cr, _sr = _patch_orchestrator(hn_top=[blocked])
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+            result = run_signal_ingestion(mock_db)
+
+        assert result.signal_urls_seen == 1
+        assert result.domain_rejected == 1
+        assert result.signal_urls_added == 0
+        assert result.stubs_created == 0

@@ -52,6 +52,24 @@ This shortlist is used as a deterministic source inventory for policy and
 ranking integration tasks in later phases (tiering, promotion/demotion,
 discovery rotation).
 
+## Domain Tiering Policy (core / rotation / discovery)
+
+Source governance now uses domain tiers in `src/backend/app/config/source_tiering.py`.
+
+Tier behavior:
+
+- `core`: top-trust publishers, high quality prior, higher per-domain cap
+- `rotation`: useful secondary sources, moderate quality prior/cap
+- `discovery`: long-tail exploration, low quality prior and tighter caps
+- `blocked`: sponsor/social/noise domains, rejected from ingestion
+
+Signal ingestion integration:
+
+- `run_signal_ingestion()` checks policy before upserting signal URLs.
+- Blocked domains increment `domain_rejected` and are skipped.
+- New CANDIDATE stubs seed `quality_score` from tier policy so promotion starts
+  from a better prior than a hard-coded constant.
+
 ## Observability
 
 - `GET /health` returns 200 only if DB is reachable.
