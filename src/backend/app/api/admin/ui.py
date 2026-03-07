@@ -5,6 +5,7 @@ Pages
 -----
 GET  /admin/ui/              → redirect to /admin/ui/dashboard
 GET  /admin/ui/dashboard     → curation pipeline dashboard (daily view)
+GET  /admin/ui/review        → reviewer queue (candidate triage + decisions)
 GET  /admin/ui/content       → content list with filters
 GET  /admin/ui/detail/{id}   → item detail + actions + audit trail
 GET  /admin/ui/submit        → manual URL submission form
@@ -15,6 +16,12 @@ POST /admin/ui/action/{id}/suppress
 POST /admin/ui/action/{id}/unsuppress
 POST /admin/ui/action/{id}/promote
 POST /admin/ui/action/{id}/demote
+POST /admin/ui/action/{id}/approve
+POST /admin/ui/action/{id}/reject
+POST /admin/ui/action/{id}/hold
+POST /admin/ui/action/{id}/request-changes
+POST /admin/ui/action/{id}/approve-publish
+POST /admin/ui/action/{id}/note
 """
 
 from __future__ import annotations
@@ -23,6 +30,7 @@ import math
 import secrets
 from datetime import date, datetime, timedelta
 from typing import Optional
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 from fastapi import APIRouter, Depends, Form, Header, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -32,6 +40,7 @@ from app.core.config import settings
 from app.core.dependencies import get_db
 from app.domain.editorial.service import EditorialService
 from app.repositories.editorial_repo import EditorialRepository
+from app.services.tiered_feed_service import invalidate_tiered_feed_cache
 
 # ---------------------------------------------------------------------------
 # Auth
@@ -83,6 +92,7 @@ def _nav(key: str, active: str = "") -> str:
           <div class="flex items-center gap-1">
             <span class="text-white font-bold text-lg mr-4">⚡ Blips Admin</span>
             {_link("/api/v1/admin/ui/dashboard", "Dashboard", "dashboard")}
+            {_link("/api/v1/admin/ui/review", "Review Queue", "review")}
             {_link("/api/v1/admin/ui/content", "Content", "content")}
             {_link("/api/v1/admin/ui/submit", "Submit URL", "submit")}
           </div>
@@ -108,6 +118,36 @@ def _base(body: str, key: str = "", active: str = "") -> HTMLResponse:
 </body>
 </html>"""
     return HTMLResponse(html)
+
+
+def _add_flash(url: str, flash: str) -> str:
+    parsed = urlparse(url)
+    params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    params["flash"] = flash
+    query = urlencode(params)
+    return f"{parsed.path}?{query}"
+
+
+def _resolve_next_ui_url(
+    *,
+    content_id: int,
+    admin_key: str,
+    next_url: Optional[str] = None,
+    referer: Optional[str] = None,
+) -> str:
+    allowed_prefix = "/api/v1/admin/ui/"
+    for candidate in (next_url, referer):
+        if not candidate:
+            continue
+        parsed = urlparse(candidate)
+        path = parsed.path or ""
+        if not path.startswith(allowed_prefix):
+            continue
+        params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        params["key"] = admin_key
+        query = urlencode(params)
+        return f"{path}?{query}"
+    return f"/api/v1/admin/ui/detail/{content_id}?key={admin_key}"
 
 
 def _esc(s: str) -> str:
@@ -312,6 +352,7 @@ def ui_dashboard(
         .limit(5)
         .all()
     )
+    dashboard_next = f"/api/v1/admin/ui/dashboard?{urlencode({'day': day_str})}"
     pending_rows_html = ""
     for p in pending_promo:
         score = f"{p.promotion_score:.3f}" if p.promotion_score else "—"
@@ -325,9 +366,17 @@ def ui_dashboard(
           <td class="px-3 py-2 text-sm font-mono">{score}</td>
           <td class="px-3 py-2 text-sm">{_esc(p.discovered_via or "—")}</td>
           <td class="px-3 py-2">
-            <form method="post" action="/api/v1/admin/ui/action/{p.id}/promote?key={admin_key}">
-              <button class="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">Promote</button>
-            </form>
+            <div class="flex gap-1">
+              <form method="post" action="/api/v1/admin/ui/action/{p.id}/approve-publish?key={admin_key}">
+                <input type="hidden" name="next" value="{dashboard_next}">
+                <input type="hidden" name="boost_level" value="3">
+                <button class="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">Publish top</button>
+              </form>
+              <a href="/api/v1/admin/ui/detail/{p.id}?key={admin_key}"
+                 class="px-2 py-1 text-xs bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50">
+                Review
+              </a>
+            </div>
           </td>
         </tr>"""
 
@@ -420,9 +469,9 @@ def ui_dashboard(
     </div>
 
     <div class="bg-white rounded-lg shadow p-5 mb-8">
-      <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">
-        Top candidates awaiting promotion (last 48 h)
-      </h3>
+        <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">
+        Top candidates awaiting editorial decision (last 48 h)
+        </h3>
       <div class="overflow-x-auto">
         <table class="min-w-full">
           <thead class="bg-gray-50">
@@ -440,6 +489,216 @@ def ui_dashboard(
       </div>
     </div>"""
     return _base(body, key=admin_key, active="dashboard")
+
+
+# ---------------------------------------------------------------------------
+# GET /admin/ui/review — Reviewer queue
+# ---------------------------------------------------------------------------
+
+
+@router.get("/review", response_class=HTMLResponse)
+def ui_review_queue(
+    type: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
+    discovered_via: Optional[str] = Query(None),
+    min_signal_hits: int = Query(0, ge=0),
+    sort_by: str = Query("priority"),
+    page: int = Query(1, ge=1),
+    flash: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_key_or_query),
+):
+    repo = EditorialRepository(db)
+    page_size = 25
+    items, total = repo.list_candidate_queue(
+        content_type=type or None,
+        source=source or None,
+        discovered_via=discovered_via or None,
+        min_signal_hits=min_signal_hits,
+        sort_by=sort_by,
+        page=page,
+        page_size=page_size,
+    )
+    counts = repo.candidate_queue_counts()
+    pages = max(1, math.ceil(total / page_size))
+
+    def _sel(name: str, cur: str, opts: list[tuple[str, str]]) -> str:
+        options_html = "".join(
+            f'<option value="{v}" {"selected" if v == cur else ""}>{lbl}</option>'
+            for v, lbl in opts
+        )
+        return (
+            f'<select name="{name}" class="w-full rounded border border-gray-300 text-sm px-2 py-1">'
+            f"{options_html}</select>"
+        )
+
+    flash_html = ""
+    if flash:
+        is_err = "error" in flash.lower() or "failed" in flash.lower()
+        cls = "bg-red-100 text-red-800" if is_err else "bg-green-100 text-green-800"
+        flash_html = f'<div class="mb-4 p-3 {cls} rounded text-sm">{_esc(flash)}</div>'
+
+    filter_form = f"""
+    <div class="bg-white rounded-lg shadow p-4 mb-4">
+      <form method="get" action="/api/v1/admin/ui/review" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
+        <input type="hidden" name="key" value="{admin_key}">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Type</label>
+          {_sel("type", type or "", [("", "All"), ("ARTICLE", "Article"), ("VIDEO", "Video"), ("REEL", "Reel")])}
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Source contains</label>
+          <input type="text" name="source" value="{source or ""}" placeholder="e.g. techcrunch"
+                 class="w-full rounded border border-gray-300 text-sm px-2 py-1">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Discovered via</label>
+          <input type="text" name="discovered_via" value="{discovered_via or ""}" placeholder="signal / manual / ... "
+                 class="w-full rounded border border-gray-300 text-sm px-2 py-1">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Min signal hits</label>
+          <input type="number" min="0" name="min_signal_hits" value="{min_signal_hits}"
+                 class="w-full rounded border border-gray-300 text-sm px-2 py-1">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Sort</label>
+          {_sel("sort_by", sort_by, [("priority", "Priority"), ("first_seen", "First seen"), ("published_at", "Published")])}
+        </div>
+        <div>
+          <button type="submit" class="w-full px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+            Apply
+          </button>
+        </div>
+      </form>
+    </div>"""
+
+    review_next = "/api/v1/admin/ui/review?" + urlencode(
+        {
+            "page": page,
+            "type": type or "",
+            "source": source or "",
+            "discovered_via": discovered_via or "",
+            "min_signal_hits": min_signal_hits,
+            "sort_by": sort_by,
+        }
+    )
+
+    rows_html = ""
+    for item in items:
+        score = f"{item.promotion_score:.3f}" if item.promotion_score else "—"
+        published = item.published_at.strftime("%m-%d %H:%M") if item.published_at else "—"
+        first_seen = getattr(item, "candidate_first_seen_at", None)
+        first_seen_str = first_seen.strftime("%m-%d %H:%M") if first_seen else "—"
+        discovered_label = _esc(getattr(item, "discovered_via", None) or "—")
+        signal_hits = str(getattr(item, "signal_hits", 0) or 0)
+        source_label = _esc(item.source or "—")
+        title = _esc((item.title or "Untitled")[:85])
+
+        rows_html += f"""
+        <tr class="border-b border-gray-100 hover:bg-gray-50">
+          <td class="px-3 py-2 text-xs text-gray-500">{item.id}</td>
+          <td class="px-3 py-2 text-sm">
+            <a href="/api/v1/admin/ui/detail/{item.id}?key={admin_key}" class="text-blue-600 hover:underline font-medium">{title}</a>
+            <div class="text-xs text-gray-500 mt-0.5">{source_label}</div>
+          </td>
+          <td class="px-3 py-2 text-xs text-gray-600">{item.type.value if item.type else "—"}</td>
+          <td class="px-3 py-2 text-xs font-mono text-gray-700">{score}</td>
+          <td class="px-3 py-2 text-xs text-gray-500">{signal_hits}</td>
+          <td class="px-3 py-2 text-xs text-gray-500">{discovered_label}</td>
+          <td class="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{first_seen_str}</td>
+          <td class="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{published}</td>
+          <td class="px-3 py-2">
+            <div class="flex flex-wrap gap-1">
+              <form method="post" action="/api/v1/admin/ui/action/{item.id}/approve-publish?key={admin_key}">
+                <input type="hidden" name="next" value="{review_next}">
+                <input type="hidden" name="boost_level" value="3">
+                <button class="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">Publish top</button>
+              </form>
+              <form method="post" action="/api/v1/admin/ui/action/{item.id}/approve?key={admin_key}">
+                <input type="hidden" name="next" value="{review_next}">
+                <button class="px-2 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700">Approve</button>
+              </form>
+              <form method="post" action="/api/v1/admin/ui/action/{item.id}/hold?key={admin_key}">
+                <input type="hidden" name="next" value="{review_next}">
+                <button class="px-2 py-1 text-xs bg-amber-500 text-white rounded hover:bg-amber-600">Hold</button>
+              </form>
+              <form method="post" action="/api/v1/admin/ui/action/{item.id}/reject?key={admin_key}">
+                <input type="hidden" name="next" value="{review_next}">
+                <button class="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700">Reject</button>
+              </form>
+            </div>
+          </td>
+        </tr>"""
+
+    if not rows_html:
+        rows_html = (
+            '<tr><td colspan="9" class="px-3 py-6 text-center text-sm text-gray-400">'
+            "No candidates match current filters."
+            "</td></tr>"
+        )
+
+    def _page_link(target_page: int, label: str) -> str:
+        query = urlencode(
+            {
+                "key": admin_key,
+                "page": target_page,
+                "type": type or "",
+                "source": source or "",
+                "discovered_via": discovered_via or "",
+                "min_signal_hits": min_signal_hits,
+                "sort_by": sort_by,
+            }
+        )
+        return f'<a href="?{query}" class="px-3 py-1 rounded bg-white shadow text-sm hover:bg-gray-50">{label}</a>'
+
+    pagination = (
+        f'<span class="text-sm text-gray-600">Page {page}/{pages} — {total} candidate items</span> '
+    )
+    if page > 1:
+        pagination += _page_link(page - 1, "← Prev") + " "
+    if page < pages:
+        pagination += _page_link(page + 1, "Next →")
+
+    queue_stats = (
+        _badge(f"Articles {counts.get('ARTICLE', 0)}", "yellow")
+        + " "
+        + _badge(f"Videos {counts.get('VIDEO', 0)}", "yellow")
+        + " "
+        + _badge(f"Reels {counts.get('REEL', 0)}", "yellow")
+    )
+
+    body = f"""
+    <div class="mb-4">
+      <h1 class="text-2xl font-bold text-gray-900">Review Queue</h1>
+      <p class="text-sm text-gray-600 mt-1">
+        This page is for editorial decisions. Approve or reject candidate content without using API tools.
+      </p>
+      <div class="mt-2">{queue_stats}</div>
+    </div>
+    {flash_html}
+    {filter_form}
+    <div class="flex justify-between items-center mb-2">{pagination}</div>
+    <div class="bg-white shadow rounded-lg overflow-x-auto">
+      <table class="min-w-full">
+        <thead class="bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wide">
+          <tr>
+            <th class="px-3 py-3 text-left">ID</th>
+            <th class="px-3 py-3 text-left">Candidate</th>
+            <th class="px-3 py-3 text-left">Type</th>
+            <th class="px-3 py-3 text-left">Score</th>
+            <th class="px-3 py-3 text-left">Hits</th>
+            <th class="px-3 py-3 text-left">Discovered</th>
+            <th class="px-3 py-3 text-left">First seen</th>
+            <th class="px-3 py-3 text-left">Published</th>
+            <th class="px-3 py-3 text-left">Actions</th>
+          </tr>
+        </thead>
+        <tbody>{rows_html}</tbody>
+      </table>
+    </div>
+    <div class="mt-3">{pagination}</div>"""
+    return _base(body, key=admin_key, active="review")
 
 
 # ---------------------------------------------------------------------------
@@ -497,6 +756,17 @@ def ui_content_list(
     )
 
     pages = max(1, math.ceil(total / 50))
+    content_next = "/api/v1/admin/ui/content?" + urlencode(
+        {
+            "page": page,
+            "day": day or "",
+            "type": type or "",
+            "source": source or "",
+            "suppressed": suppressed or "",
+            "curation_status": curation_status or "",
+            "sort_by": sort_by,
+        }
+    )
 
     rows_html = ""
     for i in items:
@@ -525,6 +795,26 @@ def ui_content_list(
         score = f"{i.promotion_score:.3f}" if getattr(i, "promotion_score", None) else "—"
         disc = _esc(getattr(i, "discovered_via", None) or "—")
         hits = str(getattr(i, "signal_hits", 0) or 0)
+        if cs == ContentStatus.CANDIDATE:
+            actions_html = f"""
+            <div class="flex gap-1">
+              <form method="post" action="/api/v1/admin/ui/action/{i.id}/approve-publish?key={admin_key}">
+                <input type="hidden" name="next" value="{content_next}">
+                <input type="hidden" name="boost_level" value="3">
+                <button class="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">Publish top</button>
+              </form>
+              <a href="/api/v1/admin/ui/detail/{i.id}?key={admin_key}"
+                 class="px-2 py-1 text-xs bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50">
+                Review
+              </a>
+            </div>"""
+        else:
+            actions_html = (
+                f'<a href="/api/v1/admin/ui/detail/{i.id}?key={admin_key}" '
+                'class="px-2 py-1 text-xs bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50">'
+                "Open"
+                "</a>"
+            )
 
         rows_html += f"""
         <tr class="{row_bg} hover:brightness-95 border-b border-gray-100">
@@ -539,7 +829,15 @@ def ui_content_list(
           <td class="px-3 py-2 text-xs font-mono text-gray-600">{score}</td>
           <td class="px-3 py-2 text-xs text-gray-500">{disc}</td>
           <td class="px-3 py-2 text-xs text-gray-500">{hits}</td>
+          <td class="px-3 py-2 text-xs text-gray-500">{actions_html}</td>
         </tr>"""
+
+    if not rows_html:
+        rows_html = (
+            '<tr><td colspan="10" class="px-3 py-6 text-center text-sm text-gray-400">'
+            "No content found for current filters."
+            "</td></tr>"
+        )
 
     def _sel(name: str, cur: str, opts: list) -> str:
         o = "".join(
@@ -583,12 +881,19 @@ def ui_content_list(
     </div>"""
 
     def _page_link(p: int, label: str) -> str:
-        return (
-            f'<a href="?key={admin_key}&page={p}&day={day or ""}&type={type or ""}'
-            f"&source={source or ''}&suppressed={suppressed or ''}"
-            f'&curation_status={curation_status or ""}&sort_by={sort_by}"'
-            f' class="px-3 py-1 rounded bg-white shadow text-sm hover:bg-gray-50">{label}</a>'
+        query = urlencode(
+            {
+                "key": admin_key,
+                "page": p,
+                "day": day or "",
+                "type": type or "",
+                "source": source or "",
+                "suppressed": suppressed or "",
+                "curation_status": curation_status or "",
+                "sort_by": sort_by,
+            }
         )
+        return f'<a href="?{query}" class="px-3 py-1 rounded bg-white shadow text-sm hover:bg-gray-50">{label}</a>'
 
     pagination = f'<span class="text-sm text-gray-600">Page {page}/{pages} — {total} items</span> '
     if page > 1:
@@ -620,6 +925,7 @@ def ui_content_list(
             <th class="px-3 py-3 text-left">Promo score</th>
             <th class="px-3 py-3 text-left">Discovered via</th>
             <th class="px-3 py-3 text-left">Hits</th>
+            <th class="px-3 py-3 text-left">Actions</th>
           </tr>
         </thead>
         <tbody>{rows_html}</tbody>
@@ -680,29 +986,69 @@ def ui_content_detail(
           <td class="px-4 py-2 text-sm text-gray-900">{val}</td>
         </tr>"""
 
+    publish_boost_options = "".join(
+        f'<option value="{lvl}" {"selected" if lvl == 3 else ""}>{lvl}</option>' for lvl in range(4)
+    )
+    detail_next = f"/api/v1/admin/ui/detail/{content_id}"
+
     if cs == ContentStatus.CANDIDATE:
-        curation_action = f"""
-        <form method="post" action="/api/v1/admin/ui/action/{content_id}/promote?key={admin_key}">
-          <button class="w-full px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700 font-medium">
-            ↑ Promote to feed
+        state_hint = _badge("Awaiting review", "yellow")
+        primary_button = f"""
+        <form method="post" action="/api/v1/admin/ui/action/{content_id}/approve?key={admin_key}">
+          <input type="hidden" name="next" value="{detail_next}">
+          <button class="w-full px-4 py-2 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700 font-medium">
+            Approve for feed
+          </button>
+        </form>"""
+        secondary_button = f"""
+        <form method="post" action="/api/v1/admin/ui/action/{content_id}/hold?key={admin_key}">
+          <input type="hidden" name="next" value="{detail_next}">
+          <button class="w-full px-4 py-2 bg-amber-500 text-white text-sm rounded hover:bg-amber-600 font-medium">
+            Hold for later
+          </button>
+        </form>"""
+        tertiary_button = f"""
+        <form method="post" action="/api/v1/admin/ui/action/{content_id}/reject?key={admin_key}">
+          <input type="hidden" name="next" value="{detail_next}">
+          <button class="w-full px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 font-medium">
+            Reject and suppress
           </button>
         </form>"""
     else:
-        curation_action = f"""
+        state_hint = _badge("Already promoted", "green")
+        primary_button = f"""
+        <form method="post" action="/api/v1/admin/ui/action/{content_id}/approve-publish?key={admin_key}">
+          <input type="hidden" name="next" value="{detail_next}">
+          <input type="hidden" name="boost_level" value="3">
+          <button class="w-full px-4 py-2 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700 font-medium">
+            Republish to top
+          </button>
+        </form>"""
+        secondary_button = f"""
         <form method="post" action="/api/v1/admin/ui/action/{content_id}/demote?key={admin_key}">
-          <button class="w-full px-4 py-2 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600 font-medium">
-            ↓ Move to Candidate
+          <input type="hidden" name="next" value="{detail_next}">
+          <button class="w-full px-4 py-2 bg-amber-500 text-white text-sm rounded hover:bg-amber-600 font-medium">
+            Move back to candidate
+          </button>
+        </form>"""
+        tertiary_button = f"""
+        <form method="post" action="/api/v1/admin/ui/action/{content_id}/reject?key={admin_key}">
+          <input type="hidden" name="next" value="{detail_next}">
+          <button class="w-full px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 font-medium">
+            Reject and suppress
           </button>
         </form>"""
 
     if item.is_suppressed:
         suppress_btn = f"""
         <form method="post" action="/api/v1/admin/ui/action/{content_id}/unsuppress?key={admin_key}">
+          <input type="hidden" name="next" value="{detail_next}">
           <button class="w-full px-4 py-2 bg-gray-200 text-gray-800 text-sm rounded hover:bg-gray-300 font-medium">Unsuppress</button>
         </form>"""
     else:
         suppress_btn = f"""
         <form method="post" action="/api/v1/admin/ui/action/{content_id}/suppress?key={admin_key}">
+          <input type="hidden" name="next" value="{detail_next}">
           <button class="w-full px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 font-medium">Suppress</button>
         </form>"""
 
@@ -755,8 +1101,52 @@ def ui_content_detail(
 
       <div class="space-y-4">
         <div class="bg-white rounded-lg shadow p-5">
-          <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Curation</h3>
-          {curation_action}
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide">Editorial decision</h3>
+            {state_hint}
+          </div>
+          <p class="text-xs text-gray-500 mb-3">
+            Pick the decision you want applied to this content item.
+          </p>
+          <div class="space-y-2">
+            {primary_button}
+            {secondary_button}
+            {tertiary_button}
+          </div>
+          <form method="post" action="/api/v1/admin/ui/action/{content_id}/approve-publish?key={admin_key}" class="mt-3 p-3 bg-green-50 rounded border border-green-100">
+            <input type="hidden" name="next" value="{detail_next}">
+            <label class="block text-xs text-gray-600 mb-1">Publish to top note (optional)</label>
+            <input type="text" name="note" placeholder="Why this should be highlighted now"
+                   class="w-full rounded border border-gray-300 text-sm px-2 py-1 mb-2">
+            <div class="flex items-center gap-2">
+              <select name="boost_level" class="rounded border border-gray-300 text-sm px-2 py-1">
+                {publish_boost_options}
+              </select>
+              <button type="submit" class="flex-1 px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700">
+                Approve + publish top
+              </button>
+            </div>
+          </form>
+          <form method="post" action="/api/v1/admin/ui/action/{content_id}/request-changes?key={admin_key}" class="mt-3">
+            <input type="hidden" name="next" value="{detail_next}">
+            <label class="block text-xs text-gray-600 mb-1">Request changes note (required)</label>
+            <textarea name="note" required rows="2"
+                      placeholder="Tell the team what should be changed"
+                      class="w-full rounded border border-gray-300 text-sm px-2 py-1 mb-2"></textarea>
+            <button type="submit" class="w-full px-3 py-1.5 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700">
+              Request changes
+            </button>
+          </form>
+          <form method="post" action="/api/v1/admin/ui/action/{content_id}/note?key={admin_key}" class="mt-3">
+            <input type="hidden" name="next" value="{detail_next}">
+            <label class="block text-xs text-gray-600 mb-1">Reviewer note</label>
+            <textarea name="note" required rows="2"
+                      placeholder="Internal note for audit trail"
+                      class="w-full rounded border border-gray-300 text-sm px-2 py-1 mb-2"></textarea>
+            <button type="submit" class="w-full px-3 py-1.5 bg-gray-700 text-white text-sm rounded hover:bg-gray-800">
+              Save note
+            </button>
+          </form>
         </div>
         <div class="bg-white rounded-lg shadow p-5">
           <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Visibility</h3>
@@ -765,6 +1155,7 @@ def ui_content_detail(
         <div class="bg-white rounded-lg shadow p-5">
           <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Editorial boost</h3>
           <form method="post" action="/api/v1/admin/ui/action/{content_id}/boost?key={admin_key}" class="flex gap-2">
+            <input type="hidden" name="next" value="{detail_next}">
             <select name="level" class="flex-1 rounded border-gray-300 text-sm px-2 py-1">{boost_options}</select>
             <button type="submit" class="px-3 py-1.5 bg-purple-600 text-white text-sm rounded hover:bg-purple-700">Set</button>
           </form>
@@ -857,84 +1248,383 @@ def ui_submit_url(
     result = svc.submit_url(url=url, importance_level=importance_level, actor=ACTOR)
     msg = f"{result.status}: {result.message}"
     if result.content_id:
-        return RedirectResponse(
-            f"/api/v1/admin/ui/detail/{result.content_id}?key={admin_key}&flash={msg}",
-            status_code=303,
-        )
-    return RedirectResponse(f"/api/v1/admin/ui/submit?key={admin_key}&flash={msg}", status_code=303)
+        target = f"/api/v1/admin/ui/detail/{result.content_id}?key={admin_key}"
+        return RedirectResponse(_add_flash(target, msg), status_code=303)
+    return RedirectResponse(
+        _add_flash(f"/api/v1/admin/ui/submit?key={admin_key}", msg),
+        status_code=303,
+    )
+
+
+def _redirect_after_action(
+    *,
+    content_id: int,
+    admin_key: str,
+    flash: str,
+    next_url: Optional[str] = None,
+    referer: Optional[str] = None,
+) -> RedirectResponse:
+    target = _resolve_next_ui_url(
+        content_id=content_id,
+        admin_key=admin_key,
+        next_url=next_url,
+        referer=referer,
+    )
+    return RedirectResponse(_add_flash(target, flash), status_code=303)
 
 
 @router.post("/action/{content_id}/boost")
 def ui_boost(
     content_id: int,
     level: int = Form(0),
+    next_path: str = Form("", alias="next"),
     key: str = Form(""),
+    referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
     admin_key: str = Depends(_require_admin_key_or_query),
 ):
     repo = EditorialRepository(db)
-    repo.set_boost(content_id, level, actor=ACTOR)
-    return RedirectResponse(
-        f"/api/v1/admin/ui/detail/{content_id}?key={admin_key}&flash=Boost+set+to+{level}",
-        status_code=303,
+    bounded_level = max(0, min(3, level))
+    item = repo.set_boost(content_id, bounded_level, actor=ACTOR)
+    if not item:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash="Error: content not found",
+            next_url=next_path,
+            referer=referer,
+        )
+    invalidate_tiered_feed_cache()
+    return _redirect_after_action(
+        content_id=content_id,
+        admin_key=admin_key,
+        flash=f"Boost set to {bounded_level}",
+        next_url=next_path,
+        referer=referer,
     )
 
 
 @router.post("/action/{content_id}/suppress")
 def ui_suppress(
     content_id: int,
+    next_path: str = Form("", alias="next"),
     key: str = Form(""),
+    referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
     admin_key: str = Depends(_require_admin_key_or_query),
 ):
     repo = EditorialRepository(db)
-    repo.suppress(content_id, actor=ACTOR)
-    return RedirectResponse(
-        f"/api/v1/admin/ui/detail/{content_id}?key={admin_key}&flash=Content+suppressed",
-        status_code=303,
+    item = repo.suppress(content_id, actor=ACTOR)
+    if not item:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash="Error: content not found",
+            next_url=next_path,
+            referer=referer,
+        )
+    invalidate_tiered_feed_cache()
+    return _redirect_after_action(
+        content_id=content_id,
+        admin_key=admin_key,
+        flash="Content suppressed",
+        next_url=next_path,
+        referer=referer,
     )
 
 
 @router.post("/action/{content_id}/unsuppress")
 def ui_unsuppress(
     content_id: int,
+    next_path: str = Form("", alias="next"),
     key: str = Form(""),
+    referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
     admin_key: str = Depends(_require_admin_key_or_query),
 ):
     repo = EditorialRepository(db)
-    repo.unsuppress(content_id, actor=ACTOR)
-    return RedirectResponse(
-        f"/api/v1/admin/ui/detail/{content_id}?key={admin_key}&flash=Content+unsuppressed",
-        status_code=303,
+    item = repo.unsuppress(content_id, actor=ACTOR)
+    if not item:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash="Error: content not found",
+            next_url=next_path,
+            referer=referer,
+        )
+    invalidate_tiered_feed_cache()
+    return _redirect_after_action(
+        content_id=content_id,
+        admin_key=admin_key,
+        flash="Content unsuppressed",
+        next_url=next_path,
+        referer=referer,
     )
 
 
 @router.post("/action/{content_id}/promote")
 def ui_promote(
     content_id: int,
+    next_path: str = Form("", alias="next"),
     key: str = Form(""),
+    referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
     admin_key: str = Depends(_require_admin_key_or_query),
 ):
     repo = EditorialRepository(db)
-    repo.promote(content_id, actor=ACTOR)
-    return RedirectResponse(
-        f"/api/v1/admin/ui/detail/{content_id}?key={admin_key}&flash=Promoted+to+feed",
-        status_code=303,
+    item = repo.promote(content_id, actor=ACTOR)
+    if not item:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash="Error: content not found",
+            next_url=next_path,
+            referer=referer,
+        )
+    invalidate_tiered_feed_cache()
+    return _redirect_after_action(
+        content_id=content_id,
+        admin_key=admin_key,
+        flash="Promoted to feed",
+        next_url=next_path,
+        referer=referer,
     )
 
 
 @router.post("/action/{content_id}/demote")
 def ui_demote(
     content_id: int,
+    next_path: str = Form("", alias="next"),
     key: str = Form(""),
+    referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
     admin_key: str = Depends(_require_admin_key_or_query),
 ):
     repo = EditorialRepository(db)
-    repo.demote(content_id, actor=ACTOR)
-    return RedirectResponse(
-        f"/api/v1/admin/ui/detail/{content_id}?key={admin_key}&flash=Moved+to+candidate",
-        status_code=303,
+    item = repo.demote(content_id, actor=ACTOR)
+    if not item:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash="Error: content not found",
+            next_url=next_path,
+            referer=referer,
+        )
+    invalidate_tiered_feed_cache()
+    return _redirect_after_action(
+        content_id=content_id,
+        admin_key=admin_key,
+        flash="Moved to candidate",
+        next_url=next_path,
+        referer=referer,
+    )
+
+
+@router.post("/action/{content_id}/approve")
+def ui_approve(
+    content_id: int,
+    note: str = Form(""),
+    next_path: str = Form("", alias="next"),
+    key: str = Form(""),
+    referer: Optional[str] = Header(None, alias="Referer"),
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_key_or_query),
+):
+    repo = EditorialRepository(db)
+    clean_note = note.strip() or None
+    item = repo.approve(content_id, actor=ACTOR, note=clean_note)
+    if not item:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash="Error: content not found",
+            next_url=next_path,
+            referer=referer,
+        )
+    invalidate_tiered_feed_cache()
+    return _redirect_after_action(
+        content_id=content_id,
+        admin_key=admin_key,
+        flash="Content approved",
+        next_url=next_path,
+        referer=referer,
+    )
+
+
+@router.post("/action/{content_id}/reject")
+def ui_reject(
+    content_id: int,
+    note: str = Form(""),
+    next_path: str = Form("", alias="next"),
+    key: str = Form(""),
+    referer: Optional[str] = Header(None, alias="Referer"),
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_key_or_query),
+):
+    repo = EditorialRepository(db)
+    clean_note = note.strip() or None
+    item = repo.reject(content_id, actor=ACTOR, note=clean_note)
+    if not item:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash="Error: content not found",
+            next_url=next_path,
+            referer=referer,
+        )
+    invalidate_tiered_feed_cache()
+    return _redirect_after_action(
+        content_id=content_id,
+        admin_key=admin_key,
+        flash="Content rejected and suppressed",
+        next_url=next_path,
+        referer=referer,
+    )
+
+
+@router.post("/action/{content_id}/hold")
+def ui_hold(
+    content_id: int,
+    note: str = Form(""),
+    next_path: str = Form("", alias="next"),
+    key: str = Form(""),
+    referer: Optional[str] = Header(None, alias="Referer"),
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_key_or_query),
+):
+    repo = EditorialRepository(db)
+    clean_note = note.strip() or None
+    item = repo.hold(content_id, actor=ACTOR, note=clean_note)
+    if not item:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash="Error: content not found",
+            next_url=next_path,
+            referer=referer,
+        )
+    invalidate_tiered_feed_cache()
+    return _redirect_after_action(
+        content_id=content_id,
+        admin_key=admin_key,
+        flash="Content placed on hold",
+        next_url=next_path,
+        referer=referer,
+    )
+
+
+@router.post("/action/{content_id}/request-changes")
+def ui_request_changes(
+    content_id: int,
+    note: str = Form(""),
+    next_path: str = Form("", alias="next"),
+    key: str = Form(""),
+    referer: Optional[str] = Header(None, alias="Referer"),
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_key_or_query),
+):
+    clean_note = note.strip()
+    if not clean_note:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash="Error: request changes note is required",
+            next_url=next_path,
+            referer=referer,
+        )
+
+    repo = EditorialRepository(db)
+    item = repo.request_changes(content_id, actor=ACTOR, note=clean_note)
+    if not item:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash="Error: content not found",
+            next_url=next_path,
+            referer=referer,
+        )
+    invalidate_tiered_feed_cache()
+    return _redirect_after_action(
+        content_id=content_id,
+        admin_key=admin_key,
+        flash="Changes requested",
+        next_url=next_path,
+        referer=referer,
+    )
+
+
+@router.post("/action/{content_id}/approve-publish")
+def ui_approve_publish(
+    content_id: int,
+    boost_level: int = Form(3),
+    note: str = Form(""),
+    next_path: str = Form("", alias="next"),
+    key: str = Form(""),
+    referer: Optional[str] = Header(None, alias="Referer"),
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_key_or_query),
+):
+    bounded_boost = max(0, min(3, boost_level))
+    clean_note = note.strip() or None
+    repo = EditorialRepository(db)
+    item = repo.approve_and_publish(
+        content_id=content_id,
+        actor=ACTOR,
+        boost_level=bounded_boost,
+        note=clean_note,
+    )
+    if not item:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash="Error: content not found",
+            next_url=next_path,
+            referer=referer,
+        )
+    invalidate_tiered_feed_cache()
+    return _redirect_after_action(
+        content_id=content_id,
+        admin_key=admin_key,
+        flash=f"Published to top with boost {bounded_boost}",
+        next_url=next_path,
+        referer=referer,
+    )
+
+
+@router.post("/action/{content_id}/note")
+def ui_add_note(
+    content_id: int,
+    note: str = Form(""),
+    next_path: str = Form("", alias="next"),
+    key: str = Form(""),
+    referer: Optional[str] = Header(None, alias="Referer"),
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_key_or_query),
+):
+    clean_note = note.strip()
+    if not clean_note:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash="Error: note is required",
+            next_url=next_path,
+            referer=referer,
+        )
+
+    repo = EditorialRepository(db)
+    action = repo.add_reviewer_note(content_id=content_id, actor=ACTOR, note=clean_note)
+    if action is None:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash="Error: content not found",
+            next_url=next_path,
+            referer=referer,
+        )
+    return _redirect_after_action(
+        content_id=content_id,
+        admin_key=admin_key,
+        flash="Reviewer note saved",
+        next_url=next_path,
+        referer=referer,
     )
