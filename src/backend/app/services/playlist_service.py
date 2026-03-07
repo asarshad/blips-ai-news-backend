@@ -213,7 +213,6 @@ class PlaylistService:
             final_score = self.ranking_service.score_item(
                 item, personalization_score=personalization
             )
-
             scored.append((item, final_score))
 
         # Sort by score descending
