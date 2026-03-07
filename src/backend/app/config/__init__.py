@@ -33,6 +33,21 @@ from app.config.scoring import (
     scoring_weights,
     trend_config,
 )
+from app.config.source_registry import (
+    DEFAULT_MAX_DOMAINS,
+    DEFAULT_MIN_MENTIONS,
+    EXCLUDED_DOMAINS,
+    SOURCE_REGISTRY_VERSION,
+    SourceRegistryEntry,
+    build_tldr_shortlist,
+    get_source_registry_entry,
+    get_source_registry_stats,
+    get_tldr_source_index,
+    get_tldr_source_shortlist,
+    is_shortlisted_source,
+    normalize_domain,
+    registered_domain,
+)
 from app.config.settings import Settings, get_settings, settings
 from app.config.youtube import (
     YouTubeChannel,
@@ -60,6 +75,20 @@ __all__ = [
     "recency_config",
     "diversity_config",
     "trend_config",
+    # Source Registry
+    "SOURCE_REGISTRY_VERSION",
+    "DEFAULT_MIN_MENTIONS",
+    "DEFAULT_MAX_DOMAINS",
+    "EXCLUDED_DOMAINS",
+    "SourceRegistryEntry",
+    "normalize_domain",
+    "registered_domain",
+    "build_tldr_shortlist",
+    "get_tldr_source_shortlist",
+    "get_tldr_source_index",
+    "get_source_registry_entry",
+    "is_shortlisted_source",
+    "get_source_registry_stats",
     # Clustering
     "ClusteringConfig",
     "clustering_config",
