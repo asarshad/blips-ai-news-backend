@@ -24,8 +24,8 @@ from app.services.tiered_feed_service import get_tiered_feed, invalidate_tiered_
 __all__ = [
     "AiChatService",
     "QuotaManager",
-    "SourceQualityService",
     "MultiFactorRankingService",
+    "SourceQualityService",
     # Re-exports
     "ScoringService",
     "ClusteringService",
