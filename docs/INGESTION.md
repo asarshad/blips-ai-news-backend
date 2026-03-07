@@ -123,6 +123,21 @@ Scheduler controls:
 The discovery lane runs through the same canonicalization, dedupe, and
 promotion gate as existing signal sources.
 
+## Canonicalization + Near-Duplicate Clustering
+
+The ingestion pipeline now applies stronger URL canonicalization and
+near-duplicate detection:
+
+- URL normalization strips additional tracking params (`source`, `trk`, `si`,
+  `output`, etc.) and collapses common AMP variants (`amp.` host and `/amp`
+  path suffixes).
+- Canonical key generation benefits from normalized AMP/www collapsing so the
+  same article URL variant maps to one canonical key.
+- New title `simhash` signatures are stored on content items at ingest-time.
+- Clustering treats article pairs as near-duplicates when simhash Hamming
+  distance is small, allowing cluster joins even when entity/topic extraction
+  is sparse.
+
 ## Inspecting progress (SQL)
 
 ```sql

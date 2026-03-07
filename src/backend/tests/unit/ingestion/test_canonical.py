@@ -25,6 +25,18 @@ def test_canonical_key_for_article_hashes_normalized_url():
     assert len(k1) == 32
 
 
+def test_canonical_key_for_article_collapses_amp_and_www_variants():
+    k1 = canonical_key_for_article(
+        canonical_url="https://www.example.com/news/story/amp/?feature=share",
+        source_url="",
+    )
+    k2 = canonical_key_for_article(
+        canonical_url="https://example.com/news/story",
+        source_url="",
+    )
+    assert k1 == k2
+
+
 def test_canonical_key_for_youtube_prefers_video_id():
     k = canonical_key_for_youtube(
         video_id="abc123", source_url="https://www.youtube.com/watch?v=abc123", video_url=None
