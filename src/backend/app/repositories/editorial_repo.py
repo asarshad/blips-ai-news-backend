@@ -9,7 +9,7 @@ see domain/editorial/service.py for that.
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from app.models.content import ContentItem, ContentStatus, ContentType
@@ -84,6 +84,83 @@ class EditorialRepository:
         offset = (page - 1) * page_size
         items = query.offset(offset).limit(page_size).all()
         return items, total
+
+    def list_candidate_queue(
+        self,
+        *,
+        content_type: Optional[str] = None,
+        source: Optional[str] = None,
+        discovered_via: Optional[str] = None,
+        min_signal_hits: int = 0,
+        include_suppressed: bool = False,
+        sort_by: str = "priority",
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Tuple[List[ContentItem], int]:
+        """Return paginated candidate items ordered for reviewer triage."""
+        query = self.db.query(ContentItem).filter(
+            ContentItem.curation_status == ContentStatus.CANDIDATE
+        )
+
+        if not include_suppressed:
+            query = query.filter(ContentItem.is_suppressed.is_(False))
+
+        if content_type is not None:
+            ct = content_type.upper()
+            if ct in ContentType.__members__:
+                query = query.filter(ContentItem.type == ContentType[ct])
+
+        if source is not None:
+            query = query.filter(ContentItem.source.ilike(f"%{source}%"))
+
+        if discovered_via is not None:
+            query = query.filter(ContentItem.discovered_via.ilike(f"%{discovered_via}%"))
+
+        if min_signal_hits > 0:
+            query = query.filter(ContentItem.signal_hits >= int(min_signal_hits))
+
+        total = query.count()
+        first_seen_col = getattr(ContentItem, "candidate_first_seen_at", None)
+
+        if sort_by == "first_seen":
+            if first_seen_col is not None:
+                query = query.order_by(
+                    desc(first_seen_col).nullslast(),
+                    desc(ContentItem.published_at),
+                )
+            else:
+                query = query.order_by(desc(ContentItem.published_at))
+        elif sort_by == "published_at":
+            query = query.order_by(desc(ContentItem.published_at))
+        else:
+            ordering = [
+                desc(ContentItem.promotion_score).nullslast(),
+                desc(ContentItem.signal_hits),
+            ]
+            if first_seen_col is not None:
+                ordering.append(desc(first_seen_col).nullslast())
+            ordering.append(desc(ContentItem.published_at))
+            query = query.order_by(*ordering)
+
+        offset = (page - 1) * page_size
+        items = query.offset(offset).limit(page_size).all()
+        return items, total
+
+    def candidate_queue_counts(self, *, include_suppressed: bool = False) -> Dict[str, int]:
+        """Return pending-candidate counts grouped by content type."""
+        query = self.db.query(ContentItem.type, func.count(ContentItem.id)).filter(
+            ContentItem.curation_status == ContentStatus.CANDIDATE
+        )
+        if not include_suppressed:
+            query = query.filter(ContentItem.is_suppressed.is_(False))
+
+        rows = query.group_by(ContentItem.type).all()
+
+        counts: Dict[str, int] = {}
+        for content_type, count in rows:
+            key = content_type.value if content_type is not None else "UNKNOWN"
+            counts[key] = int(count or 0)
+        return counts
 
     def get_content_by_id(self, content_id: int) -> Optional[ContentItem]:
         return self.db.query(ContentItem).filter(ContentItem.id == content_id).first()

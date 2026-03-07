@@ -191,6 +191,41 @@ class TestEditorialRepository:
         assert result is None
         session.commit.assert_not_called()
 
+    def test_list_candidate_queue_returns_paginated_rows(self):
+        repo, session = self._make_repo()
+        query = MagicMock()
+        session.query.return_value = query
+        query.filter.return_value = query
+        query.order_by.return_value = query
+        query.offset.return_value = query
+        query.limit.return_value = query
+        query.count.return_value = 2
+        rows = [FakeContentItem(id=1), FakeContentItem(id=2)]
+        query.all.return_value = rows
+
+        items, total = repo.list_candidate_queue(page=1, page_size=2)
+
+        assert total == 2
+        assert items == rows
+        query.order_by.assert_called_once()
+
+    def test_candidate_queue_counts_groups_by_type(self):
+        repo, session = self._make_repo()
+        query = MagicMock()
+        session.query.return_value = query
+        query.filter.return_value = query
+        query.group_by.return_value = query
+
+        article_type = MagicMock()
+        article_type.value = "ARTICLE"
+        video_type = MagicMock()
+        video_type.value = "VIDEO"
+        query.all.return_value = [(article_type, 3), (video_type, 1)]
+
+        counts = repo.candidate_queue_counts()
+
+        assert counts == {"ARTICLE": 3, "VIDEO": 1}
+
 
 # ---------------------------------------------------------------------------
 # 4. Ranking integration — editorial_boost affects global_score
