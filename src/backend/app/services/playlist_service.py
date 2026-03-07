@@ -49,6 +49,7 @@ MIN_UNIQUE_SOURCES = 3
 
 # Content freshness
 MAX_CONTENT_AGE_HOURS = 72  # 3 days
+FALLBACK_CONTENT_AGE_HOURS = 168  # 7 days fallback when no fresh approvals
 PREFER_CANONICAL_WEIGHT = 0.7  # 70% canonical, 30% fresh
 
 # Cache configuration
@@ -129,9 +130,14 @@ class PlaylistService:
             # Generate new playlist snapshot
             playlist = self._generate_playlist(device_id, content_type, MAX_PLAYLIST_SIZE)
 
-            # Cache the session snapshot
-            if self.redis:
+            # If no new approved content is available, keep serving the prior feed.
+            if not playlist:
+                playlist = self._load_fallback_playlist(device_id, content_type)
+
+            # Cache the session snapshot + latest fallback snapshot
+            if self.redis and playlist:
                 self._set_session_cache(cache_key, playlist)
+                self._set_cache(self._get_cache_key(device_id, content_type), playlist)
 
         # Cursor-based pagination
         start_cursor = cursor or 0
@@ -189,11 +195,39 @@ class PlaylistService:
         # Convert to response format
         return [self._format_item(item) for item in selected]
 
-    def _get_candidates(self, content_type: ContentType) -> List[ContentItem]:
+    def _load_fallback_playlist(self, device_id: str, content_type: ContentType) -> List[Dict]:
+        """Load fallback playlist from cache or widened historical window."""
+        if self.redis:
+            cache_key = self._get_cache_key(device_id, content_type)
+            cached = self._get_from_cache(cache_key)
+            if cached:
+                logger.info("Serving cached fallback playlist for %s", content_type.value)
+                return cached
+
+        fallback_candidates = self._get_candidates(
+            content_type=content_type,
+            hours_back=FALLBACK_CONTENT_AGE_HOURS,
+        )
+        if not fallback_candidates:
+            return []
+
+        scored = self._score_candidates(device_id, fallback_candidates)
+        selected = self._select_diverse_items(scored, MAX_PLAYLIST_SIZE)
+        logger.info("Serving historical fallback playlist for %s", content_type.value)
+        return [self._format_item(item) for item in selected]
+
+    def _get_candidates(
+        self,
+        content_type: ContentType,
+        *,
+        hours_back: int = MAX_CONTENT_AGE_HOURS,
+    ) -> List[ContentItem]:
         """Get candidate items for playlist."""
         # Get canonical items from clusters (repo already filters for canonical)
         candidates = self.content_repo.get_items_for_playlist(
-            content_type=content_type, hours_back=MAX_CONTENT_AGE_HOURS, limit=500
+            content_type=content_type,
+            hours_back=hours_back,
+            limit=500,
         )
 
         # Deduplicate by ID
