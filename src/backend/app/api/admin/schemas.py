@@ -69,6 +69,27 @@ class PaginatedContentResponse(BaseModel):
     pages: int
 
 
+class CandidateQueueItem(ContentItemSummary):
+    """Candidate review queue item with ingestion provenance fields."""
+
+    curation_status: str
+    discovered_via: Optional[str] = None
+    signal_hits: int = 0
+    promotion_score: Optional[float] = None
+    candidate_first_seen_at: Optional[datetime] = None
+    candidate_signal_source: Optional[str] = None
+    candidate_raw_title: Optional[str] = None
+
+
+class CandidateQueueResponse(BaseModel):
+    items: List[CandidateQueueItem]
+    total: int
+    page: int
+    page_size: int
+    pages: int
+    pending_by_type: Dict[str, int]
+
+
 # ---------------------------------------------------------------------------
 # Content detail
 # ---------------------------------------------------------------------------

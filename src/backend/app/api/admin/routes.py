@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 from app.api.admin.schemas import (
     BoostRequest,
     BoostResponse,
+    CandidateQueueItem,
+    CandidateQueueResponse,
     ContentItemDetail,
     ContentItemSummary,
     EditorialActionRecord,
@@ -101,6 +103,32 @@ def _to_detail(item, actions) -> ContentItemDetail:
     )
 
 
+def _to_candidate_queue_item(item) -> CandidateQueueItem:
+    return CandidateQueueItem(
+        id=item.id,
+        title=item.title,
+        source=item.source or "",
+        source_url=item.source_url,
+        canonical_url=item.canonical_url,
+        content_type=item.type.value if item.type else "ARTICLE",
+        published_at=item.published_at,
+        created_at=item.created_at,
+        suppressed=item.is_suppressed,
+        editorial_boost=item.editorial_boost or 0,
+        manual_added=item.manual_added or False,
+        quality_score=item.quality_score,
+        cluster_id=item.cluster_id,
+        global_score=item.global_score,
+        curation_status=item.curation_status.value if item.curation_status else "CANDIDATE",
+        discovered_via=item.discovered_via,
+        signal_hits=item.signal_hits or 0,
+        promotion_score=item.promotion_score,
+        candidate_first_seen_at=getattr(item, "candidate_first_seen_at", None),
+        candidate_signal_source=getattr(item, "candidate_signal_source", None),
+        candidate_raw_title=getattr(item, "candidate_raw_title", None),
+    )
+
+
 # ------------------------------------------------------------------
 # GET  /admin/editorial/content
 # ------------------------------------------------------------------
@@ -148,6 +176,39 @@ def list_content(
         page=page,
         page_size=page_size,
         pages=pages,
+    )
+
+
+@router.get("/editorial/candidates", response_model=CandidateQueueResponse)
+def list_candidate_queue(
+    type: Optional[str] = Query(None, description="ARTICLE|VIDEO|REEL"),
+    source: Optional[str] = Query(None),
+    discovered_via: Optional[str] = Query(None),
+    min_signal_hits: int = Query(0, ge=0),
+    sort_by: str = Query("priority", pattern="^(priority|first_seen|published_at)$"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    """List pending CANDIDATE items for editorial review triage."""
+    repo = EditorialRepository(db)
+    items, total = repo.list_candidate_queue(
+        content_type=type,
+        source=source,
+        discovered_via=discovered_via,
+        min_signal_hits=min_signal_hits,
+        sort_by=sort_by,
+        page=page,
+        page_size=page_size,
+    )
+    pages = max(1, math.ceil(total / page_size))
+    return CandidateQueueResponse(
+        items=[_to_candidate_queue_item(i) for i in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=pages,
+        pending_by_type=repo.candidate_queue_counts(),
     )
 
 
