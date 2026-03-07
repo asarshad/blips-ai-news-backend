@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.domain.editorial.service import EditorialService, _extract_domain
 from app.models.content import ContentStatus
@@ -124,6 +125,23 @@ class TestEditorialServiceSubmit:
         assert result.content_id == 99
         db.add.assert_called_once()
         repo.log_add_action.assert_called_once()
+
+    def test_submit_rolls_back_on_integrity_error(self):
+        repo = MagicMock()
+        existing = FakeContentItem(id=77, editorial_boost=0)
+        repo.get_by_source_url.side_effect = [None, existing]
+        repo.get_by_canonical_key.return_value = None
+
+        db = MagicMock()
+        db.commit.side_effect = IntegrityError("insert", {}, Exception("duplicate key"))
+        svc = EditorialService(db=db, repo=repo)
+
+        result = svc.submit_url("https://example.com/race-condition")
+        assert result.duplicate is True
+        assert result.status == "duplicate_exists"
+        assert result.content_id == 77
+        db.rollback.assert_called_once()
+        repo.log_add_action.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +340,24 @@ class TestEditorialRepository:
         assert logged_action.action_type == "APPROVE_PUBLISH"
         assert logged_action.new_value.get("note") == "priority story"
         session.commit.assert_called_once()
+
+    def test_promote_idempotent(self):
+        repo, session = self._make_repo()
+        item = FakeContentItem(id=10, curation_status=ContentStatus.PROMOTED)
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        result = repo.promote(10, "admin")
+        assert result is item
+        session.commit.assert_not_called()
+
+    def test_demote_idempotent(self):
+        repo, session = self._make_repo()
+        item = FakeContentItem(id=10, curation_status=ContentStatus.CANDIDATE)
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        result = repo.demote(10, "admin")
+        assert result is item
+        session.commit.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
