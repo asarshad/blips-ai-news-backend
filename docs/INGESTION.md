@@ -79,6 +79,25 @@ Example:
 
 - `curl -fsS https://YOUR-SERVICE.onrender.com/metrics | jq`
 
+## Source Quality Scoring + Promotion/Demotion
+
+Source governance now includes a deterministic scoring model and bounded
+weight adjustments:
+
+- Service module:
+  `src/backend/app/services/source_quality_service.py`
+- Inputs:
+  - `source_daily_stats` inserted/suppressed counts
+  - extraction health score (when available)
+- Quality score components:
+  - success rate (55%)
+  - volume score (25%)
+  - extraction health (20%)
+- Action rules:
+  - score >= `0.75` -> promote source weight by `+0.05` (max `1.20`)
+  - score <= `0.45` -> demote source weight by `-0.05` (min `0.40`)
+  - otherwise hold
+
 ## Inspecting progress (SQL)
 
 ```sql
