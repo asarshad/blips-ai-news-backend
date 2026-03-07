@@ -16,12 +16,16 @@ from app.ingestion import IngestionPipeline, create_ingestion_pipeline
 # Re-export from new locations for backward compatibility
 from app.ranking import ScoringService
 from app.services.ai_chat import AiChatService
+from app.services.multi_factor_ranking_service import MultiFactorRankingService
 from app.services.quota_manager import QuotaManager
+from app.services.source_quality_service import SourceQualityService
 from app.services.tiered_feed_service import get_tiered_feed, invalidate_tiered_feed_cache
 
 __all__ = [
     "AiChatService",
     "QuotaManager",
+    "MultiFactorRankingService",
+    "SourceQualityService",
     # Re-exports
     "ScoringService",
     "ClusteringService",

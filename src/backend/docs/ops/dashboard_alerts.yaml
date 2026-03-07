@@ -1,0 +1,120 @@
+dashboards:
+  - id: platform_health
+    title: Platform Health
+    panels:
+      - metric: health_status
+        source: /health
+        path: status
+      - metric: db_health
+        source: /health
+        path: database
+      - metric: redis_health
+        source: /health
+        path: redis
+      - metric: api_5xx_rate
+        source: prometheus
+      - metric: request_latency_p95
+        source: prometheus
+
+  - id: ingestion_reliability
+    title: Ingestion Reliability
+    panels:
+      - metric: feed_status
+        source: /metrics/sources
+        path: sources[].feeds[].status
+      - metric: retry_count
+        source: /metrics/sources
+        path: sources[].feeds[].retry_count
+      - metric: retry_at
+        source: /metrics/sources
+        path: sources[].feeds[].retry_at
+      - metric: attempted_vs_inserted
+        source: /metrics/sources
+        path: sources[].feeds[]
+
+  - id: feed_inventory_quality
+    title: Feed Inventory and Quality
+    panels:
+      - metric: surface_health
+        source: /api/v1/inventory/health
+      - metric: dominant_source_pct
+        source: /metrics/inventory/health
+        path: dominant_source_pct
+      - metric: infra_share_pct
+        source: /metrics/inventory/health
+        path: infra_share_pct
+      - metric: ai_share_pct
+        source: /metrics/ai-coverage
+        path: ai_share_pct
+
+  - id: editorial_delivery
+    title: Editorial and Session Delivery
+    panels:
+      - metric: candidate_promoted_counts
+        source: /api/v1/inventory/health
+        path: pipeline
+      - metric: playlist_stats
+        source: /api/v1/session/playlist-stats
+      - metric: playlist_cache_hit_ratio
+        source: redis
+
+alerts:
+  - id: api_unhealthy_critical
+    severity: SEV-1
+    condition: health.status != "healthy" for 2m
+    notify: pager
+
+  - id: api_error_rate_high
+    severity: SEV-2
+    condition: api_5xx_rate > 3% for 10m
+    notify: pager
+
+  - id: latency_p95_degraded
+    severity: SEV-2
+    condition: request_latency_p95 > 1.5s for 15m
+    notify: pager
+
+  - id: ingestion_feed_failures
+    severity: SEV-2
+    condition: failed_feeds >= 3 for 10m
+    notify: pager
+
+  - id: retry_backlog_growth
+    severity: SEV-2
+    condition: retry_count_total increases for 20m
+    notify: pager
+
+  - id: ingestion_success_rate_drop
+    severity: SEV-2
+    condition: ingestion_success_rate < 60% for 30m
+    notify: pager
+
+  - id: surface_inventory_low
+    severity: SEV-2
+    condition: any surface healthy == false for 10m
+    notify: pager
+
+  - id: source_dominance_warning
+    severity: SEV-3
+    condition: dominant_source_pct > 30% for 1h
+    notify: ticket
+
+  - id: infra_coverage_low
+    severity: SEV-3
+    condition: infra_share_pct < 10% for 1h
+    notify: ticket
+
+  - id: ai_share_cap_breach
+    severity: SEV-2
+    condition: ai_share_pct > 40% for 15m
+    notify: pager
+
+  - id: candidate_backlog_stale
+    severity: SEV-3
+    condition: candidate_count > 500 and promoted_rate < 20% for 6h
+    notify: ticket
+
+  - id: playlist_generation_failures
+    severity: SEV-2
+    condition: playlist_generation_errors > 5 for 10m
+    notify: pager

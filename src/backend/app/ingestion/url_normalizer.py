@@ -13,6 +13,24 @@ from typing import Iterable, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 _TRACKING_PARAMS = {
+    "amp",
+    "feature",
+    "from",
+    "guccounter",
+    "igsh",
+    "igshid",
+    "mc_cid",
+    "mc_eid",
+    "ocid",
+    "output",
+    "outputtype",
+    "ref",
+    "ref_src",
+    "rss",
+    "si",
+    "source",
+    "src",
+    "trk",
     "utm_source",
     "utm_medium",
     "utm_campaign",
@@ -27,13 +45,8 @@ _TRACKING_PARAMS = {
     "utm_brand",
     "utm_cid",
     "utm_sid",
-    "gclid",
     "fbclid",
-    "igshid",
-    "mc_cid",
-    "mc_eid",
-    "ref",
-    "ref_src",
+    "gclid",
 }
 
 
@@ -75,6 +88,10 @@ def normalize_url(url: str, extra_drop_params: Iterable[str] = ()) -> str:
     parts = urlsplit(url)
     scheme = (parts.scheme or "https").lower()
     netloc = parts.netloc.lower()
+    if netloc.startswith("www."):
+        netloc = netloc[4:]
+    if netloc.startswith("amp."):
+        netloc = netloc[4:]
 
     drop = set(_TRACKING_PARAMS)
     drop.update(p.lower() for p in extra_drop_params)
@@ -85,6 +102,11 @@ def normalize_url(url: str, extra_drop_params: Iterable[str] = ()) -> str:
     query = urlencode(query_pairs, doseq=True)
 
     path = parts.path or ""
+    # Common AMP variants: /.../amp and /.../amp/
+    if path.lower().endswith("/amp/"):
+        path = path[:-5]
+    elif path.lower().endswith("/amp"):
+        path = path[:-4]
     if path != "/" and path.endswith("/"):
         path = path[:-1]
 

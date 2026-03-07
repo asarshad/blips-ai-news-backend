@@ -11,12 +11,12 @@ logger = get_logger(__name__)
 
 
 def run_signal_ingestion_job() -> None:
-    """Fetch trend signals from HN, GitHub, and YouTube and enqueue new URLs.
+    """Fetch trend/discovery signals and enqueue new URLs.
 
     Cadence: every 60 minutes (configurable via ``SIGNAL_INTERVAL_MINUTES``).
 
     The job:
-    1. Calls each signal fetcher.
+    1. Calls each signal fetcher (HN, GitHub, YouTube, optional discovery feeds).
     2. Canonicalizes discovered URLs.
     3. Creates CANDIDATE content stubs for URLs not already in ``content_items``.
     4. Bumps ``signal_hits`` on items already in the system.
@@ -36,10 +36,18 @@ def run_signal_ingestion_job() -> None:
 
         settings = get_settings()
         yt_api_key: str = getattr(settings, "YOUTUBE_API_KEY", "") or ""
+        discovery_enabled: bool = bool(getattr(settings, "DISCOVERY_SIGNAL_ENABLED", True))
+        discovery_limit: int = int(getattr(settings, "DISCOVERY_SIGNAL_LIMIT", 25))
+        discovery_per_source_limit: int = int(
+            getattr(settings, "DISCOVERY_SIGNAL_PER_SOURCE_LIMIT", 5)
+        )
 
         result = run_signal_ingestion(
             db,
             yt_api_key=yt_api_key or None,
+            discovery_enabled=discovery_enabled,
+            discovery_limit=discovery_limit,
+            discovery_per_source_limit=discovery_per_source_limit,
         )
 
         stats.items_processed = result.stubs_created + result.signal_hits_bumped

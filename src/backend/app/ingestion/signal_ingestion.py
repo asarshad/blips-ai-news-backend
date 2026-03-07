@@ -29,12 +29,15 @@ from typing import Dict, List, Optional
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config.source_tiering import get_domain_policy, is_allowed_domain
 from app.ingestion.canonical import canonical_key_for_article, extract_youtube_video_id
 from app.ingestion.signals import SignalItem
+from app.ingestion.signals.discovery_feeds import fetch_discovery_leads
 from app.ingestion.signals.github_trending import fetch_github_trending
 from app.ingestion.signals.hacker_news import fetch_hn_best, fetch_hn_top
 from app.ingestion.signals.youtube_trending import fetch_yt_trending
 from app.ingestion.url_normalizer import normalize_url
+from app.models.candidate_audit import CandidateAuditEvent
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.signal import SignalSource
 from app.repositories.content_repo import ContentItemRepository
@@ -50,6 +53,7 @@ _SIGNAL_SOURCE_LABELS: Dict[SignalSource, str] = {
     SignalSource.HN_BEST: "signal_hn",
     SignalSource.GITHUB_TRENDING: "signal_github",
     SignalSource.YT_TRENDING: "signal_yt_trending",
+    SignalSource.DISCOVERY_LEADS: "signal_discovery",
 }
 
 # Max article/video stub candidates created per orchestrator run
@@ -68,6 +72,7 @@ class SignalIngestionResult:
     signal_hits_bumped: int = 0  # Existing content items that got signal_hits++
     stubs_created: int = 0  # New CANDIDATE content stubs
     stubs_skipped: int = 0  # Skipped (integrity error / content type unknown)
+    domain_rejected: int = 0  # Rejected by domain tiering policy
     errors: List[str] = field(default_factory=list)
 
 
@@ -132,6 +137,7 @@ def _build_candidate_stub(
 
     source = extract_source(url)
     topics: list = extract_topics(item.raw_title or "", "") if item.raw_title else []
+    domain_policy = get_domain_policy(url)
 
     if content_type == ContentType.VIDEO:
         yt_vid = extract_youtube_video_id(url)
@@ -150,6 +156,9 @@ def _build_candidate_stub(
         published_at=datetime.utcnow(),
         ingestion_day=date.today(),
         title=(item.raw_title or url)[:1000],
+        candidate_first_seen_at=datetime.utcnow(),
+        candidate_signal_source=item.signal_source.value,
+        candidate_raw_title=(item.raw_title or url)[:1000],
         description=None,
         content_text=None,
         summary=None,
@@ -160,7 +169,8 @@ def _build_candidate_stub(
         dedupe_key=None,
         ai_processed=False,
         language="en",
-        quality_score=0.3,  # Low initial score; scoring service will recalculate
+        # Seed with policy tier weight so promotion has better priors.
+        quality_score=domain_policy.quality_weight,
         recency_score=1.0,
         trend_score=0.0,
         global_score=0.0,
@@ -169,6 +179,30 @@ def _build_candidate_stub(
         signal_hits=1,
     )
     return stub
+
+
+def _record_candidate_audit_event(
+    db: Session,
+    *,
+    canonical_url: str,
+    signal_source: SignalSource,
+    event_type: str,
+    discovered_via: Optional[str] = None,
+    content_item_id: Optional[int] = None,
+    reason: Optional[str] = None,
+    payload: Optional[dict] = None,
+) -> None:
+    db.add(
+        CandidateAuditEvent(
+            canonical_url=canonical_url,
+            signal_source=signal_source.value,
+            discovered_via=discovered_via,
+            content_item_id=content_item_id,
+            event_type=event_type,
+            reason=reason,
+            payload=payload,
+        )
+    )
 
 
 # ── Main entry-point ──────────────────────────────────────────────────────────
@@ -181,6 +215,9 @@ def run_signal_ingestion(
     hn_limit: int = 50,
     github_limit: int = 25,
     yt_limit: int = 30,
+    discovery_limit: int = 25,
+    discovery_per_source_limit: int = 5,
+    discovery_enabled: bool = True,
     max_stubs: int = _MAX_STUBS_PER_RUN,
 ) -> SignalIngestionResult:
     """Fetch all signal sources and cross-check / enqueue new URLs.
@@ -191,6 +228,9 @@ def run_signal_ingestion(
         hn_limit:    Max items to fetch from each HN endpoint.
         github_limit: Max repos from GitHub Trending.
         yt_limit:    Max videos from YouTube Trending.
+        discovery_limit: Max links from discovery feed fetcher.
+        discovery_per_source_limit: Max links per discovery feed source.
+        discovery_enabled: Include discovery feed fetcher in this run.
         max_stubs:   Cap on new CANDIDATE stubs created per run.
 
     Returns:
@@ -202,12 +242,25 @@ def run_signal_ingestion(
 
     # ── 1. Collect raw signal items ───────────────────────────────────────
     all_items: List[SignalItem] = []
-    for fetcher_name, fetch_fn, kwargs in [
+    fetchers = [
         ("HN_TOP", fetch_hn_top, {"limit": hn_limit}),
         ("HN_BEST", fetch_hn_best, {"limit": hn_limit}),
         ("GITHUB", fetch_github_trending, {"limit": github_limit}),
         ("YT_TRENDING", _fetch_yt_safe, {"api_key": yt_api_key, "limit": yt_limit}),
-    ]:
+    ]
+    if discovery_enabled:
+        fetchers.append(
+            (
+                "DISCOVERY_FEEDS",
+                fetch_discovery_leads,
+                {
+                    "limit": discovery_limit,
+                    "per_source_limit": discovery_per_source_limit,
+                },
+            )
+        )
+
+    for fetcher_name, fetch_fn, kwargs in fetchers:
         try:
             items = fetch_fn(**kwargs)
             all_items.extend(items)
@@ -228,6 +281,21 @@ def run_signal_ingestion(
             with db.begin_nested():  # SAVEPOINT sp_N
                 canonical = normalize_url(item.raw_url)
                 if not canonical:
+                    _record_candidate_audit_event(
+                        db,
+                        canonical_url=item.raw_url or "",
+                        signal_source=item.signal_source,
+                        event_type="rejected",
+                        reason="normalization_failed",
+                    )
+                    continue
+                if not is_allowed_domain(canonical, channel="signal"):
+                    result.domain_rejected += 1
+                    logger.debug(
+                        "[signal_ingestion] domain policy rejected url=%s source=%s",
+                        canonical,
+                        item.signal_source.value,
+                    )
                     continue
 
                 # Atomic upsert into signal_urls
@@ -251,11 +319,27 @@ def run_signal_ingestion(
                     result.signal_hits_bumped += 1
                     existing.signal_hits = (existing.signal_hits or 0) + 1
                     signal_repo.mark_duplicate(signal_row, existing.id)
+                    _record_candidate_audit_event(
+                        db,
+                        canonical_url=canonical,
+                        signal_source=item.signal_source,
+                        event_type="duplicate",
+                        discovered_via=_SIGNAL_SOURCE_LABELS.get(item.signal_source, "signal"),
+                        content_item_id=existing.id,
+                    )
                     continue
 
                 # New URL – create a CANDIDATE stub (if within per-run cap)
                 if stubs_this_run >= max_stubs:
                     result.stubs_skipped += 1
+                    _record_candidate_audit_event(
+                        db,
+                        canonical_url=canonical,
+                        signal_source=item.signal_source,
+                        event_type="skipped",
+                        discovered_via=_SIGNAL_SOURCE_LABELS.get(item.signal_source, "signal"),
+                        reason="max_stubs_reached",
+                    )
                     continue
 
                 content_type = _detect_content_type(canonical)
@@ -266,6 +350,18 @@ def run_signal_ingestion(
                 signal_repo.mark_ingested(signal_row, stub.id)
                 stubs_this_run += 1
                 result.stubs_created += 1
+                _record_candidate_audit_event(
+                    db,
+                    canonical_url=canonical,
+                    signal_source=item.signal_source,
+                    event_type="created",
+                    discovered_via=stub.discovered_via,
+                    content_item_id=stub.id,
+                    payload={
+                        "content_type": content_type.value,
+                        "signal_score": item.signal_score,
+                    },
+                )
 
         except IntegrityError:
             # Savepoint already rolled back by context manager exit.
@@ -286,11 +382,12 @@ def run_signal_ingestion(
         result.errors.append(msg)
 
     logger.info(
-        "[signal_ingestion] Done. seen=%d added=%d stubs=%d bumped=%d errors=%d",
+        "[signal_ingestion] Done. seen=%d added=%d stubs=%d bumped=%d rejected=%d errors=%d",
         result.signal_urls_seen,
         result.signal_urls_added,
         result.stubs_created,
         result.signal_hits_bumped,
+        result.domain_rejected,
         len(result.errors),
     )
     return result

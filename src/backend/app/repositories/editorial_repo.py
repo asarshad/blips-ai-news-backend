@@ -9,7 +9,7 @@ see domain/editorial/service.py for that.
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from app.models.content import ContentItem, ContentStatus, ContentType
@@ -84,6 +84,83 @@ class EditorialRepository:
         offset = (page - 1) * page_size
         items = query.offset(offset).limit(page_size).all()
         return items, total
+
+    def list_candidate_queue(
+        self,
+        *,
+        content_type: Optional[str] = None,
+        source: Optional[str] = None,
+        discovered_via: Optional[str] = None,
+        min_signal_hits: int = 0,
+        include_suppressed: bool = False,
+        sort_by: str = "priority",
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Tuple[List[ContentItem], int]:
+        """Return paginated candidate items ordered for reviewer triage."""
+        query = self.db.query(ContentItem).filter(
+            ContentItem.curation_status == ContentStatus.CANDIDATE
+        )
+
+        if not include_suppressed:
+            query = query.filter(ContentItem.is_suppressed.is_(False))
+
+        if content_type is not None:
+            ct = content_type.upper()
+            if ct in ContentType.__members__:
+                query = query.filter(ContentItem.type == ContentType[ct])
+
+        if source is not None:
+            query = query.filter(ContentItem.source.ilike(f"%{source}%"))
+
+        if discovered_via is not None:
+            query = query.filter(ContentItem.discovered_via.ilike(f"%{discovered_via}%"))
+
+        if min_signal_hits > 0:
+            query = query.filter(ContentItem.signal_hits >= int(min_signal_hits))
+
+        total = query.count()
+        first_seen_col = getattr(ContentItem, "candidate_first_seen_at", None)
+
+        if sort_by == "first_seen":
+            if first_seen_col is not None:
+                query = query.order_by(
+                    desc(first_seen_col).nullslast(),
+                    desc(ContentItem.published_at),
+                )
+            else:
+                query = query.order_by(desc(ContentItem.published_at))
+        elif sort_by == "published_at":
+            query = query.order_by(desc(ContentItem.published_at))
+        else:
+            ordering = [
+                desc(ContentItem.promotion_score).nullslast(),
+                desc(ContentItem.signal_hits),
+            ]
+            if first_seen_col is not None:
+                ordering.append(desc(first_seen_col).nullslast())
+            ordering.append(desc(ContentItem.published_at))
+            query = query.order_by(*ordering)
+
+        offset = (page - 1) * page_size
+        items = query.offset(offset).limit(page_size).all()
+        return items, total
+
+    def candidate_queue_counts(self, *, include_suppressed: bool = False) -> Dict[str, int]:
+        """Return pending-candidate counts grouped by content type."""
+        query = self.db.query(ContentItem.type, func.count(ContentItem.id)).filter(
+            ContentItem.curation_status == ContentStatus.CANDIDATE
+        )
+        if not include_suppressed:
+            query = query.filter(ContentItem.is_suppressed.is_(False))
+
+        rows = query.group_by(ContentItem.type).all()
+
+        counts: Dict[str, int] = {}
+        for content_type, count in rows:
+            key = content_type.value if content_type is not None else "UNKNOWN"
+            counts[key] = int(count or 0)
+        return counts
 
     def get_content_by_id(self, content_id: int) -> Optional[ContentItem]:
         return self.db.query(ContentItem).filter(ContentItem.id == content_id).first()
@@ -201,6 +278,154 @@ class EditorialRepository:
         self.db.refresh(item)
         return item
 
+    def _set_review_state(
+        self,
+        *,
+        content_id: int,
+        actor: str,
+        action_type: str,
+        curation_status: Optional[ContentStatus] = None,
+        suppressed: Optional[bool] = None,
+        note: Optional[str] = None,
+    ) -> Optional[ContentItem]:
+        """Apply editorial review state transition + audit log entry."""
+        item = self.get_content_by_id(content_id)
+        if item is None:
+            return None
+
+        old_state = {
+            "curation_status": item.curation_status.value if item.curation_status else None,
+            "is_suppressed": bool(item.is_suppressed),
+        }
+
+        if curation_status is not None:
+            item.curation_status = curation_status
+        if suppressed is not None:
+            item.is_suppressed = suppressed
+
+        item.last_modified_by = actor
+        item.last_modified_at = datetime.now(tz=None)
+
+        new_state = {
+            "curation_status": item.curation_status.value if item.curation_status else None,
+            "is_suppressed": bool(item.is_suppressed),
+        }
+        if note:
+            new_state["note"] = note
+
+        self._log_action(
+            content_id=content_id,
+            action_type=action_type,
+            old_value=old_state,
+            new_value=new_state,
+            actor=actor,
+        )
+        self.db.commit()
+        self.db.refresh(item)
+        return item
+
+    def approve(self, content_id: int, actor: str, note: Optional[str] = None) -> Optional[ContentItem]:
+        """Approve a candidate and promote it for feed visibility."""
+        return self._set_review_state(
+            content_id=content_id,
+            actor=actor,
+            action_type="APPROVE",
+            curation_status=ContentStatus.PROMOTED,
+            suppressed=False,
+            note=note,
+        )
+
+    def approve_and_publish(
+        self,
+        content_id: int,
+        actor: str,
+        *,
+        boost_level: int = 3,
+        note: Optional[str] = None,
+    ) -> Optional[ContentItem]:
+        """
+        Approve content and publish it to the top of feed ordering.
+
+        Promotion is applied by:
+        - setting curation_status to PROMOTED
+        - clearing suppression
+        - bumping published_at to now
+        - applying at least the provided editorial boost
+        """
+        item = self.get_content_by_id(content_id)
+        if item is None:
+            return None
+
+        old_state = {
+            "curation_status": item.curation_status.value if item.curation_status else None,
+            "is_suppressed": bool(item.is_suppressed),
+            "published_at": item.published_at.isoformat() if item.published_at else None,
+            "editorial_boost": item.editorial_boost or 0,
+        }
+
+        now = datetime.now(tz=None)
+        item.curation_status = ContentStatus.PROMOTED
+        item.is_suppressed = False
+        item.published_at = now
+        item.editorial_boost = max(item.editorial_boost or 0, int(boost_level))
+        item.last_modified_by = actor
+        item.last_modified_at = now
+
+        new_state = {
+            "curation_status": item.curation_status.value,
+            "is_suppressed": bool(item.is_suppressed),
+            "published_at": item.published_at.isoformat(),
+            "editorial_boost": item.editorial_boost,
+        }
+        if note:
+            new_state["note"] = note
+
+        self._log_action(
+            content_id=content_id,
+            action_type="APPROVE_PUBLISH",
+            old_value=old_state,
+            new_value=new_state,
+            actor=actor,
+        )
+        self.db.commit()
+        self.db.refresh(item)
+        return item
+
+    def reject(self, content_id: int, actor: str, note: Optional[str] = None) -> Optional[ContentItem]:
+        """Reject content from editorial queue and suppress it."""
+        return self._set_review_state(
+            content_id=content_id,
+            actor=actor,
+            action_type="REJECT",
+            curation_status=ContentStatus.CANDIDATE,
+            suppressed=True,
+            note=note,
+        )
+
+    def hold(self, content_id: int, actor: str, note: Optional[str] = None) -> Optional[ContentItem]:
+        """Place content on hold while keeping it available for later review."""
+        return self._set_review_state(
+            content_id=content_id,
+            actor=actor,
+            action_type="HOLD",
+            curation_status=ContentStatus.CANDIDATE,
+            suppressed=False,
+            note=note,
+        )
+
+    def request_changes(
+        self, content_id: int, actor: str, note: Optional[str] = None
+    ) -> Optional[ContentItem]:
+        """Return content for changes; stays as candidate and unsuppressed."""
+        return self._set_review_state(
+            content_id=content_id,
+            actor=actor,
+            action_type="REQUEST_CHANGES",
+            curation_status=ContentStatus.CANDIDATE,
+            suppressed=False,
+            note=note,
+        )
+
     # ------------------------------------------------------------------
     # Audit log
     # ------------------------------------------------------------------
@@ -255,3 +480,29 @@ class EditorialRepository:
             .limit(limit)
             .all()
         )
+
+    def add_reviewer_note(
+        self,
+        *,
+        content_id: int,
+        actor: str,
+        note: str,
+    ) -> Optional[EditorialAction]:
+        """Append a reviewer note to the editorial audit log."""
+        item = self.get_content_by_id(content_id)
+        if item is None:
+            return None
+
+        now = datetime.now(tz=None)
+        item.last_modified_by = actor
+        item.last_modified_at = now
+
+        action = self._log_action(
+            content_id=content_id,
+            action_type="NOTE",
+            old_value=None,
+            new_value={"note": note},
+            actor=actor,
+        )
+        self.db.commit()
+        return action

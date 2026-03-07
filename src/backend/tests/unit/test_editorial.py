@@ -20,8 +20,10 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.domain.editorial.service import EditorialService, _extract_domain
+from app.models.content import ContentStatus
 from app.ranking.global_score import (
     EDITORIAL_BOOST_WEIGHT,
     compute_global_score,
@@ -58,6 +60,7 @@ class FakeContentItem:
         self.type = kwargs.get("type", None)
         self.source = kwargs.get("source", "")
         self.title = kwargs.get("title", "Test")
+        self.curation_status = kwargs.get("curation_status", ContentStatus.CANDIDATE)
         self.published_at = kwargs.get("published_at", datetime.now(timezone.utc))
         self.created_at = kwargs.get("created_at", datetime.now(timezone.utc))
         self.quality_score = kwargs.get("quality_score", 0.5)
@@ -122,6 +125,23 @@ class TestEditorialServiceSubmit:
         assert result.content_id == 99
         db.add.assert_called_once()
         repo.log_add_action.assert_called_once()
+
+    def test_submit_rolls_back_on_integrity_error(self):
+        repo = MagicMock()
+        existing = FakeContentItem(id=77, editorial_boost=0)
+        repo.get_by_source_url.side_effect = [None, existing]
+        repo.get_by_canonical_key.return_value = None
+
+        db = MagicMock()
+        db.commit.side_effect = IntegrityError("insert", {}, Exception("duplicate key"))
+        svc = EditorialService(db=db, repo=repo)
+
+        result = svc.submit_url("https://example.com/race-condition")
+        assert result.duplicate is True
+        assert result.status == "duplicate_exists"
+        assert result.content_id == 77
+        db.rollback.assert_called_once()
+        repo.log_add_action.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +209,154 @@ class TestEditorialRepository:
 
         result = repo.set_boost(999, 2, "admin")
         assert result is None
+        session.commit.assert_not_called()
+
+    def test_list_candidate_queue_returns_paginated_rows(self):
+        repo, session = self._make_repo()
+        query = MagicMock()
+        session.query.return_value = query
+        query.filter.return_value = query
+        query.order_by.return_value = query
+        query.offset.return_value = query
+        query.limit.return_value = query
+        query.count.return_value = 2
+        rows = [FakeContentItem(id=1), FakeContentItem(id=2)]
+        query.all.return_value = rows
+
+        items, total = repo.list_candidate_queue(page=1, page_size=2)
+
+        assert total == 2
+        assert items == rows
+        query.order_by.assert_called_once()
+
+    def test_candidate_queue_counts_groups_by_type(self):
+        repo, session = self._make_repo()
+        query = MagicMock()
+        session.query.return_value = query
+        query.filter.return_value = query
+        query.group_by.return_value = query
+
+        article_type = MagicMock()
+        article_type.value = "ARTICLE"
+        video_type = MagicMock()
+        video_type.value = "VIDEO"
+        query.all.return_value = [(article_type, 3), (video_type, 1)]
+
+        counts = repo.candidate_queue_counts()
+
+        assert counts == {"ARTICLE": 3, "VIDEO": 1}
+
+    def test_approve_sets_promoted_and_unsuppressed(self):
+        repo, session = self._make_repo()
+        item = FakeContentItem(
+            id=10,
+            curation_status=ContentStatus.CANDIDATE,
+            is_suppressed=True,
+        )
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        result = repo.approve(10, "reviewer", note="Looks good")
+
+        assert result is item
+        assert item.curation_status == ContentStatus.PROMOTED
+        assert item.is_suppressed is False
+        session.add.assert_called_once()
+        session.commit.assert_called_once()
+
+    def test_reject_sets_candidate_and_suppressed(self):
+        repo, session = self._make_repo()
+        item = FakeContentItem(
+            id=11,
+            curation_status=ContentStatus.PROMOTED,
+            is_suppressed=False,
+        )
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        result = repo.reject(11, "reviewer", note="Off-topic")
+
+        assert result is item
+        assert item.curation_status == ContentStatus.CANDIDATE
+        assert item.is_suppressed is True
+        session.add.assert_called_once()
+        session.commit.assert_called_once()
+
+    def test_hold_sets_candidate_without_suppression(self):
+        repo, session = self._make_repo()
+        item = FakeContentItem(
+            id=12,
+            curation_status=ContentStatus.PROMOTED,
+            is_suppressed=False,
+        )
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        result = repo.hold(12, "reviewer")
+
+        assert result is item
+        assert item.curation_status == ContentStatus.CANDIDATE
+        assert item.is_suppressed is False
+        session.add.assert_called_once()
+        session.commit.assert_called_once()
+
+    def test_request_changes_sets_candidate_and_logs_note(self):
+        repo, session = self._make_repo()
+        item = FakeContentItem(
+            id=13,
+            curation_status=ContentStatus.PROMOTED,
+            is_suppressed=False,
+        )
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        result = repo.request_changes(13, "reviewer", note="Needs better title")
+
+        assert result is item
+        assert item.curation_status == ContentStatus.CANDIDATE
+        assert item.is_suppressed is False
+        session.add.assert_called_once()
+        logged_action = session.add.call_args[0][0]
+        assert logged_action.action_type == "REQUEST_CHANGES"
+        assert logged_action.new_value.get("note") == "Needs better title"
+        session.commit.assert_called_once()
+
+    def test_approve_publish_promotes_sets_now_and_boost(self):
+        repo, session = self._make_repo()
+        old_time = datetime(2025, 1, 1)
+        item = FakeContentItem(
+            id=14,
+            editorial_boost=1,
+            is_suppressed=True,
+            published_at=old_time,
+        )
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        result = repo.approve_and_publish(14, "editor", boost_level=3, note="priority story")
+
+        assert result is item
+        assert item.curation_status.value == "PROMOTED"
+        assert item.is_suppressed is False
+        assert item.editorial_boost == 3
+        assert item.published_at > old_time
+        session.add.assert_called_once()
+        logged_action = session.add.call_args[0][0]
+        assert logged_action.action_type == "APPROVE_PUBLISH"
+        assert logged_action.new_value.get("note") == "priority story"
+        session.commit.assert_called_once()
+
+    def test_promote_idempotent(self):
+        repo, session = self._make_repo()
+        item = FakeContentItem(id=10, curation_status=ContentStatus.PROMOTED)
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        result = repo.promote(10, "admin")
+        assert result is item
+        session.commit.assert_not_called()
+
+    def test_demote_idempotent(self):
+        repo, session = self._make_repo()
+        item = FakeContentItem(id=10, curation_status=ContentStatus.CANDIDATE)
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        result = repo.demote(10, "admin")
+        assert result is item
         session.commit.assert_not_called()
 
 
@@ -281,6 +449,22 @@ class TestAuditLogCreation:
         assert audit_record.old_value == {"editorial_boost": 1}
         assert audit_record.new_value == {"editorial_boost": 3}
         assert audit_record.actor == "editor"
+
+    def test_add_reviewer_note_writes_note_action(self):
+        session = MagicMock()
+        repo = EditorialRepository(session)
+        item = FakeContentItem(id=15)
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        action = repo.add_reviewer_note(content_id=15, actor="reviewer", note="Needs clearer source")
+
+        assert action is not None
+        session.add.assert_called_once()
+        audit_record = session.add.call_args[0][0]
+        assert audit_record.action_type == "NOTE"
+        assert audit_record.new_value == {"note": "Needs clearer source"}
+        assert audit_record.actor == "reviewer"
+        session.commit.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

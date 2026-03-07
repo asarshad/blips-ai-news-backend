@@ -29,6 +29,50 @@ This backend supports restart-resilient ingestion that continues until per-feed 
 - `INGESTION_POLL_SECONDS` (default: `30`): sleep between loops when targets not met
 - `INGESTION_LEASE_TTL_MS` (default: `60000`): per-feed lease TTL
 - `INGESTION_TARGET_DEFAULTS`: JSON mapping `{ "rss:TechCrunch": 3, "youtube_video:Bloomberg Technology": 2 }`
+- `CONNECTOR_MAX_RETRIES` (default: `2`): max retry attempts per RSS/YouTube feed fetch
+- `CONNECTOR_RETRY_BUDGET` (default: `40`): total retry attempts allowed per client run
+- `CONNECTOR_TIMEOUT_SECONDS` (default: `15`): HTTP timeout for RSS/YouTube feed fetch calls
+- `CONNECTOR_BACKOFF_BASE_SECONDS` (default: `0.5`): exponential backoff base for connector retries
+
+## Source Registry v1 (TLDR-derived shortlist)
+
+To avoid ingesting from an unbounded long tail, the backend now includes a
+TLDR-derived source registry snapshot and shortlist builder:
+
+- Snapshot file:
+  `src/backend/app/config/data/tldr_domain_counts_2026_03_06.csv`
+- Registry module:
+  `src/backend/app/config/source_registry.py`
+
+How v1 shortlist generation works:
+
+1. Start from 1,351 unique domains observed in TLDR source crawl.
+2. Apply `min_mentions >= 6`.
+3. Exclude noisy/platform/sponsor domains (for example: `x.com`,
+   `threadreaderapp.com`, `advertise.tldr.tech`).
+4. Keep at most `120` domains for the operational shortlist.
+
+This shortlist is used as a deterministic source inventory for policy and
+ranking integration tasks in later phases (tiering, promotion/demotion,
+discovery rotation).
+
+## Domain Tiering Policy (core / rotation / discovery)
+
+Source governance now uses domain tiers in `src/backend/app/config/source_tiering.py`.
+
+Tier behavior:
+
+- `core`: top-trust publishers, high quality prior, higher per-domain cap
+- `rotation`: useful secondary sources, moderate quality prior/cap
+- `discovery`: long-tail exploration, low quality prior and tighter caps
+- `blocked`: sponsor/social/noise domains, rejected from ingestion
+
+Signal ingestion integration:
+
+- `run_signal_ingestion()` checks policy before upserting signal URLs.
+- Blocked domains increment `domain_rejected` and are skipped.
+- New CANDIDATE stubs seed `quality_score` from tier policy so promotion starts
+  from a better prior than a hard-coded constant.
 
 ## Observability
 
@@ -38,6 +82,83 @@ This backend supports restart-resilient ingestion that continues until per-feed 
 Example:
 
 - `curl -fsS https://YOUR-SERVICE.onrender.com/metrics | jq`
+
+## Source Quality Scoring + Promotion/Demotion
+
+Source governance now includes a deterministic scoring model and bounded
+weight adjustments:
+
+- Service module:
+  `src/backend/app/services/source_quality_service.py`
+- Inputs:
+  - `source_daily_stats` inserted/suppressed counts
+  - extraction health score (when available)
+- Quality score components:
+  - success rate (55%)
+  - volume score (25%)
+  - extraction health (20%)
+- Action rules:
+  - score >= `0.75` -> promote source weight by `+0.05` (max `1.20`)
+  - score <= `0.45` -> demote source weight by `-0.05` (min `0.40`)
+  - otherwise hold
+
+## Discovery Leads Pipeline (Substack/Beehiiv)
+
+Signal ingestion now includes an optional discovery-feed lane for long-tail
+coverage (especially newsletters and creator-led technical analysis):
+
+- Fetcher module:
+  `src/backend/app/ingestion/signals/discovery_feeds.py`
+- Signal source enum value:
+  `discovery_leads`
+- Candidate stub label:
+  `discovered_via = signal_discovery`
+
+Scheduler controls:
+
+- `DISCOVERY_SIGNAL_ENABLED` (default: `true`)
+- `DISCOVERY_SIGNAL_LIMIT` (default: `25`)
+- `DISCOVERY_SIGNAL_PER_SOURCE_LIMIT` (default: `5`)
+
+The discovery lane runs through the same canonicalization, dedupe, and
+promotion gate as existing signal sources.
+
+## Canonicalization + Near-Duplicate Clustering
+
+The ingestion pipeline now applies stronger URL canonicalization and
+near-duplicate detection:
+
+- URL normalization strips additional tracking params (`source`, `trk`, `si`,
+  `output`, etc.) and collapses common AMP variants (`amp.` host and `/amp`
+  path suffixes).
+- Canonical key generation benefits from normalized AMP/www collapsing so the
+  same article URL variant maps to one canonical key.
+- New title `simhash` signatures are stored on content items at ingest-time.
+- Clustering treats article pairs as near-duplicates when simhash Hamming
+  distance is small, allowing cluster joins even when entity/topic extraction
+  is sparse.
+
+## Candidate Provenance + Audit Trail
+
+Signal ingestion now records candidate lineage and lifecycle events for
+traceability and post-hoc review.
+
+Schema additions:
+
+- `content_items` provenance columns:
+  - `candidate_first_seen_at`
+  - `candidate_signal_source`
+  - `candidate_raw_title`
+- New table: `candidate_audit_events`
+  - `canonical_url`, `signal_source`, `discovered_via`
+  - `event_type` (`created`, `duplicate`, `rejected`, `skipped`)
+  - optional `reason` and structured `payload`
+
+Implementation points:
+
+- Model: `src/backend/app/models/candidate_audit.py`
+- Migration: `src/backend/alembic/versions/candidate_audit_001.py`
+- Signal integration: `src/backend/app/ingestion/signal_ingestion.py`
 
 ## Inspecting progress (SQL)
 

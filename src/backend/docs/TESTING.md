@@ -14,6 +14,8 @@ From `src/backend/`:
 - Unit tests (fast, offline): `pytest tests/unit`
 - Contract tests (OpenAPI snapshot): `pytest tests/contract`
 - Update OpenAPI snapshot (intentional): `pytest tests/contract --update-openapi-snapshot`
+- QA gates (coverage + missing tests): `python scripts/qa_gates.py --min-coverage 50`
+- CI parity (same checks as backend PR workflow): `python scripts/ci_parity.py`
 
 ## Integration tests (Docker)
 

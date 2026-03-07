@@ -25,6 +25,7 @@ from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentType
 from app.repositories.content_repo import ContentItemRepository
 from app.repositories.user_repo import UserPreferenceRepository, UserProfileRepository
+from app.services.multi_factor_ranking_service import MultiFactorRankingService
 from app.services.personalization_service import PersonalizationService
 
 logger = get_logger(__name__)
@@ -40,10 +41,15 @@ MIN_PLAYLIST_SIZE = 20
 # Diversity constraints
 MAX_TOPIC_DOMINANCE = 0.40  # 40% max for any single topic
 MAX_CONSECUTIVE_SAME_SOURCE = 3
+SOURCE_CAP_WINDOW_SIZE = 5
+MAX_SOURCE_PER_WINDOW = 2
+CATEGORY_CAP_WINDOW_SIZE = 5
+MAX_CATEGORY_SHARE_PER_WINDOW = 0.40
 MIN_UNIQUE_SOURCES = 3
 
 # Content freshness
 MAX_CONTENT_AGE_HOURS = 72  # 3 days
+FALLBACK_CONTENT_AGE_HOURS = 168  # 7 days fallback when no fresh approvals
 PREFER_CANONICAL_WEIGHT = 0.7  # 70% canonical, 30% fresh
 
 # Cache configuration
@@ -69,12 +75,14 @@ class PlaylistService:
         profile_repo: UserProfileRepository,
         preference_repo: UserPreferenceRepository,
         personalization_service: PersonalizationService,
+        ranking_service: Optional[MultiFactorRankingService] = None,
         redis_client=None,
     ):
         self.content_repo = content_repo
         self.profile_repo = profile_repo
         self.preference_repo = preference_repo
         self.personalization = personalization_service
+        self.ranking_service = ranking_service or MultiFactorRankingService()
         self.redis = redis_client
 
     def get_playlist(
@@ -122,9 +130,14 @@ class PlaylistService:
             # Generate new playlist snapshot
             playlist = self._generate_playlist(device_id, content_type, MAX_PLAYLIST_SIZE)
 
-            # Cache the session snapshot
-            if self.redis:
+            # If no new approved content is available, keep serving the prior feed.
+            if not playlist:
+                playlist = self._load_fallback_playlist(device_id, content_type)
+
+            # Cache the session snapshot + latest fallback snapshot
+            if self.redis and playlist:
                 self._set_session_cache(cache_key, playlist)
+                self._set_cache(self._get_cache_key(device_id, content_type), playlist)
 
         # Cursor-based pagination
         start_cursor = cursor or 0
@@ -182,11 +195,39 @@ class PlaylistService:
         # Convert to response format
         return [self._format_item(item) for item in selected]
 
-    def _get_candidates(self, content_type: ContentType) -> List[ContentItem]:
+    def _load_fallback_playlist(self, device_id: str, content_type: ContentType) -> List[Dict]:
+        """Load fallback playlist from cache or widened historical window."""
+        if self.redis:
+            cache_key = self._get_cache_key(device_id, content_type)
+            cached = self._get_from_cache(cache_key)
+            if cached:
+                logger.info("Serving cached fallback playlist for %s", content_type.value)
+                return cached
+
+        fallback_candidates = self._get_candidates(
+            content_type=content_type,
+            hours_back=FALLBACK_CONTENT_AGE_HOURS,
+        )
+        if not fallback_candidates:
+            return []
+
+        scored = self._score_candidates(device_id, fallback_candidates)
+        selected = self._select_diverse_items(scored, MAX_PLAYLIST_SIZE)
+        logger.info("Serving historical fallback playlist for %s", content_type.value)
+        return [self._format_item(item) for item in selected]
+
+    def _get_candidates(
+        self,
+        content_type: ContentType,
+        *,
+        hours_back: int = MAX_CONTENT_AGE_HOURS,
+    ) -> List[ContentItem]:
         """Get candidate items for playlist."""
         # Get canonical items from clusters (repo already filters for canonical)
         candidates = self.content_repo.get_items_for_playlist(
-            content_type=content_type, hours_back=MAX_CONTENT_AGE_HOURS, limit=500
+            content_type=content_type,
+            hours_back=hours_back,
+            limit=500,
         )
 
         # Deduplicate by ID
@@ -202,19 +243,14 @@ class PlaylistService:
     def _score_candidates(
         self, device_id: str, candidates: List[ContentItem]
     ) -> List[Tuple[ContentItem, float]]:
-        """Score candidates with global + personalization scores."""
+        """Score candidates with multi-factor ranking."""
         scored = []
 
         for item in candidates:
-            # Base score is global_score
-            base_score = item.global_score or 0.5
-
-            # Add personalization boost
             personalization = self.personalization.compute_personalization_score(device_id, item)
-
-            # Combined score: 60% global, 40% personalization
-            final_score = 0.60 * base_score + 0.40 * personalization
-
+            final_score = self.ranking_service.score_item(
+                item, personalization_score=personalization
+            )
             scored.append((item, final_score))
 
         # Sort by score descending
@@ -241,6 +277,14 @@ class PlaylistService:
 
             # Check topic dominance
             if not self._check_topic_diversity(item, topic_counts, len(selected)):
+                continue
+
+            # Check source cap in rolling window
+            if not self._check_window_source_cap(item, selected):
+                continue
+
+            # Check category cap in rolling window
+            if not self._check_window_category_cap(item, selected):
                 continue
 
             # Check source rotation
@@ -293,6 +337,37 @@ class PlaylistService:
             return False
 
         return True
+
+    def _check_window_source_cap(self, item: ContentItem, selected: List[ContentItem]) -> bool:
+        """Enforce max same-source items in rolling window."""
+        source = (item.source or "").lower()
+        if not source:
+            return True
+
+        lookback = min(len(selected), SOURCE_CAP_WINDOW_SIZE - 1)
+        window = selected[-lookback:] if lookback > 0 else []
+        source_count = sum(1 for candidate in window if (candidate.source or "").lower() == source)
+        return (source_count + 1) <= MAX_SOURCE_PER_WINDOW
+
+    def _check_window_category_cap(self, item: ContentItem, selected: List[ContentItem]) -> bool:
+        """Enforce max per-category share in rolling window."""
+        topics = item.topics or []
+        if not topics:
+            return True
+
+        primary = str(topics[0]).lower()
+        if not primary:
+            return True
+
+        max_per_window = max(1, int(CATEGORY_CAP_WINDOW_SIZE * MAX_CATEGORY_SHARE_PER_WINDOW))
+        lookback = min(len(selected), CATEGORY_CAP_WINDOW_SIZE - 1)
+        window = selected[-lookback:] if lookback > 0 else []
+        category_count = 0
+        for candidate in window:
+            candidate_topics = candidate.topics or []
+            if candidate_topics and str(candidate_topics[0]).lower() == primary:
+                category_count += 1
+        return (category_count + 1) <= max_per_window
 
     def _format_item(self, item: ContentItem) -> Dict:
         """Format content item for API response."""

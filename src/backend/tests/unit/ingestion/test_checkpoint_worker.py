@@ -56,14 +56,18 @@ class _FakeSession:
         self._progress = progress
         self.updated_values = None
         self.committed = False
+        self.commit_calls = 0
+        self.rollback_calls = 0
 
     def query(self, _model):  # noqa: ARG002
         return _FakeQuery(self, self._progress)
 
     def commit(self):
         self.committed = True
+        self.commit_calls += 1
 
     def rollback(self):
+        self.rollback_calls += 1
         return
 
     def close(self):
@@ -191,3 +195,66 @@ def test_worker_reports_attempted_when_inserted_zero(monkeypatch):
     assert result["status"] == "ok"
     assert result["inserted"] == 0
     assert result["attempted"] == 6
+
+
+def test_worker_failure_schedules_retry_with_backoff_and_rolls_back(monkeypatch):
+    entries = [_Entry("https://example.com/fail")]
+    progress = _Progress(
+        id=1,
+        day_utc=None,
+        source_type="rss",
+        feed_name="feed1",
+        target=10,
+        items_ingested=0,
+        items_attempted=0,
+        status="running",
+        retry_count=2,
+    )
+    session = _FakeSession(progress)
+
+    pkg = ModuleType("app.integrations")
+    pkg.__path__ = []
+    rss_mod = ModuleType("app.integrations.rss_client")
+    rss_mod.RSSClient = lambda: _FakeRSSClient(entries)  # type: ignore[attr-defined]
+    yt_mod = ModuleType("app.integrations.youtube_client")
+    yt_mod.YouTubeClient = lambda: None  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "app.integrations", pkg)
+    monkeypatch.setitem(sys.modules, "app.integrations.rss_client", rss_mod)
+    monkeypatch.setitem(sys.modules, "app.integrations.youtube_client", yt_mod)
+    monkeypatch.setattr("app.db.base.SessionLocal", lambda: session)
+    monkeypatch.setattr(checkpoint_worker, "IngestionBudgetRepository", _FakeBudgetRepo)
+    monkeypatch.setattr(checkpoint_worker, "claim_lease", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(checkpoint_worker, "release_lease", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        checkpoint_worker,
+        "_insert_content_items_postgres",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("insert boom")),
+    )
+
+    before = datetime.utcnow()
+    result = checkpoint_worker.process_progress_row_batch(
+        row_id=1,
+        day_utc=datetime.utcnow().date(),
+        redis_client=object(),
+        owner_token="t",
+        ttl_ms=1000,
+        batch_size=1,
+        retry_base_seconds=5,
+        retry_max_seconds=60,
+    )
+    after = datetime.utcnow()
+
+    assert result["status"] == "failed"
+    assert "insert boom" in str(result["error"])
+
+    # Insert transaction should rollback, then retry state should be committed.
+    assert session.rollback_calls >= 1
+    assert session.commit_calls >= 1
+
+    # Retry metadata should be updated with exponential backoff.
+    assert progress.status == "failed"
+    assert progress.last_error == "insert boom"
+    assert progress.retry_count == 3
+    assert progress.retry_at is not None
+    assert before + timedelta(seconds=5) <= progress.retry_at <= after + timedelta(seconds=60)

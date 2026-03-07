@@ -23,6 +23,8 @@ This value is used by ingestion and `/metrics` to decide which day’s `ingestio
 
 ## Concurrency Tuning
 
+- `INGESTION_SCHEDULER_MINUTES` (default: `15`, clamped to `5-15`)
+  - Controls continuous ingestion run cadence.
 - `INGESTION_MAX_WORKERS` (default: `1`)
 - `INGESTION_MAX_WORKERS_ARTICLE` / `INGESTION_MAX_WORKERS_VIDEO` / `INGESTION_MAX_WORKERS_REEL`
   - If unset (or `0`), defaults are derived from `INGESTION_MAX_WORKERS`.
