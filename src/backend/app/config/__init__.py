@@ -49,6 +49,19 @@ from app.config.source_registry import (
     registered_domain,
 )
 from app.config.settings import Settings, get_settings, settings
+from app.config.source_tiering import (
+    BLOCKED_DOMAINS,
+    CORE_DOMAINS,
+    DISCOVERY_DOMAINS,
+    ROTATION_DOMAINS,
+    DomainPolicy,
+    DomainTier,
+    get_domain_policy,
+    get_domain_tier,
+    is_allowed_domain,
+    normalize_domain as normalize_source_domain,
+    registered_domain as registered_source_domain,
+)
 from app.config.youtube import (
     YouTubeChannel,
     get_all_channels,
@@ -89,6 +102,18 @@ __all__ = [
     "get_source_registry_entry",
     "is_shortlisted_source",
     "get_source_registry_stats",
+    # Source tiering
+    "DomainTier",
+    "DomainPolicy",
+    "CORE_DOMAINS",
+    "ROTATION_DOMAINS",
+    "DISCOVERY_DOMAINS",
+    "BLOCKED_DOMAINS",
+    "normalize_source_domain",
+    "registered_source_domain",
+    "get_domain_tier",
+    "get_domain_policy",
+    "is_allowed_domain",
     # Clustering
     "ClusteringConfig",
     "clustering_config",

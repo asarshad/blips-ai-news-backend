@@ -29,6 +29,7 @@ from typing import Dict, List, Optional
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config.source_tiering import get_domain_policy, is_allowed_domain
 from app.ingestion.canonical import canonical_key_for_article, extract_youtube_video_id
 from app.ingestion.signals import SignalItem
 from app.ingestion.signals.github_trending import fetch_github_trending
@@ -68,6 +69,7 @@ class SignalIngestionResult:
     signal_hits_bumped: int = 0  # Existing content items that got signal_hits++
     stubs_created: int = 0  # New CANDIDATE content stubs
     stubs_skipped: int = 0  # Skipped (integrity error / content type unknown)
+    domain_rejected: int = 0  # Rejected by domain tiering policy
     errors: List[str] = field(default_factory=list)
 
 
@@ -132,6 +134,7 @@ def _build_candidate_stub(
 
     source = extract_source(url)
     topics: list = extract_topics(item.raw_title or "", "") if item.raw_title else []
+    domain_policy = get_domain_policy(url)
 
     if content_type == ContentType.VIDEO:
         yt_vid = extract_youtube_video_id(url)
@@ -160,7 +163,8 @@ def _build_candidate_stub(
         dedupe_key=None,
         ai_processed=False,
         language="en",
-        quality_score=0.3,  # Low initial score; scoring service will recalculate
+        # Seed with policy tier weight so promotion has better priors.
+        quality_score=domain_policy.quality_weight,
         recency_score=1.0,
         trend_score=0.0,
         global_score=0.0,
@@ -229,6 +233,14 @@ def run_signal_ingestion(
                 canonical = normalize_url(item.raw_url)
                 if not canonical:
                     continue
+                if not is_allowed_domain(canonical, channel="signal"):
+                    result.domain_rejected += 1
+                    logger.debug(
+                        "[signal_ingestion] domain policy rejected url=%s source=%s",
+                        canonical,
+                        item.signal_source.value,
+                    )
+                    continue
 
                 # Atomic upsert into signal_urls
                 signal_row = signal_repo.upsert(
@@ -286,11 +298,12 @@ def run_signal_ingestion(
         result.errors.append(msg)
 
     logger.info(
-        "[signal_ingestion] Done. seen=%d added=%d stubs=%d bumped=%d errors=%d",
+        "[signal_ingestion] Done. seen=%d added=%d stubs=%d bumped=%d rejected=%d errors=%d",
         result.signal_urls_seen,
         result.signal_urls_added,
         result.stubs_created,
         result.signal_hits_bumped,
+        result.domain_rejected,
         len(result.errors),
     )
     return result
