@@ -37,6 +37,7 @@ from app.ingestion.signals.github_trending import fetch_github_trending
 from app.ingestion.signals.hacker_news import fetch_hn_best, fetch_hn_top
 from app.ingestion.signals.youtube_trending import fetch_yt_trending
 from app.ingestion.url_normalizer import normalize_url
+from app.models.candidate_audit import CandidateAuditEvent
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.signal import SignalSource
 from app.repositories.content_repo import ContentItemRepository
@@ -155,6 +156,9 @@ def _build_candidate_stub(
         published_at=datetime.utcnow(),
         ingestion_day=date.today(),
         title=(item.raw_title or url)[:1000],
+        candidate_first_seen_at=datetime.utcnow(),
+        candidate_signal_source=item.signal_source.value,
+        candidate_raw_title=(item.raw_title or url)[:1000],
         description=None,
         content_text=None,
         summary=None,
@@ -175,6 +179,30 @@ def _build_candidate_stub(
         signal_hits=1,
     )
     return stub
+
+
+def _record_candidate_audit_event(
+    db: Session,
+    *,
+    canonical_url: str,
+    signal_source: SignalSource,
+    event_type: str,
+    discovered_via: Optional[str] = None,
+    content_item_id: Optional[int] = None,
+    reason: Optional[str] = None,
+    payload: Optional[dict] = None,
+) -> None:
+    db.add(
+        CandidateAuditEvent(
+            canonical_url=canonical_url,
+            signal_source=signal_source.value,
+            discovered_via=discovered_via,
+            content_item_id=content_item_id,
+            event_type=event_type,
+            reason=reason,
+            payload=payload,
+        )
+    )
 
 
 # ── Main entry-point ──────────────────────────────────────────────────────────
@@ -253,6 +281,13 @@ def run_signal_ingestion(
             with db.begin_nested():  # SAVEPOINT sp_N
                 canonical = normalize_url(item.raw_url)
                 if not canonical:
+                    _record_candidate_audit_event(
+                        db,
+                        canonical_url=item.raw_url or "",
+                        signal_source=item.signal_source,
+                        event_type="rejected",
+                        reason="normalization_failed",
+                    )
                     continue
                 if not is_allowed_domain(canonical, channel="signal"):
                     result.domain_rejected += 1
@@ -284,11 +319,27 @@ def run_signal_ingestion(
                     result.signal_hits_bumped += 1
                     existing.signal_hits = (existing.signal_hits or 0) + 1
                     signal_repo.mark_duplicate(signal_row, existing.id)
+                    _record_candidate_audit_event(
+                        db,
+                        canonical_url=canonical,
+                        signal_source=item.signal_source,
+                        event_type="duplicate",
+                        discovered_via=_SIGNAL_SOURCE_LABELS.get(item.signal_source, "signal"),
+                        content_item_id=existing.id,
+                    )
                     continue
 
                 # New URL – create a CANDIDATE stub (if within per-run cap)
                 if stubs_this_run >= max_stubs:
                     result.stubs_skipped += 1
+                    _record_candidate_audit_event(
+                        db,
+                        canonical_url=canonical,
+                        signal_source=item.signal_source,
+                        event_type="skipped",
+                        discovered_via=_SIGNAL_SOURCE_LABELS.get(item.signal_source, "signal"),
+                        reason="max_stubs_reached",
+                    )
                     continue
 
                 content_type = _detect_content_type(canonical)
@@ -299,6 +350,18 @@ def run_signal_ingestion(
                 signal_repo.mark_ingested(signal_row, stub.id)
                 stubs_this_run += 1
                 result.stubs_created += 1
+                _record_candidate_audit_event(
+                    db,
+                    canonical_url=canonical,
+                    signal_source=item.signal_source,
+                    event_type="created",
+                    discovered_via=stub.discovered_via,
+                    content_item_id=stub.id,
+                    payload={
+                        "content_type": content_type.value,
+                        "signal_score": item.signal_score,
+                    },
+                )
 
         except IntegrityError:
             # Savepoint already rolled back by context manager exit.

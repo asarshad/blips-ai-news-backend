@@ -7,6 +7,7 @@ from app.models.content import (
     UserPreference,
     UserProfile,
 )
+from app.models.candidate_audit import CandidateAuditEvent
 from app.models.conversation import Conversation
 from app.models.editorial import EditorialAction
 from app.models.ingestion_progress import IngestionProgress
@@ -16,6 +17,7 @@ from app.models.usage import Usage
 __all__ = [
     "Conversation",
     "Usage",
+    "CandidateAuditEvent",
     "ContentItem",
     "ContentType",
     "UserProfile",

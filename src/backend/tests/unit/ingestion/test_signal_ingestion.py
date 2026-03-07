@@ -16,6 +16,7 @@ from app.ingestion.signal_ingestion import (
     run_signal_ingestion,
 )
 from app.ingestion.signals import SignalItem
+from app.models.candidate_audit import CandidateAuditEvent
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.signal import SignalSource
 
@@ -178,6 +179,16 @@ class TestBuildCandidateStub:
         )
         assert stub.signal_hits == 1
 
+    def test_candidate_provenance_fields_are_set(self):
+        stub = _build_candidate_stub(
+            "https://example.com/article",
+            self._make_item(source=SignalSource.HN_TOP, title="From signal"),
+            ContentType.ARTICLE,
+        )
+        assert stub.candidate_first_seen_at is not None
+        assert stub.candidate_signal_source == SignalSource.HN_TOP.value
+        assert stub.candidate_raw_title == "From signal"
+
     def test_title_truncated_to_1000_chars(self):
         long_title = "A" * 1500
         stub = _build_candidate_stub(
@@ -279,6 +290,12 @@ class TestRunSignalIngestion:
         assert result.signal_urls_added == 1
         assert result.stubs_created == 1
         assert result.signal_hits_bumped == 0
+        audit_events = [
+            c.args[0]
+            for c in mock_db.add.call_args_list
+            if c.args and isinstance(c.args[0], CandidateAuditEvent)
+        ]
+        assert any(evt.event_type == "created" for evt in audit_events)
 
     def test_existing_url_bumps_signal_hits(self):
         existing = MagicMock(spec=ContentItem)
@@ -305,6 +322,12 @@ class TestRunSignalIngestion:
         assert result.stubs_created == 0
         assert result.signal_hits_bumped == 1
         assert existing.signal_hits == 3
+        audit_events = [
+            c.args[0]
+            for c in mock_db.add.call_args_list
+            if c.args and isinstance(c.args[0], CandidateAuditEvent)
+        ]
+        assert any(evt.event_type == "duplicate" for evt in audit_events)
 
     def test_stubs_capped_at_max_stubs(self):
         items = [

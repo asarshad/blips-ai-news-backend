@@ -140,6 +140,11 @@ class ContentItem(Base):
 
     # Promotion score computed by PromotionService (refreshed each run).
     promotion_score = Column(Float, nullable=True, index=True)
+
+    # Candidate provenance fields (set by signal ingestion when created as CANDIDATE).
+    candidate_first_seen_at = Column(DateTime, nullable=True, index=True)
+    candidate_signal_source = Column(String(64), nullable=True, index=True)
+    candidate_raw_title = Column(Text, nullable=True)
     # ─────────────────────────────────────────────────────────────────────
 
     # ── Editorial control fields ──────────────────────────────────────────

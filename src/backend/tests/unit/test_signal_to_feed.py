@@ -90,7 +90,8 @@ class TestSignalIngestionCreatesCandidates:
         stubs_added = []
 
         def capture_add(stub):
-            stubs_added.append(stub)
+            if isinstance(stub, ContentItem):
+                stubs_added.append(stub)
 
         mock_db.add.side_effect = capture_add
 
@@ -112,6 +113,7 @@ class TestSignalIngestionCreatesCandidates:
 
         assert result.stubs_created == 2
         assert result.signal_urls_seen == 2
+        assert len(stubs_added) == 2
         # All stubs must be CANDIDATE
         for stub in stubs_added:
             assert stub.curation_status == ContentStatus.CANDIDATE
@@ -131,6 +133,8 @@ class TestSignalIngestionCreatesCandidates:
         mock_signal_repo.upsert.return_value = signal_row
 
         mock_db = MagicMock()
+        added_objects = []
+        mock_db.add.side_effect = lambda obj: added_objects.append(obj)
 
         signals = [_make_article_signal("https://existing.com/article", "Old story")]
 
@@ -152,7 +156,8 @@ class TestSignalIngestionCreatesCandidates:
 
         assert result.stubs_created == 0
         assert result.signal_hits_bumped == 1
-        mock_db.add.assert_not_called()
+        content_adds = [obj for obj in added_objects if isinstance(obj, ContentItem)]
+        assert content_adds == []
 
 
 # ── Test: promotion service gates the feed ────────────────────────────────────
