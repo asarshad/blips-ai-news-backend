@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from datetime import date
 
-from app.ingestion.scheduler import IngestionScheduler, SchedulerConfig, TaskRef, build_fair_queue
+from app.ingestion.scheduler import (
+    IngestionScheduler,
+    SchedulerConfig,
+    TaskRef,
+    build_fair_queue,
+    load_scheduler_config,
+)
 
 
 class _FakeRedis:
@@ -90,3 +96,33 @@ def test_scheduler_skips_tasks_when_lease_exists():
     scheduler.refresh(tasks=[TaskRef(1, "rss", "a")])
 
     assert scheduler.pop_next_dispatchable() is None
+
+
+def test_load_scheduler_config_preserves_article_capacity_when_explicit_caps_starve_it(
+    monkeypatch,
+):
+    monkeypatch.setenv("INGESTION_MAX_WORKERS", "2")
+    monkeypatch.setenv("INGESTION_MAX_WORKERS_ARTICLE", "0")
+    monkeypatch.setenv("INGESTION_MAX_WORKERS_VIDEO", "2")
+    monkeypatch.setenv("INGESTION_MAX_WORKERS_REEL", "0")
+
+    cfg = load_scheduler_config()
+
+    assert cfg.max_workers == 2
+    assert cfg.max_workers_article == 1
+    assert cfg.max_workers_video == 1
+    assert cfg.max_workers_reel == 0
+
+
+def test_load_scheduler_config_rebalances_when_article_is_zero_and_caps_are_full(monkeypatch):
+    monkeypatch.setenv("INGESTION_MAX_WORKERS", "3")
+    monkeypatch.setenv("INGESTION_MAX_WORKERS_ARTICLE", "0")
+    monkeypatch.setenv("INGESTION_MAX_WORKERS_VIDEO", "1")
+    monkeypatch.setenv("INGESTION_MAX_WORKERS_REEL", "2")
+
+    cfg = load_scheduler_config()
+
+    assert cfg.max_workers == 3
+    assert cfg.max_workers_article == 1
+    assert cfg.max_workers_video == 1
+    assert cfg.max_workers_reel == 1
