@@ -64,7 +64,7 @@ def run_checkpointed_ingestion(
     repo = IngestionProgressRepository(db)
     budget_repo = IngestionBudgetRepository(db)
 
-    defaults = _build_defaults()
+    defaults = _build_defaults(db=db, day_utc=day)
     created = repo.ensure_rows(
         day_utc=day, defaults=[(d.source_type, d.feed_name, d.target) for d in defaults]
     )

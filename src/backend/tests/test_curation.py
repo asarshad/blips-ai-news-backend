@@ -503,6 +503,36 @@ class TestPlaylistService:
         result = service._check_topic_diversity(item, topic_counts, current_size)
         assert result is False
 
+    def test_check_topic_diversity_bootstraps_small_playlists(
+        self, mock_content_repo, mock_profile_repo, mock_preference_repo
+    ):
+        """Small playlists should not be blocked by early topic overlap."""
+        personalization = Mock()
+
+        service = PlaylistService(
+            mock_content_repo,
+            mock_profile_repo,
+            mock_preference_repo,
+            personalization,
+            redis_client=None,
+        )
+
+        # Existing playlist is tiny and topic already dominates 100%,
+        # but bootstrap rule should allow growth.
+        topic_counts = {"ai": 1}
+        current_size = 1
+
+        item = ContentItem(
+            id=2,
+            type=ContentType.ARTICLE,
+            title="Another AI Item",
+            source="Test",
+            topics=["ai", "machine-learning"],
+        )
+
+        result = service._check_topic_diversity(item, topic_counts, current_size)
+        assert result is True
+
     def test_check_source_rotation_allowed(
         self, mock_content_repo, mock_profile_repo, mock_preference_repo
     ):

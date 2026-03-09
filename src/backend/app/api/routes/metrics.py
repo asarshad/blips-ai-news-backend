@@ -53,6 +53,13 @@ def get_source_health_metrics(db: Session = Depends(get_db)):
     yesterday = today - timedelta(days=1)
 
     try:
+        from app.ingestion.checkpoint_defaults import (
+            build_defaults as build_ingestion_defaults,
+        )
+        from app.ingestion.checkpoint_defaults import (
+            get_reel_auto_pause_decisions,
+        )
+
         # Get today's ingestion progress for all feeds
         progress_rows = (
             db.query(IngestionProgress)
@@ -149,11 +156,28 @@ def get_source_health_metrics(db: Session = Depends(get_db)):
                 }
             )
 
+        reel_feed_names = sorted(
+            {
+                d.feed_name
+                for d in build_ingestion_defaults(day_utc=today)
+                if d.source_type == "youtube_reel"
+            }
+        )
+        paused_reel_feeds = get_reel_auto_pause_decisions(
+            db=db,
+            day_utc=today,
+            feed_names=reel_feed_names,
+        )
+
         return {
             "as_of": datetime.now(timezone.utc).isoformat(),
             "today": today.isoformat(),
             "sources": list(sources.values()),
             "source_daily_stats": daily_stats,
+            "auto_paused_reel_feeds": [
+                {"feed_name": feed_name, "reason": reason}
+                for feed_name, reason in sorted(paused_reel_feeds.items())
+            ],
             "problem_feeds": problem_feeds,
             "summary": {
                 "total_sources": len(sources),
