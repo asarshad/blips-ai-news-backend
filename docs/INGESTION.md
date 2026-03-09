@@ -34,6 +34,25 @@ This backend supports restart-resilient ingestion that continues until per-feed 
 - `CONNECTOR_TIMEOUT_SECONDS` (default: `15`): HTTP timeout for RSS/YouTube feed fetch calls
 - `CONNECTOR_BACKOFF_BASE_SECONDS` (default: `0.5`): exponential backoff base for connector retries
 
+### Reel guardrail (auto-pause)
+
+Reel feeds are auto-paused for the next day when either condition is met:
+
+- `items_attempted >= 30` and `items_ingested = 0` on the previous day
+- conversion `< 5%` for 3 consecutive days
+
+Paused feeds are exposed in admin metrics (`GET /metrics/sources`) under
+`auto_paused_reel_feeds`.
+
+### Reel scorecard command
+
+Use this read-only diagnostics command to review reel source performance:
+
+```bash
+cd src/backend
+python scripts/reels_source_scorecard.py --days 14
+```
+
 ## Source Registry v1 (TLDR-derived shortlist)
 
 To avoid ingesting from an unbounded long tail, the backend now includes a

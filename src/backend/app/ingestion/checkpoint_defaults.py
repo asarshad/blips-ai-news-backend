@@ -10,11 +10,42 @@ import os
 import socket
 import uuid
 from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Dict, List
 
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Utility-first reel targets (YouTube-only) with explicit daily budget of 30.
+# Environment overrides can still replace any of these values.
+DEFAULT_INGESTION_TARGET_OVERRIDES: Dict[str, int] = {
+    "youtube_reel:The Verge": 4,
+    "youtube_reel:Technology Connections Shorts": 4,
+    "youtube_reel:Karl Conrad": 3,
+    "youtube_reel:SuperSaf": 3,
+    "youtube_reel:Sam Beckman": 3,
+    "youtube_reel:Mrwhosetheboss": 3,
+    "youtube_reel:Unbox Therapy": 3,
+    "youtube_reel:JerryRigEverything": 3,
+    "youtube_reel:Marques Brownlee (MKBHD)": 2,
+    "youtube_reel:ShortCircuit": 1,
+    "youtube_reel:TechLinked": 1,
+    "youtube_reel:Android Developers": 0,
+    "youtube_reel:Tech Vision": 0,
+    "youtube_reel:Linus Tech Tips": 0,
+    "youtube_reel:Fireship": 0,
+    "youtube_reel:Matt Wolfe": 0,
+    "youtube_reel:Jeff Geerling": 0,
+    # Keep long-form throughput unchanged after enabling MIXED format.
+    "youtube_video:Marques Brownlee (MKBHD)": 2,
+    "youtube_video:ShortCircuit": 3,
+    "youtube_video:TechLinked": 2,
+}
+
+REEL_AUTO_PAUSE_MIN_ATTEMPTS = 30
+REEL_AUTO_PAUSE_MIN_CONVERSION = 0.05
+REEL_AUTO_PAUSE_CONSECUTIVE_DAYS = 3
 
 
 @dataclass(frozen=True)
@@ -34,17 +65,18 @@ def parse_target_overrides() -> Dict[str, int]:
     Format: JSON object mapping "{source_type}:{feed_name}" -> int.
     """
 
+    result: Dict[str, int] = dict(DEFAULT_INGESTION_TARGET_OVERRIDES)
+
     raw = os.getenv("INGESTION_TARGET_DEFAULTS", "").strip()
     if not raw:
-        return {}
+        return result
 
     try:
         data = json.loads(raw)
     except Exception:
         logger.warning("Invalid INGESTION_TARGET_DEFAULTS JSON; ignoring")
-        return {}
+        return result
 
-    result: Dict[str, int] = {}
     if isinstance(data, dict):
         for k, v in data.items():
             try:
@@ -54,7 +86,82 @@ def parse_target_overrides() -> Dict[str, int]:
     return result
 
 
-def build_defaults() -> List[FeedDefault]:
+def get_reel_auto_pause_decisions(
+    *,
+    db=None,
+    day_utc: date | None = None,
+    feed_names: List[str] | None = None,
+) -> Dict[str, str]:
+    """Return reel feeds that should be auto-paused for the current day."""
+    if db is None:
+        return {}
+
+    names = sorted({name for name in (feed_names or []) if str(name).strip()})
+    if not names:
+        return {}
+
+    from app.ingestion.time import get_ingestion_day
+    from app.models.ingestion_progress import IngestionProgress
+
+    today = day_utc or get_ingestion_day()
+    yesterday = today - timedelta(days=1)
+    start_day = today - timedelta(days=REEL_AUTO_PAUSE_CONSECUTIVE_DAYS)
+
+    rows = (
+        db.query(IngestionProgress)
+        .filter(
+            IngestionProgress.source_type == "youtube_reel",
+            IngestionProgress.feed_name.in_(names),
+            IngestionProgress.day_utc >= start_day,
+            IngestionProgress.day_utc <= yesterday,
+        )
+        .all()
+    )
+
+    by_feed_day = {(row.feed_name, row.day_utc): row for row in rows}
+    paused: Dict[str, str] = {}
+
+    for feed_name in names:
+        yesterday_row = by_feed_day.get((feed_name, yesterday))
+        attempted_yesterday = int(getattr(yesterday_row, "items_attempted", 0) or 0)
+        inserted_yesterday = int(getattr(yesterday_row, "items_ingested", 0) or 0)
+
+        if attempted_yesterday >= REEL_AUTO_PAUSE_MIN_ATTEMPTS and inserted_yesterday == 0:
+            paused[feed_name] = (
+                f"attempted>={REEL_AUTO_PAUSE_MIN_ATTEMPTS} and inserted=0 on "
+                f"{yesterday.isoformat()}"
+            )
+            continue
+
+        low_conversion_streak = True
+        for offset in range(1, REEL_AUTO_PAUSE_CONSECUTIVE_DAYS + 1):
+            day_to_check = today - timedelta(days=offset)
+            row = by_feed_day.get((feed_name, day_to_check))
+            if row is None:
+                low_conversion_streak = False
+                break
+
+            attempted = int(getattr(row, "items_attempted", 0) or 0)
+            inserted = int(getattr(row, "items_ingested", 0) or 0)
+            if attempted <= 0:
+                low_conversion_streak = False
+                break
+
+            conversion = inserted / attempted
+            if conversion >= REEL_AUTO_PAUSE_MIN_CONVERSION:
+                low_conversion_streak = False
+                break
+
+        if low_conversion_streak:
+            paused[feed_name] = (
+                f"conversion<{REEL_AUTO_PAUSE_MIN_CONVERSION:.0%} for "
+                f"{REEL_AUTO_PAUSE_CONSECUTIVE_DAYS} consecutive days"
+            )
+
+    return paused
+
+
+def build_defaults(*, db=None, day_utc: date | None = None) -> List[FeedDefault]:
     """Build per-feed daily targets from configured RSS feeds + YouTube channels."""
 
     from app.integrations.rss_client import RSSClient
@@ -96,5 +203,21 @@ def build_defaults() -> List[FeedDefault]:
             defaults.append(FeedDefault("youtube_video", cfg.name, max(0, video_target)))
             if reel_target > 0:
                 defaults.append(FeedDefault("youtube_reel", cfg.name, max(0, reel_target)))
+
+    reel_feeds = [d.feed_name for d in defaults if d.source_type == "youtube_reel" and d.target > 0]
+    paused_reel_feeds = get_reel_auto_pause_decisions(
+        db=db,
+        day_utc=day_utc,
+        feed_names=reel_feeds,
+    )
+
+    if paused_reel_feeds:
+        for feed_name, reason in paused_reel_feeds.items():
+            logger.warning("Auto-paused reel feed for today: %s (%s)", feed_name, reason)
+        defaults = [
+            d
+            for d in defaults
+            if not (d.source_type == "youtube_reel" and d.feed_name in paused_reel_feeds)
+        ]
 
     return [d for d in defaults if d.target > 0]

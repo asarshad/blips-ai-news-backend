@@ -93,7 +93,7 @@ class Settings(BaseSettings):
     # Daily ingestion targets (per UTC day)
     DAILY_TARGET_ARTICLES: int = 55
     DAILY_TARGET_VIDEOS: int = 35
-    DAILY_TARGET_REELS: int = 25
+    DAILY_TARGET_REELS: int = 30
 
     # Ingestion durability controls
     INGESTION_ENABLED: bool = True

@@ -128,7 +128,24 @@ class PlaylistService:
 
         if not playlist:
             # Generate new playlist snapshot
-            playlist = self._generate_playlist(device_id, content_type, MAX_PLAYLIST_SIZE)
+            playlist_items = self._generate_playlist_items(
+                device_id, content_type, MAX_PLAYLIST_SIZE
+            )
+
+            if playlist_items and len(playlist_items) < MIN_PLAYLIST_SIZE:
+                logger.info(
+                    "Fresh playlist for %s too small (%s items) - topping up from historical window",
+                    content_type.value,
+                    len(playlist_items),
+                )
+                playlist_items = self._top_up_items_with_historical(
+                    device_id=device_id,
+                    content_type=content_type,
+                    selected_items=playlist_items,
+                    target_size=MAX_PLAYLIST_SIZE,
+                )
+
+            playlist = [self._format_item(item) for item in playlist_items]
 
             # If no new approved content is available, keep serving the prior feed.
             if not playlist:
@@ -179,6 +196,13 @@ class PlaylistService:
         self, device_id: str, content_type: ContentType, size: int
     ) -> List[Dict]:
         """Generate a new playlist with diversity constraints."""
+        selected = self._generate_playlist_items(device_id, content_type, size)
+        return [self._format_item(item) for item in selected]
+
+    def _generate_playlist_items(
+        self, device_id: str, content_type: ContentType, size: int
+    ) -> List[ContentItem]:
+        """Generate selected content items (pre-format) for a new playlist."""
         # Get candidate items
         candidates = self._get_candidates(content_type)
 
@@ -192,8 +216,59 @@ class PlaylistService:
         # Select items with diversity constraints
         selected = self._select_diverse_items(scored_candidates, size)
 
-        # Convert to response format
-        return [self._format_item(item) for item in selected]
+        return selected
+
+    def _relaxed_fill_items(
+        self,
+        selected_items: List[ContentItem],
+        scored_candidates: List[Tuple[ContentItem, float]],
+        target_size: int,
+    ) -> List[ContentItem]:
+        """Fill remaining slots using relaxed constraints to prevent starvation."""
+        selected: List[ContentItem] = list(selected_items)
+        seen_ids = {item.id for item in selected}
+        used_clusters = {item.cluster_id for item in selected if item.cluster_id}
+
+        for item, _score in scored_candidates:
+            if len(selected) >= target_size:
+                break
+            if item.id in seen_ids:
+                continue
+            if item.cluster_id and item.cluster_id in used_clusters:
+                continue
+
+            selected.append(item)
+            seen_ids.add(item.id)
+            if item.cluster_id:
+                used_clusters.add(item.cluster_id)
+
+        return selected
+
+    def _top_up_items_with_historical(
+        self,
+        *,
+        device_id: str,
+        content_type: ContentType,
+        selected_items: List[ContentItem],
+        target_size: int,
+    ) -> List[ContentItem]:
+        """Top up short playlists from a wider historical window."""
+        if len(selected_items) >= target_size:
+            return selected_items
+
+        fallback_candidates = self._get_candidates(
+            content_type=content_type,
+            hours_back=FALLBACK_CONTENT_AGE_HOURS,
+        )
+        if not fallback_candidates:
+            return selected_items
+
+        selected_ids = {item.id for item in selected_items}
+        scored = self._score_candidates(
+            device_id,
+            [item for item in fallback_candidates if item.id not in selected_ids],
+        )
+        return self._relaxed_fill_items(selected_items, scored, target_size)
 
     def _load_fallback_playlist(self, device_id: str, content_type: ContentType) -> List[Dict]:
         """Load fallback playlist from cache or widened historical window."""
@@ -213,6 +288,7 @@ class PlaylistService:
 
         scored = self._score_candidates(device_id, fallback_candidates)
         selected = self._select_diverse_items(scored, MAX_PLAYLIST_SIZE)
+        selected = self._relaxed_fill_items(selected, scored, MAX_PLAYLIST_SIZE)
         logger.info("Serving historical fallback playlist for %s", content_type.value)
         return [self._format_item(item) for item in selected]
 
@@ -316,13 +392,20 @@ class PlaylistService:
         if current_size == 0 or not item.topics:
             return True
 
-        # Check each topic
-        for topic in item.topics:
-            current_count = topic_counts.get(topic.lower(), 0)
-            future_share = (current_count + 1) / (current_size + 1)
+        # Bootstrap small playlists first; strict dominance this early can starve
+        # sources where tagging is dense and overlapping.
+        if current_size < 5:
+            return True
 
-            if future_share > MAX_TOPIC_DOMINANCE:
-                return False
+        primary_topic = str(item.topics[0]).lower() if item.topics else ""
+        if not primary_topic:
+            return True
+
+        current_count = topic_counts.get(primary_topic, 0)
+        future_share = (current_count + 1) / (current_size + 1)
+
+        if future_share > MAX_TOPIC_DOMINANCE:
+            return False
 
         return True
 
