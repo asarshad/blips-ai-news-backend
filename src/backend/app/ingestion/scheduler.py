@@ -109,6 +109,27 @@ def load_scheduler_config() -> SchedulerConfig:
         take = min(overflow, max(0, w_a))
         w_a -= take
 
+    # Safety: never starve ARTICLE entirely when workers exist.
+    # Explicit per-type env values can accidentally set ARTICLE=0 while
+    # allocating all workers to VIDEO/REEL, causing RSS ingestion to stop.
+    if max_workers > 0 and w_a <= 0:
+        overflow = max(0, (max(0, w_a) + max(0, w_v) + max(0, w_r) + 1) - max_workers)
+        while overflow > 0:
+            if w_v >= w_r and w_v > 0:
+                w_v -= 1
+            elif w_r > 0:
+                w_r -= 1
+            else:
+                break
+            overflow -= 1
+        w_a = 1
+        logger.warning(
+            "Adjusted scheduler caps to preserve ARTICLE capacity: article=%s video=%s reel=%s",
+            w_a,
+            w_v,
+            w_r,
+        )
+
     batch_size = max(1, _int_env("INGESTION_BATCH_SIZE", 10))
     loop_sleep_seconds = _float_env("INGESTION_LOOP_SLEEP_SECONDS", 10.0)
 
