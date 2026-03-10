@@ -7,7 +7,7 @@ from datetime import date, datetime
 from itertools import zip_longest
 from typing import Iterable, List, Optional, Tuple
 
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.models.ingestion_progress import IngestionProgress
@@ -86,9 +86,10 @@ class IngestionProgressRepository:
         """List rows eligible to be worked, interleaved by source type.
 
         Eligibility rules:
-        - not complete
         - below target
-        - retry_at is null or <= now
+        - either:
+          - status is active (not complete/failed) and retry_at is null or <= now
+          - status is failed but explicitly scheduled for retry (retry_at <= now)
 
         Results are interleaved by source_type for fair processing.
         """
@@ -96,9 +97,20 @@ class IngestionProgressRepository:
         current = now or datetime.utcnow()
         q = self.db.query(IngestionProgress).filter(
             IngestionProgress.day_utc == day_utc,
-            IngestionProgress.status.not_in(["complete", "failed"]),
             IngestionProgress.items_ingested < IngestionProgress.target,
-            or_(IngestionProgress.retry_at.is_(None), IngestionProgress.retry_at <= current),
+            or_(
+                and_(
+                    IngestionProgress.status.not_in(["complete", "failed"]),
+                    or_(
+                        IngestionProgress.retry_at.is_(None), IngestionProgress.retry_at <= current
+                    ),
+                ),
+                and_(
+                    IngestionProgress.status == "failed",
+                    IngestionProgress.retry_at.isnot(None),
+                    IngestionProgress.retry_at <= current,
+                ),
+            ),
         )
         if source_types:
             q = q.filter(IngestionProgress.source_type.in_(list(source_types)))
@@ -160,7 +172,8 @@ class IngestionProgressRepository:
 
     def schedule_retry(self, *, row_id: int, error: str, retry_at: datetime) -> None:
         row = self.db.query(IngestionProgress).filter(IngestionProgress.id == row_id).one()
-        row.status = "failed"
+        # Retryable failures should remain eligible after backoff expires.
+        row.status = "running"
         row.last_error = error
         row.retry_count = int(row.retry_count or 0) + 1
         row.retry_at = retry_at

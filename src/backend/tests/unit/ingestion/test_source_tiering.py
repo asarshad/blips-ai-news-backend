@@ -18,6 +18,11 @@ def test_domain_tier_rotation_for_secondary_publishers():
     assert get_domain_tier("https://blog.figma.com/post") == DomainTier.ROTATION
 
 
+def test_domain_tier_rotation_for_tldr_shortlist_domains():
+    # Not manually listed in CORE/ROTATION sets, but present in TLDR shortlist.
+    assert get_domain_tier("https://uxdesign.cc/story") == DomainTier.ROTATION
+
+
 def test_domain_tier_discovery_for_curated_long_tail():
     assert get_domain_tier("https://speedrun.substack.com/p/issue") == DomainTier.DISCOVERY
     assert get_domain_tier("https://example.com/post") == DomainTier.DISCOVERY

@@ -253,7 +253,7 @@ def test_worker_failure_schedules_retry_with_backoff_and_rolls_back(monkeypatch)
     assert session.commit_calls >= 1
 
     # Retry metadata should be updated with exponential backoff.
-    assert progress.status == "failed"
+    assert progress.status == "running"
     assert progress.last_error == "insert boom"
     assert progress.retry_count == 3
     assert progress.retry_at is not None

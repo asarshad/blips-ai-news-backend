@@ -729,6 +729,70 @@ FEED_REGISTRY: List[FeedConfig] = [
         notes="Weekly AI/ML newsletter — feed URL returns 404, needs investigation",
     ),
     # =========================================================================
+    # DISCOVERY NEWSLETTERS (TLDR-DERIVED)
+    # Substack/Beehiiv sources with low caps for controlled direct coverage
+    # =========================================================================
+    FeedConfig(
+        url="https://speedrun.substack.com/feed",
+        name="Speedrun",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=1,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.78,
+        notes="AI product + model launch analysis (Substack)",
+    ),
+    FeedConfig(
+        url="https://cloudedjudgement.substack.com/feed",
+        name="Clouded Judgement",
+        role=FeedRole.INFRA,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.86,
+        notes="Cloud infrastructure and hyperscaler cost analysis (Substack)",
+    ),
+    FeedConfig(
+        url="https://joereis.substack.com/feed",
+        name="Joe Reis",
+        role=FeedRole.INFRA,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=1,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.82,
+        notes="Data engineering and platform architecture analysis (Substack)",
+    ),
+    FeedConfig(
+        url="https://latent.space/feed",
+        name="Latent Space",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.88,
+        notes="Applied AI engineering and agent systems analysis",
+    ),
+    FeedConfig(
+        url="https://productpicnic.beehiiv.com/feed",
+        name="Product Picnic",
+        role=FeedRole.BUSINESS,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=1,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.76,
+        notes="Product strategy and growth signal curation (Beehiiv)",
+    ),
+    FeedConfig(
+        url="https://cutlefish.substack.com/feed",
+        name="Cut Le Fish",
+        role=FeedRole.DEV,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=1,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.78,
+        notes="Engineering leadership and software strategy essays (Substack)",
+    ),
+    # =========================================================================
     # PRODUCT & STARTUP DISCOVERY (NEW)
     # Product launches, indie tools, startup ecosystem
     # =========================================================================

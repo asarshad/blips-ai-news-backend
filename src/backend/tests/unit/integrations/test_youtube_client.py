@@ -1,3 +1,4 @@
+import time
 from unittest.mock import Mock
 
 import pytest
@@ -86,3 +87,20 @@ def test_parse_feed_with_retries_stops_when_budget_exhausted(monkeypatch):
     monkeypatch.setattr(requests, "get", _always_fail)
     feed = client._parse_feed_with_retries("https://www.youtube.com/feeds/videos.xml?channel_id=x")
     assert len(feed.entries) == 0
+
+
+def test_parse_entry_published_at_prefers_published_then_updated():
+    client = YouTubeClient(channel_configs=[])
+
+    published_entry = {"published_parsed": time.gmtime(1716912000)}
+    updated_entry = {"updated_parsed": time.gmtime(1716998400)}
+    empty_entry = {}
+
+    published_at = client._parse_entry_published_at(published_entry)
+    updated_at = client._parse_entry_published_at(updated_entry)
+
+    assert published_at is not None
+    assert published_at.year == 2024
+    assert updated_at is not None
+    assert updated_at.year == 2024
+    assert client._parse_entry_published_at(empty_entry) is None

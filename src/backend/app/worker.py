@@ -68,8 +68,8 @@ _stop_event = threading.Event()
 # Unique token used to verify lock ownership
 _worker_lock_token: str = f"{os.getpid()}:{uuid.uuid4()}"
 
-WORKER_LOCK_KEY = "worker_lock"
-WORKER_LOCK_TTL = 300  # 5 minutes
+WORKER_LOCK_KEY = os.getenv("SCHEDULER_LEADER_LOCK_KEY", "scheduler_lock")
+WORKER_LOCK_TTL = int(os.getenv("SCHEDULER_LOCK_TTL_SECONDS", "120"))
 LOCK_REACQUIRE_ATTEMPTS = 3
 LOCK_REACQUIRE_DELAY_SECONDS = 5.0
 
@@ -121,6 +121,12 @@ _REFRESH_LUA = (
     "else return 0 end"
 )
 
+_RELEASE_LUA = (
+    "if redis.call('get', KEYS[1]) == ARGV[1] then "
+    "  return redis.call('del', KEYS[1]) "
+    "else return 0 end"
+)
+
 
 def refresh_worker_lock() -> bool | None:
     """Refresh the worker lock TTL — only if we still own it.
@@ -142,6 +148,17 @@ def refresh_worker_lock() -> bool | None:
     except RedisError as e:
         logger.warning(f"Failed to refresh worker lock (transient Redis error): {e}")
         return None
+
+
+def release_worker_lock() -> bool:
+    """Release the worker lock only if we still own it."""
+    try:
+        redis_client = get_redis()
+        result = redis_client.eval(_RELEASE_LUA, 1, WORKER_LOCK_KEY, _worker_lock_token)
+        return int(result or 0) == 1
+    except RedisError as e:
+        logger.warning(f"Failed to release worker lock: {e}")
+        return False
 
 
 def _probe_worker_lock_state() -> str:
@@ -241,6 +258,7 @@ def _acquire_lock_with_retry(max_attempts: int = 10, base_delay: float = 5.0) ->
 def run_worker():
     """Main worker entry point."""
     global _scheduler
+    lock_acquired = False
 
     # Register signal handlers as early as possible so SIGTERM during lock
     # acquisition is handled gracefully rather than causing an immediate exit.
@@ -255,6 +273,7 @@ def run_worker():
     logger.info(f"Ingestion enabled: {os.getenv('INGESTION_ENABLED', 'true')}")
     logger.info(f"Feature ingestion: {os.getenv('FEATURE_INGESTION_ENABLED', 'not set')}")
     logger.info(f"Fetch interval: {os.getenv('NEWS_FETCH_INTERVAL_MINUTES', '30')} minutes")
+    logger.info(f"Scheduler lock key: {WORKER_LOCK_KEY}")
     logger.info("=" * 60)
     sys.stdout.flush()
 
@@ -275,6 +294,7 @@ def run_worker():
         _idle_forever()
         return
 
+    lock_acquired = True
     logger.info("Worker lock acquired successfully")
     sys.stdout.flush()
 
@@ -359,6 +379,11 @@ def run_worker():
         _stop_event.set()  # Ensure everything knows we're stopping
         if _scheduler:
             _scheduler.shutdown(wait=False)
+        if lock_acquired:
+            if release_worker_lock():
+                logger.info("Worker lock released")
+            else:
+                logger.info("Worker lock not released (already lost or Redis unavailable)")
         logger.info("Worker shutdown complete")
         sys.stdout.flush()
 

@@ -378,7 +378,7 @@ def process_progress_row_batch(
 
                 is_reel = bool(e.is_short or (e.video_url and "/shorts/" in e.video_url))
                 # Debug: trace the filter decision
-                logger.info(
+                logger.debug(
                     "YT filter: want_reel=%s is_reel=%s e.is_short=%s url_has_shorts=%s video_id=%s",
                     want_reel,
                     is_reel,
@@ -417,7 +417,7 @@ def process_progress_row_batch(
                         "ingestion_day": day_utc,
                         "is_suppressed": False,
                         "signal_hits": 0,
-                        "published_at": datetime.utcnow(),
+                        "published_at": getattr(e, "published_at", None) or datetime.utcnow(),
                         "title": e.title,
                         "description": (e.summary or "")[:500] if e.summary else None,
                         "content_text": None,
