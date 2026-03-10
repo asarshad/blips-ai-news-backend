@@ -9,7 +9,7 @@ see domain/editorial/service.py for that.
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import desc, func
+from sqlalchemy import and_, desc, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.content import ContentItem, ContentStatus, ContentType
@@ -46,8 +46,14 @@ class EditorialRepository:
             start = datetime.combine(day, datetime.min.time())
             end = start + timedelta(days=1)
             query = query.filter(
-                ContentItem.published_at >= start,
-                ContentItem.published_at < end,
+                or_(
+                    ContentItem.ingestion_day == day,
+                    and_(
+                        ContentItem.ingestion_day.is_(None),
+                        ContentItem.published_at >= start,
+                        ContentItem.published_at < end,
+                    ),
+                ),
             )
 
         if content_type is not None:

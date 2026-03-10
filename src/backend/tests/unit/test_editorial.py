@@ -16,7 +16,7 @@ the full app import chain (feedparser → cgi etc.).  Schemas are tested
 implicitly via contract/integration tests and by Pydantic's own validation.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -245,6 +245,25 @@ class TestEditorialRepository:
         counts = repo.candidate_queue_counts()
 
         assert counts == {"ARTICLE": 3, "VIDEO": 1}
+
+    def test_list_content_day_uses_ingestion_day_with_legacy_published_fallback(self):
+        repo, session = self._make_repo()
+        query = MagicMock()
+        session.query.return_value = query
+        query.filter.return_value = query
+        query.order_by.return_value = query
+        query.offset.return_value = query
+        query.limit.return_value = query
+        query.count.return_value = 0
+        query.all.return_value = []
+
+        repo.list_content(day=date(2026, 3, 10), page=1, page_size=50)
+
+        day_filter_expr = query.filter.call_args_list[0].args[0]
+        rendered = str(day_filter_expr)
+        assert "ingestion_day" in rendered
+        assert "published_at" in rendered
+        assert "IS NULL" in rendered
 
     def test_approve_sets_promoted_and_unsuppressed(self):
         repo, session = self._make_repo()
