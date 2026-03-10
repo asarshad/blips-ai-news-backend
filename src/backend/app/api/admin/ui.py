@@ -11,6 +11,7 @@ GET  /admin/ui/detail/{id}   → item detail + actions + audit trail
 GET  /admin/ui/submit        → manual URL submission form
 
 POST /admin/ui/submit
+POST /admin/ui/review/bulk-action
 POST /admin/ui/action/{id}/boost
 POST /admin/ui/action/{id}/suppress
 POST /admin/ui/action/{id}/unsuppress
@@ -128,10 +129,10 @@ def _add_flash(url: str, flash: str) -> str:
     return f"{parsed.path}?{query}"
 
 
-def _resolve_next_ui_url(
+def _resolve_ui_url(
     *,
-    content_id: int,
     admin_key: str,
+    fallback_path: str,
     next_url: Optional[str] = None,
     referer: Optional[str] = None,
 ) -> str:
@@ -147,7 +148,22 @@ def _resolve_next_ui_url(
         params["key"] = admin_key
         query = urlencode(params)
         return f"{path}?{query}"
-    return f"/api/v1/admin/ui/detail/{content_id}?key={admin_key}"
+    return f"{fallback_path}?key={admin_key}"
+
+
+def _resolve_next_ui_url(
+    *,
+    content_id: int,
+    admin_key: str,
+    next_url: Optional[str] = None,
+    referer: Optional[str] = None,
+) -> str:
+    return _resolve_ui_url(
+        admin_key=admin_key,
+        fallback_path=f"/api/v1/admin/ui/detail/{content_id}",
+        next_url=next_url,
+        referer=referer,
+    )
 
 
 def _esc(s: str) -> str:
@@ -502,25 +518,66 @@ def ui_review_queue(
     source: Optional[str] = Query(None),
     discovered_via: Optional[str] = Query(None),
     min_signal_hits: int = Query(0, ge=0),
+    start_day: Optional[str] = Query(None),
+    end_day: Optional[str] = Query(None),
     sort_by: str = Query("priority"),
+    selected_id: Optional[int] = Query(None, ge=1),
     page: int = Query(1, ge=1),
     flash: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     admin_key: str = Depends(_require_admin_key_or_query),
 ):
+    from app.models.content import ContentStatus
+
     repo = EditorialRepository(db)
     page_size = 25
+    parsed_start_day = None
+    if start_day:
+        try:
+            parsed_start_day = date.fromisoformat(start_day)
+        except ValueError:
+            parsed_start_day = None
+
+    parsed_end_day = None
+    if end_day:
+        try:
+            parsed_end_day = date.fromisoformat(end_day)
+        except ValueError:
+            parsed_end_day = None
+
+    if parsed_start_day and parsed_end_day and parsed_start_day > parsed_end_day:
+        parsed_start_day, parsed_end_day = parsed_end_day, parsed_start_day
+
+    start_day_value = parsed_start_day.isoformat() if parsed_start_day else ""
+    end_day_value = parsed_end_day.isoformat() if parsed_end_day else ""
+
     items, total = repo.list_candidate_queue(
         content_type=type or None,
         source=source or None,
         discovered_via=discovered_via or None,
         min_signal_hits=min_signal_hits,
+        start_day=parsed_start_day,
+        end_day=parsed_end_day,
         sort_by=sort_by,
         page=page,
         page_size=page_size,
     )
     counts = repo.candidate_queue_counts()
     pages = max(1, math.ceil(total / page_size))
+
+    if page > pages and total > 0:
+        page = pages
+        items, total = repo.list_candidate_queue(
+            content_type=type or None,
+            source=source or None,
+            discovered_via=discovered_via or None,
+            min_signal_hits=min_signal_hits,
+            start_day=parsed_start_day,
+            end_day=parsed_end_day,
+            sort_by=sort_by,
+            page=page,
+            page_size=page_size,
+        )
 
     def _sel(name: str, cur: str, opts: list[tuple[str, str]]) -> str:
         options_html = "".join(
@@ -538,9 +595,48 @@ def ui_review_queue(
         cls = "bg-red-100 text-red-800" if is_err else "bg-green-100 text-green-800"
         flash_html = f'<div class="mb-4 p-3 {cls} rounded text-sm">{_esc(flash)}</div>'
 
+    if selected_id is not None:
+        selected_item = next(
+            (candidate for candidate in items if candidate.id == selected_id), None
+        )
+    else:
+        selected_item = None
+
+    if selected_item is None and selected_id is not None:
+        candidate_item = repo.get_content_by_id(selected_id)
+        if candidate_item and candidate_item.curation_status == ContentStatus.CANDIDATE:
+            selected_item = candidate_item
+
+    if selected_item is None and items:
+        selected_item = items[0]
+        selected_id = selected_item.id
+
+    def _review_query(
+        *,
+        target_page: Optional[int] = None,
+        target_selected_id: Optional[int] = None,
+    ) -> str:
+        effective_selected_id = (
+            target_selected_id if target_selected_id is not None else (selected_id or "")
+        )
+        return urlencode(
+            {
+                "key": admin_key,
+                "page": target_page if target_page is not None else page,
+                "type": type or "",
+                "source": source or "",
+                "discovered_via": discovered_via or "",
+                "min_signal_hits": min_signal_hits,
+                "start_day": start_day_value,
+                "end_day": end_day_value,
+                "sort_by": sort_by,
+                "selected_id": effective_selected_id,
+            }
+        )
+
     filter_form = f"""
     <div class="bg-white rounded-lg shadow p-4 mb-4">
-      <form method="get" action="/api/v1/admin/ui/review" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
+      <form method="get" action="/api/v1/admin/ui/review" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 items-end">
         <input type="hidden" name="key" value="{admin_key}">
         <div>
           <label class="block text-xs text-gray-500 mb-1">Type</label>
@@ -562,6 +658,16 @@ def ui_review_queue(
                  class="w-full rounded border border-gray-300 text-sm px-2 py-1">
         </div>
         <div>
+          <label class="block text-xs text-gray-500 mb-1">From date</label>
+          <input type="date" name="start_day" value="{start_day_value}"
+                 class="w-full rounded border border-gray-300 text-sm px-2 py-1">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">To date</label>
+          <input type="date" name="end_day" value="{end_day_value}"
+                 class="w-full rounded border border-gray-300 text-sm px-2 py-1">
+        </div>
+        <div>
           <label class="block text-xs text-gray-500 mb-1">Sort</label>
           {_sel("sort_by", sort_by, [("priority", "Priority"), ("first_seen", "First seen"), ("published_at", "Published")])}
         </div>
@@ -573,18 +679,13 @@ def ui_review_queue(
       </form>
     </div>"""
 
-    review_next = "/api/v1/admin/ui/review?" + urlencode(
-        {
-            "page": page,
-            "type": type or "",
-            "source": source or "",
-            "discovered_via": discovered_via or "",
-            "min_signal_hits": min_signal_hits,
-            "sort_by": sort_by,
-        }
+    review_next = "/api/v1/admin/ui/review?" + _review_query()
+    publish_boost_options = "".join(
+        f'<option value="{lvl}" {"selected" if lvl == 3 else ""}>{lvl}</option>' for lvl in range(4)
     )
 
     rows_html = ""
+    mobile_cards_html = ""
     for item in items:
         score = f"{item.promotion_score:.3f}" if item.promotion_score else "—"
         published = item.published_at.strftime("%m-%d %H:%M") if item.published_at else "—"
@@ -594,12 +695,25 @@ def ui_review_queue(
         signal_hits = str(getattr(item, "signal_hits", 0) or 0)
         source_label = _esc(item.source or "—")
         title = _esc((item.title or "Untitled")[:85])
+        item_link = (
+            "/api/v1/admin/ui/review?"
+            + _review_query(target_selected_id=item.id)
+            + "#review-detail"
+        )
+        item_selected = selected_id == item.id
+        row_class = "bg-blue-50" if item_selected else "hover:bg-gray-50"
+        mobile_selected_ring = (
+            "ring-2 ring-blue-400 border-blue-300" if item_selected else "border-gray-200"
+        )
 
         rows_html += f"""
-        <tr class="border-b border-gray-100 hover:bg-gray-50">
+        <tr class="border-b border-gray-100 {row_class} cursor-pointer" data-detail-href="{item_link}">
+          <td class="px-3 py-2">
+            <input type="checkbox" value="{item.id}" class="bulk-item rounded border-gray-300" aria-label="Select {item.id}">
+          </td>
           <td class="px-3 py-2 text-xs text-gray-500">{item.id}</td>
           <td class="px-3 py-2 text-sm">
-            <a href="/api/v1/admin/ui/detail/{item.id}?key={admin_key}" class="text-blue-600 hover:underline font-medium">{title}</a>
+            <a href="{item_link}" class="text-blue-600 hover:underline font-medium">{title}</a>
             <div class="text-xs text-gray-500 mt-0.5">{source_label}</div>
           </td>
           <td class="px-3 py-2 text-xs text-gray-600">{item.type.value if item.type else "—"}</td>
@@ -608,28 +722,26 @@ def ui_review_queue(
           <td class="px-3 py-2 text-xs text-gray-500">{discovered_label}</td>
           <td class="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{first_seen_str}</td>
           <td class="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{published}</td>
-          <td class="px-3 py-2">
-            <div class="flex flex-wrap gap-1">
-              <form method="post" action="/api/v1/admin/ui/action/{item.id}/approve-publish?key={admin_key}">
-                <input type="hidden" name="next" value="{review_next}">
-                <input type="hidden" name="boost_level" value="3">
-                <button class="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">Publish top</button>
-              </form>
-              <form method="post" action="/api/v1/admin/ui/action/{item.id}/approve?key={admin_key}">
-                <input type="hidden" name="next" value="{review_next}">
-                <button class="px-2 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700">Approve</button>
-              </form>
-              <form method="post" action="/api/v1/admin/ui/action/{item.id}/hold?key={admin_key}">
-                <input type="hidden" name="next" value="{review_next}">
-                <button class="px-2 py-1 text-xs bg-amber-500 text-white rounded hover:bg-amber-600">Hold</button>
-              </form>
-              <form method="post" action="/api/v1/admin/ui/action/{item.id}/reject?key={admin_key}">
-                <input type="hidden" name="next" value="{review_next}">
-                <button class="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700">Reject</button>
-              </form>
-            </div>
-          </td>
         </tr>"""
+
+        mobile_cards_html += f"""
+        <div class="bg-white rounded-lg shadow p-3 border {mobile_selected_ring}">
+          <div class="flex items-start gap-2">
+            <input type="checkbox" value="{item.id}" class="bulk-item mt-1 rounded border-gray-300" aria-label="Select {item.id}">
+            <div class="min-w-0 flex-1">
+              <a href="{item_link}" class="text-sm font-medium text-blue-700 hover:underline">{title}</a>
+              <div class="text-xs text-gray-500 mt-1">{source_label}</div>
+              <div class="mt-2 flex flex-wrap gap-1">
+                {_badge(item.type.value if item.type else "—", "gray")}
+                {_badge(f"score {score}", "blue")}
+                {_badge(f"hits {signal_hits}", "yellow")}
+              </div>
+              <div class="mt-2 text-xs text-gray-500">
+                First seen {first_seen_str} · Published {published}
+              </div>
+            </div>
+          </div>
+        </div>"""
 
     if not rows_html:
         rows_html = (
@@ -637,19 +749,15 @@ def ui_review_queue(
             "No candidates match current filters."
             "</td></tr>"
         )
+    if not mobile_cards_html:
+        mobile_cards_html = (
+            '<div class="bg-white rounded-lg shadow p-6 text-center text-sm text-gray-400">'
+            "No candidates match current filters."
+            "</div>"
+        )
 
     def _page_link(target_page: int, label: str) -> str:
-        query = urlencode(
-            {
-                "key": admin_key,
-                "page": target_page,
-                "type": type or "",
-                "source": source or "",
-                "discovered_via": discovered_via or "",
-                "min_signal_hits": min_signal_hits,
-                "sort_by": sort_by,
-            }
-        )
+        query = _review_query(target_page=target_page)
         return f'<a href="?{query}" class="px-3 py-1 rounded bg-white shadow text-sm hover:bg-gray-50">{label}</a>'
 
     pagination = (
@@ -668,37 +776,371 @@ def ui_review_queue(
         + _badge(f"Reels {counts.get('REEL', 0)}", "yellow")
     )
 
+    if selected_item is not None:
+        selected_actions = repo.get_actions_for_content(selected_item.id, limit=10)
+        detail_next = (
+            "/api/v1/admin/ui/review?"
+            + _review_query(target_selected_id=selected_item.id)
+            + "#review-detail"
+        )
+        selected_status = _badge("CANDIDATE", "yellow")
+        if selected_item.is_suppressed:
+            selected_status += " " + _badge("suppressed", "red")
+        if (selected_item.editorial_boost or 0) > 0:
+            selected_status += " " + _badge(f"boost {selected_item.editorial_boost}", "purple")
+
+        selected_url = _esc(selected_item.source_url or "")
+        selected_description = (
+            _esc((selected_item.description or "").strip()[:280]) or "No description"
+        )
+        selected_score = (
+            f"{selected_item.promotion_score:.4f}" if selected_item.promotion_score else "—"
+        )
+        selected_pub = (
+            selected_item.published_at.strftime("%Y-%m-%d %H:%M")
+            if selected_item.published_at
+            else "—"
+        )
+        selected_first_seen = getattr(selected_item, "candidate_first_seen_at", None)
+        selected_first_seen_str = (
+            selected_first_seen.strftime("%Y-%m-%d %H:%M") if selected_first_seen else "—"
+        )
+        selected_actions_rows = ""
+        for action in selected_actions:
+            ts = action.created_at.strftime("%m-%d %H:%M") if action.created_at else "—"
+            selected_actions_rows += f"""
+            <tr class="border-b border-gray-100">
+              <td class="px-2 py-1.5 text-xs text-gray-500 whitespace-nowrap">{ts}</td>
+              <td class="px-2 py-1.5">{_badge(action.action_type, "blue")}</td>
+              <td class="px-2 py-1.5 text-xs text-gray-600">{_esc(action.actor or "—")}</td>
+            </tr>"""
+
+        selected_panel_html = f"""
+        <div id="review-detail" class="bg-white rounded-lg shadow sticky top-4">
+          <div class="p-4 border-b border-gray-100">
+            <h2 class="text-lg font-semibold text-gray-900 leading-snug">{_esc((selected_item.title or "Untitled")[:120])}</h2>
+            <div class="mt-2 flex flex-wrap gap-1">{selected_status}</div>
+          </div>
+          <div class="p-4 space-y-4">
+            <div class="space-y-1 text-sm">
+              <div class="flex justify-between gap-3"><span class="text-gray-500">ID</span><span class="font-medium text-gray-800">{selected_item.id}</span></div>
+              <div class="flex justify-between gap-3"><span class="text-gray-500">Type</span><span class="font-medium text-gray-800">{selected_item.type.value if selected_item.type else "—"}</span></div>
+              <div class="flex justify-between gap-3"><span class="text-gray-500">Score</span><span class="font-mono text-gray-800">{selected_score}</span></div>
+              <div class="flex justify-between gap-3"><span class="text-gray-500">Hits</span><span class="text-gray-800">{selected_item.signal_hits or 0}</span></div>
+              <div class="flex justify-between gap-3"><span class="text-gray-500">First seen</span><span class="text-gray-800">{selected_first_seen_str}</span></div>
+              <div class="flex justify-between gap-3"><span class="text-gray-500">Published</span><span class="text-gray-800">{selected_pub}</span></div>
+            </div>
+
+            <div>
+              <div class="text-xs uppercase tracking-wide text-gray-500 mb-1">Source</div>
+              <a href="{selected_url}" target="_blank" class="text-sm text-blue-700 hover:underline break-all">{selected_url}</a>
+            </div>
+
+            <div>
+              <div class="text-xs uppercase tracking-wide text-gray-500 mb-1">Description</div>
+              <p class="text-sm text-gray-700">{selected_description}</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2">
+              <form method="post" action="/api/v1/admin/ui/action/{selected_item.id}/approve?key={admin_key}">
+                <input type="hidden" name="next" value="{detail_next}">
+                <button class="w-full px-2 py-1.5 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700">Approve</button>
+              </form>
+              <form method="post" action="/api/v1/admin/ui/action/{selected_item.id}/hold?key={admin_key}">
+                <input type="hidden" name="next" value="{detail_next}">
+                <button class="w-full px-2 py-1.5 text-xs bg-amber-500 text-white rounded hover:bg-amber-600">Hold</button>
+              </form>
+              <form method="post" action="/api/v1/admin/ui/action/{selected_item.id}/reject?key={admin_key}">
+                <input type="hidden" name="next" value="{detail_next}">
+                <button class="w-full px-2 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700">Reject</button>
+              </form>
+              <form method="post" action="/api/v1/admin/ui/action/{selected_item.id}/approve-publish?key={admin_key}">
+                <input type="hidden" name="next" value="{detail_next}">
+                <input type="hidden" name="boost_level" value="3">
+                <button class="w-full px-2 py-1.5 text-xs bg-green-600 text-white rounded hover:bg-green-700">Publish top</button>
+              </form>
+            </div>
+
+            <form method="post" action="/api/v1/admin/ui/action/{selected_item.id}/approve-publish?key={admin_key}" class="p-3 rounded border border-green-200 bg-green-50">
+              <input type="hidden" name="next" value="{detail_next}">
+              <label class="block text-xs text-gray-600 mb-1">Boost and note (optional)</label>
+              <div class="flex gap-2">
+                <select name="boost_level" class="rounded border border-gray-300 text-sm px-2 py-1">{publish_boost_options}</select>
+                <input type="text" name="note" placeholder="Why now"
+                       class="flex-1 rounded border border-gray-300 text-sm px-2 py-1">
+              </div>
+              <button class="mt-2 w-full px-3 py-1.5 text-xs bg-green-700 text-white rounded hover:bg-green-800">Approve + publish</button>
+            </form>
+
+            <form method="post" action="/api/v1/admin/ui/action/{selected_item.id}/note?key={admin_key}">
+              <input type="hidden" name="next" value="{detail_next}">
+              <label class="block text-xs text-gray-600 mb-1">Reviewer note</label>
+              <textarea name="note" rows="2" required class="w-full rounded border border-gray-300 text-sm px-2 py-1"></textarea>
+              <button class="mt-2 w-full px-3 py-1.5 text-xs bg-gray-700 text-white rounded hover:bg-gray-800">Save note</button>
+            </form>
+
+            <a href="/api/v1/admin/ui/detail/{selected_item.id}?key={admin_key}" class="inline-block text-xs text-blue-700 hover:underline">
+              Open full detail page
+            </a>
+
+            <div class="border-t border-gray-100 pt-3">
+              <div class="text-xs uppercase tracking-wide text-gray-500 mb-2">Recent audit trail</div>
+              <div class="overflow-x-auto">
+                <table class="min-w-full">
+                  <tbody>{selected_actions_rows or '<tr><td colspan="3" class="px-2 py-2 text-xs text-gray-400">No actions yet</td></tr>'}</tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>"""
+    else:
+        selected_panel_html = """
+        <div id="review-detail" class="bg-white rounded-lg shadow p-6 text-sm text-gray-500">
+          Select a candidate from the queue to open details and apply single-item actions here.
+        </div>"""
+
     body = f"""
     <div class="mb-4">
       <h1 class="text-2xl font-bold text-gray-900">Review Queue</h1>
       <p class="text-sm text-gray-600 mt-1">
-        This page is for editorial decisions. Approve or reject candidate content without using API tools.
+        Triage candidate content in one place. Clicking an item keeps you on this page and opens details on the right.
       </p>
       <div class="mt-2">{queue_stats}</div>
     </div>
     {flash_html}
     {filter_form}
-    <div class="flex justify-between items-center mb-2">{pagination}</div>
-    <div class="bg-white shadow rounded-lg overflow-x-auto">
-      <table class="min-w-full">
-        <thead class="bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wide">
-          <tr>
-            <th class="px-3 py-3 text-left">ID</th>
-            <th class="px-3 py-3 text-left">Candidate</th>
-            <th class="px-3 py-3 text-left">Type</th>
-            <th class="px-3 py-3 text-left">Score</th>
-            <th class="px-3 py-3 text-left">Hits</th>
-            <th class="px-3 py-3 text-left">Discovered</th>
-            <th class="px-3 py-3 text-left">First seen</th>
-            <th class="px-3 py-3 text-left">Published</th>
-            <th class="px-3 py-3 text-left">Actions</th>
-          </tr>
-        </thead>
-        <tbody>{rows_html}</tbody>
-      </table>
+    <div class="bg-white rounded-lg shadow p-4 mb-4">
+      <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
+        <div>
+          <h2 class="text-sm font-semibold text-gray-800 uppercase tracking-wide">Bulk actions</h2>
+          <p class="text-xs text-gray-500 mt-1">Select multiple rows and apply one action in a single submission.</p>
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <button type="button" id="bulk-select-page" class="px-2 py-1 text-xs rounded bg-gray-100 text-gray-700 hover:bg-gray-200">Select page</button>
+            <button type="button" id="bulk-clear-page" class="px-2 py-1 text-xs rounded bg-gray-100 text-gray-700 hover:bg-gray-200">Clear</button>
+            <span id="bulk-selected-count" class="text-xs text-gray-600">0 selected</span>
+          </div>
+        </div>
+        <form id="bulk-action-form" method="post" action="/api/v1/admin/ui/review/bulk-action?key={admin_key}" class="grid grid-cols-1 sm:grid-cols-4 gap-2 w-full lg:w-auto">
+          <input type="hidden" name="next" value="{review_next}">
+          <input type="hidden" id="bulk-content-ids" name="content_ids_csv" value="">
+          <select name="action" class="rounded border border-gray-300 text-sm px-2 py-1.5">
+            <option value="approve">Approve</option>
+            <option value="approve_publish">Approve + publish top</option>
+            <option value="hold">Hold</option>
+            <option value="reject">Reject and suppress</option>
+          </select>
+          <select name="boost_level" class="rounded border border-gray-300 text-sm px-2 py-1.5">
+            {publish_boost_options}
+          </select>
+          <input type="text" name="note" placeholder="optional note"
+                 class="rounded border border-gray-300 text-sm px-2 py-1.5">
+          <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+            Apply
+          </button>
+        </form>
+      </div>
     </div>
-    <div class="mt-3">{pagination}</div>"""
+
+    <div class="flex justify-between items-center mb-2">{pagination}</div>
+    <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
+      <section class="xl:col-span-7">
+        <div class="md:hidden space-y-2">{mobile_cards_html}</div>
+        <div class="hidden md:block bg-white shadow rounded-lg overflow-x-auto">
+          <table class="min-w-full">
+            <thead class="bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-3 py-3 text-left">
+                  <input type="checkbox" id="bulk-select-all" class="rounded border-gray-300" aria-label="Select all on page">
+                </th>
+                <th class="px-3 py-3 text-left">ID</th>
+                <th class="px-3 py-3 text-left">Candidate</th>
+                <th class="px-3 py-3 text-left">Type</th>
+                <th class="px-3 py-3 text-left">Score</th>
+                <th class="px-3 py-3 text-left">Hits</th>
+                <th class="px-3 py-3 text-left">Discovered</th>
+                <th class="px-3 py-3 text-left">First seen</th>
+                <th class="px-3 py-3 text-left">Published</th>
+              </tr>
+            </thead>
+            <tbody>{rows_html}</tbody>
+          </table>
+        </div>
+        <div class="mt-3">{pagination}</div>
+      </section>
+      <aside class="xl:col-span-5">{selected_panel_html}</aside>
+    </div>
+
+    <script>
+      (() => {{
+        const checkboxes = Array.from(document.querySelectorAll(".bulk-item"));
+        const selectAll = document.getElementById("bulk-select-all");
+        const selectPageButton = document.getElementById("bulk-select-page");
+        const clearPageButton = document.getElementById("bulk-clear-page");
+        const selectedCount = document.getElementById("bulk-selected-count");
+        const bulkForm = document.getElementById("bulk-action-form");
+        const bulkIdsInput = document.getElementById("bulk-content-ids");
+
+        const interactiveSelector = "a,button,input,select,textarea,label,form";
+        document.querySelectorAll("[data-detail-href]").forEach((row) => {{
+          row.addEventListener("click", (event) => {{
+            if (event.target.closest(interactiveSelector)) {{
+              return;
+            }}
+            const href = row.getAttribute("data-detail-href");
+            if (href) {{
+              window.location.href = href;
+            }}
+          }});
+        }});
+
+        const visibleCheckboxes = () => checkboxes.filter((cb) => cb.offsetParent !== null);
+        const updateSelectionUi = () => {{
+          const activeCheckboxes = visibleCheckboxes();
+          const selected = activeCheckboxes.filter((cb) => cb.checked).length;
+          if (selectedCount) {{
+            selectedCount.textContent = `${{selected}} selected`;
+          }}
+          if (selectAll) {{
+            selectAll.checked = selected > 0 && selected === activeCheckboxes.length;
+          }}
+        }};
+
+        if (selectAll) {{
+          selectAll.addEventListener("change", () => {{
+            visibleCheckboxes().forEach((cb) => {{
+              cb.checked = selectAll.checked;
+            }});
+            updateSelectionUi();
+          }});
+        }}
+
+        if (selectPageButton) {{
+          selectPageButton.addEventListener("click", () => {{
+            visibleCheckboxes().forEach((cb) => {{
+              cb.checked = true;
+            }});
+            updateSelectionUi();
+          }});
+        }}
+
+        if (clearPageButton) {{
+          clearPageButton.addEventListener("click", () => {{
+            visibleCheckboxes().forEach((cb) => {{
+              cb.checked = false;
+            }});
+            updateSelectionUi();
+          }});
+        }}
+
+        checkboxes.forEach((cb) => {{
+          cb.addEventListener("change", updateSelectionUi);
+        }});
+        updateSelectionUi();
+
+        if (bulkForm) {{
+          bulkForm.addEventListener("submit", (event) => {{
+            const selectedIds = visibleCheckboxes()
+              .filter((cb) => cb.checked)
+              .map((cb) => cb.value);
+            if (!selectedIds.length) {{
+              event.preventDefault();
+              window.alert("Select at least one item for bulk actions.");
+              return;
+            }}
+            if (bulkIdsInput) {{
+              bulkIdsInput.value = selectedIds.join(",");
+            }}
+          }});
+        }}
+      }})();
+    </script>"""
     return _base(body, key=admin_key, active="review")
+
+
+@router.post("/review/bulk-action")
+def ui_review_bulk_action(
+    action: str = Form(...),
+    content_ids_csv: str = Form(""),
+    boost_level: int = Form(3),
+    note: str = Form(""),
+    next_path: str = Form("", alias="next"),
+    key: str = Form(""),
+    referer: Optional[str] = Header(None, alias="Referer"),
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_key_or_query),
+):
+    raw_ids = [chunk.strip() for chunk in content_ids_csv.split(",") if chunk.strip()]
+    parsed_ids: list[int] = []
+    for raw_id in raw_ids:
+        try:
+            parsed_ids.append(int(raw_id))
+        except ValueError:
+            continue
+
+    content_ids = list(dict.fromkeys(parsed_ids))
+    if not content_ids:
+        target = _resolve_ui_url(
+            admin_key=admin_key,
+            fallback_path="/api/v1/admin/ui/review",
+            next_url=next_path,
+            referer=referer,
+        )
+        return RedirectResponse(
+            _add_flash(target, "Error: select at least one content item"),
+            status_code=303,
+        )
+
+    repo = EditorialRepository(db)
+    clean_note = note.strip() or None
+    bounded_boost = max(0, min(3, boost_level))
+
+    applied = 0
+    failed = 0
+    for content_id in content_ids:
+        item = None
+        if action == "approve":
+            item = repo.approve(content_id, actor=ACTOR, note=clean_note)
+        elif action == "approve_publish":
+            item = repo.approve_and_publish(
+                content_id=content_id,
+                actor=ACTOR,
+                boost_level=bounded_boost,
+                note=clean_note,
+            )
+        elif action == "hold":
+            item = repo.hold(content_id, actor=ACTOR, note=clean_note)
+        elif action == "reject":
+            item = repo.reject(content_id, actor=ACTOR, note=clean_note)
+
+        if item is None:
+            failed += 1
+        else:
+            applied += 1
+
+    if applied > 0:
+        invalidate_tiered_feed_cache()
+
+    action_label = {
+        "approve": "approved",
+        "approve_publish": f"published to top (boost {bounded_boost})",
+        "hold": "placed on hold",
+        "reject": "rejected and suppressed",
+    }.get(action, "")
+
+    if not action_label:
+        flash = "Error: unsupported bulk action"
+    elif failed == 0:
+        flash = f"Bulk action complete: {applied} items {action_label}"
+    else:
+        flash = f"Bulk action partial: {applied} succeeded, {failed} failed"
+
+    target = _resolve_ui_url(
+        admin_key=admin_key,
+        fallback_path="/api/v1/admin/ui/review",
+        next_url=next_path,
+        referer=referer,
+    )
+    return RedirectResponse(_add_flash(target, flash), status_code=303)
 
 
 # ---------------------------------------------------------------------------

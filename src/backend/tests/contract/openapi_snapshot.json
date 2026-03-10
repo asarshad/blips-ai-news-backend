@@ -470,6 +470,44 @@
         "title": "Body_ui_request_changes_api_v1_admin_ui_action__content_id__request_changes_post",
         "type": "object"
       },
+      "Body_ui_review_bulk_action_api_v1_admin_ui_review_bulk_action_post": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "boost_level": {
+            "default": 3,
+            "title": "Boost Level",
+            "type": "integer"
+          },
+          "content_ids_csv": {
+            "default": "",
+            "title": "Content Ids Csv",
+            "type": "string"
+          },
+          "key": {
+            "default": "",
+            "title": "Key",
+            "type": "string"
+          },
+          "next": {
+            "default": "",
+            "title": "Next",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "Body_ui_review_bulk_action_api_v1_admin_ui_review_bulk_action_post",
+        "type": "object"
+      },
       "Body_ui_submit_url_api_v1_admin_ui_submit_post": {
         "properties": {
           "importance_level": {
@@ -5606,12 +5644,61 @@
           },
           {
             "in": "query",
+            "name": "start_day",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Day"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_day",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Day"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
               "default": "priority",
               "title": "Sort By",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "selected_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Selected Id"
             }
           },
           {
@@ -5697,6 +5784,96 @@
           }
         },
         "summary": "Ui Review Queue",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
+    "/api/v1/admin/ui/review/bulk-action": {
+      "post": {
+        "operationId": "ui_review_bulk_action_api_v1_admin_ui_review_bulk_action_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Referer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Referer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ui_review_bulk_action_api_v1_admin_ui_review_bulk_action_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Review Bulk Action",
         "tags": [
           "admin-ui",
           "admin-ui"
