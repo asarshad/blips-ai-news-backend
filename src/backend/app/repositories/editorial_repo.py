@@ -92,6 +92,8 @@ class EditorialRepository:
         source: Optional[str] = None,
         discovered_via: Optional[str] = None,
         min_signal_hits: int = 0,
+        start_day: Optional[date] = None,
+        end_day: Optional[date] = None,
         include_suppressed: bool = False,
         sort_by: str = "priority",
         page: int = 1,
@@ -118,6 +120,18 @@ class EditorialRepository:
 
         if min_signal_hits > 0:
             query = query.filter(ContentItem.signal_hits >= int(min_signal_hits))
+
+        if start_day is not None or end_day is not None:
+            first_seen_expr = func.coalesce(
+                ContentItem.candidate_first_seen_at,
+                ContentItem.published_at,
+            )
+            if start_day is not None:
+                start_dt = datetime.combine(start_day, datetime.min.time())
+                query = query.filter(first_seen_expr >= start_dt)
+            if end_day is not None:
+                end_dt = datetime.combine(end_day + timedelta(days=1), datetime.min.time())
+                query = query.filter(first_seen_expr < end_dt)
 
         total = query.count()
         first_seen_col = getattr(ContentItem, "candidate_first_seen_at", None)
