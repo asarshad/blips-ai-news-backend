@@ -292,8 +292,12 @@ class IngestionScheduler:
                     self._last_cycle_status = "budget_exhausted"
                     break
 
-                # Refresh tasks if queue is empty or we have capacity.
-                if not self._queue or len(self._active) < self.config.max_workers:
+                # Refresh only when the queue is drained.
+                #
+                # Rebuilding the queue on every cycle when a worker slot is
+                # available causes starvation: the scheduler repeatedly picks
+                # the first few rows and never rotates through the rest.
+                if not self._queue:
                     tasks = fetch_tasks() or []
                     if not tasks and not self._active:
                         self._last_cycle_status = "complete"
