@@ -40,7 +40,7 @@ setup_logging()
 logger = get_logger(__name__)
 
 
-SCHEDULER_LOCK_KEY = "scheduler_lock"
+SCHEDULER_LOCK_KEY = os.getenv("SCHEDULER_LEADER_LOCK_KEY", "scheduler_lock")
 SCHEDULER_LOCK_TTL_SECONDS = int(os.getenv("SCHEDULER_LOCK_TTL_SECONDS", "120"))
 SCHEDULER_LOCK_REFRESH_SECONDS = int(os.getenv("SCHEDULER_LOCK_REFRESH_SECONDS", "30"))
 

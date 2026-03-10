@@ -231,6 +231,7 @@ class VideoEntry:
     content_format: Optional[ContentFormat] = None
     quality_tier: Optional[QualityTier] = None
     is_short: bool = False
+    published_at: Optional[datetime] = None
 
 
 class YouTubeClient:
@@ -637,6 +638,7 @@ class YouTubeClient:
                     thumbnail_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
                     summary = self._get_summary(entry)
                     category = self._categorize_video(title, summary)
+                    published_at = self._parse_entry_published_at(entry)
 
                     videos.append(
                         VideoEntry(
@@ -652,10 +654,11 @@ class YouTubeClient:
                             content_format=config.content_format,
                             quality_tier=config.quality_tier,
                             is_short=is_short,
+                            published_at=published_at,
                         )
                     )
 
-                    logger.info(f"Added video: {title}")
+                    logger.debug("Added video: %s (published_at=%s)", title, published_at)
 
                 except Exception as e:
                     logger.error(f"Error processing video entry: {str(e)}")
@@ -688,18 +691,18 @@ class YouTubeClient:
         """
         # URL contains /shorts/
         if "/shorts/" in video_url:
-            logger.info("_detect_short: vid=%s -> True (url contains /shorts/)", video_id)
+            logger.debug("_detect_short: vid=%s -> True (url contains /shorts/)", video_id)
             return True
 
         # Channel is shorts-native
         if config.content_format == ContentFormat.SHORTS:
-            logger.info("_detect_short: vid=%s -> True (channel is SHORTS format)", video_id)
+            logger.debug("_detect_short: vid=%s -> True (channel is SHORTS format)", video_id)
             return True
 
         # Title contains #shorts or #short hashtag (common for shorts)
         title_lower = title.lower()
         if "#shorts" in title_lower or "#short" in title_lower:
-            logger.info("_detect_short: vid=%s -> True (title contains #shorts)", video_id)
+            logger.debug("_detect_short: vid=%s -> True (title contains #shorts)", video_id)
             return True
 
         # For mixed channels, use duration heuristic.
@@ -712,7 +715,7 @@ class YouTubeClient:
             duration = self.get_video_duration(video_id)
             if duration is not None:
                 if duration <= short_max_seconds:
-                    logger.info(
+                    logger.debug(
                         "_detect_short: vid=%s -> True (MIXED, duration=%ds <= %ds)",
                         video_id,
                         duration,
@@ -720,7 +723,7 @@ class YouTubeClient:
                     )
                     return True
                 else:
-                    logger.info(
+                    logger.debug(
                         "_detect_short: vid=%s -> False (MIXED, duration=%ds > %ds)",
                         video_id,
                         duration,
@@ -732,14 +735,24 @@ class YouTubeClient:
             # NOTE: Thumbnail aspect ratio detection via oembed doesn't work - YouTube
             # always returns horizontal (480x360) thumbnails regardless of video type.
             # Without YOUTUBE_API_KEY, we cannot reliably detect Shorts for MIXED channels.
-            logger.info(
+            logger.debug(
                 "_detect_short: vid=%s -> False (MIXED, duration detection failed - set YOUTUBE_API_KEY for reliable detection)",
                 video_id,
             )
             return False
 
-        logger.info("_detect_short: vid=%s -> False (LONG_FORM channel)", video_id)
+        logger.debug("_detect_short: vid=%s -> False (LONG_FORM channel)", video_id)
         return False
+
+    def _parse_entry_published_at(self, entry) -> Optional[datetime]:
+        """Parse a feed entry publish timestamp to UTC-naive datetime."""
+        parsed = entry.get("published_parsed") or entry.get("updated_parsed")
+        if not parsed:
+            return None
+        try:
+            return datetime(*parsed[:6])
+        except Exception:
+            return None
 
     # Legacy method for backward compatibility
     def fetch_channel(self, feed_url: str, max_videos: int = 5) -> List[VideoEntry]:

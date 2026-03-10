@@ -14,6 +14,8 @@ from enum import Enum
 from typing import Dict, Optional
 from urllib.parse import urlparse
 
+from app.config.source_registry import is_shortlisted_source
+
 
 class DomainTier(str, Enum):
     CORE = "core"
@@ -277,6 +279,8 @@ def get_domain_tier(domain_or_url: str) -> DomainTier:
         return DomainTier.ROTATION
     if _match_domain_set(domain, DISCOVERY_DOMAINS):
         return DomainTier.DISCOVERY
+    if is_shortlisted_source(domain):
+        return DomainTier.ROTATION
 
     # Unknown domains default to discovery, with low trust/cap.
     if _looks_like_tech_domain(domain):
