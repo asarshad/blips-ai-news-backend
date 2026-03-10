@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from datetime import date
 
 from app.ingestion.scheduler import (
@@ -126,3 +127,44 @@ def test_load_scheduler_config_rebalances_when_article_is_zero_and_caps_are_full
     assert cfg.max_workers_article == 1
     assert cfg.max_workers_video == 1
     assert cfg.max_workers_reel == 1
+
+
+def test_scheduler_run_rotates_rows_instead_of_restarting_queue_each_cycle():
+    cfg = SchedulerConfig(
+        max_workers=1,
+        max_workers_article=1,
+        max_workers_video=0,
+        max_workers_reel=0,
+        batch_size=1,
+        loop_sleep_seconds=0.001,
+    )
+    scheduler = IngestionScheduler(day_utc=date(2026, 1, 29), redis_client=None, config=cfg)
+
+    rows = [
+        TaskRef(1, "rss", "a"),
+        TaskRef(2, "rss", "b"),
+        TaskRef(3, "rss", "c"),
+    ]
+    seen_order: list[int] = []
+
+    # Keep rows perpetually eligible so queue behavior is visible.
+    def _fetch_tasks():
+        return rows
+
+    def _process_task_batch(row_id: int, _batch_size: int):
+        seen_order.append(int(row_id))
+        if len(seen_order) >= 3:
+            stop_event.set()
+        return {"status": "ok", "inserted": 0, "attempted": 1}
+
+    stop_event = threading.Event()
+    result = scheduler.run(
+        fetch_tasks=_fetch_tasks,
+        process_task_batch=_process_task_batch,
+        stop_event=stop_event,
+        max_seconds=5,
+        sleep_seconds=0.001,
+    )
+
+    assert result["status"] in {"stopping", "budget_exhausted", "idle", "complete"}
+    assert seen_order[:3] == [1, 2, 3]
