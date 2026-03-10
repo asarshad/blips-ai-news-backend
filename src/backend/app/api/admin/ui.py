@@ -221,7 +221,7 @@ def ui_dashboard(
     db: Session = Depends(get_db),
     admin_key: str = Depends(_require_admin_key_or_query),
 ):
-    from sqlalchemy import func
+    from sqlalchemy import and_, func, or_
 
     from app.models.content import ContentItem, ContentStatus
     from app.models.signal import SignalURL
@@ -280,7 +280,17 @@ def ui_dashboard(
           </div>
         </div>"""
 
-    # ── Items published on selected day ───────────────────────────────────
+    # ── Day bucket (ingestion-aware, with legacy fallback) ───────────────
+    day_bucket_filter = or_(
+        ContentItem.ingestion_day == selected_date,
+        and_(
+            ContentItem.ingestion_day.is_(None),
+            ContentItem.published_at >= day_start,
+            ContentItem.published_at < day_end,
+        ),
+    )
+
+    # ── Items for selected day ────────────────────────────────────────────
     day_rows = (
         db.query(
             ContentItem.type,
@@ -288,8 +298,7 @@ def ui_dashboard(
             func.count(ContentItem.id).label("cnt"),
         )
         .filter(
-            ContentItem.published_at >= day_start,
-            ContentItem.published_at < day_end,
+            day_bucket_filter,
             ContentItem.is_suppressed.is_(False),
         )
         .group_by(ContentItem.type, ContentItem.curation_status)
@@ -307,8 +316,7 @@ def ui_dashboard(
     avg_score_row = (
         db.query(func.avg(ContentItem.promotion_score))
         .filter(
-            ContentItem.published_at >= day_start,
-            ContentItem.published_at < day_end,
+            day_bucket_filter,
             ContentItem.curation_status == ContentStatus.PROMOTED,
             ContentItem.promotion_score.isnot(None),
         )
@@ -338,8 +346,7 @@ def ui_dashboard(
     source_rows = (
         db.query(ContentItem.source, func.count(ContentItem.id).label("cnt"))
         .filter(
-            ContentItem.published_at >= day_start,
-            ContentItem.published_at < day_end,
+            day_bucket_filter,
             ContentItem.curation_status == ContentStatus.PROMOTED,
             ContentItem.is_suppressed.is_(False),
         )
