@@ -5585,6 +5585,26 @@
         "parameters": [
           {
             "in": "query",
+            "name": "review_status",
+            "required": false,
+            "schema": {
+              "default": "CANDIDATE",
+              "title": "Review Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_suppressed",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Suppressed",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
             "name": "type",
             "required": false,
             "schema": {
