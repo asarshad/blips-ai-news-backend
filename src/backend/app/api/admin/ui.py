@@ -521,6 +521,8 @@ def ui_dashboard(
 
 @router.get("/review", response_class=HTMLResponse)
 def ui_review_queue(
+    review_status: str = Query("CANDIDATE"),
+    include_suppressed: bool = Query(False),
     type: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
     discovered_via: Optional[str] = Query(None),
@@ -555,6 +557,11 @@ def ui_review_queue(
     if parsed_start_day and parsed_end_day and parsed_start_day > parsed_end_day:
         parsed_start_day, parsed_end_day = parsed_end_day, parsed_start_day
 
+    status_value = (review_status or "CANDIDATE").upper()
+    if status_value not in {"CANDIDATE", "PROMOTED", "ALL"}:
+        status_value = "CANDIDATE"
+    status_filter = None if status_value == "ALL" else status_value
+
     start_day_value = parsed_start_day.isoformat() if parsed_start_day else ""
     end_day_value = parsed_end_day.isoformat() if parsed_end_day else ""
 
@@ -565,11 +572,16 @@ def ui_review_queue(
         min_signal_hits=min_signal_hits,
         start_day=parsed_start_day,
         end_day=parsed_end_day,
+        curation_status=status_filter,
+        include_suppressed=include_suppressed,
         sort_by=sort_by,
         page=page,
         page_size=page_size,
     )
-    counts = repo.candidate_queue_counts()
+    counts = repo.candidate_queue_counts(
+        include_suppressed=include_suppressed,
+        curation_status=status_filter,
+    )
     pages = max(1, math.ceil(total / page_size))
 
     if page > pages and total > 0:
@@ -581,6 +593,8 @@ def ui_review_queue(
             min_signal_hits=min_signal_hits,
             start_day=parsed_start_day,
             end_day=parsed_end_day,
+            curation_status=status_filter,
+            include_suppressed=include_suppressed,
             sort_by=sort_by,
             page=page,
             page_size=page_size,
@@ -611,7 +625,9 @@ def ui_review_queue(
 
     if selected_item is None and selected_id is not None:
         candidate_item = repo.get_content_by_id(selected_id)
-        if candidate_item and candidate_item.curation_status == ContentStatus.CANDIDATE:
+        if candidate_item and (
+            status_filter is None or candidate_item.curation_status == ContentStatus[status_filter]
+        ):
             selected_item = candidate_item
 
     if selected_item is None and items:
@@ -630,6 +646,8 @@ def ui_review_queue(
             {
                 "key": admin_key,
                 "page": target_page if target_page is not None else page,
+                "review_status": status_value,
+                "include_suppressed": "true" if include_suppressed else "false",
                 "type": type or "",
                 "source": source or "",
                 "discovered_via": discovered_via or "",
@@ -643,8 +661,16 @@ def ui_review_queue(
 
     filter_form = f"""
     <div class="bg-white rounded-lg shadow p-4 mb-4">
-      <form method="get" action="/api/v1/admin/ui/review" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 items-end">
+      <form method="get" action="/api/v1/admin/ui/review" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-10 gap-3 items-end">
         <input type="hidden" name="key" value="{admin_key}">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Status</label>
+          {_sel("review_status", status_value, [("CANDIDATE", "Candidates"), ("PROMOTED", "Promoted"), ("ALL", "All statuses")])}
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Suppressed</label>
+          {_sel("include_suppressed", "true" if include_suppressed else "false", [("false", "Hide suppressed"), ("true", "Show suppressed")])}
+        </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Type</label>
           {_sel("type", type or "", [("", "All"), ("ARTICLE", "Article"), ("VIDEO", "Video"), ("REEL", "Reel")])}
@@ -753,13 +779,13 @@ def ui_review_queue(
     if not rows_html:
         rows_html = (
             '<tr><td colspan="9" class="px-3 py-6 text-center text-sm text-gray-400">'
-            "No candidates match current filters."
+            "No items match current filters."
             "</td></tr>"
         )
     if not mobile_cards_html:
         mobile_cards_html = (
             '<div class="bg-white rounded-lg shadow p-6 text-center text-sm text-gray-400">'
-            "No candidates match current filters."
+            "No items match current filters."
             "</div>"
         )
 
@@ -767,8 +793,13 @@ def ui_review_queue(
         query = _review_query(target_page=target_page)
         return f'<a href="?{query}" class="px-3 py-1 rounded bg-white shadow text-sm hover:bg-gray-50">{label}</a>'
 
+    status_label = (
+        "candidate items"
+        if status_value == "CANDIDATE"
+        else ("promoted items" if status_value == "PROMOTED" else "items")
+    )
     pagination = (
-        f'<span class="text-sm text-gray-600">Page {page}/{pages} — {total} candidate items</span> '
+        f'<span class="text-sm text-gray-600">Page {page}/{pages} — {total} {status_label}</span> '
     )
     if page > 1:
         pagination += _page_link(page - 1, "← Prev") + " "
@@ -790,7 +821,15 @@ def ui_review_queue(
             + _review_query(target_selected_id=selected_item.id)
             + "#review-detail"
         )
-        selected_status = _badge("CANDIDATE", "yellow")
+        selected_state = (
+            selected_item.curation_status.value if selected_item.curation_status else "UNKNOWN"
+        )
+        status_color = (
+            "yellow"
+            if selected_state == "CANDIDATE"
+            else ("green" if selected_state == "PROMOTED" else "gray")
+        )
+        selected_status = _badge(selected_state, status_color)
         if selected_item.is_suppressed:
             selected_status += " " + _badge("suppressed", "red")
         if (selected_item.editorial_boost or 0) > 0:
@@ -903,14 +942,20 @@ def ui_review_queue(
     else:
         selected_panel_html = """
         <div id="review-detail" class="bg-white rounded-lg shadow p-6 text-sm text-gray-500">
-          Select a candidate from the queue to open details and apply single-item actions here.
+          Select an item from the queue to open details and apply single-item actions here.
         </div>"""
+
+    scope_description = (
+        "candidate content"
+        if status_value == "CANDIDATE"
+        else ("promoted content" if status_value == "PROMOTED" else "all queued content")
+    )
 
     body = f"""
     <div class="mb-4">
       <h1 class="text-2xl font-bold text-gray-900">Review Queue</h1>
       <p class="text-sm text-gray-600 mt-1">
-        Triage candidate content in one place. Clicking an item keeps you on this page and opens details on the right.
+        Triage {scope_description} in one place. Clicking an item keeps you on this page and opens details on the right.
       </p>
       <div class="mt-2">{queue_stats}</div>
     </div>
@@ -960,7 +1005,7 @@ def ui_review_queue(
                   <input type="checkbox" id="bulk-select-all" class="rounded border-gray-300" aria-label="Select all on page">
                 </th>
                 <th class="px-3 py-3 text-left">ID</th>
-                <th class="px-3 py-3 text-left">Candidate</th>
+                <th class="px-3 py-3 text-left">Item</th>
                 <th class="px-3 py-3 text-left">Type</th>
                 <th class="px-3 py-3 text-left">Score</th>
                 <th class="px-3 py-3 text-left">Hits</th>

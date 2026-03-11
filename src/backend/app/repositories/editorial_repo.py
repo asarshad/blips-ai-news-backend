@@ -100,15 +100,21 @@ class EditorialRepository:
         min_signal_hits: int = 0,
         start_day: Optional[date] = None,
         end_day: Optional[date] = None,
+        curation_status: Optional[str] = "CANDIDATE",
         include_suppressed: bool = False,
         sort_by: str = "priority",
         page: int = 1,
         page_size: int = 50,
     ) -> Tuple[List[ContentItem], int]:
-        """Return paginated candidate items ordered for reviewer triage."""
-        query = self.db.query(ContentItem).filter(
-            ContentItem.curation_status == ContentStatus.CANDIDATE
-        )
+        """Return paginated review queue items ordered for triage."""
+        query = self.db.query(ContentItem)
+
+        if curation_status is not None:
+            cs = curation_status.upper()
+            if cs in ContentStatus.__members__:
+                query = query.filter(ContentItem.curation_status == ContentStatus[cs])
+            else:
+                query = query.filter(ContentItem.curation_status == ContentStatus.CANDIDATE)
 
         if not include_suppressed:
             query = query.filter(ContentItem.is_suppressed.is_(False))
@@ -166,11 +172,20 @@ class EditorialRepository:
         items = query.offset(offset).limit(page_size).all()
         return items, total
 
-    def candidate_queue_counts(self, *, include_suppressed: bool = False) -> Dict[str, int]:
-        """Return pending-candidate counts grouped by content type."""
-        query = self.db.query(ContentItem.type, func.count(ContentItem.id)).filter(
-            ContentItem.curation_status == ContentStatus.CANDIDATE
-        )
+    def candidate_queue_counts(
+        self,
+        *,
+        include_suppressed: bool = False,
+        curation_status: Optional[str] = "CANDIDATE",
+    ) -> Dict[str, int]:
+        """Return review queue counts grouped by content type."""
+        query = self.db.query(ContentItem.type, func.count(ContentItem.id))
+        if curation_status is not None:
+            cs = curation_status.upper()
+            if cs in ContentStatus.__members__:
+                query = query.filter(ContentItem.curation_status == ContentStatus[cs])
+            else:
+                query = query.filter(ContentItem.curation_status == ContentStatus.CANDIDATE)
         if not include_suppressed:
             query = query.filter(ContentItem.is_suppressed.is_(False))
 
