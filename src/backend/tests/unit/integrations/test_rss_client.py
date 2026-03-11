@@ -1,4 +1,5 @@
 import datetime as dt
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -88,3 +89,34 @@ def test_fetch_feed_stops_when_retry_budget_exhausted(monkeypatch):
     monkeypatch.setattr(requests, "get", _always_fail)
     entries = client.fetch_feed("https://example.com/feed.xml", max_entries=10)
     assert entries == []
+
+
+def test_extract_image_url_uses_rss_summary_image_without_page_fallback(monkeypatch):
+    client = RSSClient(feed_configs=[])
+    entry = SimpleNamespace(
+        media_content=[],
+        media_thumbnail=[],
+        enclosures=[],
+        summary='<p><img src="/images/hero.jpg" /></p>',
+    )
+
+    def _should_not_run(_url):
+        raise AssertionError("page metadata fallback should not run when RSS image exists")
+
+    monkeypatch.setattr(client, "_extract_image_from_page_metadata", _should_not_run)
+
+    image_url = client._extract_image_url(entry, "https://example.com/story/1")
+    assert image_url == "https://example.com/images/hero.jpg"
+
+
+def test_extract_image_url_falls_back_to_page_metadata(monkeypatch):
+    client = RSSClient(feed_configs=[])
+    entry = SimpleNamespace(media_content=[], media_thumbnail=[], enclosures=[], summary="")
+    monkeypatch.setattr(
+        client,
+        "_extract_image_from_page_metadata",
+        lambda _url: "https://cdn.example.com/og.jpg",
+    )
+
+    image_url = client._extract_image_url(entry, "https://example.com/story/2")
+    assert image_url == "https://cdn.example.com/og.jpg"
