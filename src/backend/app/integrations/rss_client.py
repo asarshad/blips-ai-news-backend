@@ -15,12 +15,14 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 import feedparser
 import requests
 from bs4 import BeautifulSoup
 
 from app.core.logging import get_logger
+from app.extraction.normalize import make_absolute_url, validate_image_url
 from app.integrations.rss_feeds import (
     DecayProfile,
     FeedConfig,
@@ -98,6 +100,18 @@ class RSSClient:
         self._backoff_base_seconds = max(
             0.0, float(os.getenv("CONNECTOR_BACKOFF_BASE_SECONDS", "0.5"))
         )
+        self._image_fallback_enabled = os.getenv("RSS_IMAGE_FALLBACK_ENABLED", "true").lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        try:
+            self._image_fallback_budget_remaining = max(
+                0, int(os.getenv("RSS_IMAGE_FALLBACK_BUDGET", "25"))
+            )
+        except ValueError:
+            self._image_fallback_budget_remaining = 25
 
     def fetch_all_feeds(self, entries_per_feed: int = 10) -> List[FeedEntry]:
         """
@@ -288,36 +302,86 @@ class RSSClient:
 
         return ""
 
-    def _extract_image_url(self, entry, _article_url: str) -> str:
-        """Extract featured image URL from feed entry or article page."""
+    def _extract_image_url(self, entry, article_url: str) -> str:
+        """Extract featured image URL from RSS metadata, then page metadata fallback."""
         # Check media content
         if hasattr(entry, "media_content") and entry.media_content:
             for media in entry.media_content:
-                if "url" in media:
-                    return media["url"]
+                candidate = self._validate_image_candidate(media.get("url"), article_url)
+                if candidate:
+                    return candidate
 
         # Check media_thumbnail
         if hasattr(entry, "media_thumbnail") and entry.media_thumbnail:
             for thumb in entry.media_thumbnail:
-                if "url" in thumb:
-                    return thumb["url"]
+                candidate = self._validate_image_candidate(thumb.get("url"), article_url)
+                if candidate:
+                    return candidate
 
         # Check enclosures
         if hasattr(entry, "enclosures") and entry.enclosures:
             for enclosure in entry.enclosures:
-                if hasattr(enclosure, "url") and hasattr(enclosure, "type"):
-                    if enclosure.type and enclosure.type.startswith("image"):
-                        return enclosure.url
+                if isinstance(enclosure, dict):
+                    enclosure_url = enclosure.get("url")
+                    enclosure_type = enclosure.get("type", "")
+                else:
+                    enclosure_url = getattr(enclosure, "url", None)
+                    enclosure_type = getattr(enclosure, "type", "")
+                if enclosure_type and str(enclosure_type).startswith("image"):
+                    candidate = self._validate_image_candidate(enclosure_url, article_url)
+                    if candidate:
+                        return candidate
 
         # Check summary/content for images
         if hasattr(entry, "summary") and entry.summary:
             soup = BeautifulSoup(entry.summary, "html.parser")
             img_tag = soup.find("img")
             if img_tag and img_tag.get("src"):
-                return img_tag["src"]
+                candidate = self._validate_image_candidate(img_tag["src"], article_url)
+                if candidate:
+                    return candidate
 
-        # No OG image fallback — we only use images from the RSS feed
-        # metadata to avoid scraping article pages.
+        # Fallback: fetch page metadata (og:image/twitter:image) only when RSS
+        # metadata has no usable image. Guarded by env switch + per-run budget.
+        fallback = self._extract_image_from_page_metadata(article_url)
+        if fallback:
+            logger.debug("Image fallback used from page metadata: %s", article_url)
+            return fallback
+
+        return ""
+
+    def _validate_image_candidate(self, candidate: Optional[str], article_url: str) -> str:
+        """Normalize/validate an image URL candidate to an absolute public URL."""
+        if not candidate:
+            return ""
+        absolute = make_absolute_url(candidate, article_url) or candidate
+        validated = validate_image_url(absolute)
+        return validated or ""
+
+    def _extract_image_from_page_metadata(self, article_url: str) -> str:
+        """Best-effort OG/Twitter image fallback for RSS entries with no image."""
+        if not self._image_fallback_enabled:
+            return ""
+        if self._image_fallback_budget_remaining <= 0:
+            return ""
+        parsed = urlparse(article_url or "")
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return ""
+
+        self._image_fallback_budget_remaining -= 1
+        try:
+            from app.extraction.fetcher import fetch_url
+            from app.extraction.metadata import extract_metadata
+
+            fetch = fetch_url(article_url)
+            if fetch.error or not fetch.html:
+                return ""
+            metadata = extract_metadata(fetch.html, article_url)
+            if metadata.image_url:
+                return metadata.image_url
+        except Exception as exc:
+            logger.debug("Image metadata fallback failed for %s: %s", article_url, exc)
+
         return ""
 
     def _parse_date(self, entry) -> datetime:
