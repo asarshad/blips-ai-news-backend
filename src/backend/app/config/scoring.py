@@ -173,6 +173,16 @@ ENGAGEMENT_WEIGHTS: Dict[str, int] = {
     "save": 5,  # Bookmarked for later
     "chat_start": 6,  # Deep engagement
     "chat_message": 1,  # Continued engagement
+    "video_impression": 1,
+    "video_start": 2,
+    "video_3s": 2,
+    "video_50pct": 4,
+    "video_95pct": 6,
+    "video_skip_lt_2s": -2,
+    "video_save": 5,
+    "video_share": 5,
+    "less_from_creator": -5,
+    "caught_up": 0,
 }
 
 

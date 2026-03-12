@@ -57,6 +57,10 @@ class PromotionConfig:
     w_recency: float = 0.25
     w_clickbait: float = 0.10
     w_duplicate: float = 0.10
+    w_velocity: float = 0.0
+    w_format_fit: float = 0.0
+    w_category_gap: float = 0.0
+    w_creator_fatigue: float = 0.0
 
     # Minimum promotion score to be promoted
     min_score: float = 0.30
@@ -72,9 +76,40 @@ class PromotionConfig:
 
     # Maximum signal_hits bonus (caps contribution at this value)
     signal_hits_cap: int = 5
+    discovery_lane_penalty: float = 0.0
 
 
 _DEFAULT_CONFIG = PromotionConfig()
+_VIDEO_CONFIG = PromotionConfig(
+    w_source=0.22,
+    w_cluster=0.18,
+    w_recency=0.18,
+    w_clickbait=0.10,
+    w_duplicate=0.08,
+    w_velocity=0.12,
+    w_format_fit=0.08,
+    w_category_gap=0.06,
+    w_creator_fatigue=0.06,
+    min_score=0.34,
+    top_n_per_type=60,
+    recency_half_life_hours=12.0,
+    discovery_lane_penalty=0.08,
+)
+_REEL_CONFIG = PromotionConfig(
+    w_source=0.16,
+    w_cluster=0.12,
+    w_recency=0.24,
+    w_clickbait=0.10,
+    w_duplicate=0.06,
+    w_velocity=0.16,
+    w_format_fit=0.08,
+    w_category_gap=0.04,
+    w_creator_fatigue=0.08,
+    min_score=0.38,
+    top_n_per_type=90,
+    recency_half_life_hours=8.0,
+    discovery_lane_penalty=0.10,
+)
 
 
 # ── Clickbait detection ───────────────────────────────────────────────────────
@@ -182,6 +217,53 @@ def compute_duplicate_penalty(cluster_id: Optional[str], cluster_sizes: Dict[str
     return min(math.log2(size - 1) / 4.0, 0.5)
 
 
+def compute_velocity_score(views_per_hour: Optional[float]) -> float:
+    """Log-normalize views/hour into a [0,1] velocity signal."""
+    try:
+        value = float(views_per_hour)
+    except (TypeError, ValueError):
+        return 0.0
+    if value <= 0:
+        return 0.0
+    return min(math.log10(value + 1) / 5.0, 1.0)
+
+
+def compute_category_gap_bonus(
+    topic: Optional[str],
+    promoted_topic_counts: Dict[str, int],
+) -> float:
+    """Boost underrepresented categories within the recent promoted set."""
+    if not topic:
+        return 0.0
+    total = sum(promoted_topic_counts.values())
+    if total <= 0:
+        return 0.05
+    share = promoted_topic_counts.get(topic, 0) / max(total, 1)
+    if share < 0.08:
+        return 0.08
+    if share < 0.15:
+        return 0.04
+    return 0.0
+
+
+def compute_creator_fatigue_penalty(channel_count: int) -> float:
+    """Penalize channels already occupying a large share of the feed."""
+    if channel_count <= 1:
+        return 0.0
+    return min((channel_count - 1) / 4.0, 1.0)
+
+
+def _safe_float(value: Optional[float], default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_text(value: Optional[str]) -> str:
+    return value.lower() if isinstance(value, str) else ""
+
+
 # ── Per-item scoring ──────────────────────────────────────────────────────────
 
 
@@ -189,6 +271,9 @@ def score_candidate(
     item: ContentItem,
     cluster_sizes: Dict[str, int],
     config: PromotionConfig,
+    *,
+    promoted_topic_counts: Optional[Dict[str, int]] = None,
+    promoted_channel_counts: Optional[Dict[str, int]] = None,
 ) -> float:
     """Compute the promotion score for a single ContentItem.
 
@@ -196,19 +281,52 @@ def score_candidate(
     run_promotion_job() is config.min_score.
     """
     source_quality = compute_source_weight(item.source or "")
+    source_status = _safe_text(getattr(item, "source_status", None))
+    if source_status == "core":
+        source_quality = min(source_quality * 1.05, 1.0)
+    elif source_status == "rotation":
+        source_quality *= 0.95
+    elif source_status == "blocked":
+        source_quality = 0.0
+    elif source_status == "discovery":
+        source_quality *= 0.8
+
     cluster_hotness = compute_cluster_hotness(
         item.cluster_id, item.signal_hits or 0, cluster_sizes, config.signal_hits_cap
     )
     recency = compute_promotion_recency(item.published_at, config.recency_half_life_hours)
     clickbait = compute_clickbait_penalty(item.title or "")
     duplicate_penalty = compute_duplicate_penalty(item.cluster_id, cluster_sizes)
+    velocity = compute_velocity_score(getattr(item, "views_per_hour", None))
+    format_fit = min(max(_safe_float(getattr(item, "format_fit_score", None), 0.5), 0.0), 1.0)
+    topics = (
+        getattr(item, "topics", None) if isinstance(getattr(item, "topics", None), list) else []
+    )
+    topic = topics[0] if topics else None
+    category_gap_bonus = compute_category_gap_bonus(topic, promoted_topic_counts or {})
+    channel_attr = getattr(item, "channel_id", None)
+    channel_key = (
+        channel_attr if isinstance(channel_attr, str) and channel_attr else item.source or ""
+    )
+    creator_fatigue = compute_creator_fatigue_penalty(
+        (promoted_channel_counts or {}).get(channel_key, 0)
+    )
+    lane_penalty = 0.0
+    lane = _safe_text(getattr(item, "acquisition_lane", None))
+    if lane in {"search", "trending"} and source_status not in {"core", "rotation"}:
+        lane_penalty = config.discovery_lane_penalty
 
     score = (
         config.w_source * source_quality
         + config.w_cluster * cluster_hotness
         + config.w_recency * recency
+        + config.w_velocity * velocity
+        + config.w_format_fit * format_fit
+        + config.w_category_gap * category_gap_bonus
         - config.w_clickbait * clickbait
         - config.w_duplicate * duplicate_penalty
+        - config.w_creator_fatigue * creator_fatigue
+        - lane_penalty
     )
     return round(score, 4)
 
@@ -275,12 +393,61 @@ class PromotionService:
             .all()
         )
 
+    def _get_recent_promoted_topic_counts(self, content_type: ContentType) -> Dict[str, int]:
+        cutoff = datetime.utcnow() - timedelta(hours=24)
+        items = (
+            self.db.query(ContentItem)
+            .filter(
+                ContentItem.type == content_type,
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.is_suppressed.is_(False),
+                ContentItem.published_at >= cutoff,
+            )
+            .all()
+        )
+        counts: Dict[str, int] = {}
+        for item in items:
+            topics = item.topics or []
+            if topics:
+                counts[topics[0]] = counts.get(topics[0], 0) + 1
+        return counts
+
+    def _get_recent_promoted_channel_counts(self, content_type: ContentType) -> Dict[str, int]:
+        cutoff = datetime.utcnow() - timedelta(hours=24)
+        rows = (
+            self.db.query(
+                func.coalesce(ContentItem.channel_id, ContentItem.source).label("channel_key"),
+                func.count(ContentItem.id),
+            )
+            .filter(
+                ContentItem.type == content_type,
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.is_suppressed.is_(False),
+                ContentItem.published_at >= cutoff,
+            )
+            .group_by("channel_key")
+            .all()
+        )
+        return {row[0]: row[1] for row in rows if row[0]}
+
+    def _config_for_type(self, content_type: ContentType) -> PromotionConfig:
+        if self.config is not _DEFAULT_CONFIG:
+            return self.config
+        if content_type == ContentType.VIDEO:
+            return _VIDEO_CONFIG
+        if content_type == ContentType.REEL:
+            return _REEL_CONFIG
+        return self.config
+
     # ── Re-score existing PROMOTED items ──────────────────────────────────
 
     def _rescore_promoted(
         self,
         content_type: ContentType,
         cluster_sizes: Dict[str, int],
+        config: PromotionConfig,
+        promoted_topic_counts: Optional[Dict[str, int]] = None,
+        promoted_channel_counts: Optional[Dict[str, int]] = None,
     ) -> int:
         """Refresh promotion_score on PROMOTED items (no status change)."""
         cutoff = datetime.utcnow() - timedelta(hours=self.config.window_hours)
@@ -295,7 +462,14 @@ class PromotionService:
         )
         count = 0
         for item in promoted_items:
-            item.promotion_score = score_candidate(item, cluster_sizes, self.config)
+            item.promotion_score = score_candidate(
+                item,
+                cluster_sizes,
+                config,
+                promoted_topic_counts=promoted_topic_counts,
+                promoted_channel_counts=promoted_channel_counts,
+            )
+            item.promotion_reason = self._promotion_reason(item, config)
             count += 1
         return count
 
@@ -304,18 +478,15 @@ class PromotionService:
     def run_promotion_job(self) -> PromotionResult:
         """Score all CANDIDATE items and promote the best ones.
 
-        Runs independently per content type (ARTICLE, VIDEO) so that
+        Runs independently per content type (ARTICLE, VIDEO, REEL) so that
         each surface has its own top-N allocation.
-
-        REEL content is always PROMOTED by default (short-form video is
-        assumed high fidelity from curated channels).
         """
         result = PromotionResult()
 
         try:
             cluster_sizes = self._get_cluster_sizes(hours_back=self.config.window_hours * 2)
 
-            for content_type in (ContentType.ARTICLE, ContentType.VIDEO):
+            for content_type in (ContentType.ARTICLE, ContentType.VIDEO, ContentType.REEL):
                 try:
                     promoted, evaluated, rescored = self._promote_type(content_type, cluster_sizes)
                     result.promoted_count += promoted
@@ -327,6 +498,13 @@ class PromotionService:
                     result.errors.append(msg)
 
             self.db.commit()
+            if result.promoted_count > 0 and isinstance(self.db, Session):
+                from app.services.video_source_service import refresh_video_source_health
+
+                try:
+                    refresh_video_source_health(self.db)
+                except Exception as exc:
+                    logger.warning("[promotion] source health refresh failed: %s", exc)
 
         except Exception as exc:
             self.db.rollback()
@@ -354,12 +532,22 @@ class PromotionService:
         """
         candidates = self._get_candidates(content_type)
         evaluated = len(candidates)
+        config = self._config_for_type(content_type)
+        promoted_topic_counts = self._get_recent_promoted_topic_counts(content_type)
+        promoted_channel_counts = self._get_recent_promoted_channel_counts(content_type)
 
         # Score every candidate
         scored: List[Tuple[float, ContentItem]] = []
         for item in candidates:
-            s = score_candidate(item, cluster_sizes, self.config)
+            s = score_candidate(
+                item,
+                cluster_sizes,
+                config,
+                promoted_topic_counts=promoted_topic_counts,
+                promoted_channel_counts=promoted_channel_counts,
+            )
             item.promotion_score = s
+            item.promotion_reason = self._promotion_reason(item, config)
             scored.append((s, item))
 
         # Sort descending by promotion score
@@ -367,20 +555,44 @@ class PromotionService:
 
         promoted = 0
         for rank, (s, item) in enumerate(scored):
-            if rank >= self.config.top_n_per_type:
+            if rank >= config.top_n_per_type:
                 break
-            if s < self.config.min_score:
+            if s < config.min_score:
                 break
             item.curation_status = ContentStatus.PROMOTED
             promoted += 1
 
-        rescored = self._rescore_promoted(content_type, cluster_sizes)
+        rescored = self._rescore_promoted(
+            content_type,
+            cluster_sizes,
+            config,
+            promoted_topic_counts=promoted_topic_counts,
+            promoted_channel_counts=promoted_channel_counts,
+        )
 
         logger.info(
             "[promotion] %s: evaluated=%d promoted=%d (threshold=%.2f)",
             content_type.value,
             evaluated,
             promoted,
-            self.config.min_score,
+            config.min_score,
         )
         return promoted, evaluated, rescored
+
+    def _promotion_reason(self, item: ContentItem, config: PromotionConfig) -> str:
+        """Compact explanation persisted for admin diagnostics."""
+        lane = (
+            getattr(item, "acquisition_lane", None)
+            if isinstance(getattr(item, "acquisition_lane", None), str)
+            else "curated"
+        )
+        source_status = (
+            getattr(item, "source_status", None)
+            if isinstance(getattr(item, "source_status", None), str)
+            else "unknown"
+        )
+        return (
+            f"{lane}|{source_status}|"
+            f"fit={_safe_float(getattr(item, 'format_fit_score', None), 0.0):.2f}|"
+            f"vph={_safe_float(getattr(item, 'views_per_hour', None), 0.0):.1f}"
+        )

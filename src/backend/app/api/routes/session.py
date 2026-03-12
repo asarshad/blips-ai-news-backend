@@ -55,6 +55,16 @@ class EventTypeParam(str, Enum):
     SAVE = "SAVE"
     CHAT_START = "CHAT_START"
     CHAT_MESSAGE = "CHAT_MESSAGE"
+    VIDEO_IMPRESSION = "VIDEO_IMPRESSION"
+    VIDEO_START = "VIDEO_START"
+    VIDEO_3S = "VIDEO_3S"
+    VIDEO_50PCT = "VIDEO_50PCT"
+    VIDEO_95PCT = "VIDEO_95PCT"
+    VIDEO_SKIP_LT_2S = "VIDEO_SKIP_LT_2S"
+    VIDEO_SAVE = "VIDEO_SAVE"
+    VIDEO_SHARE = "VIDEO_SHARE"
+    LESS_FROM_CREATOR = "LESS_FROM_CREATOR"
+    CAUGHT_UP = "CAUGHT_UP"
 
 
 class InteractionRequest(BaseModel):
@@ -116,7 +126,7 @@ class UserStatsResponse(BaseModel):
     """Response for user stats endpoint."""
 
     device_id: str
-    user_id: int
+    user_id: str
     created_at: str
     preference_counts: dict
     engagement_7d: dict
@@ -248,7 +258,14 @@ def record_interaction(
         return InteractionResponse(success=False, message="Failed to record interaction")
 
     # Invalidate playlist cache on significant interactions
-    if event_type in (EventType.SAVE, EventType.SHARE, EventType.CHAT_START):
+    if event_type in (
+        EventType.SAVE,
+        EventType.SHARE,
+        EventType.VIDEO_SAVE,
+        EventType.VIDEO_SHARE,
+        EventType.CHAT_START,
+        EventType.LESS_FROM_CREATOR,
+    ):
         playlist_service.invalidate_user_cache(device_id)
 
     return InteractionResponse(success=True, event_id=event.id)

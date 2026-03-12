@@ -93,6 +93,8 @@ def _nav(key: str, active: str = "") -> str:
           <div class="flex items-center gap-1">
             <span class="text-white font-bold text-lg mr-4">⚡ Blips Admin</span>
             {_link("/api/v1/admin/ui/dashboard", "Dashboard", "dashboard")}
+            {_link("/api/v1/admin/ui/video-lanes", "Video Lanes", "video-lanes")}
+            {_link("/api/v1/admin/ui/video-sources", "Video Sources", "video-sources")}
             {_link("/api/v1/admin/ui/review", "Review Queue", "review")}
             {_link("/api/v1/admin/ui/content", "Content", "content")}
             {_link("/api/v1/admin/ui/submit", "Submit URL", "submit")}
@@ -226,6 +228,10 @@ def ui_dashboard(
     from app.models.content import ContentItem, ContentStatus
     from app.models.signal import SignalURL
     from app.services.inventory_service import get_pipeline_counts
+    from app.services.video_metrics_service import (
+        compute_video_lane_metrics,
+        compute_video_supply_metrics,
+    )
 
     # ── Date selection ────────────────────────────────────────────────────
     try:
@@ -236,6 +242,32 @@ def ui_dashboard(
     day_str = selected_date.isoformat()
     day_start = datetime.combine(selected_date, datetime.min.time())
     day_end = day_start + timedelta(days=1)
+    video_supply = compute_video_supply_metrics(db)
+    video_lanes = compute_video_lane_metrics(db, hours=24)
+
+    def _fmt_delta(value: Optional[float]) -> str:
+        if value is None:
+            return "—"
+        prefix = "+" if value > 0 else ""
+        return f"{prefix}{value}"
+
+    def _video_kpi_card(surface: str, label: str) -> str:
+        metrics = video_supply["surfaces"][surface]
+        fresh_delta = metrics["deltas"]["fresh_inventory_24h"]
+        dominance_delta = metrics["deltas"]["dominant_channel_pct_top20"]
+        return _stat_card(
+            label,
+            str(metrics["fresh_inventory_24h"]),
+            (
+                f"median age {metrics['median_age_top20_hours'] or '—'}h | "
+                f"distinct channels {metrics['distinct_active_channels_24h']} | "
+                f"baseline {video_supply.get('baseline_tag') or '—'} {_fmt_delta(fresh_delta['baseline'])} | "
+                f"24h {_fmt_delta(fresh_delta['vs_24h'])} | "
+                f"7d {_fmt_delta(fresh_delta['vs_7d'])} | "
+                f"dominance {metrics['dominant_channel_pct_top20']}% ({_fmt_delta(dominance_delta['vs_24h'])})"
+            ),
+            "purple" if surface == "reels" else "blue",
+        )
 
     # ── Pipeline counts (48h window) ──────────────────────────────────────
     pipeline = get_pipeline_counts(db)
@@ -429,14 +461,20 @@ def ui_dashboard(
     <div class="flex items-center gap-3 mb-6">
       <h1 class="text-2xl font-bold text-gray-900">Dashboard</h1>
       <div class="flex items-center gap-2 ml-4">
-        <a href="?key={admin_key}&day={prev_day}" class="px-2 py-1 rounded bg-white shadow text-sm hover:bg-gray-50">←</a>
+        <a href="?key={admin_key}&day={
+        prev_day
+    }" class="px-2 py-1 rounded bg-white shadow text-sm hover:bg-gray-50">←</a>
         <form method="get" class="flex items-center gap-2">
           <input type="hidden" name="key" value="{admin_key}">
           <input type="date" name="day" value="{day_str}"
                  class="rounded border border-gray-300 text-sm px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
                  onchange="this.form.submit()">
         </form>
-        {f'<a href="?key={admin_key}&day={next_day}" class="px-2 py-1 rounded bg-white shadow text-sm hover:bg-gray-50">→</a>' if not is_today else ""}
+        {
+        f'<a href="?key={admin_key}&day={next_day}" class="px-2 py-1 rounded bg-white shadow text-sm hover:bg-gray-50">→</a>'
+        if not is_today
+        else ""
+    }
         {_badge("Today", "blue") if is_today else ""}
       </div>
     </div>
@@ -453,6 +491,60 @@ def ui_dashboard(
       {_stat_card("Ingested → candidate", str(sig_ingested), "", "blue")}
       {_stat_card("Duplicates skipped", str(sig_duplicate), "", "gray")}
       {_stat_card("Avg promotion score", str(avg_score), f"promoted items on {day_str}", "green")}
+    </div>
+
+    <h2 class="text-lg font-semibold text-gray-700 mb-3">Video And Reels Health</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+      {_video_kpi_card("videos", "Videos fresh inventory")}
+      {_video_kpi_card("reels", "Reels fresh inventory")}
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+      <div class="bg-white rounded-lg shadow p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide">Launch gates</h3>
+          <a href="/api/v1/admin/ui/video-lanes?key={
+        admin_key
+    }" class="text-sm text-blue-600 hover:underline">Lane performance →</a>
+        </div>
+        <div class="space-y-2 text-sm text-gray-700">
+          <div class="flex justify-between"><span>Videos fresh inventory</span><span class="font-semibold">{
+        video_supply["surfaces"]["videos"]["fresh_inventory_24h"]
+    } / 20</span></div>
+          <div class="flex justify-between"><span>Reels fresh inventory</span><span class="font-semibold">{
+        video_supply["surfaces"]["reels"]["fresh_inventory_24h"]
+    } / 35</span></div>
+          <div class="flex justify-between"><span>Videos median age</span><span class="font-semibold">{
+        video_supply["surfaces"]["videos"]["median_age_top20_hours"] or "—"
+    }h</span></div>
+          <div class="flex justify-between"><span>Reels median age</span><span class="font-semibold">{
+        video_supply["surfaces"]["reels"]["median_age_top20_hours"] or "—"
+    }h</span></div>
+          <div class="flex justify-between"><span>Videos dominant channel</span><span class="font-semibold">{
+        video_supply["surfaces"]["videos"]["dominant_channel_pct_top20"]
+    }%</span></div>
+          <div class="flex justify-between"><span>Reels dominant channel</span><span class="font-semibold">{
+        video_supply["surfaces"]["reels"]["dominant_channel_pct_top20"]
+    }%</span></div>
+        </div>
+      </div>
+      <div class="bg-white rounded-lg shadow p-5">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide">Lane snapshot (24h)</h3>
+          <a href="/api/v1/admin/ui/video-sources?key={
+        admin_key
+    }" class="text-sm text-blue-600 hover:underline">Channel health →</a>
+        </div>
+        <div class="space-y-2 text-sm text-gray-700">
+          {
+        "".join(
+            f'<div class="flex justify-between"><span>{surface.title()} {lane["lane"]}</span><span class="font-semibold">{lane["promoted"]}/{lane["candidates"]} ({lane["promotion_rate"]}%)</span></div>'
+            for surface, lanes in video_lanes["surfaces"].items()
+            for lane in lanes[:2]
+        )
+        or '<p class="text-sm text-gray-400">No discovery runs captured yet.</p>'
+    }
+        </div>
+      </div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
@@ -476,10 +568,18 @@ def ui_dashboard(
       <div class="bg-white rounded-lg shadow p-5">
         <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Signal queue (all time)</h3>
         <div class="space-y-2">
-          <div class="flex justify-between"><span class="text-sm text-gray-600">Pending</span>{_badge(str(sig_pending), "yellow")}</div>
-          <div class="flex justify-between"><span class="text-sm text-gray-600">Ingested</span>{_badge(str(sig_ingested), "green")}</div>
-          <div class="flex justify-between"><span class="text-sm text-gray-600">Duplicate</span>{_badge(str(sig_duplicate), "gray")}</div>
-          <div class="flex justify-between"><span class="text-sm text-gray-600">Rejected</span>{_badge(str(sig_rejected), "red")}</div>
+          <div class="flex justify-between"><span class="text-sm text-gray-600">Pending</span>{
+        _badge(str(sig_pending), "yellow")
+    }</div>
+          <div class="flex justify-between"><span class="text-sm text-gray-600">Ingested</span>{
+        _badge(str(sig_ingested), "green")
+    }</div>
+          <div class="flex justify-between"><span class="text-sm text-gray-600">Duplicate</span>{
+        _badge(str(sig_duplicate), "gray")
+    }</div>
+          <div class="flex justify-between"><span class="text-sm text-gray-600">Rejected</span>{
+        _badge(str(sig_rejected), "red")
+    }</div>
         </div>
       </div>
 
@@ -512,6 +612,152 @@ def ui_dashboard(
       </div>
     </div>"""
     return _base(body, key=admin_key, active="dashboard")
+
+
+# ---------------------------------------------------------------------------
+# GET /admin/ui/video-lanes
+# ---------------------------------------------------------------------------
+
+
+@router.get("/video-lanes", response_class=HTMLResponse)
+def ui_video_lanes(
+    hours: int = Query(24, ge=1, le=24 * 14),
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_key_or_query),
+):
+    from app.services.video_metrics_service import compute_video_lane_metrics
+
+    payload = compute_video_lane_metrics(db, hours=hours)
+
+    def _rows(surface: str) -> str:
+        rows = payload["surfaces"].get(surface, [])
+        if not rows:
+            return '<tr><td colspan="7" class="px-3 py-4 text-sm text-gray-400 text-center">No data</td></tr>'
+        return "".join(
+            f"""
+            <tr class="border-b border-gray-100">
+              <td class="px-3 py-2 text-sm font-medium text-gray-800">{_esc(row["lane"])}</td>
+              <td class="px-3 py-2 text-sm text-right">{row["candidates"]}</td>
+              <td class="px-3 py-2 text-sm text-right">{row["promoted"]}</td>
+              <td class="px-3 py-2 text-sm text-right">{row["promotion_rate"]}%</td>
+              <td class="px-3 py-2 text-sm text-right">{row["median_promoted_age"] or "—"}h</td>
+              <td class="px-3 py-2 text-sm text-right">{row["distinct_promoted_channels"]}</td>
+              <td class="px-3 py-2 text-sm text-right">{row["duplicate_rejection_rate"]}% / {row["clickbait_rejection_rate"]}%</td>
+            </tr>"""
+            for row in rows
+        )
+
+    body = f"""
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-bold text-gray-900">Video Lanes</h1>
+      <form method="get" class="flex items-center gap-2">
+        <input type="hidden" name="key" value="{admin_key}">
+        <label class="text-sm text-gray-600">Window (hours)</label>
+        <input type="number" min="1" max="{24 * 14}" name="hours" value="{hours}" class="w-24 rounded border border-gray-300 px-2 py-1 text-sm">
+        <button class="px-3 py-1.5 rounded bg-gray-900 text-white text-sm">Apply</button>
+      </form>
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="bg-white rounded-lg shadow p-5">
+        <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Videos</h2>
+        <table class="min-w-full">
+          <thead class="bg-gray-50">
+            <tr class="text-xs text-gray-500 uppercase">
+              <th class="px-3 py-2 text-left">Lane</th>
+              <th class="px-3 py-2 text-right">Candidates</th>
+              <th class="px-3 py-2 text-right">Promoted</th>
+              <th class="px-3 py-2 text-right">Rate</th>
+              <th class="px-3 py-2 text-right">Median age</th>
+              <th class="px-3 py-2 text-right">Channels</th>
+              <th class="px-3 py-2 text-right">Dup / Clickbait</th>
+            </tr>
+          </thead>
+          <tbody>{_rows("videos")}</tbody>
+        </table>
+      </div>
+      <div class="bg-white rounded-lg shadow p-5">
+        <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Reels</h2>
+        <table class="min-w-full">
+          <thead class="bg-gray-50">
+            <tr class="text-xs text-gray-500 uppercase">
+              <th class="px-3 py-2 text-left">Lane</th>
+              <th class="px-3 py-2 text-right">Candidates</th>
+              <th class="px-3 py-2 text-right">Promoted</th>
+              <th class="px-3 py-2 text-right">Rate</th>
+              <th class="px-3 py-2 text-right">Median age</th>
+              <th class="px-3 py-2 text-right">Channels</th>
+              <th class="px-3 py-2 text-right">Dup / Clickbait</th>
+            </tr>
+          </thead>
+          <tbody>{_rows("reels")}</tbody>
+        </table>
+      </div>
+    </div>"""
+    return _base(body, key=admin_key, active="video-lanes")
+
+
+# ---------------------------------------------------------------------------
+# GET /admin/ui/video-sources
+# ---------------------------------------------------------------------------
+
+
+@router.get("/video-sources", response_class=HTMLResponse)
+def ui_video_sources(
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_key_or_query),
+):
+    from app.services.video_metrics_service import compute_video_source_metrics
+
+    payload = compute_video_source_metrics(db)
+    rows = payload["sources"]
+    body_rows = (
+        "".join(
+            f"""
+        <tr class="border-b border-gray-100">
+          <td class="px-3 py-2 text-sm">
+            <div class="font-medium text-gray-900">{_esc(row["channel_name"])}</div>
+            <div class="text-xs text-gray-500 font-mono">{_esc(row["channel_id"])}</div>
+          </td>
+          <td class="px-3 py-2 text-sm">{_badge(row["status"], "green" if row["status"] == "core" else "blue" if row["status"] == "rotation" else "yellow" if row["status"] == "discovery" else "red")}</td>
+          <td class="px-3 py-2 text-sm">{_esc(row["role"])}</td>
+          <td class="px-3 py-2 text-sm text-right">{row["score_7d"]}</td>
+          <td class="px-3 py-2 text-sm text-right">{row["promoted_share"]}%</td>
+          <td class="px-3 py-2 text-sm text-right">{row["suppression_rate"]}%</td>
+          <td class="px-3 py-2 text-sm text-right">{row["early_skip_rate"]}%</td>
+          <td class="px-3 py-2 text-sm text-right">{row["completion_rate"]}%</td>
+          <td class="px-3 py-2 text-sm text-right">{row["save_share_rate"]}%</td>
+          <td class="px-3 py-2 text-xs text-gray-500">{_esc(row["last_promoted_at"] or "—")}</td>
+        </tr>"""
+            for row in rows
+        )
+        or '<tr><td colspan="10" class="px-3 py-4 text-sm text-gray-400 text-center">No source profiles found</td></tr>'
+    )
+
+    body = f"""
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-bold text-gray-900">Video Sources</h1>
+      <a href="/api/v1/admin/ui/dashboard?key={admin_key}" class="text-sm text-blue-600 hover:underline">Back to dashboard</a>
+    </div>
+    <div class="bg-white rounded-lg shadow p-5">
+      <table class="min-w-full">
+        <thead class="bg-gray-50">
+          <tr class="text-xs text-gray-500 uppercase">
+            <th class="px-3 py-2 text-left">Channel</th>
+            <th class="px-3 py-2 text-left">Status</th>
+            <th class="px-3 py-2 text-left">Role</th>
+            <th class="px-3 py-2 text-right">Score 7d</th>
+            <th class="px-3 py-2 text-right">Promoted share</th>
+            <th class="px-3 py-2 text-right">Suppression</th>
+            <th class="px-3 py-2 text-right">Early skip</th>
+            <th class="px-3 py-2 text-right">Completion</th>
+            <th class="px-3 py-2 text-right">Save/share</th>
+            <th class="px-3 py-2 text-left">Last promoted</th>
+          </tr>
+        </thead>
+        <tbody>{body_rows}</tbody>
+      </table>
+    </div>"""
+    return _base(body, key=admin_key, active="video-sources")
 
 
 # ---------------------------------------------------------------------------

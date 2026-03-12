@@ -4,7 +4,7 @@ Updated to serve content from the unified content_items table with AI filtering.
 Includes tiered freshness strategy (A/B/C) and diversity mixing.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
@@ -52,10 +52,32 @@ def _content_item_to_video_schema(item) -> dict:
     }
 
 
+def _cursor_to_offset(cursor: Optional[str], limit: int, page: Optional[int]) -> int:
+    """Translate an opaque cursor into the internal offset used by caching."""
+    if cursor:
+        try:
+            return max(0, int(cursor))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid cursor") from exc
+    if page and page > 1:
+        return (page - 1) * limit
+    return 0
+
+
+def _inventory_state(has_more: bool, item_count: int) -> str:
+    """Surface-aware feed state for clients and admin diagnostics."""
+    if item_count == 0:
+        return "warming_up"
+    if not has_more:
+        return "caught_up"
+    return "healthy"
+
+
 @router.get("/recent", response_model=Dict[str, Any])
 def get_recent_videos(
     limit: int = Query(10, ge=1, le=50, description="Number of videos to return"),
-    page: int = Query(1, ge=1, description="Page number"),
+    cursor: Optional[str] = Query(None, description="Cursor returned by the previous page"),
+    page: Optional[int] = Query(None, ge=1, include_in_schema=False),
     response: Response = None,
     db: Session = Depends(get_db),
     flags: FeatureFlags = Depends(get_feature_flags),
@@ -78,7 +100,7 @@ def get_recent_videos(
     # Check inventory and trigger background top-up if needed (non-blocking)
     check_and_trigger_topup(db, SessionLocal)
 
-    offset = (page - 1) * limit
+    offset = _cursor_to_offset(cursor, limit, page)
 
     # Use cached tiered feed for better performance
     # Only show videos that have been AI-processed (have summaries)
@@ -95,7 +117,7 @@ def get_recent_videos(
     for v in videos:
         tier = v.get("freshness_tier", "?")
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
-    logger.info(f"Videos page {page}: {tier_counts} (limit={limit})")
+    logger.info(f"Videos cursor {offset}: {tier_counts} (limit={limit})")
 
     # ALWAYS add diagnostic headers (even on empty)
     if response:
@@ -111,9 +133,6 @@ def get_recent_videos(
         )
         feed_meta.add_headers(response)
 
-    if not videos and page == 1:
-        raise HTTPException(status_code=404, detail="No videos found")
-
     # Ad injection (noop when ADS_ENABLED is false)
     mixed, ads_injected = inject_ads(videos, placement_id="feed_fullpage")
     if response:
@@ -121,16 +140,19 @@ def get_recent_videos(
         response.headers["X-Ads-Frequency"] = str(settings.ADS_FEED_FREQUENCY)
 
     return {
-        "videos": mixed,
+        "items": mixed,
+        "next_cursor": str(offset + limit) if has_more else None,
         "has_more": has_more,
-        "page": page,
+        "served_at": meta.generated_at.isoformat(),
+        "inventory_state": _inventory_state(has_more, len(mixed)),
     }
 
 
 @router.get("/reels", response_model=Dict[str, Any])
 def get_reels(
     limit: int = Query(10, ge=1, le=50, description="Number of reels to return"),
-    page: int = Query(1, ge=1, description="Page number"),
+    cursor: Optional[str] = Query(None, description="Cursor returned by the previous page"),
+    page: Optional[int] = Query(None, ge=1, include_in_schema=False),
     response: Response = None,
     db: Session = Depends(get_db),
     flags: FeatureFlags = Depends(get_feature_flags),
@@ -153,7 +175,7 @@ def get_reels(
     # Check inventory and trigger background top-up if needed (non-blocking)
     check_and_trigger_topup(db, SessionLocal)
 
-    offset = (page - 1) * limit
+    offset = _cursor_to_offset(cursor, limit, page)
 
     # Use cached tiered feed for better performance
     videos, has_more, meta = get_cached_tiered_feed(
@@ -169,7 +191,7 @@ def get_reels(
     for v in videos:
         tier = v.get("freshness_tier", "?")
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
-    logger.info(f"Reels page {page}: {tier_counts} (limit={limit})")
+    logger.info(f"Reels cursor {offset}: {tier_counts} (limit={limit})")
 
     # Add diagnostic headers
     if response:
@@ -186,9 +208,11 @@ def get_reels(
         feed_meta.add_headers(response)
 
     return {
-        "videos": videos,
+        "items": videos,
+        "next_cursor": str(offset + limit) if has_more else None,
         "has_more": has_more,
-        "page": page,
+        "served_at": meta.generated_at.isoformat(),
+        "inventory_state": _inventory_state(has_more, len(videos)),
     }
 
 

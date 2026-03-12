@@ -292,12 +292,11 @@ class TestPromotionService:
         mock_db.rollback.assert_called_once()
         assert any("Promotion run failed" in e for e in result.errors)
 
-    def test_reel_type_not_processed(self):
-        """REEL content is always PROMOTED; the service skips REEL in its loop."""
+    def test_reel_type_processed(self):
+        """REEL candidates now flow through the same promotion gate."""
         mock_db = MagicMock()
         svc = PromotionService(mock_db)
 
-        # _get_candidates should never be called with REEL
         with (
             patch.object(svc, "_get_cluster_sizes", return_value={}),
             patch.object(svc, "_get_candidates", return_value=[]) as mock_gc,
@@ -305,8 +304,7 @@ class TestPromotionService:
         ):
             svc.run_promotion_job()
 
-        # Ensure it was only called for ARTICLE and VIDEO
         called_types = [call.args[0] for call in mock_gc.call_args_list]
-        assert ContentType.REEL not in called_types
+        assert ContentType.REEL in called_types
         assert ContentType.ARTICLE in called_types
         assert ContentType.VIDEO in called_types

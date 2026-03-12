@@ -75,6 +75,16 @@ class EventType(enum.Enum):
     SAVE = "SAVE"  # Saved/bookmarked content
     CHAT_START = "CHAT_START"  # Started chat about content
     CHAT_MESSAGE = "CHAT_MESSAGE"  # Sent message in chat
+    VIDEO_IMPRESSION = "VIDEO_IMPRESSION"  # Video or reel became visible
+    VIDEO_START = "VIDEO_START"  # Playback started
+    VIDEO_3S = "VIDEO_3S"  # Reached 3 seconds of playback
+    VIDEO_50PCT = "VIDEO_50PCT"  # Reached 50% completion
+    VIDEO_95PCT = "VIDEO_95PCT"  # Reached 95% completion
+    VIDEO_SKIP_LT_2S = "VIDEO_SKIP_LT_2S"  # Skipped almost immediately
+    VIDEO_SAVE = "VIDEO_SAVE"  # Saved/bookmarked video content
+    VIDEO_SHARE = "VIDEO_SHARE"  # Shared video content
+    LESS_FROM_CREATOR = "LESS_FROM_CREATOR"  # Explicit creator downvote
+    CAUGHT_UP = "CAUGHT_UP"  # User hit the end of healthy inventory
 
 
 # Define PostgreSQL enums with create_type=False to avoid recreation errors
@@ -105,6 +115,7 @@ class ContentItem(Base):
     source = Column(String(255), nullable=False, index=True)
     source_url = Column(String(2048), unique=True, nullable=False, index=True)
     canonical_url = Column(String(2048), nullable=True)
+    channel_id = Column(String(64), nullable=True, index=True)
 
     # Canonical identity (hard-dedupe)
     # - ARTICLE: sha256(normalized canonical URL)
@@ -140,6 +151,15 @@ class ContentItem(Base):
 
     # Promotion score computed by PromotionService (refreshed each run).
     promotion_score = Column(Float, nullable=True, index=True)
+    promotion_reason = Column(String(255), nullable=True)
+
+    # Dedicated video/reel discovery metadata.
+    acquisition_lane = Column(String(32), nullable=True, index=True)
+    source_status = Column(String(32), nullable=True, index=True)
+    view_count_snapshot = Column(BigInteger, nullable=True)
+    engagement_snapshot = Column(JSONB, nullable=True)
+    views_per_hour = Column(Float, nullable=True, index=True)
+    format_fit_score = Column(Float, nullable=True)
 
     # Candidate provenance fields (set by signal ingestion when created as CANDIDATE).
     candidate_first_seen_at = Column(DateTime, nullable=True, index=True)
