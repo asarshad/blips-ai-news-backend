@@ -8,7 +8,11 @@ from typing import Dict, Iterable, List
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.integrations.youtube_channels import CHANNEL_REGISTRY, ChannelConfig
+from app.integrations.youtube_channels import (
+    CHANNEL_REGISTRY,
+    ChannelConfig,
+    dedupe_channel_configs,
+)
 from app.models.content import ContentItem, ContentStatus, EventType, InteractionEvent
 from app.models.video_source import VideoSourceProfile
 from app.repositories.video_source_repo import VideoSourceProfileRepository
@@ -20,7 +24,7 @@ def bootstrap_video_source_profiles(
 ) -> List[VideoSourceProfile]:
     """Persist the curated registry into profile rows when missing."""
     repo = VideoSourceProfileRepository(db)
-    profiles = repo.upsert_from_registry(configs or CHANNEL_REGISTRY)
+    profiles = repo.upsert_from_registry(dedupe_channel_configs(configs or CHANNEL_REGISTRY))
     db.commit()
     return profiles
 
