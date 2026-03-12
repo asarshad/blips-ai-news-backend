@@ -23,6 +23,7 @@ from app.integrations.youtube_channels import (
     ChannelRole,
     ContentFormat,
     QualityTier,
+    get_channel_by_id,
     get_enabled_channels,
     get_long_form_channels,
     get_shorts_channels,
@@ -232,6 +233,17 @@ class VideoEntry:
     quality_tier: Optional[QualityTier] = None
     is_short: bool = False
     published_at: Optional[datetime] = None
+    acquisition_lane: str = "curated"
+    query_label: Optional[str] = None
+    region: Optional[str] = None
+    source_status: Optional[str] = None
+    view_count: Optional[int] = None
+    like_count: Optional[int] = None
+    comment_count: Optional[int] = None
+    views_per_hour: Optional[float] = None
+    format_fit_score: Optional[float] = None
+    live_broadcast_content: Optional[str] = None
+    default_language: Optional[str] = None
 
 
 class YouTubeClient:
@@ -590,6 +602,304 @@ class YouTubeClient:
 
         logger.info(f"Fetched {len(shorts)} shorts/reels")
         return shorts
+
+    def fetch_search_candidates(
+        self,
+        query: str,
+        *,
+        region_code: str = "US",
+        max_results: int = 10,
+        surface: str = "videos",
+        published_after: Optional[datetime] = None,
+    ) -> List[VideoEntry]:
+        """Fetch hydrated search candidates from the YouTube Data API."""
+        api_key = os.getenv("YOUTUBE_API_KEY")
+        if not api_key:
+            logger.info("Skipping YouTube search for '%s': no API key configured", query)
+            return []
+        if not self._breaker.allow_request():
+            logger.warning("Circuit open - skipping YouTube search for '%s'", query)
+            return []
+
+        params = {
+            "part": "snippet",
+            "type": "video",
+            "order": "date",
+            "maxResults": min(max_results, 50),
+            "q": query,
+            "regionCode": region_code,
+            "videoCategoryId": "28",
+            "relevanceLanguage": "en",
+            "safeSearch": "moderate",
+            "key": api_key,
+        }
+        if published_after:
+            params["publishedAfter"] = published_after.replace(microsecond=0).isoformat() + "Z"
+
+        try:
+            response = requests.get(
+                "https://www.googleapis.com/youtube/v3/search",
+                params=params,
+                timeout=10,
+            )
+            response.raise_for_status()
+            self._breaker.record_success()
+            data = response.json()
+        except Exception as exc:
+            self._breaker.record_failure()
+            logger.warning("YouTube search failed for '%s': %s", query, exc)
+            return []
+
+        video_ids = [
+            item.get("id", {}).get("videoId")
+            for item in data.get("items", [])
+            if item.get("id", {}).get("videoId")
+        ]
+        return self.hydrate_video_candidates(
+            video_ids=video_ids,
+            acquisition_lane="search",
+            query_label=query,
+            region=region_code,
+            surface=surface,
+        )
+
+    def fetch_trending_candidates(
+        self,
+        *,
+        region_code: str = "US",
+        max_results: int = 20,
+        surface: str = "videos",
+    ) -> List[VideoEntry]:
+        """Fetch hydrated Science & Technology trending candidates."""
+        api_key = os.getenv("YOUTUBE_API_KEY")
+        if not api_key:
+            logger.info("Skipping YouTube trending: no API key configured")
+            return []
+        if not self._breaker.allow_request():
+            logger.warning("Circuit open - skipping YouTube trending fetch")
+            return []
+
+        params = {
+            "part": "snippet",
+            "chart": "mostPopular",
+            "videoCategoryId": "28",
+            "regionCode": region_code,
+            "maxResults": min(max_results, 50),
+            "key": api_key,
+        }
+        try:
+            response = requests.get(
+                "https://www.googleapis.com/youtube/v3/videos",
+                params=params,
+                timeout=10,
+            )
+            response.raise_for_status()
+            self._breaker.record_success()
+            data = response.json()
+        except Exception as exc:
+            self._breaker.record_failure()
+            logger.warning("YouTube trending fetch failed: %s", exc)
+            return []
+
+        video_ids = [item.get("id") for item in data.get("items", []) if item.get("id")]
+        return self.hydrate_video_candidates(
+            video_ids=video_ids,
+            acquisition_lane="trending",
+            query_label="most_popular_science_technology",
+            region=region_code,
+            surface=surface,
+        )
+
+    def hydrate_video_candidates(
+        self,
+        *,
+        video_ids: List[str],
+        acquisition_lane: str,
+        query_label: Optional[str],
+        region: Optional[str],
+        surface: str,
+    ) -> List[VideoEntry]:
+        """Hydrate video IDs into enriched candidates via videos.list."""
+        api_key = os.getenv("YOUTUBE_API_KEY")
+        if not api_key or not video_ids:
+            return []
+
+        unique_ids = list(dict.fromkeys(video_ids))
+        entries: List[VideoEntry] = []
+        for start in range(0, len(unique_ids), 50):
+            chunk = unique_ids[start : start + 50]
+            params = {
+                "part": "snippet,contentDetails,statistics,liveStreamingDetails,status",
+                "id": ",".join(chunk),
+                "key": api_key,
+            }
+            try:
+                response = requests.get(
+                    "https://www.googleapis.com/youtube/v3/videos",
+                    params=params,
+                    timeout=10,
+                )
+                response.raise_for_status()
+                self._breaker.record_success()
+                data = response.json()
+            except Exception as exc:
+                self._breaker.record_failure()
+                logger.warning("YouTube hydration failed for %s ids: %s", len(chunk), exc)
+                continue
+
+            for item in data.get("items", []):
+                entry = self._entry_from_api_item(
+                    item,
+                    acquisition_lane=acquisition_lane,
+                    query_label=query_label,
+                    region=region,
+                    surface=surface,
+                )
+                if entry:
+                    entries.append(entry)
+
+        return entries
+
+    def _entry_from_api_item(
+        self,
+        item: dict,
+        *,
+        acquisition_lane: str,
+        query_label: Optional[str],
+        region: Optional[str],
+        surface: str,
+    ) -> Optional[VideoEntry]:
+        """Convert a videos.list payload into a VideoEntry."""
+        video_id = item.get("id")
+        snippet = item.get("snippet", {})
+        content_details = item.get("contentDetails", {})
+        statistics = item.get("statistics", {})
+        status = item.get("status", {})
+        if not video_id or not snippet:
+            return None
+
+        title = snippet.get("title", "Untitled")
+        summary = snippet.get("description", "")
+        channel_id = snippet.get("channelId", "")
+        channel_name = snippet.get("channelTitle", "YouTube")
+        published_at = self._parse_api_datetime(snippet.get("publishedAt"))
+        duration_seconds = self._parse_iso_duration(content_details.get("duration", ""))
+        view_count = self._safe_int(statistics.get("viewCount"))
+        like_count = self._safe_int(statistics.get("likeCount"))
+        comment_count = self._safe_int(statistics.get("commentCount"))
+
+        is_short = bool(
+            duration_seconds is not None
+            and duration_seconds <= int(os.getenv("YT_SHORT_MAX_SECONDS", "75"))
+        )
+        content_format = ContentFormat.SHORTS if is_short else ContentFormat.LONG_FORM
+
+        channel_cfg = get_channel_by_id(channel_id) if channel_id else None
+        channel_role = (
+            channel_cfg.role if channel_cfg else self._guess_role(title, summary, surface)
+        )
+        quality_tier = channel_cfg.quality_tier if channel_cfg else QualityTier.STANDARD
+        source_status = "core" if channel_cfg and channel_cfg.enabled else "discovery"
+
+        views_per_hour = None
+        if published_at and view_count is not None:
+            hours_old = max((datetime.utcnow() - published_at).total_seconds() / 3600, 1.0)
+            views_per_hour = round(view_count / hours_old, 2)
+
+        fit_score = self._compute_format_fit_score(
+            duration_seconds=duration_seconds,
+            is_short=is_short,
+            surface=surface,
+            role=channel_role,
+        )
+
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        return VideoEntry(
+            title=title,
+            video_url=video_url,
+            thumbnail_url=self.get_thumbnail_url(video_id),
+            summary=summary,
+            source=channel_name,
+            category=self._categorize_video(title, summary),
+            video_id=video_id,
+            channel_id=channel_id,
+            channel_role=channel_role,
+            content_format=channel_cfg.content_format if channel_cfg else content_format,
+            quality_tier=quality_tier,
+            is_short=is_short,
+            published_at=published_at,
+            acquisition_lane=acquisition_lane,
+            query_label=query_label,
+            region=region,
+            source_status=source_status,
+            view_count=view_count,
+            like_count=like_count,
+            comment_count=comment_count,
+            views_per_hour=views_per_hour,
+            format_fit_score=fit_score,
+            live_broadcast_content=snippet.get("liveBroadcastContent")
+            or status.get("uploadStatus"),
+            default_language=snippet.get("defaultAudioLanguage") or snippet.get("defaultLanguage"),
+        )
+
+    def _guess_role(self, title: str, summary: str, surface: str) -> ChannelRole:
+        """Best-effort role inference for discovered channels."""
+        text = f"{title} {summary}".lower()
+        if any(token in text for token in ("openai", "google", "apple", "microsoft", "developer")):
+            return ChannelRole.OFFICIAL
+        if any(token in text for token in ("ai", "model", "llm", "chatgpt", "gemini", "claude")):
+            return ChannelRole.AI
+        if any(
+            token in text
+            for token in ("kernel", "programming", "developer", "framework", "benchmark")
+        ):
+            return ChannelRole.ENGINEER
+        if surface == "reels":
+            return ChannelRole.SHORTS
+        if any(token in text for token in ("news", "today", "update", "announced", "launch")):
+            return ChannelRole.NEWS
+        return ChannelRole.EXPLAINER
+
+    def _compute_format_fit_score(
+        self,
+        *,
+        duration_seconds: Optional[int],
+        is_short: bool,
+        surface: str,
+        role: ChannelRole,
+    ) -> float:
+        """Return a [0,1] fit score for the requested surface."""
+        if surface == "reels":
+            if duration_seconds is None:
+                return 0.6 if is_short else 0.0
+            return 1.0 if 15 <= duration_seconds <= 75 else 0.0
+
+        if duration_seconds is None:
+            return 0.4
+        if 180 <= duration_seconds <= 1200:
+            return 1.0
+        if role in (ChannelRole.ENGINEER, ChannelRole.OFFICIAL) and duration_seconds <= 2700:
+            return 0.8
+        return 0.0
+
+    def _parse_api_datetime(self, value: Optional[str]) -> Optional[datetime]:
+        """Parse RFC3339 datetimes from YouTube API payloads."""
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed.replace(tzinfo=None)
+        except Exception:
+            return None
+
+    def _safe_int(self, value: Optional[str]) -> Optional[int]:
+        """Convert an optional string count into int."""
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
     def _fetch_channel_with_config(
         self, config: ChannelConfig, max_videos: int

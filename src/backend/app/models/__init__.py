@@ -12,6 +12,7 @@ from app.models.conversation import Conversation
 from app.models.editorial import EditorialAction
 from app.models.ingestion_progress import IngestionProgress
 from app.models.usage import Usage
+from app.models.video_source import VideoDiscoveryRun, VideoSourceProfile
 
 # For Alembic to detect all models
 __all__ = [
@@ -27,4 +28,6 @@ __all__ = [
     "EventType",
     "IngestionProgress",
     "EditorialAction",
+    "VideoSourceProfile",
+    "VideoDiscoveryRun",
 ]

@@ -1,0 +1,71 @@
+{
+  "capture_error": "(psycopg2.OperationalError) connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\nconnection to server at \"localhost\" (::1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8); (psycopg2.OperationalError) connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\nconnection to server at \"localhost\" (::1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)",
+  "capture_status": "partial",
+  "captured_at": "2026-03-12T20:11:55.792499",
+  "raw": {
+    "inventory_health": {
+      "path": "/api/v1/metrics/inventory/health",
+      "payload": {
+        "detail": "(psycopg2.OperationalError) connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\nconnection to server at \"localhost\" (::1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+      },
+      "status_code": 500
+    },
+    "signal": {
+      "path": "/api/v1/metrics/signal",
+      "payload": {
+        "as_of": "2026-03-12T20:11:55.751845+00:00",
+        "error": "(psycopg2.OperationalError) connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\nconnection to server at \"localhost\" (::1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+      },
+      "status_code": 200
+    },
+    "sources": {
+      "path": "/api/v1/metrics/sources",
+      "payload": {
+        "as_of": "2026-03-12T20:11:55.731768+00:00",
+        "error": "(psycopg2.OperationalError) connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\nconnection to server at \"localhost\" (::1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)"
+      },
+      "status_code": 200
+    },
+    "videos_recent": {
+      "error": "(psycopg2.OperationalError) connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\nconnection to server at \"localhost\" (::1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)",
+      "path": "/api/v1/videos/recent?limit=20&page=1",
+      "status_code": null
+    },
+    "videos_reels": {
+      "error": "(psycopg2.OperationalError) connection to server at \"localhost\" (127.0.0.1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\nconnection to server at \"localhost\" (::1), port 5432 failed: Connection refused\n\tIs the server running on that host and accepting TCP/IP connections?\n\n(Background on this error at: https://sqlalche.me/e/20/e3q8)",
+      "path": "/api/v1/videos/reels?limit=20&page=1",
+      "status_code": null
+    }
+  },
+  "samples": {
+    "videos_recent": [],
+    "videos_reels": []
+  },
+  "tag": "pre-video-reels-overhaul-2026-03-12",
+  "video_supply": {
+    "reels": {
+      "caught_up_rate": null,
+      "clickbait_rejection_rate": null,
+      "distinct_active_channels_24h": 0,
+      "dominant_channel_pct_top20": 0.0,
+      "duplicate_rejection_rate": null,
+      "empty_feed_rate": null,
+      "fresh_inventory_24h": 0,
+      "median_age_top20_hours": null,
+      "official_share_top20": null,
+      "p95_age_top20_hours": null
+    },
+    "videos": {
+      "caught_up_rate": null,
+      "clickbait_rejection_rate": null,
+      "distinct_active_channels_24h": 0,
+      "dominant_channel_pct_top20": 0.0,
+      "duplicate_rejection_rate": null,
+      "empty_feed_rate": null,
+      "fresh_inventory_24h": 0,
+      "median_age_top20_hours": null,
+      "official_share_top20": null,
+      "p95_age_top20_hours": null
+    }
+  }
+}

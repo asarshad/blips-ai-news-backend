@@ -106,8 +106,9 @@ class PersonalizationService:
 
         # Check chat message cap
         if event_type == EventType.CHAT_MESSAGE:
-            today_count = self.event_repo.count_user_chat_messages_for_content(
-                profile.id, content_item_id, hours_back=24
+            today_count = self.event_repo.count_user_chat_messages_today(
+                profile.device_id,
+                content_item_id,
             )
             if today_count >= CHAT_MESSAGE_CAP_PER_CONTENT:
                 logger.debug(
@@ -115,19 +116,19 @@ class PersonalizationService:
                 )
                 # Still record the event, but don't update preferences
                 event = self.event_repo.record_event(
-                    user_id=profile.id,
+                    device_id=profile.device_id,
                     content_item_id=content_item_id,
                     event_type=event_type,
-                    extra_data=extra_data,
+                    event_value=str(extra_data) if extra_data else None,
                 )
                 return event
 
         # Record the event
         event = self.event_repo.record_event(
-            user_id=profile.id,
+            device_id=profile.device_id,
             content_item_id=content_item_id,
             event_type=event_type,
-            extra_data=extra_data,
+            event_value=str(extra_data) if extra_data else None,
         )
 
         if not event:
@@ -148,9 +149,9 @@ class PersonalizationService:
         if content.topics:
             for topic in content.topics:
                 self.preference_repo.upsert_preference(
-                    user_id=profile.id,
+                    device_id=profile.device_id,
                     pref_type=PrefType.TOPIC,
-                    pref_key=topic.lower(),
+                    key=topic.lower(),
                     weight_delta=weight,
                 )
 
@@ -158,26 +159,26 @@ class PersonalizationService:
         if content.entities:
             for entity in content.entities:
                 self.preference_repo.upsert_preference(
-                    user_id=profile.id,
+                    device_id=profile.device_id,
                     pref_type=PrefType.ENTITY,
-                    pref_key=entity.lower(),
+                    key=str(entity).lower(),
                     weight_delta=weight,
                 )
 
         # Update source preference
         if content.source:
             self.preference_repo.upsert_preference(
-                user_id=profile.id,
+                device_id=profile.device_id,
                 pref_type=PrefType.SOURCE,
-                pref_key=content.source.lower(),
+                key=content.source.lower(),
                 weight_delta=weight,
             )
 
         # Update format preference
         self.preference_repo.upsert_preference(
-            user_id=profile.id,
+            device_id=profile.device_id,
             pref_type=PrefType.FORMAT,
-            pref_key=content.type.value,
+            key=content.type.value,
             weight_delta=weight,
         )
 
@@ -195,28 +196,19 @@ class PersonalizationService:
             "errors": 0,
         }
 
-        # Get all profiles with preferences
-        profiles = self.profile_repo.get_all_with_preferences()
-
+        profiles = self.profile_repo.get_all(limit=10000)
         logger.info(f"Running decay for {len(profiles)} users")
 
-        for profile in profiles:
-            try:
-                stats["users_processed"] += 1
-
-                # Apply decay
-                decayed, pruned = self.preference_repo.apply_decay(
-                    user_id=profile.id,
-                    decay_factor=DAILY_DECAY_FACTOR,
-                    min_weight=MIN_PREFERENCE_WEIGHT,
-                )
-
-                stats["preferences_decayed"] += decayed
-                stats["preferences_pruned"] += pruned
-
-            except Exception as e:
-                logger.error(f"Error decaying preferences for user {profile.id}: {e}")
-                stats["errors"] += 1
+        try:
+            decayed = self.preference_repo.apply_decay(
+                decay_rate=1 - DAILY_DECAY_FACTOR,
+                min_weight=MIN_PREFERENCE_WEIGHT,
+            )
+            stats["users_processed"] = len(profiles)
+            stats["preferences_decayed"] = decayed
+        except Exception as e:
+            logger.error(f"Error decaying preferences: {e}")
+            stats["errors"] += 1
 
         logger.info(f"Decay complete: {stats}")
         return stats
@@ -229,16 +221,8 @@ class PersonalizationService:
         """
         stats = {"users_processed": 0, "preferences_pruned": 0}
 
-        profiles = self.profile_repo.get_all_with_preferences()
-
-        for profile in profiles:
-            stats["users_processed"] += 1
-
-            for pref_type in PrefType:
-                pruned = self.preference_repo.prune_excess_preferences(
-                    user_id=profile.id, pref_type=pref_type, max_count=MAX_PREFERENCES_PER_TYPE
-                )
-                stats["preferences_pruned"] += pruned
+        profiles = self.profile_repo.get_all(limit=10000)
+        stats["users_processed"] = len(profiles)
 
         return stats
 
@@ -255,10 +239,8 @@ class PersonalizationService:
 
         result = {}
         for pref_type in PrefType:
-            prefs = self.preference_repo.get_top_preferences(
-                user_id=profile.id, pref_type=pref_type, limit=20
-            )
-            result[pref_type.value] = [(p.pref_key, p.weight) for p in prefs]
+            prefs = self.preference_repo.get_top_preferences(device_id, limit=20)
+            result[pref_type.value] = [(p.key, p.weight) for p in prefs.get(pref_type, [])]
 
         return result
 
@@ -275,20 +257,28 @@ class PersonalizationService:
 
         # Get user's preferences
         topic_prefs = {
-            p.pref_key: p.weight
-            for p in self.preference_repo.get_top_preferences(profile.id, PrefType.TOPIC, limit=50)
+            p.key: p.weight
+            for p in self.preference_repo.get_top_preferences(profile.device_id, limit=50).get(
+                PrefType.TOPIC, []
+            )
         }
         entity_prefs = {
-            p.pref_key: p.weight
-            for p in self.preference_repo.get_top_preferences(profile.id, PrefType.ENTITY, limit=50)
+            p.key: p.weight
+            for p in self.preference_repo.get_top_preferences(profile.device_id, limit=50).get(
+                PrefType.ENTITY, []
+            )
         }
         source_prefs = {
-            p.pref_key: p.weight
-            for p in self.preference_repo.get_top_preferences(profile.id, PrefType.SOURCE, limit=50)
+            p.key: p.weight
+            for p in self.preference_repo.get_top_preferences(profile.device_id, limit=50).get(
+                PrefType.SOURCE, []
+            )
         }
         format_prefs = {
-            p.pref_key: p.weight
-            for p in self.preference_repo.get_top_preferences(profile.id, PrefType.FORMAT, limit=10)
+            p.key: p.weight
+            for p in self.preference_repo.get_top_preferences(profile.device_id, limit=10).get(
+                PrefType.FORMAT, []
+            )
         }
 
         # Compute topic match
@@ -339,18 +329,20 @@ class PersonalizationService:
         # Get preference counts
         pref_counts = {}
         for pref_type in PrefType:
-            prefs = self.preference_repo.get_top_preferences(profile.id, pref_type, limit=1000)
+            prefs = self.preference_repo.get_top_preferences(device_id, limit=1000).get(
+                pref_type, []
+            )
             pref_counts[pref_type.value] = len(prefs)
 
         # Get engagement stats
         engagement = self.event_repo.get_engagement_stats(
-            profile.id,
+            profile.device_id,
             hours_back=168,  # 7 days
         )
 
         return {
             "device_id": device_id,
-            "user_id": profile.id,
+            "user_id": profile.device_id,
             "created_at": profile.created_at.isoformat(),
             "preference_counts": pref_counts,
             "engagement_7d": engagement,

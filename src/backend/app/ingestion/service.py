@@ -37,10 +37,12 @@ from app.integrations.youtube_channels import (
     get_quality_weight_modifier,
 )
 from app.integrations.youtube_client import VideoEntry, YouTubeClient
-from app.models.content import ContentItem, ContentType
+from app.models.content import ContentItem, ContentStatus, ContentType
 from app.ranking.quality import compute_source_weight
 from app.ranking.service import ScoringService
 from app.repositories.content_repo import ContentItemRepository
+from app.services.video_discovery_service import VideoDiscoveryService
+from app.services.video_source_service import bootstrap_video_source_profiles
 
 logger = get_logger(__name__)
 
@@ -400,8 +402,9 @@ class IngestionPipeline:
             type=content_type,
             source=source,
             source_url=normalized_video_url or entry.video_url,
-            # YouTube RSS dates can be inconsistent; created_at is the ingestion date.
-            published_at=datetime.utcnow(),
+            channel_id=getattr(entry, "channel_id", None),
+            # Discovery and curated candidates now carry their true publish time.
+            published_at=entry.published_at or datetime.utcnow(),
             title=entry.title,
             description=summary[:500] if summary else None,
             summary=summary if content_type != ContentType.REEL else None,
@@ -415,6 +418,17 @@ class IngestionPipeline:
             ai_processed=ai_processed,
             conversation_starters=inline_starters,
             language=detected_lang or "en",
+            curation_status=ContentStatus.CANDIDATE,
+            discovered_via=f"yt_{getattr(entry, 'acquisition_lane', 'curated')}",
+            acquisition_lane=getattr(entry, "acquisition_lane", "curated"),
+            source_status=getattr(entry, "source_status", None),
+            view_count_snapshot=getattr(entry, "view_count", None),
+            engagement_snapshot={
+                "likes": getattr(entry, "like_count", None),
+                "comments": getattr(entry, "comment_count", None),
+            },
+            views_per_hour=getattr(entry, "views_per_hour", None),
+            format_fit_score=getattr(entry, "format_fit_score", None),
         )
         base_quality = compute_source_weight(source)
         content_item.quality_score = base_quality * quality_modifier
@@ -504,6 +518,8 @@ class IngestionPipeline:
             "attempts": 0,
             "daily_targets_met": False,
         }
+
+        bootstrap_video_source_profiles(self.db)
 
         while True:
             # Enforce per-day quotas based on items created today (UTC).
@@ -622,6 +638,25 @@ class IngestionPipeline:
                     logger.error(f"Error fetching YouTube channels: {type(e).__name__}: {e}")
                     stats["errors"] += 1
 
+            # Dedicated YouTube discovery lane for broader coverage and recency.
+            try:
+                discovery = VideoDiscoveryService(self.db, self.youtube_client)
+                discovered_videos = discovery.discover("videos")
+                discovered_reels = discovery.discover("reels")
+                video_entries.extend(discovered_videos)
+                video_entries.extend(discovered_reels)
+                logger.info(
+                    "Fetched %s discovery candidates (%s videos, %s reels)",
+                    len(discovered_videos) + len(discovered_reels),
+                    len(discovered_videos),
+                    len(discovered_reels),
+                )
+            except Exception as e:
+                logger.error(
+                    f"Error fetching YouTube discovery candidates: {type(e).__name__}: {e}"
+                )
+                stats["errors"] += 1
+
             # Process articles until we hit the remaining daily target
             # Track per-feed counts to enforce daily caps
             feed_article_counts: Dict[str, int] = defaultdict(int)
@@ -681,6 +716,14 @@ class IngestionPipeline:
                 existing_reels,
                 DAILY_TARGET_REELS,
                 remaining_reels,
+            )
+            video_entries.sort(
+                key=lambda entry: (
+                    getattr(entry, "format_fit_score", 0.0) or 0.0,
+                    getattr(entry, "views_per_hour", 0.0) or 0.0,
+                    entry.published_at or datetime.min,
+                ),
+                reverse=True,
             )
             for entry in video_entries:
                 if remaining_videos == 0 and remaining_reels == 0:

@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.models.content import ContentItem, ContentType
+from app.models.content import ContentItem, ContentStatus, ContentType
 from app.services.diversity_mixer import mix_feed
 from app.services.inventory_service import FreshnessTier, Surface, _get_surface_config
 
@@ -165,6 +165,7 @@ def get_tiered_feed(
     base_filter = and_(
         ContentItem.type == content_type,
         ContentItem.is_suppressed.is_(False),
+        ContentItem.curation_status == ContentStatus.PROMOTED,
     )
 
     if require_ai_processed:
@@ -194,16 +195,22 @@ def get_tiered_feed(
     # =========================================================================
     # TIER A: Fresh (published within window)
     # =========================================================================
-    tier_a_items = (
-        db.query(ContentItem)
-        .filter(
-            base_filter,
-            ContentItem.published_at >= fresh_cutoff,
-        )
-        .order_by(desc(ContentItem.global_score), desc(ContentItem.published_at))
-        .limit(target_count * fetch_multiplier)
-        .all()
+    tier_a_query = db.query(ContentItem).filter(
+        base_filter,
+        ContentItem.published_at >= fresh_cutoff,
     )
+    if surface in (Surface.VIDEOS, Surface.REELS):
+        tier_a_query = tier_a_query.order_by(
+            desc(ContentItem.published_at),
+            desc(ContentItem.promotion_score),
+            desc(ContentItem.global_score),
+        )
+    else:
+        tier_a_query = tier_a_query.order_by(
+            desc(ContentItem.global_score),
+            desc(ContentItem.published_at),
+        )
+    tier_a_items = tier_a_query.limit(target_count * fetch_multiplier).all()
 
     for item in tier_a_items:
         if item.id not in seen_ids:
@@ -223,7 +230,11 @@ def get_tiered_feed(
                 ContentItem.created_at >= backfill_cutoff,
                 ContentItem.published_at < fresh_cutoff,
             )
-            .order_by(desc(ContentItem.global_score), desc(ContentItem.created_at))
+            .order_by(
+                desc(ContentItem.promotion_score),
+                desc(ContentItem.global_score),
+                desc(ContentItem.created_at),
+            )
             .limit(target_count * fetch_multiplier)
             .all()
         )
@@ -249,7 +260,11 @@ def get_tiered_feed(
                 ContentItem.published_at >= evergreen_cutoff,
                 ContentItem.global_score >= 0.3,  # Quality threshold
             )
-            .order_by(desc(ContentItem.global_score), desc(ContentItem.published_at))
+            .order_by(
+                desc(ContentItem.promotion_score),
+                desc(ContentItem.global_score),
+                desc(ContentItem.published_at),
+            )
             .limit(target_count * fetch_multiplier)
             .all()
         )
@@ -347,8 +362,15 @@ def tiered_item_to_dict(tiered: TieredItem) -> Dict[str, Any]:
         # Ranking metadata — used by personalised re-rank pass; included in
         # the cached payload so rerank_feed() can operate without DB access.
         "global_score": item.global_score or 0.0,
+        "promotion_score": item.promotion_score or 0.0,
         "recency_score": item.recency_score or 1.0,
         "topics": item.topics or [],
+        "channel_id": item.channel_id,
+        "acquisition_lane": item.acquisition_lane,
+        "source_status": item.source_status,
+        "views_per_hour": item.views_per_hour,
+        "format_fit_score": item.format_fit_score,
+        "promotion_reason": item.promotion_reason,
         # Conversation starters (inline to avoid separate API call)
         # Serve persisted starters; generate title-based defaults at serving
         # time if ingestion/backfill didn't populate them.

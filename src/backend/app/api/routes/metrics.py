@@ -21,6 +21,11 @@ from app.models.ingestion_progress import IngestionProgress
 from app.models.source import SourceDailyStat
 from app.services.ai_metrics import compute_ai_feed_metrics
 from app.services.feed_health import compute_inventory_health
+from app.services.video_metrics_service import (
+    compute_video_lane_metrics,
+    compute_video_source_metrics,
+    compute_video_supply_metrics,
+)
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -473,3 +478,42 @@ def get_signal_metrics(
             "error": str(exc),
             "as_of": datetime.now(timezone.utc).isoformat(),
         }
+
+
+@router.get("/video-supply", dependencies=[Depends(require_admin_key)])
+def get_video_supply_metrics(
+    baseline_tag: str | None = Query(
+        None,
+        description="Committed baseline tag to compare against",
+    ),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Get supply, freshness, coverage, and baseline deltas for videos/reels."""
+    try:
+        return compute_video_supply_metrics(db, baseline_tag=baseline_tag)
+    except Exception as exc:
+        logger.error("Error getting video supply metrics: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/video-lanes", dependencies=[Depends(require_admin_key)])
+def get_video_lane_metrics(
+    hours: int = Query(24, ge=1, le=24 * 14, description="Look-back window in hours"),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Get discovery-lane candidate, rejection, and promotion metrics."""
+    try:
+        return compute_video_lane_metrics(db, hours=hours)
+    except Exception as exc:
+        logger.error("Error getting video lane metrics: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/video-sources", dependencies=[Depends(require_admin_key)])
+def get_video_source_metrics(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Get per-channel health and status for the admin portal."""
+    try:
+        return compute_video_source_metrics(db)
+    except Exception as exc:
+        logger.error("Error getting video source metrics: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
