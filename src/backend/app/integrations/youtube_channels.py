@@ -17,7 +17,7 @@ This structure enables:
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 
 class ChannelRole(str, Enum):
@@ -117,7 +117,7 @@ CHANNEL_REGISTRY: List[ChannelConfig] = [
         notes="Quick reviews, unboxings (LTT family)",
     ),
     ChannelConfig(
-        channel_id="UC0vBXGSyV14uvJ4hECDOl0Q",
+        channel_id="UCeeFfhMcJa1kjtfZAGskOCA",
         name="TechLinked",
         role=ChannelRole.EXPLAINER,
         content_format=ContentFormat.MIXED,
@@ -171,7 +171,7 @@ CHANNEL_REGISTRY: List[ChannelConfig] = [
         notes="High production tech reviews",
     ),
     ChannelConfig(
-        channel_id="UCmOdED66QPe_Z2IR1F17COg",
+        channel_id="UCTzLRZUgelatKZ4nyIKcAbg",
         name="Hardware Canucks",
         role=ChannelRole.EXPLAINER,
         content_format=ContentFormat.LONG_FORM,
@@ -523,8 +523,8 @@ CHANNEL_REGISTRY: List[ChannelConfig] = [
         content_format=ContentFormat.SHORTS,
         daily_cap=5,
         quality_tier=QualityTier.STANDARD,
-        notes="Tech news shorts",
-        enabled=True,
+        notes="Disabled: duplicate channel ID with Android Developers",
+        enabled=False,
     ),
     ChannelConfig(
         channel_id="UCR-DXc1voovS8nhAvccRZhg",
@@ -562,9 +562,31 @@ CHANNEL_REGISTRY: List[ChannelConfig] = [
 # =============================================================================
 
 
+def _channel_config_priority(config: ChannelConfig) -> tuple[int, int, int]:
+    """Prefer enabled, non-shorts, mixed-capable configs for duplicate IDs."""
+    format_rank = {
+        ContentFormat.MIXED: 2,
+        ContentFormat.LONG_FORM: 1,
+        ContentFormat.SHORTS: 0,
+    }[config.content_format]
+    role_rank = 0 if config.role == ChannelRole.SHORTS else 1
+    enabled_rank = 1 if config.enabled else 0
+    return (enabled_rank, role_rank, format_rank)
+
+
+def dedupe_channel_configs(configs: Iterable[ChannelConfig]) -> List[ChannelConfig]:
+    """Collapse duplicate channel IDs down to a single canonical config."""
+    unique: Dict[str, ChannelConfig] = {}
+    for config in configs:
+        current = unique.get(config.channel_id)
+        if current is None or _channel_config_priority(config) > _channel_config_priority(current):
+            unique[config.channel_id] = config
+    return list(unique.values())
+
+
 def get_enabled_channels() -> List[ChannelConfig]:
     """Get all enabled channels."""
-    return [ch for ch in CHANNEL_REGISTRY if ch.enabled]
+    return [ch for ch in dedupe_channel_configs(CHANNEL_REGISTRY) if ch.enabled]
 
 
 def get_channels_by_role(role: ChannelRole) -> List[ChannelConfig]:
@@ -597,7 +619,7 @@ def get_channel_feed_urls() -> List[str]:
 
 def get_channel_by_id(channel_id: str) -> Optional[ChannelConfig]:
     """Look up channel configuration by ID."""
-    for ch in CHANNEL_REGISTRY:
+    for ch in dedupe_channel_configs(CHANNEL_REGISTRY):
         if ch.channel_id == channel_id:
             return ch
     return None
@@ -606,7 +628,7 @@ def get_channel_by_id(channel_id: str) -> Optional[ChannelConfig]:
 def get_channel_by_name(name: str) -> Optional[ChannelConfig]:
     """Look up channel configuration by name (case-insensitive partial match)."""
     name_lower = name.lower()
-    for ch in CHANNEL_REGISTRY:
+    for ch in dedupe_channel_configs(CHANNEL_REGISTRY):
         if name_lower in ch.name.lower():
             return ch
     return None

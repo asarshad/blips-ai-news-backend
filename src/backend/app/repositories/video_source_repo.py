@@ -5,7 +5,7 @@ from typing import Iterable, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.integrations.youtube_channels import ChannelConfig, ContentFormat
+from app.integrations.youtube_channels import ChannelConfig, ContentFormat, dedupe_channel_configs
 from app.models.video_source import VideoDiscoveryRun, VideoSourceProfile
 
 
@@ -31,9 +31,26 @@ class VideoSourceProfileRepository:
 
     def upsert_from_registry(self, configs: Iterable[ChannelConfig]) -> List[VideoSourceProfile]:
         """Ensure every curated channel has a persisted governance profile."""
+        unique_configs = dedupe_channel_configs(configs)
+        if not unique_configs:
+            return []
+
+        existing_profiles = {
+            profile.channel_id: profile
+            for profile in (
+                self.db.query(VideoSourceProfile)
+                .filter(
+                    VideoSourceProfile.channel_id.in_(
+                        [config.channel_id for config in unique_configs]
+                    )
+                )
+                .all()
+            )
+        }
+
         profiles: List[VideoSourceProfile] = []
-        for config in configs:
-            profile = self.get(config.channel_id)
+        for config in unique_configs:
+            profile = existing_profiles.get(config.channel_id)
             reel_cap = config.daily_cap if config.content_format != ContentFormat.LONG_FORM else 1
             if profile is None:
                 profile = VideoSourceProfile(
@@ -52,6 +69,7 @@ class VideoSourceProfileRepository:
                     allow_trending=True,
                 )
                 self.db.add(profile)
+                existing_profiles[config.channel_id] = profile
             else:
                 profile.channel_name = config.name
                 profile.role = config.role.value

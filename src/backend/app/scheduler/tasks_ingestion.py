@@ -54,6 +54,7 @@ def fetch_and_process_news():
 def _run_curation_ingestion_with_stats(db, stats: JobStats):
     try:
         from app.ingestion.checkpointing import run_checkpointed_ingestion
+        from app.ingestion.service import run_video_discovery_ingestion
 
         redis_client = None
         try:
@@ -63,5 +64,13 @@ def _run_curation_ingestion_with_stats(db, stats: JobStats):
 
         result = run_checkpointed_ingestion(db, redis_client=redis_client)
         logger.info(f"[fetch_news] Curation ingestion: {result}")
+
+        discovery_result = run_video_discovery_ingestion(db)
+        logger.info(f"[fetch_news] Video discovery ingestion: {discovery_result}")
+        stats.items_processed += int(discovery_result.get("videos_ingested", 0)) + int(
+            discovery_result.get("reels_ingested", 0)
+        )
+        if int(discovery_result.get("errors", 0)) > 0:
+            stats.errors.append(f"Video discovery ingestion: {discovery_result}")
     except Exception as e:
         stats.errors.append(f"Curation ingestion: {str(e)}")

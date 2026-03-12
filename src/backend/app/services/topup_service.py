@@ -146,6 +146,7 @@ def _run_topup(db_factory, priority_surfaces: list = None):
         # Import here to avoid circular imports
         from app.core.dependencies import get_redis
         from app.ingestion.checkpointing import run_checkpointed_ingestion
+        from app.ingestion.service import run_video_discovery_ingestion
 
         # Create a new database session for background work
         db = db_factory()
@@ -176,6 +177,8 @@ def _run_topup(db_factory, priority_surfaces: list = None):
                 # Run a single ingestion pass using checkpointed ingestion
                 result = run_checkpointed_ingestion(db, redis_client=redis_client)
                 logger.info(f"Top-up cycle {cycles + 1}: {result}")
+                discovery_result = run_video_discovery_ingestion(db)
+                logger.info(f"Top-up discovery cycle {cycles + 1}: {discovery_result}")
                 cycles += 1
 
             # Invalidate caches after top-up

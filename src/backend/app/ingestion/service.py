@@ -796,6 +796,126 @@ class IngestionPipeline:
             if ingest_until_targets and catchup_sleep_seconds > 0:
                 time.sleep(catchup_sleep_seconds)
 
+    def ingest_video_discovery_candidates(self) -> Dict[str, int | str]:
+        """Fetch and persist YouTube search/trending candidates in the live worker path."""
+        if os.getenv("YOUTUBE_DISCOVERY_ENABLED", "true").lower() not in (
+            "true",
+            "1",
+            "yes",
+            "on",
+        ):
+            return {
+                "status": "disabled",
+                "videos_candidates": 0,
+                "videos_ingested": 0,
+                "reels_candidates": 0,
+                "reels_ingested": 0,
+                "duplicates": 0,
+                "errors": 0,
+            }
+
+        today = datetime.utcnow().date()
+        remaining_videos = max(
+            0,
+            DAILY_TARGET_VIDEOS - self.content_repo.count_created_on_date(ContentType.VIDEO, today),
+        )
+        remaining_reels = max(
+            0,
+            DAILY_TARGET_REELS - self.content_repo.count_created_on_date(ContentType.REEL, today),
+        )
+        if remaining_videos == 0 and remaining_reels == 0:
+            return {
+                "status": "targets_met",
+                "videos_candidates": 0,
+                "videos_ingested": 0,
+                "reels_candidates": 0,
+                "reels_ingested": 0,
+                "duplicates": 0,
+                "errors": 0,
+            }
+
+        bootstrap_video_source_profiles(self.db)
+        discovery = VideoDiscoveryService(self.db, self.youtube_client)
+        channel_video_counts: Dict[str, int] = defaultdict(int)
+        channel_reel_counts: Dict[str, int] = defaultdict(int)
+        result: Dict[str, int | str] = {
+            "status": "ok",
+            "videos_candidates": 0,
+            "videos_ingested": 0,
+            "reels_candidates": 0,
+            "reels_ingested": 0,
+            "duplicates": 0,
+            "errors": 0,
+        }
+
+        for surface in ("videos", "reels"):
+            if surface == "videos" and remaining_videos <= 0:
+                continue
+            if surface == "reels" and remaining_reels <= 0:
+                continue
+
+            try:
+                entries = discovery.discover(surface)
+            except Exception as exc:
+                logger.error("[video_discovery] %s discovery failed: %s", surface, exc)
+                result["errors"] = int(result["errors"]) + 1
+                continue
+
+            result[f"{surface}_candidates"] = len(entries)
+            entries.sort(
+                key=lambda entry: (
+                    getattr(entry, "format_fit_score", 0.0) or 0.0,
+                    getattr(entry, "views_per_hour", 0.0) or 0.0,
+                    entry.published_at or datetime.min,
+                ),
+                reverse=True,
+            )
+
+            for entry in entries:
+                if surface == "videos" and remaining_videos <= 0:
+                    break
+                if surface == "reels" and remaining_reels <= 0:
+                    break
+
+                channel_id = getattr(entry, "channel_id", "") or entry.source or "unknown"
+                if surface == "videos":
+                    if channel_video_counts[channel_id] >= 2:
+                        continue
+                else:
+                    if channel_reel_counts[channel_id] >= 4:
+                        continue
+
+                try:
+                    item = self.ingest_youtube_entry(entry)
+                except Exception as exc:
+                    logger.error(
+                        "[video_discovery] Failed to ingest %s candidate '%s': %s",
+                        surface,
+                        entry.title,
+                        exc,
+                    )
+                    self.db.rollback()
+                    result["errors"] = int(result["errors"]) + 1
+                    continue
+
+                if not item:
+                    result["duplicates"] = int(result["duplicates"]) + 1
+                    continue
+
+                if item.type == ContentType.REEL:
+                    remaining_reels = max(0, remaining_reels - 1)
+                    channel_reel_counts[channel_id] += 1
+                    result["reels_ingested"] = int(result["reels_ingested"]) + 1
+                else:
+                    remaining_videos = max(0, remaining_videos - 1)
+                    channel_video_counts[channel_id] += 1
+                    result["videos_ingested"] = int(result["videos_ingested"]) + 1
+
+        if int(result["videos_ingested"]) == 0 and int(result["reels_ingested"]) == 0:
+            result["status"] = "no_new_items"
+
+        return result
+
     def _update_scores(self, content_item: ContentItem) -> None:
         """Update scores for a newly ingested item."""
         scores = self.scoring.score_single_item(content_item)
@@ -841,3 +961,9 @@ def create_ingestion_pipeline(db: Session) -> IngestionPipeline:
         clustering_service=clustering,
         scoring_service=scoring,
     )
+
+
+def run_video_discovery_ingestion(db: Session) -> Dict[str, int | str]:
+    """Run the YouTube discovery lane inside the live scheduler and top-up paths."""
+    pipeline = create_ingestion_pipeline(db)
+    return pipeline.ingest_video_discovery_candidates()
