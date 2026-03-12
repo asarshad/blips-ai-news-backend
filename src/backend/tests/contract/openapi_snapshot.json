@@ -1628,7 +1628,17 @@
           "SHARE",
           "SAVE",
           "CHAT_START",
-          "CHAT_MESSAGE"
+          "CHAT_MESSAGE",
+          "VIDEO_IMPRESSION",
+          "VIDEO_START",
+          "VIDEO_3S",
+          "VIDEO_50PCT",
+          "VIDEO_95PCT",
+          "VIDEO_SKIP_LT_2S",
+          "VIDEO_SAVE",
+          "VIDEO_SHARE",
+          "LESS_FROM_CREATOR",
+          "CAUGHT_UP"
         ],
         "title": "EventTypeParam",
         "type": "string"
@@ -2513,7 +2523,7 @@
           },
           "user_id": {
             "title": "User Id",
-            "type": "integer"
+            "type": "string"
           }
         },
         "required": [
@@ -6054,6 +6064,150 @@
         ]
       }
     },
+    "/api/v1/admin/ui/video-lanes": {
+      "get": {
+        "operationId": "ui_video_lanes_api_v1_admin_ui_video_lanes_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "maximum": 336,
+              "minimum": 1,
+              "title": "Hours",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Video Lanes",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
+    "/api/v1/admin/ui/video-sources": {
+      "get": {
+        "operationId": "ui_video_sources_api_v1_admin_ui_video_sources_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Video Sources",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
     "/api/v1/ai/respond": {
       "post": {
         "description": "Generate AI response for a message about a content item.",
@@ -7060,6 +7214,176 @@
         ]
       }
     },
+    "/api/v1/metrics/video-lanes": {
+      "get": {
+        "description": "Get discovery-lane candidate, rejection, and promotion metrics.",
+        "operationId": "get_video_lane_metrics_api_v1_metrics_video_lanes_get",
+        "parameters": [
+          {
+            "description": "Look-back window in hours",
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "description": "Look-back window in hours",
+              "maximum": 336,
+              "minimum": 1,
+              "title": "Hours",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Video Lane Metrics Api V1 Metrics Video Lanes Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Video Lane Metrics",
+        "tags": [
+          "metrics",
+          "metrics"
+        ]
+      }
+    },
+    "/api/v1/metrics/video-sources": {
+      "get": {
+        "description": "Get per-channel health and status for the admin portal.",
+        "operationId": "get_video_source_metrics_api_v1_metrics_video_sources_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Video Source Metrics Api V1 Metrics Video Sources Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Video Source Metrics",
+        "tags": [
+          "metrics",
+          "metrics"
+        ]
+      }
+    },
+    "/api/v1/metrics/video-supply": {
+      "get": {
+        "description": "Get supply, freshness, coverage, and baseline deltas for videos/reels.",
+        "operationId": "get_video_supply_metrics_api_v1_metrics_video_supply_get",
+        "parameters": [
+          {
+            "description": "Committed baseline tag to compare against",
+            "in": "query",
+            "name": "baseline_tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Committed baseline tag to compare against",
+              "title": "Baseline Tag"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Video Supply Metrics Api V1 Metrics Video Supply Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Video Supply Metrics",
+        "tags": [
+          "metrics",
+          "metrics"
+        ]
+      }
+    },
     "/api/v1/quality/report": {
       "get": {
         "operationId": "get_quality_report_api_v1_quality_report_get",
@@ -7763,16 +8087,21 @@
             }
           },
           {
-            "description": "Page number",
+            "description": "Cursor returned by the previous page",
             "in": "query",
-            "name": "page",
+            "name": "cursor",
             "required": false,
             "schema": {
-              "default": 1,
-              "description": "Page number",
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor returned by the previous page",
+              "title": "Cursor"
             }
           }
         ],
@@ -7826,16 +8155,21 @@
             }
           },
           {
-            "description": "Page number",
+            "description": "Cursor returned by the previous page",
             "in": "query",
-            "name": "page",
+            "name": "cursor",
             "required": false,
             "schema": {
-              "default": 1,
-              "description": "Page number",
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor returned by the previous page",
+              "title": "Cursor"
             }
           }
         ],
