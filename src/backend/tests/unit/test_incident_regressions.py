@@ -98,15 +98,17 @@ class TestVideosFeedAiProcessed:
         source = inspect.getsource(get_recent_videos)
         assert "require_ai_processed=True" in source
 
-    def test_videos_headers_before_404(self):
+    def test_videos_returns_cursor_envelope_instead_of_404(self):
         import inspect
 
         from app.api.routes.videos import get_recent_videos
 
         source = inspect.getsource(get_recent_videos)
         header_pos = source.index("add_headers")
-        raise_pos = source.index("raise HTTPException(status_code=404")
-        assert header_pos < raise_pos
+        return_pos = source.index("return {")
+        assert header_pos < return_pos
+        assert "raise HTTPException(status_code=404" not in source
+        assert '"inventory_state": _inventory_state' in source
 
 
 # ---------------------------------------------------------------------------
