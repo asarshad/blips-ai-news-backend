@@ -29,6 +29,7 @@ from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.services.diversity_mixer import mix_feed
 from app.services.inventory_service import FreshnessTier, Surface, _get_surface_config
+from app.services.video_content_policy import apply_content_policy
 
 logger = get_logger(__name__)
 
@@ -195,10 +196,10 @@ def get_tiered_feed(
     # =========================================================================
     # TIER A: Fresh (published within window)
     # =========================================================================
-    tier_a_query = db.query(ContentItem).filter(
-        base_filter,
-        ContentItem.published_at >= fresh_cutoff,
-    )
+    tier_a_query = apply_content_policy(
+        db.query(ContentItem).filter(base_filter),
+        content_type=content_type,
+    ).filter(ContentItem.published_at >= fresh_cutoff)
     if surface in (Surface.VIDEOS, Surface.REELS):
         tier_a_query = tier_a_query.order_by(
             desc(ContentItem.published_at),
@@ -224,9 +225,11 @@ def get_tiered_feed(
     # =========================================================================
     if len(results) < target_count * fetch_multiplier:
         tier_b_items = (
-            db.query(ContentItem)
+            apply_content_policy(
+                db.query(ContentItem).filter(base_filter),
+                content_type=content_type,
+            )
             .filter(
-                base_filter,
                 ContentItem.created_at >= backfill_cutoff,
                 ContentItem.published_at < fresh_cutoff,
             )
@@ -253,9 +256,11 @@ def get_tiered_feed(
     # =========================================================================
     if len(results) < target_count * fetch_multiplier:
         tier_c_items = (
-            db.query(ContentItem)
+            apply_content_policy(
+                db.query(ContentItem).filter(base_filter),
+                content_type=content_type,
+            )
             .filter(
-                base_filter,
                 ContentItem.published_at < fresh_cutoff,
                 ContentItem.published_at >= evergreen_cutoff,
                 ContentItem.global_score >= 0.3,  # Quality threshold

@@ -42,6 +42,7 @@ from app.models.content import ContentItem, ContentStatus, ContentType
 from app.ranking.quality import compute_source_weight
 from app.ranking.service import ScoringService
 from app.repositories.content_repo import ContentItemRepository
+from app.services.video_content_policy import youtube_discovery_enabled
 
 logger = get_logger(__name__)
 
@@ -58,10 +59,12 @@ DAILY_TARGET_REELS = settings.DAILY_TARGET_REELS
 
 DISCOVERY_FRESH_WINDOW_HOURS = max(1, int(os.getenv("VIDEO_DISCOVERY_FRESH_WINDOW_HOURS", "24")))
 DISCOVERY_FRESH_VIDEO_FLOOR = max(
-    1, int(os.getenv("VIDEO_DISCOVERY_MIN_FRESH_VIDEO_SUPPLY_24H", "30"))
+    1,
+    int(os.getenv("VIDEO_DISCOVERY_MIN_FRESH_VIDEO_SUPPLY_24H", str(settings.MIN_FRESH_VIDEOS))),
 )
 DISCOVERY_FRESH_REEL_FLOOR = max(
-    1, int(os.getenv("VIDEO_DISCOVERY_MIN_FRESH_REEL_SUPPLY_24H", "35"))
+    1,
+    int(os.getenv("VIDEO_DISCOVERY_MIN_FRESH_REEL_SUPPLY_24H", str(settings.MIN_FRESH_REELS))),
 )
 
 
@@ -677,34 +680,35 @@ class IngestionPipeline:
                     logger.error(f"Error fetching YouTube channels: {type(e).__name__}: {e}")
                     stats["errors"] += 1
 
-            # Dedicated YouTube discovery lane for broader coverage and recency.
-            try:
-                from app.services.video_discovery_service import VideoDiscoveryService
+            if youtube_discovery_enabled():
+                # Dedicated YouTube discovery lane for broader coverage and recency.
+                try:
+                    from app.services.video_discovery_service import VideoDiscoveryService
 
-                discovery = VideoDiscoveryService(self.db, self.youtube_client)
-                discovered_videos = (
-                    discovery.discover("videos", remaining_needed=remaining_videos)
-                    if remaining_videos > 0
-                    else []
-                )
-                discovered_reels = (
-                    discovery.discover("reels", remaining_needed=remaining_reels)
-                    if remaining_reels > 0
-                    else []
-                )
-                video_entries.extend(discovered_videos)
-                video_entries.extend(discovered_reels)
-                logger.info(
-                    "Fetched %s discovery candidates (%s videos, %s reels)",
-                    len(discovered_videos) + len(discovered_reels),
-                    len(discovered_videos),
-                    len(discovered_reels),
-                )
-            except Exception as e:
-                logger.error(
-                    f"Error fetching YouTube discovery candidates: {type(e).__name__}: {e}"
-                )
-                stats["errors"] += 1
+                    discovery = VideoDiscoveryService(self.db, self.youtube_client)
+                    discovered_videos = (
+                        discovery.discover("videos", remaining_needed=remaining_videos)
+                        if remaining_videos > 0
+                        else []
+                    )
+                    discovered_reels = (
+                        discovery.discover("reels", remaining_needed=remaining_reels)
+                        if remaining_reels > 0
+                        else []
+                    )
+                    video_entries.extend(discovered_videos)
+                    video_entries.extend(discovered_reels)
+                    logger.info(
+                        "Fetched %s discovery candidates (%s videos, %s reels)",
+                        len(discovered_videos) + len(discovered_reels),
+                        len(discovered_videos),
+                        len(discovered_reels),
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Error fetching YouTube discovery candidates: {type(e).__name__}: {e}"
+                    )
+                    stats["errors"] += 1
 
             # Process articles until we hit the remaining daily target
             # Track per-feed counts to enforce daily caps
@@ -847,12 +851,7 @@ class IngestionPipeline:
 
     def ingest_video_discovery_candidates(self) -> Dict[str, int | str]:
         """Fetch and persist YouTube search/trending candidates in the live worker path."""
-        if os.getenv("YOUTUBE_DISCOVERY_ENABLED", "true").lower() not in (
-            "true",
-            "1",
-            "yes",
-            "on",
-        ):
+        if not youtube_discovery_enabled():
             return {
                 "status": "disabled",
                 "videos_candidates": 0,

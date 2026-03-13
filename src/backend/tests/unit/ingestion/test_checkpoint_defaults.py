@@ -6,7 +6,9 @@ from datetime import date
 from enum import Enum
 from types import ModuleType, SimpleNamespace
 
+from app.ingestion import checkpoint_defaults
 from app.ingestion.checkpoint_defaults import build_defaults, get_reel_auto_pause_decisions
+from app.models.content import ContentType
 
 
 class _ContentFormat(str, Enum):
@@ -60,59 +62,30 @@ def _install_fake_integrations(monkeypatch, *, channels, rss_feeds=None):
     monkeypatch.setitem(sys.modules, "app.integrations.youtube_client", yt_client_mod)
 
 
-def test_build_defaults_applies_explicit_reel_targets_to_total_40(monkeypatch):
+def test_build_defaults_uses_curated_channel_caps(monkeypatch):
     channels = [
-        _Channel("The Verge", _ContentFormat.MIXED, 3),
-        _Channel("Technology Connections Shorts", _ContentFormat.SHORTS, 2),
-        _Channel("Karl Conrad", _ContentFormat.MIXED, 2),
-        _Channel("SuperSaf", _ContentFormat.MIXED, 2),
-        _Channel("Sam Beckman", _ContentFormat.MIXED, 2),
-        _Channel("Mrwhosetheboss", _ContentFormat.MIXED, 2),
-        _Channel("Unbox Therapy", _ContentFormat.MIXED, 2),
-        _Channel("JerryRigEverything", _ContentFormat.MIXED, 2),
-        _Channel("Marques Brownlee (MKBHD)", _ContentFormat.MIXED, 2),
-        _Channel("ShortCircuit", _ContentFormat.MIXED, 3),
-        _Channel("TechLinked", _ContentFormat.MIXED, 2),
-        _Channel("Android Developers", _ContentFormat.MIXED, 2),
-        _Channel("Tech Vision", _ContentFormat.SHORTS, 5),
-        _Channel("Linus Tech Tips", _ContentFormat.MIXED, 2),
-        _Channel("Fireship", _ContentFormat.MIXED, 2),
-        _Channel("Matt Wolfe", _ContentFormat.MIXED, 2),
-        _Channel("Jeff Geerling", _ContentFormat.MIXED, 3),
-        _Channel("Snazzy Labs", _ContentFormat.MIXED, 1),
+        _Channel("Long Feed", _ContentFormat.LONG_FORM, 1),
+        _Channel("Mixed Feed", _ContentFormat.MIXED, 2),
+        _Channel("Shorts Feed", _ContentFormat.SHORTS, 2),
     ]
     _install_fake_integrations(monkeypatch, channels=channels)
     monkeypatch.delenv("INGESTION_TARGET_DEFAULTS", raising=False)
+    monkeypatch.setattr(checkpoint_defaults, "_should_fill_surface", lambda *_a, **_k: True)
 
     defaults = build_defaults(day_utc=date(2026, 3, 9))
-    reel_targets = {d.feed_name: d.target for d in defaults if d.source_type == "youtube_reel"}
-    video_targets = {d.feed_name: d.target for d in defaults if d.source_type == "youtube_video"}
+    targets = {(d.source_type, d.feed_name): d.target for d in defaults}
 
-    assert sum(reel_targets.values()) == 40
-    assert reel_targets["The Verge"] == 4
-    assert reel_targets["Technology Connections Shorts"] == 4
-    assert reel_targets["Marques Brownlee (MKBHD)"] == 2
-    assert reel_targets["ShortCircuit"] == 1
-    assert reel_targets["TechLinked"] == 1
-    assert reel_targets["Android Developers"] == 1
-    assert reel_targets["Linus Tech Tips"] == 2
-    assert reel_targets["Fireship"] == 2
-    assert reel_targets["Matt Wolfe"] == 2
-    assert reel_targets["Jeff Geerling"] == 2
-    assert reel_targets["Snazzy Labs"] == 1
-
-    assert "Tech Vision" not in reel_targets
-
-    # Converted MIXED channels keep original video throughput via explicit overrides.
-    assert video_targets["Marques Brownlee (MKBHD)"] == 2
-    assert video_targets["ShortCircuit"] == 3
-    assert video_targets["TechLinked"] == 2
+    assert targets[("youtube_video", "Long Feed")] == 1
+    assert targets[("youtube_video", "Mixed Feed")] == 1
+    assert targets[("youtube_reel", "Mixed Feed")] == 1
+    assert targets[("youtube_reel", "Shorts Feed")] == 2
 
 
 def test_build_defaults_keeps_mixed_split_for_unoverridden_channels(monkeypatch):
     channels = [_Channel("Custom Mixed Feed", _ContentFormat.MIXED, 5)]
     _install_fake_integrations(monkeypatch, channels=channels)
     monkeypatch.delenv("INGESTION_TARGET_DEFAULTS", raising=False)
+    monkeypatch.setattr(checkpoint_defaults, "_should_fill_surface", lambda *_a, **_k: True)
 
     defaults = build_defaults(day_utc=date(2026, 3, 9))
     targets = {(d.source_type, d.feed_name): d.target for d in defaults}
@@ -121,7 +94,27 @@ def test_build_defaults_keeps_mixed_split_for_unoverridden_channels(monkeypatch)
     assert targets[("youtube_reel", "Custom Mixed Feed")] == 3
 
 
-def test_reel_guardrail_pauses_after_exhausted_day():
+def test_build_defaults_skips_video_and_reel_surfaces_when_inventory_is_healthy(monkeypatch):
+    channels = [
+        _Channel("Long Feed", _ContentFormat.LONG_FORM, 1),
+        _Channel("Mixed Feed", _ContentFormat.MIXED, 2),
+        _Channel("Shorts Feed", _ContentFormat.SHORTS, 2),
+    ]
+    rss_feeds = [SimpleNamespace(name="RSS Feed", daily_cap=2)]
+    _install_fake_integrations(monkeypatch, channels=channels, rss_feeds=rss_feeds)
+    monkeypatch.delenv("INGESTION_TARGET_DEFAULTS", raising=False)
+
+    def _fill_surface(_db, content_type):
+        return content_type == ContentType.ARTICLE
+
+    monkeypatch.setattr(checkpoint_defaults, "_should_fill_surface", _fill_surface)
+
+    defaults = build_defaults(day_utc=date(2026, 3, 9))
+
+    assert [(d.source_type, d.feed_name, d.target) for d in defaults] == [("rss", "RSS Feed", 2)]
+
+
+def test_reel_guardrail_is_disabled_in_curated_only_mode(monkeypatch):
     db = _FakeDb(
         [
             SimpleNamespace(
@@ -132,6 +125,7 @@ def test_reel_guardrail_pauses_after_exhausted_day():
             )
         ]
     )
+    monkeypatch.setattr(checkpoint_defaults.settings, "YOUTUBE_CURATED_ONLY", True)
 
     paused = get_reel_auto_pause_decisions(
         db=db,
@@ -139,11 +133,10 @@ def test_reel_guardrail_pauses_after_exhausted_day():
         feed_names=["No Yield Feed"],
     )
 
-    assert "No Yield Feed" in paused
-    assert "attempted>=60 and inserted=0" in paused["No Yield Feed"]
+    assert paused == {}
 
 
-def test_reel_guardrail_pauses_after_five_low_conversion_days():
+def test_reel_guardrail_pauses_after_five_low_conversion_days_when_enabled(monkeypatch):
     db = _FakeDb(
         [
             SimpleNamespace(
@@ -178,6 +171,7 @@ def test_reel_guardrail_pauses_after_five_low_conversion_days():
             ),
         ]
     )
+    monkeypatch.setattr(checkpoint_defaults.settings, "YOUTUBE_CURATED_ONLY", False)
 
     paused = get_reel_auto_pause_decisions(
         db=db,

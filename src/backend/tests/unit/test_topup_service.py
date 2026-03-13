@@ -47,6 +47,7 @@ def test_run_topup_runs_video_discovery(monkeypatch):
     monkeypatch.setattr(topup_service, "invalidate_tiered_feed_cache", lambda: None)
     monkeypatch.setattr(topup_service, "_release_topup_lock", lambda: None)
     monkeypatch.setattr(topup_service.settings, "TOPUP_MAX_RUNTIME_SECONDS", 60)
+    monkeypatch.setattr(topup_service, "youtube_discovery_enabled", lambda: True)
 
     topup_service._run_topup(lambda: db)
 

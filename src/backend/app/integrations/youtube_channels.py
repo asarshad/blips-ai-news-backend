@@ -1,565 +1,89 @@
 """
-YouTube Channel Configuration for Blips Tech News.
+YouTube channel configuration for curated video/reel ingestion.
 
-This module defines the structured channel configuration with role-based
-metadata for intelligent content ingestion. Each channel is tagged with:
-- Role (content type/style)
-- Content format (long-form vs shorts)
-- Daily ingestion caps
-- Quality tier
-
-This structure enables:
-- Balanced content mix across roles
-- Prevention of creator fatigue
-- Reliable shorts/reels volume
-- Quality-first ingestion
+The registry is stored as data so we can grow the trusted roster without
+turning this module into a giant hand-maintained Python list.
 """
 
+from __future__ import annotations
+
+import json
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 
 class ChannelRole(str, Enum):
-    """
-    Content role classification for channels.
+    """Content role classification for channels."""
 
-    Roles determine:
-    - Ranking weight adjustments
-    - Daily quota distribution
-    - Content placement (Videos vs Reels tab)
-    """
-
-    EXPLAINER = "explainer"  # Reviews, tutorials, explainers (MKBHD, Dave2D)
-    NEWS = "news"  # Daily tech news coverage (Bloomberg, Verge)
-    ENGINEER = "engineer"  # Deep technical content (Two Minute Papers, 3Blue1Brown)
-    AI = "ai"  # AI/ML focused creators and explainers
-    OFFICIAL = "official"  # Primary source announcements (Apple, Google, OpenAI)
-    SHORTS = "shorts"  # Shorts/Reels native channels
+    EXPLAINER = "explainer"
+    NEWS = "news"
+    ENGINEER = "engineer"
+    AI = "ai"
+    OFFICIAL = "official"
+    SHORTS = "shorts"
 
 
 class ContentFormat(str, Enum):
     """Content format classification."""
 
-    LONG_FORM = "long_form"  # Standard videos (typically > 3 min)
-    SHORTS = "shorts"  # YouTube Shorts (< 60 sec typically)
-    MIXED = "mixed"  # Channel produces both formats
+    LONG_FORM = "long_form"
+    SHORTS = "shorts"
+    MIXED = "mixed"
 
 
 class QualityTier(str, Enum):
     """Quality tier for ranking weight adjustment."""
 
-    PREMIUM = "premium"  # Top-tier creators, weight boost
-    STANDARD = "standard"  # Normal ranking weight
-    SUPPLEMENTAL = "supplemental"  # Fill content, slight weight reduction
+    PREMIUM = "premium"
+    STANDARD = "standard"
+    SUPPLEMENTAL = "supplemental"
 
 
-@dataclass
+@dataclass(frozen=True)
 class ChannelConfig:
-    """
-    Configuration for a single YouTube channel.
-
-    Attributes:
-        channel_id: YouTube channel ID
-        name: Human-readable channel name
-        role: Content role classification
-        content_format: Long-form, shorts, or mixed
-        daily_cap: Maximum videos to ingest per day from this channel
-        quality_tier: Quality classification for ranking
-        enabled: Whether channel is active for ingestion
-        notes: Optional notes about the channel
-    """
+    """Configuration for a single curated YouTube channel."""
 
     channel_id: str
     name: str
     role: ChannelRole
     content_format: ContentFormat = ContentFormat.LONG_FORM
-    daily_cap: int = 2
+    daily_cap: int = 1
     quality_tier: QualityTier = QualityTier.STANDARD
     enabled: bool = True
     notes: str = ""
 
     @property
     def feed_url(self) -> str:
-        """Generate YouTube RSS feed URL from channel ID."""
+        """Generate the YouTube RSS feed URL from the channel ID."""
         return f"https://www.youtube.com/feeds/videos.xml?channel_id={self.channel_id}"
 
 
-# =============================================================================
-# CHANNEL REGISTRY
-# =============================================================================
-# Organized by role for clarity. Each section targets specific content needs.
-# Total long-form capacity: ~50-60 videos/day
-# Total shorts capacity: ~40-50 reels/day
-
-CHANNEL_REGISTRY: List[ChannelConfig] = [
-    # =========================================================================
-    # EXPLAINER / REVIEW CHANNELS
-    # High-quality tech reviews, explainers, and tutorials
-    # Target: 8-10 videos/day
-    # =========================================================================
-    ChannelConfig(
-        channel_id="UCBJycsmduvYEL83R_U4JriQ",
-        name="Marques Brownlee (MKBHD)",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.MIXED,
-        daily_cap=2,
-        quality_tier=QualityTier.PREMIUM,
-        notes="Top tech reviewer, flagship content",
-    ),
-    ChannelConfig(
-        channel_id="UCdBK94H6oZT2Q7l0-b0xmMg",
-        name="ShortCircuit",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.MIXED,
-        daily_cap=3,
-        quality_tier=QualityTier.PREMIUM,
-        notes="Quick reviews, unboxings (LTT family)",
-    ),
-    ChannelConfig(
-        channel_id="UCeeFfhMcJa1kjtfZAGskOCA",
-        name="TechLinked",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.MIXED,
-        daily_cap=2,
-        quality_tier=QualityTier.PREMIUM,
-        notes="Daily tech news digest (LTT family)",
-    ),
-    ChannelConfig(
-        channel_id="UCXuqSBlHAE6Xw-yeJA0Tunw",
-        name="Linus Tech Tips",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.MIXED,
-        daily_cap=2,
-        quality_tier=QualityTier.PREMIUM,
-        notes="Comprehensive tech reviews and builds",
-    ),
-    ChannelConfig(
-        channel_id="UCVYamHliCI9rw1tHR1xbkfw",
-        name="Dave2D",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=2,
-        quality_tier=QualityTier.PREMIUM,
-        notes="Clean laptop/phone reviews",
-    ),
-    ChannelConfig(
-        channel_id="UCsTcErHg8oDvUnTzoqsYeNw",
-        name="Unbox Therapy",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.MIXED,
-        daily_cap=2,
-        quality_tier=QualityTier.STANDARD,
-        notes="Gadget unboxings and reviews",
-    ),
-    ChannelConfig(
-        channel_id="UCXGgrKt94gR6lmN4aN3mYTg",
-        name="Austin Evans",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=2,
-        quality_tier=QualityTier.STANDARD,
-        notes="Gaming and tech reviews",
-    ),
-    ChannelConfig(
-        channel_id="UCMiJRAwDNSNzuYeN2uWa0pA",
-        name="Mrwhosetheboss",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.MIXED,
-        daily_cap=2,
-        quality_tier=QualityTier.PREMIUM,
-        notes="High production tech reviews",
-    ),
-    ChannelConfig(
-        channel_id="UCTzLRZUgelatKZ4nyIKcAbg",
-        name="Hardware Canucks",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=2,
-        quality_tier=QualityTier.STANDARD,
-        notes="PC hardware reviews",
-    ),
-    ChannelConfig(
-        channel_id="UC9-y-6csu5WGm29I7JiwpnA",
-        name="Computerphile",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=2,
-        quality_tier=QualityTier.STANDARD,
-        notes="Computer science explanations",
-    ),
-    # =========================================================================
-    # NEWS / COMMENTARY CHANNELS
-    # Daily tech news, market analysis, industry commentary
-    # Target: 8-10 videos/day (high daily volume expected)
-    # =========================================================================
-    ChannelConfig(
-        channel_id="UCrM7B7SL_g1edFOnmj-SDKg",
-        name="Bloomberg Technology",
-        role=ChannelRole.NEWS,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=4,
-        quality_tier=QualityTier.PREMIUM,
-        notes="Professional tech news coverage",
-    ),
-    ChannelConfig(
-        channel_id="UCvJJ_dzjViJCoLf5uKUTwoA",
-        name="CNBC",
-        role=ChannelRole.NEWS,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=3,
-        quality_tier=QualityTier.STANDARD,
-        notes="Business/tech news intersection",
-    ),
-    ChannelConfig(
-        channel_id="UCK7tptUDHh-RYDsdxO1-5QQ",
-        name="The Wall Street Journal",
-        role=ChannelRole.NEWS,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=3,
-        quality_tier=QualityTier.PREMIUM,
-        notes="In-depth tech business analysis",
-    ),
-    ChannelConfig(
-        channel_id="UCddiUEpeqJcYeBxX1IVBKvQ",
-        name="The Verge",
-        role=ChannelRole.NEWS,
-        content_format=ContentFormat.MIXED,
-        daily_cap=3,
-        quality_tier=QualityTier.PREMIUM,
-        notes="Tech news and reviews",
-    ),
-    ChannelConfig(
-        channel_id="UC7YOGHUfC1Tb6E4pudI9STA",
-        name="Mental Outlaw",
-        role=ChannelRole.NEWS,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=2,
-        quality_tier=QualityTier.STANDARD,
-        notes="Linux and privacy tech news",
-    ),
-    ChannelConfig(
-        channel_id="UC2Xd-TjJByJyK2w1zNwY0zQ",
-        name="Fireship",
-        role=ChannelRole.NEWS,
-        content_format=ContentFormat.MIXED,
-        daily_cap=2,
-        quality_tier=QualityTier.PREMIUM,
-        notes="Developer news and quick explainers",
-    ),
-    # =========================================================================
-    # ENGINEER / DEEP TECH CHANNELS
-    # Technical depth, academic content, engineering explanations
-    # Target: 3-5 videos/day
-    # =========================================================================
-    ChannelConfig(
-        channel_id="UCbfYPyITQ-7l4upoX8nvctg",
-        name="Two Minute Papers",
-        role=ChannelRole.ENGINEER,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=2,
-        quality_tier=QualityTier.PREMIUM,
-        notes="AI/ML research paper summaries",
-    ),
-    ChannelConfig(
-        channel_id="UCYO_jab_esuFRV4b17AJtAw",
-        name="3Blue1Brown",
-        role=ChannelRole.ENGINEER,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=1,
-        quality_tier=QualityTier.PREMIUM,
-        notes="Math/CS visualizations, infrequent but high value",
-    ),
-    ChannelConfig(
-        channel_id="UCS0N5baNlQWJCUrhCEo8WlA",
-        name="Ben Eater",
-        role=ChannelRole.ENGINEER,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=1,
-        quality_tier=QualityTier.PREMIUM,
-        enabled=False,
-        notes="Educational, publishes ~1/month, not news",
-    ),
-    ChannelConfig(
-        channel_id="UC8butISFwT-Wl7EV0hUK0BQ",
-        name="freeCodeCamp",
-        role=ChannelRole.ENGINEER,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=2,
-        quality_tier=QualityTier.STANDARD,
-        enabled=False,
-        notes="3-10 hour tutorials, wrong format for news app",
-    ),
-    ChannelConfig(
-        channel_id="UCsBjURrPoezykLs9EqgamOA",
-        name="Fireship (100 seconds)",
-        role=ChannelRole.ENGINEER,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=2,
-        quality_tier=QualityTier.PREMIUM,
-        notes="Quick tech explainers for developers",
-        enabled=False,  # Same channel as news Fireship, avoid double-counting
-    ),
-    ChannelConfig(
-        channel_id="UCW5YeuERMmlnqo4oq8vwUpg",
-        name="The Net Ninja",
-        role=ChannelRole.ENGINEER,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=2,
-        quality_tier=QualityTier.STANDARD,
-        notes="Web development tutorials",
-    ),
-    # =========================================================================
-    # OFFICIAL / PRIMARY SOURCE CHANNELS
-    # Company announcements, keynotes, developer content
-    # Target: 3-5 videos/day (down-ranked unless corroborated)
-    # =========================================================================
-    ChannelConfig(
-        channel_id="UCXZCJLdBC09xxGZ6gcdrc6A",
-        name="OpenAI",
-        role=ChannelRole.OFFICIAL,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=2,
-        quality_tier=QualityTier.SUPPLEMENTAL,
-        notes="Official AI announcements",
-    ),
-    ChannelConfig(
-        channel_id="UC_x5XG1OV2P6uZZ5FSM9Ttw",
-        name="Google Developers",
-        role=ChannelRole.OFFICIAL,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=2,
-        quality_tier=QualityTier.SUPPLEMENTAL,
-        notes="Google tech announcements",
-    ),
-    ChannelConfig(
-        channel_id="UCVHFbqXqoYvEWM1Ddxl0QDg",
-        name="Android Developers",
-        role=ChannelRole.OFFICIAL,
-        content_format=ContentFormat.MIXED,  # Channel posts both shorts and long videos
-        daily_cap=2,
-        quality_tier=QualityTier.SUPPLEMENTAL,
-        notes="Android platform updates",
-    ),
-    ChannelConfig(
-        channel_id="UCsMica-v34Irf9KVTh6xx-g",
-        name="Microsoft Developer",
-        role=ChannelRole.OFFICIAL,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=2,
-        quality_tier=QualityTier.SUPPLEMENTAL,
-        notes="Microsoft tech announcements",
-    ),
-    ChannelConfig(
-        channel_id="UCE_M8A5yxnLfW0KghEeajjw",
-        name="Apple",
-        role=ChannelRole.OFFICIAL,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=2,
-        quality_tier=QualityTier.SUPPLEMENTAL,
-        notes="Apple official announcements",
-    ),
-    ChannelConfig(
-        channel_id="UCd6MoB9NC6uYN2grvUNT-Zg",
-        name="Amazon Web Services",
-        role=ChannelRole.OFFICIAL,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=2,
-        quality_tier=QualityTier.SUPPLEMENTAL,
-        enabled=False,
-        notes="Conference talks, not news",
-    ),
-    ChannelConfig(
-        channel_id="UCL-g3eGJi1omSDSz48AML-g",
-        name="NVIDIA",
-        role=ChannelRole.OFFICIAL,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=2,
-        quality_tier=QualityTier.SUPPLEMENTAL,
-        enabled=False,
-        notes="Product demos and conference recordings",
-    ),
-    # =========================================================================
-    # DIVERSE REVIEWER CHANNELS (NEW)
-    # Broader demographic appeal, mobile-focused, lifestyle tech
-    # Target: 6-8 videos/day
-    # =========================================================================
-    ChannelConfig(
-        channel_id="UCSOpcUkE-is7u7c4AkLgqTw",
-        name="MrMobile (Michael Fisher)",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=1,
-        quality_tier=QualityTier.PREMIUM,
-        notes="Mobile-focused reviews, retro tech, excellent production",
-    ),
-    ChannelConfig(
-        channel_id="UCIrrRLyFMVmmL9NDAU2obJA",
-        name="SuperSaf",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.MIXED,
-        daily_cap=2,
-        quality_tier=QualityTier.STANDARD,
-        notes="Phone comparisons, camera tests, diverse perspective",
-    ),
-    ChannelConfig(
-        channel_id="UCey_c7U86mJGz1VJWH5CYPA",
-        name="iJustine",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=1,
-        quality_tier=QualityTier.STANDARD,
-        notes="Apple ecosystem, lifestyle tech, female creator",
-    ),
-    ChannelConfig(
-        channel_id="UCFfCqe7b9YiDk2ZiAG8UIGA",
-        name="Flossy Carter",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=1,
-        quality_tier=QualityTier.STANDARD,
-        notes="Unfiltered phone reviews, diverse perspective",
-    ),
-    ChannelConfig(
-        channel_id="UCWFKCr40YwOZQx8FHU_ZqqQ",
-        name="JerryRigEverything",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.MIXED,
-        daily_cap=2,
-        quality_tier=QualityTier.STANDARD,
-        notes="Durability tests, teardowns, hands-on reviews",
-    ),
-    ChannelConfig(
-        channel_id="UC0MYNOsIrz6jmXfIMERyRHQ",
-        name="Karl Conrad",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.MIXED,
-        daily_cap=2,
-        quality_tier=QualityTier.STANDARD,
-        notes="Cinematic tech reviews, camera comparisons",
-    ),
-    ChannelConfig(
-        channel_id="UCH7_fVl9_71cNjNDCCZAH6w",
-        name="Snazzy Labs",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.MIXED,
-        daily_cap=1,
-        quality_tier=QualityTier.STANDARD,
-        notes="Apple ecosystem deep dives, homelab, smart home",
-    ),
-    ChannelConfig(
-        channel_id="UC_1awbvccFZOnVRjAIkCG7Q",
-        name="Sam Beckman",
-        role=ChannelRole.EXPLAINER,
-        content_format=ContentFormat.MIXED,
-        daily_cap=2,
-        quality_tier=QualityTier.STANDARD,
-        notes="Phone speed tests, comparisons, budget tech",
-    ),
-    # =========================================================================
-    # AI / ML FOCUSED CHANNELS (NEW)
-    # AI tools, research explainers, ML developments
-    # Target: 3-4 videos/day
-    # =========================================================================
-    ChannelConfig(
-        channel_id="UCl3U-xOlFVLlsheAug-QoWA",
-        name="Matt Wolfe",
-        role=ChannelRole.AI,
-        content_format=ContentFormat.MIXED,
-        daily_cap=2,
-        quality_tier=QualityTier.PREMIUM,
-        notes="AI tools roundups, weekly AI news, tutorials",
-    ),
-    ChannelConfig(
-        channel_id="UCNJ1Ymd5yFuUPtn21xtRbbw",
-        name="AI Explained",
-        role=ChannelRole.AI,
-        content_format=ContentFormat.LONG_FORM,
-        daily_cap=1,
-        quality_tier=QualityTier.PREMIUM,
-        notes="Deep AI research analysis, model comparisons, benchmarks",
-    ),
-    # =========================================================================
-    # SHORTS / REELS NATIVE CHANNELS
-    # Channels that primarily produce short-form content
-    # CRITICAL for meeting reels quota
-    # Target: 30+ reels/day
-    # =========================================================================
-    ChannelConfig(
-        channel_id="UCBJycsmduvYEL83R_U4JriQ",
-        name="MKBHD (Shorts)",
-        role=ChannelRole.SHORTS,
-        content_format=ContentFormat.SHORTS,
-        daily_cap=4,
-        quality_tier=QualityTier.PREMIUM,
-        notes="MKBHD short clips - same channel but different ingestion",
-        enabled=False,  # Handled via main MKBHD entry with MIXED format detection
-    ),
-    ChannelConfig(
-        channel_id="UCMiJRAwDNSNzuYeN2uWa0pA",
-        name="Mrwhosetheboss (Shorts)",
-        role=ChannelRole.SHORTS,
-        content_format=ContentFormat.SHORTS,
-        daily_cap=4,
-        quality_tier=QualityTier.PREMIUM,
-        notes="Mrwhosetheboss short clips",
-        enabled=False,  # Handled via main entry with MIXED format detection
-    ),
-    ChannelConfig(
-        channel_id="UCsTcErHg8oDvUnTzoqsYeNw",
-        name="Unbox Therapy (Shorts)",
-        role=ChannelRole.SHORTS,
-        content_format=ContentFormat.SHORTS,
-        daily_cap=4,
-        quality_tier=QualityTier.STANDARD,
-        notes="Quick gadget highlights",
-        enabled=False,  # Handled via main entry
-    ),
-    # Dedicated shorts channels
-    ChannelConfig(
-        channel_id="UCVHFbqXqoYvEWM1Ddxl0QDg",
-        name="Tech Vision",
-        role=ChannelRole.SHORTS,
-        content_format=ContentFormat.SHORTS,
-        daily_cap=5,
-        quality_tier=QualityTier.STANDARD,
-        notes="Disabled: duplicate channel ID with Android Developers",
-        enabled=False,
-    ),
-    ChannelConfig(
-        channel_id="UCR-DXc1voovS8nhAvccRZhg",
-        name="Jeff Geerling",
-        role=ChannelRole.SHORTS,
-        content_format=ContentFormat.MIXED,
-        daily_cap=3,
-        quality_tier=QualityTier.STANDARD,
-        notes="Raspberry Pi and hardware shorts",
-    ),
-    ChannelConfig(
-        channel_id="UCFhXFikryT4aFcLkLw2LBLA",
-        name="NileRed Shorts",
-        role=ChannelRole.SHORTS,
-        content_format=ContentFormat.SHORTS,
-        daily_cap=2,
-        quality_tier=QualityTier.PREMIUM,
-        enabled=False,
-        notes="Science/chemistry, not tech",
-    ),
-    ChannelConfig(
-        channel_id="UCnmGIkw-KdI0W5siakKPKog",
-        name="Technology Connections Shorts",
-        role=ChannelRole.SHORTS,
-        content_format=ContentFormat.SHORTS,
-        daily_cap=2,
-        quality_tier=QualityTier.PREMIUM,
-        notes="Tech history and explainer shorts",
-    ),
-]
+_DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "youtube_curated_channels.json"
 
 
-# =============================================================================
-# HELPER FUNCTIONS
-# =============================================================================
+def _load_channel_registry() -> List[ChannelConfig]:
+    """Load the curated roster from disk."""
+    raw = json.loads(_DATA_PATH.read_text(encoding="utf-8"))
+    configs: List[ChannelConfig] = []
+    for entry in raw:
+        configs.append(
+            ChannelConfig(
+                channel_id=str(entry["channel_id"]).strip(),
+                name=str(entry["name"]).strip(),
+                role=ChannelRole(entry["role"]),
+                content_format=ContentFormat(entry.get("content_format", "long_form")),
+                daily_cap=max(1, int(entry.get("daily_cap", 1))),
+                quality_tier=QualityTier(entry.get("quality_tier", "standard")),
+                enabled=bool(entry.get("enabled", True)),
+                notes=str(entry.get("notes", "")),
+            )
+        )
+    return configs
+
+
+CHANNEL_REGISTRY: List[ChannelConfig] = _load_channel_registry()
 
 
 def _channel_config_priority(config: ChannelConfig) -> tuple[int, int, int]:
@@ -585,79 +109,69 @@ def dedupe_channel_configs(configs: Iterable[ChannelConfig]) -> List[ChannelConf
 
 
 def get_enabled_channels() -> List[ChannelConfig]:
-    """Get all enabled channels."""
-    return [ch for ch in dedupe_channel_configs(CHANNEL_REGISTRY) if ch.enabled]
+    """Get the enabled curated channels."""
+    return [channel for channel in dedupe_channel_configs(CHANNEL_REGISTRY) if channel.enabled]
 
 
 def get_channels_by_role(role: ChannelRole) -> List[ChannelConfig]:
     """Get enabled channels for a specific role."""
-    return [ch for ch in get_enabled_channels() if ch.role == role]
+    return [channel for channel in get_enabled_channels() if channel.role == role]
 
 
 def get_long_form_channels() -> List[ChannelConfig]:
-    """Get channels that produce long-form content."""
+    """Get channels that can contribute long-form videos."""
     return [
-        ch
-        for ch in get_enabled_channels()
-        if ch.content_format in (ContentFormat.LONG_FORM, ContentFormat.MIXED)
+        channel
+        for channel in get_enabled_channels()
+        if channel.content_format in (ContentFormat.LONG_FORM, ContentFormat.MIXED)
     ]
 
 
 def get_shorts_channels() -> List[ChannelConfig]:
-    """Get channels that produce shorts content."""
+    """Get channels that can contribute reels/shorts."""
     return [
-        ch
-        for ch in get_enabled_channels()
-        if ch.content_format in (ContentFormat.SHORTS, ContentFormat.MIXED)
+        channel
+        for channel in get_enabled_channels()
+        if channel.content_format in (ContentFormat.SHORTS, ContentFormat.MIXED)
     ]
 
 
 def get_channel_feed_urls() -> List[str]:
-    """Get all enabled channel feed URLs (backward compatible)."""
-    return [ch.feed_url for ch in get_enabled_channels()]
+    """Get RSS feed URLs for all enabled channels."""
+    return [channel.feed_url for channel in get_enabled_channels()]
 
 
 def get_channel_by_id(channel_id: str) -> Optional[ChannelConfig]:
-    """Look up channel configuration by ID."""
-    for ch in dedupe_channel_configs(CHANNEL_REGISTRY):
-        if ch.channel_id == channel_id:
-            return ch
+    """Look up a channel by ID."""
+    for channel in dedupe_channel_configs(CHANNEL_REGISTRY):
+        if channel.channel_id == channel_id:
+            return channel
     return None
 
 
 def get_channel_by_name(name: str) -> Optional[ChannelConfig]:
-    """Look up channel configuration by name (case-insensitive partial match)."""
+    """Look up a channel by case-insensitive partial name match."""
     name_lower = name.lower()
-    for ch in dedupe_channel_configs(CHANNEL_REGISTRY):
-        if name_lower in ch.name.lower():
-            return ch
+    for channel in dedupe_channel_configs(CHANNEL_REGISTRY):
+        if name_lower in channel.name.lower():
+            return channel
     return None
 
 
 def get_role_quotas() -> Dict[ChannelRole, Dict[str, int]]:
-    """
-    Calculate daily quotas by role.
-
-    Returns:
-        Dict mapping role to quota info (min, target, max)
-    """
+    """Return heuristic per-role mix targets for admin diagnostics."""
     return {
-        ChannelRole.EXPLAINER: {"min": 6, "target": 12, "max": 18},
-        ChannelRole.NEWS: {"min": 6, "target": 10, "max": 15},
-        ChannelRole.ENGINEER: {"min": 2, "target": 5, "max": 8},
-        ChannelRole.AI: {"min": 2, "target": 4, "max": 8},
-        ChannelRole.OFFICIAL: {"min": 2, "target": 4, "max": 6},
-        ChannelRole.SHORTS: {"min": 15, "target": 25, "max": 40},
+        ChannelRole.EXPLAINER: {"min": 12, "target": 24, "max": 40},
+        ChannelRole.NEWS: {"min": 10, "target": 18, "max": 30},
+        ChannelRole.ENGINEER: {"min": 8, "target": 16, "max": 28},
+        ChannelRole.AI: {"min": 4, "target": 8, "max": 14},
+        ChannelRole.OFFICIAL: {"min": 8, "target": 18, "max": 32},
+        ChannelRole.SHORTS: {"min": 12, "target": 20, "max": 32},
     }
 
 
 def get_quality_weight_modifier(tier: QualityTier) -> float:
-    """
-    Get ranking weight modifier for quality tier.
-
-    Returns:
-        Multiplier for quality score (1.0 = no change)
-    """
+    """Return the ranking weight modifier for the quality tier."""
     return {
         QualityTier.PREMIUM: 1.15,
         QualityTier.STANDARD: 1.0,
@@ -665,28 +179,20 @@ def get_quality_weight_modifier(tier: QualityTier) -> float:
     }[tier]
 
 
-# =============================================================================
-# STATISTICS
-# =============================================================================
-
-
-def get_channel_stats() -> Dict[str, any]:
-    """Get summary statistics about channel configuration."""
+def get_channel_stats() -> Dict[str, object]:
+    """Summarise the current curated channel registry."""
     enabled = get_enabled_channels()
-
-    role_counts = {}
-    for role in ChannelRole:
-        role_counts[role.value] = len(get_channels_by_role(role))
-
-    total_daily_cap = sum(ch.daily_cap for ch in enabled)
-    long_form_cap = sum(ch.daily_cap for ch in get_long_form_channels())
-    shorts_cap = sum(ch.daily_cap for ch in get_shorts_channels())
-
+    role_counts = {role.value: len(get_channels_by_role(role)) for role in ChannelRole}
+    total_daily_cap = sum(channel.daily_cap for channel in enabled)
+    long_form_cap = sum(channel.daily_cap for channel in get_long_form_channels())
+    shorts_cap = sum(channel.daily_cap for channel in get_shorts_channels())
     return {
         "total_channels": len(enabled),
         "total_daily_cap": total_daily_cap,
         "long_form_daily_cap": long_form_cap,
         "shorts_daily_cap": shorts_cap,
         "channels_by_role": role_counts,
-        "premium_channels": len([ch for ch in enabled if ch.quality_tier == QualityTier.PREMIUM]),
+        "premium_channels": len(
+            [channel for channel in enabled if channel.quality_tier == QualityTier.PREMIUM]
+        ),
     }

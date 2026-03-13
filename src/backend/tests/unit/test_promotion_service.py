@@ -8,8 +8,10 @@ from app.services.promotion_service import (
 
 
 def test_video_and_reel_configs_use_longer_half_lives():
-    assert _VIDEO_CONFIG.recency_half_life_hours == 60.0
-    assert _REEL_CONFIG.recency_half_life_hours == 30.0
+    assert _VIDEO_CONFIG.window_hours == 168
+    assert _REEL_CONFIG.window_hours == 168
+    assert _VIDEO_CONFIG.recency_half_life_hours == 72.0
+    assert _REEL_CONFIG.recency_half_life_hours == 48.0
     assert _VIDEO_CONFIG.w_story > 0.0
     assert _REEL_CONFIG.w_story > 0.0
 

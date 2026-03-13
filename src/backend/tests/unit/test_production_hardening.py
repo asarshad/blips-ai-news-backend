@@ -10,7 +10,7 @@ Covers:
 """
 
 import logging
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 # ── LOG_LEVEL ─────────────────────────────────────────────────────────
 
@@ -209,7 +209,10 @@ class TestMistralTimeout:
             mock_settings.MISTRAL_API_KEY = "test-key"
             mock_settings.LLM_REQUEST_TIMEOUT = 30
 
-            with patch("mistralai.Mistral") as MockMistral:
+            with patch("app.integrations.llm_client._load_mistral_client_class") as mock_loader:
+                MockMistral = Mock()
+                mock_loader.return_value = MockMistral
+
                 import app.integrations.llm_client as llm_mod
 
                 # Re-read the timeout constant

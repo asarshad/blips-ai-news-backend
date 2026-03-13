@@ -10,39 +10,16 @@ import os
 import socket
 import uuid
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Dict, List
 
+from app.core.config import settings
 from app.core.logging import get_logger
+from app.models.content import ContentItem, ContentStatus, ContentType
 
 logger = get_logger(__name__)
 
-# Utility-first reel targets (YouTube-only) with an explicit reel-heavy budget of 40.
-# Environment overrides can still replace any of these values.
-DEFAULT_INGESTION_TARGET_OVERRIDES: Dict[str, int] = {
-    "youtube_reel:The Verge": 4,
-    "youtube_reel:Technology Connections Shorts": 4,
-    "youtube_reel:Karl Conrad": 3,
-    "youtube_reel:SuperSaf": 3,
-    "youtube_reel:Sam Beckman": 3,
-    "youtube_reel:Mrwhosetheboss": 3,
-    "youtube_reel:Unbox Therapy": 3,
-    "youtube_reel:JerryRigEverything": 3,
-    "youtube_reel:Marques Brownlee (MKBHD)": 2,
-    "youtube_reel:ShortCircuit": 1,
-    "youtube_reel:TechLinked": 1,
-    "youtube_reel:Android Developers": 1,
-    "youtube_reel:Tech Vision": 0,
-    "youtube_reel:Linus Tech Tips": 2,
-    "youtube_reel:Fireship": 2,
-    "youtube_reel:Matt Wolfe": 2,
-    "youtube_reel:Jeff Geerling": 2,
-    "youtube_reel:Snazzy Labs": 1,
-    # Keep long-form throughput unchanged after enabling MIXED format.
-    "youtube_video:Marques Brownlee (MKBHD)": 2,
-    "youtube_video:ShortCircuit": 3,
-    "youtube_video:TechLinked": 2,
-}
+DEFAULT_INGESTION_TARGET_OVERRIDES: Dict[str, int] = {}
 
 REEL_AUTO_PAUSE_MIN_ATTEMPTS = 60
 REEL_AUTO_PAUSE_MIN_CONVERSION = 0.02
@@ -94,6 +71,8 @@ def get_reel_auto_pause_decisions(
     feed_names: List[str] | None = None,
 ) -> Dict[str, str]:
     """Return reel feeds that should be auto-paused for the current day."""
+    if settings.YOUTUBE_CURATED_ONLY:
+        return {}
     if db is None:
         return {}
 
@@ -162,6 +141,41 @@ def get_reel_auto_pause_decisions(
     return paused
 
 
+def _fresh_promoted_count(db, content_type: ContentType, *, hours: int) -> int:
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    count = (
+        db.query(ContentItem.id)
+        .filter(
+            ContentItem.type == content_type,
+            ContentItem.curation_status == ContentStatus.PROMOTED,
+            ContentItem.is_suppressed.is_(False),
+            ContentItem.published_at >= cutoff,
+        )
+        .count()
+    )
+    return int(count or 0)
+
+
+def _should_fill_surface(db, content_type: ContentType) -> bool:
+    if db is None:
+        return True
+
+    if content_type == ContentType.VIDEO:
+        fresh_count = _fresh_promoted_count(
+            db,
+            ContentType.VIDEO,
+            hours=settings.VIDEOS_FRESH_PUBLISHED_HOURS,
+        )
+        return fresh_count < settings.MIN_FRESH_VIDEOS
+
+    fresh_count = _fresh_promoted_count(
+        db,
+        ContentType.REEL,
+        hours=settings.REELS_FRESH_PUBLISHED_HOURS,
+    )
+    return fresh_count < settings.MIN_FRESH_REELS
+
+
 def build_defaults(*, db=None, day_utc: date | None = None) -> List[FeedDefault]:
     """Build per-feed daily targets from configured RSS feeds + YouTube channels."""
 
@@ -172,6 +186,8 @@ def build_defaults(*, db=None, day_utc: date | None = None) -> List[FeedDefault]
     overrides = parse_target_overrides()
 
     defaults: List[FeedDefault] = []
+    fill_videos = _should_fill_surface(db, ContentType.VIDEO)
+    fill_reels = _should_fill_surface(db, ContentType.REEL)
 
     # RSS: 1 row per feed
     rss_client = RSSClient()
@@ -184,14 +200,20 @@ def build_defaults(*, db=None, day_utc: date | None = None) -> List[FeedDefault]
     yt_client = YouTubeClient()
     for cfg in yt_client.channel_configs:
         if cfg.content_format == ContentFormat.LONG_FORM:
+            if not fill_videos:
+                continue
             key = f"youtube_video:{cfg.name}"
             target = int(overrides.get(key, cfg.daily_cap))
             defaults.append(FeedDefault("youtube_video", cfg.name, max(0, target)))
         elif cfg.content_format == ContentFormat.SHORTS:
+            if not fill_reels:
+                continue
             key = f"youtube_reel:{cfg.name}"
             target = int(overrides.get(key, cfg.daily_cap))
             defaults.append(FeedDefault("youtube_reel", cfg.name, max(0, target)))
         else:
+            if not fill_videos and not fill_reels:
+                continue
             # MIXED: split daily_cap across video and reels
             video_target = max(1, int(cfg.daily_cap) // 2)
             reel_target = max(0, int(cfg.daily_cap) - video_target)
@@ -201,8 +223,9 @@ def build_defaults(*, db=None, day_utc: date | None = None) -> List[FeedDefault]
             video_target = int(overrides.get(key_v, video_target))
             reel_target = int(overrides.get(key_r, reel_target))
 
-            defaults.append(FeedDefault("youtube_video", cfg.name, max(0, video_target)))
-            if reel_target > 0:
+            if fill_videos:
+                defaults.append(FeedDefault("youtube_video", cfg.name, max(0, video_target)))
+            if fill_reels and reel_target > 0:
                 defaults.append(FeedDefault("youtube_reel", cfg.name, max(0, reel_target)))
 
     reel_feeds = [d.feed_name for d in defaults if d.source_type == "youtube_reel" and d.target > 0]

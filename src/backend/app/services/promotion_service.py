@@ -40,6 +40,7 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.ranking.quality import compute_source_weight
+from app.services.video_content_policy import apply_content_policy
 
 logger = get_logger(__name__)
 
@@ -94,7 +95,8 @@ _VIDEO_CONFIG = PromotionConfig(
     w_story=0.16,
     min_score=0.30,
     top_n_per_type=80,
-    recency_half_life_hours=60.0,
+    window_hours=168,
+    recency_half_life_hours=72.0,
     discovery_lane_penalty=0.03,
 )
 _REEL_CONFIG = PromotionConfig(
@@ -110,7 +112,8 @@ _REEL_CONFIG = PromotionConfig(
     w_story=0.16,
     min_score=0.32,
     top_n_per_type=120,
-    recency_half_life_hours=30.0,
+    window_hours=168,
+    recency_half_life_hours=48.0,
     discovery_lane_penalty=0.04,
 )
 
@@ -482,7 +485,7 @@ class PromotionService:
         """Return a mapping cluster_id → item count for recent items."""
         cutoff = datetime.utcnow() - timedelta(hours=hours_back)
         rows = (
-            self.db.query(ContentItem.cluster_id, func.count(ContentItem.id))
+            apply_content_policy(self.db.query(ContentItem.cluster_id, func.count(ContentItem.id)))
             .filter(
                 ContentItem.cluster_id.isnot(None),
                 ContentItem.published_at >= cutoff,
@@ -496,9 +499,14 @@ class PromotionService:
     # ── Candidate fetch ───────────────────────────────────────────────────
 
     def _get_candidates(self, content_type: ContentType) -> List[ContentItem]:
-        cutoff = datetime.utcnow() - timedelta(hours=self.config.window_hours)
+        cutoff = datetime.utcnow() - timedelta(
+            hours=self._config_for_type(content_type).window_hours
+        )
         return (
-            self.db.query(ContentItem)
+            apply_content_policy(
+                self.db.query(ContentItem),
+                content_type=content_type,
+            )
             .filter(
                 ContentItem.type == content_type,
                 ContentItem.curation_status == ContentStatus.CANDIDATE,
@@ -512,7 +520,10 @@ class PromotionService:
     def _get_recent_promoted_topic_counts(self, content_type: ContentType) -> Dict[str, int]:
         cutoff = datetime.utcnow() - timedelta(hours=24)
         items = (
-            self.db.query(ContentItem)
+            apply_content_policy(
+                self.db.query(ContentItem),
+                content_type=content_type,
+            )
             .filter(
                 ContentItem.type == content_type,
                 ContentItem.curation_status == ContentStatus.PROMOTED,
@@ -531,9 +542,12 @@ class PromotionService:
     def _get_recent_promoted_channel_counts(self, content_type: ContentType) -> Dict[str, int]:
         cutoff = datetime.utcnow() - timedelta(hours=24)
         rows = (
-            self.db.query(
-                func.coalesce(ContentItem.channel_id, ContentItem.source).label("channel_key"),
-                func.count(ContentItem.id),
+            apply_content_policy(
+                self.db.query(
+                    func.coalesce(ContentItem.channel_id, ContentItem.source).label("channel_key"),
+                    func.count(ContentItem.id),
+                ),
+                content_type=content_type,
             )
             .filter(
                 ContentItem.type == content_type,
@@ -550,7 +564,7 @@ class PromotionService:
         """Build a 7-day cross-surface story graph used for video/reel ranking."""
         cutoff = datetime.utcnow() - timedelta(days=7)
         items = (
-            self.db.query(ContentItem)
+            apply_content_policy(self.db.query(ContentItem))
             .filter(
                 ContentItem.curation_status == ContentStatus.PROMOTED,
                 ContentItem.is_suppressed.is_(False),
@@ -592,9 +606,12 @@ class PromotionService:
         story_entity_counts: Optional[Dict[str, int]] = None,
     ) -> int:
         """Refresh promotion_score on PROMOTED items (no status change)."""
-        cutoff = datetime.utcnow() - timedelta(hours=self.config.window_hours)
+        cutoff = datetime.utcnow() - timedelta(hours=config.window_hours)
         promoted_items = (
-            self.db.query(ContentItem)
+            apply_content_policy(
+                self.db.query(ContentItem),
+                content_type=content_type,
+            )
             .filter(
                 ContentItem.type == content_type,
                 ContentItem.curation_status == ContentStatus.PROMOTED,
@@ -633,7 +650,12 @@ class PromotionService:
         result = PromotionResult()
 
         try:
-            cluster_sizes = self._get_cluster_sizes(hours_back=self.config.window_hours * 2)
+            max_window_hours = max(
+                self.config.window_hours,
+                _VIDEO_CONFIG.window_hours,
+                _REEL_CONFIG.window_hours,
+            )
+            cluster_sizes = self._get_cluster_sizes(hours_back=max_window_hours * 2)
             story_topic_counts, story_entity_counts = self._get_recent_story_context()
 
             for content_type in (ContentType.ARTICLE, ContentType.VIDEO, ContentType.REEL):

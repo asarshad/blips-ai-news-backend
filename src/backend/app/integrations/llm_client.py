@@ -41,6 +41,25 @@ _TOKEN_COST_PER_1K = {
 }
 
 
+def _load_mistral_client_class():
+    """Resolve the Mistral SDK client across supported package layouts."""
+    try:
+        import mistralai
+    except ImportError:
+        raise
+
+    client_cls = getattr(mistralai, "Mistral", None)
+    if client_cls is not None:
+        return client_cls
+
+    try:
+        from mistralai.client import Mistral as client_cls
+    except ImportError as exc:
+        raise ImportError("mistralai package installed, but Mistral client is unavailable") from exc
+
+    return client_cls
+
+
 class LLMProvider(str, Enum):
     """Supported LLM providers."""
 
@@ -194,9 +213,9 @@ class MistralLLMClient(BaseLLMClient):
             self.api_key = None
         else:
             try:
-                from mistralai import Mistral
+                mistral_client_cls = _load_mistral_client_class()
 
-                self.client = Mistral(
+                self.client = mistral_client_cls(
                     api_key=self.api_key,
                     timeout_ms=LLM_REQUEST_TIMEOUT * 1000,
                 )

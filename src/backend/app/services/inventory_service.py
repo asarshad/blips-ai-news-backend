@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentStatus, ContentType
+from app.services.video_content_policy import apply_content_policy
 
 logger = get_logger(__name__)
 
@@ -191,21 +192,25 @@ def compute_surface_health(
         ContentItem.is_suppressed.is_(False),
         ContentItem.curation_status == ContentStatus.PROMOTED,
     )
+    scoped_query = apply_content_policy(db.query(ContentItem), content_type=content_type)
 
     # Tier A: published_at within fresh window
     tier_a_count = (
-        db.query(func.count(ContentItem.id))
-        .filter(
-            base_filter,
-            ContentItem.published_at >= fresh_cutoff,
+        apply_content_policy(
+            db.query(func.count(ContentItem.id)).select_from(ContentItem),
+            content_type=content_type,
         )
+        .filter(base_filter, ContentItem.published_at >= fresh_cutoff)
         .scalar()
         or 0
     )
 
     # Tier B: created_at within backfill window AND published_at older than fresh
     tier_b_count = (
-        db.query(func.count(ContentItem.id))
+        apply_content_policy(
+            db.query(func.count(ContentItem.id)).select_from(ContentItem),
+            content_type=content_type,
+        )
         .filter(
             base_filter,
             ContentItem.created_at >= backfill_cutoff,
@@ -218,7 +223,10 @@ def compute_surface_health(
     # Tier C: evergreen (older than fresh, within max age, high quality)
     # We use global_score > 0.3 as quality threshold
     tier_c_count = (
-        db.query(func.count(ContentItem.id))
+        apply_content_policy(
+            db.query(func.count(ContentItem.id)).select_from(ContentItem),
+            content_type=content_type,
+        )
         .filter(
             base_filter,
             ContentItem.published_at < fresh_cutoff,
@@ -237,37 +245,41 @@ def compute_surface_health(
 
     # Reservoir count (total available content within max age)
     reservoir_count = (
-        db.query(func.count(ContentItem.id))
-        .filter(
-            base_filter,
-            ContentItem.published_at >= evergreen_cutoff,
+        apply_content_policy(
+            db.query(func.count(ContentItem.id)).select_from(ContentItem),
+            content_type=content_type,
         )
+        .filter(base_filter, ContentItem.published_at >= evergreen_cutoff)
         .scalar()
         or 0
     )
 
     # Newest item age
-    newest = db.query(func.max(ContentItem.published_at)).filter(base_filter).scalar()
+    newest = (
+        apply_content_policy(
+            db.query(func.max(ContentItem.published_at)).select_from(ContentItem),
+            content_type=content_type,
+        )
+        .filter(base_filter)
+        .scalar()
+    )
     newest_age = int((now - newest).total_seconds()) if newest else None
 
     # Oldest Tier A item age
     oldest_tier_a = (
-        db.query(func.min(ContentItem.published_at))
-        .filter(
-            base_filter,
-            ContentItem.published_at >= fresh_cutoff,
+        apply_content_policy(
+            db.query(func.min(ContentItem.published_at)).select_from(ContentItem),
+            content_type=content_type,
         )
+        .filter(base_filter, ContentItem.published_at >= fresh_cutoff)
         .scalar()
     )
     oldest_tier_a_age = int((now - oldest_tier_a).total_seconds()) if oldest_tier_a else None
 
     # Source distribution (for reservoir content)
     source_dist_rows = (
-        db.query(ContentItem.source, func.count(ContentItem.id))
-        .filter(
-            base_filter,
-            ContentItem.published_at >= evergreen_cutoff,
-        )
+        scoped_query.with_entities(ContentItem.source, func.count(ContentItem.id))
+        .filter(base_filter, ContentItem.published_at >= evergreen_cutoff)
         .group_by(ContentItem.source)
         .all()
     )
@@ -410,11 +422,13 @@ def get_pipeline_counts(db: Session) -> Dict[str, Any]:
     cutoff = datetime.utcnow() - timedelta(hours=window_hours)
 
     rows = (
-        db.query(
-            ContentItem.type,
-            ContentItem.curation_status,
-            sa_func.count(ContentItem.id).label("cnt"),
-            sa_func.max(ContentItem.created_at).label("newest"),
+        apply_content_policy(
+            db.query(
+                ContentItem.type,
+                ContentItem.curation_status,
+                sa_func.count(ContentItem.id).label("cnt"),
+                sa_func.max(ContentItem.created_at).label("newest"),
+            )
         )
         .filter(
             ContentItem.published_at >= cutoff,
