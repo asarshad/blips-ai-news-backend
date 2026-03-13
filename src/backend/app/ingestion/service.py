@@ -9,9 +9,10 @@ import os
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -41,8 +42,6 @@ from app.models.content import ContentItem, ContentStatus, ContentType
 from app.ranking.quality import compute_source_weight
 from app.ranking.service import ScoringService
 from app.repositories.content_repo import ContentItemRepository
-from app.services.video_discovery_service import VideoDiscoveryService
-from app.services.video_source_service import bootstrap_video_source_profiles
 
 logger = get_logger(__name__)
 
@@ -56,6 +55,14 @@ VIDEOS_PER_CHANNEL = settings.YT_VIDEOS_PER_CHANNEL
 DAILY_TARGET_ARTICLES = settings.DAILY_TARGET_ARTICLES
 DAILY_TARGET_VIDEOS = settings.DAILY_TARGET_VIDEOS
 DAILY_TARGET_REELS = settings.DAILY_TARGET_REELS
+
+DISCOVERY_FRESH_WINDOW_HOURS = max(1, int(os.getenv("VIDEO_DISCOVERY_FRESH_WINDOW_HOURS", "24")))
+DISCOVERY_FRESH_VIDEO_FLOOR = max(
+    1, int(os.getenv("VIDEO_DISCOVERY_MIN_FRESH_VIDEO_SUPPLY_24H", "30"))
+)
+DISCOVERY_FRESH_REEL_FLOOR = max(
+    1, int(os.getenv("VIDEO_DISCOVERY_MIN_FRESH_REEL_SUPPLY_24H", "35"))
+)
 
 
 class IngestionPipeline:
@@ -83,6 +90,33 @@ class IngestionPipeline:
         self.rss_client = rss_client or RSSClient()
         self.youtube_client = youtube_client or YouTubeClient()
         self.llm_client = llm_client or LLMClient()
+
+    def _fresh_promoted_inventory_count(self, content_type: ContentType) -> int:
+        """Count recent promoted inventory for the surface users actually see."""
+        cutoff = datetime.utcnow() - timedelta(hours=DISCOVERY_FRESH_WINDOW_HOURS)
+        count = (
+            self.db.query(func.count(ContentItem.id))
+            .filter(
+                ContentItem.type == content_type,
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.is_suppressed.is_(False),
+                ContentItem.published_at >= cutoff,
+            )
+            .scalar()
+        )
+        return int(count or 0)
+
+    def _discovery_remaining_needed(
+        self, content_type: ContentType, *, created_remaining: int
+    ) -> int:
+        """Let discovery keep running until fresh promoted inventory is healthy."""
+        floor = (
+            DISCOVERY_FRESH_REEL_FLOOR
+            if content_type == ContentType.REEL
+            else DISCOVERY_FRESH_VIDEO_FLOOR
+        )
+        promoted_gap = max(0, floor - self._fresh_promoted_inventory_count(content_type))
+        return max(created_remaining, promoted_gap)
 
     def ingest_rss_entry(self, entry: FeedEntry) -> Optional[ContentItem]:
         """
@@ -522,6 +556,8 @@ class IngestionPipeline:
             "daily_targets_met": False,
         }
 
+        from app.services.video_source_service import bootstrap_video_source_profiles
+
         bootstrap_video_source_profiles(self.db)
 
         while True:
@@ -643,6 +679,8 @@ class IngestionPipeline:
 
             # Dedicated YouTube discovery lane for broader coverage and recency.
             try:
+                from app.services.video_discovery_service import VideoDiscoveryService
+
                 discovery = VideoDiscoveryService(self.db, self.youtube_client)
                 discovered_videos = (
                     discovery.discover("videos", remaining_needed=remaining_videos)
@@ -826,13 +864,21 @@ class IngestionPipeline:
             }
 
         today = datetime.utcnow().date()
-        remaining_videos = max(
+        created_remaining_videos = max(
             0,
             DAILY_TARGET_VIDEOS - self.content_repo.count_created_on_date(ContentType.VIDEO, today),
         )
-        remaining_reels = max(
+        created_remaining_reels = max(
             0,
             DAILY_TARGET_REELS - self.content_repo.count_created_on_date(ContentType.REEL, today),
+        )
+        remaining_videos = self._discovery_remaining_needed(
+            ContentType.VIDEO,
+            created_remaining=created_remaining_videos,
+        )
+        remaining_reels = self._discovery_remaining_needed(
+            ContentType.REEL,
+            created_remaining=created_remaining_reels,
         )
         if remaining_videos == 0 and remaining_reels == 0:
             return {
@@ -844,6 +890,17 @@ class IngestionPipeline:
                 "duplicates": 0,
                 "errors": 0,
             }
+
+        logger.info(
+            "[video_discovery] remaining_needed videos=%s (created_gap=%s) reels=%s (created_gap=%s)",
+            remaining_videos,
+            created_remaining_videos,
+            remaining_reels,
+            created_remaining_reels,
+        )
+
+        from app.services.video_discovery_service import VideoDiscoveryService
+        from app.services.video_source_service import bootstrap_video_source_profiles
 
         bootstrap_video_source_profiles(self.db)
         discovery = VideoDiscoveryService(self.db, self.youtube_client)
