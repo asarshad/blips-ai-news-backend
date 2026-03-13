@@ -50,6 +50,20 @@ _SKIP_STORY_ENTITIES = {
     "update",
     "shorts",
 }
+_DISCOVERY_MIN_CHANNEL_SUBSCRIBERS = max(
+    1, int(os.getenv("YOUTUBE_DISCOVERY_MIN_CHANNEL_SUBSCRIBERS", "10000"))
+)
+_DISCOVERY_MIN_CHANNEL_VIDEOS = max(1, int(os.getenv("YOUTUBE_DISCOVERY_MIN_CHANNEL_VIDEOS", "25")))
+_DISCOVERY_MIN_VIDEO_VIEWS = max(1, int(os.getenv("YOUTUBE_DISCOVERY_MIN_VIDEO_VIEWS", "2500")))
+_DISCOVERY_MIN_VIEWS_PER_HOUR = max(
+    1.0, float(os.getenv("YOUTUBE_DISCOVERY_MIN_VIEWS_PER_HOUR", "75"))
+)
+_DISCOVERY_MIN_ENGAGEMENT_RATE = max(
+    0.0, float(os.getenv("YOUTUBE_DISCOVERY_MIN_ENGAGEMENT_RATE", "0.003"))
+)
+_DISCOVERY_STORY_MIN_SUBSCRIBERS = max(
+    1, int(os.getenv("YOUTUBE_DISCOVERY_STORY_MIN_SUBSCRIBERS", "5000"))
+)
 
 
 class VideoDiscoveryService:
@@ -345,8 +359,14 @@ class VideoDiscoveryService:
         accepted: List[VideoEntry] = []
         counters: Counter = Counter()
         seen_ids = set()
+        channel_stats = self.youtube_client.fetch_channel_stats(
+            [entry.channel_id for entry in candidates if entry.channel_id]
+        )
 
         for entry in candidates:
+            stats = channel_stats.get(entry.channel_id or "", {})
+            entry.channel_subscriber_count = self._stat_as_int(stats.get("subscriber_count"))
+            entry.channel_video_count = self._stat_as_int(stats.get("video_count"))
             if not entry.video_id or entry.video_id in seen_ids:
                 counters["duplicate"] += 1
                 continue
@@ -371,10 +391,24 @@ class VideoDiscoveryService:
             if surface == "videos" and entry.is_short:
                 counters["format"] += 1
                 continue
+            if not self._passes_discovery_quality(entry):
+                counters["quality"] += 1
+                continue
 
             seen_ids.add(entry.video_id)
             accepted.append(entry)
 
+        self.repo.upsert_discovered_channels(
+            {
+                "channel_id": entry.channel_id,
+                "channel_name": entry.source,
+                "role": entry.channel_role.value if entry.channel_role else "explainer",
+                "content_format": entry.content_format.value if entry.content_format else "mixed",
+                "quality_tier": entry.quality_tier.value if entry.quality_tier else "standard",
+            }
+            for entry in accepted
+            if entry.source_status == "discovery" and entry.channel_id
+        )
         return accepted, counters
 
     def _is_english(self, entry: VideoEntry) -> bool:
@@ -384,3 +418,47 @@ class VideoDiscoveryService:
     def _is_live_or_scheduled(self, entry: VideoEntry) -> bool:
         status = (entry.live_broadcast_content or "").lower()
         return status in {"live", "upcoming"}
+
+    def _passes_discovery_quality(self, entry: VideoEntry) -> bool:
+        if entry.acquisition_lane == "curated" or entry.source_status in {"core", "rotation"}:
+            return True
+
+        subscribers = entry.channel_subscriber_count or 0
+        channel_videos = entry.channel_video_count or 0
+        view_count = entry.view_count or 0
+        views_per_hour = entry.views_per_hour or 0.0
+        likes = entry.like_count or 0
+        comments = entry.comment_count or 0
+        engagement_rate = (likes + comments * 2) / max(view_count, 1)
+        strong_channel = (
+            subscribers >= _DISCOVERY_MIN_CHANNEL_SUBSCRIBERS
+            and channel_videos >= _DISCOVERY_MIN_CHANNEL_VIDEOS
+        )
+        strong_video = (
+            view_count >= _DISCOVERY_MIN_VIDEO_VIEWS
+            or views_per_hour >= _DISCOVERY_MIN_VIEWS_PER_HOUR
+        )
+        strong_engagement = engagement_rate >= _DISCOVERY_MIN_ENGAGEMENT_RATE
+        story_led = (
+            isinstance(entry.query_label, str)
+            and entry.query_label.startswith("story-")
+            and subscribers >= _DISCOVERY_STORY_MIN_SUBSCRIBERS
+        )
+
+        if strong_channel and (strong_video or strong_engagement or story_led):
+            return True
+        if story_led and strong_video:
+            return True
+        if (
+            strong_video
+            and strong_engagement
+            and subscribers >= (_DISCOVERY_MIN_CHANNEL_SUBSCRIBERS // 2)
+        ):
+            return True
+        return False
+
+    def _stat_as_int(self, value: object) -> int | None:
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None

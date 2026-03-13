@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.integrations.youtube_channels import ChannelRole, ContentFormat, QualityTier
+from app.integrations.youtube_client import VideoEntry
 from app.services import video_discovery_service as discovery_module
 from app.services.video_discovery_service import VideoDiscoveryService
 
@@ -25,6 +27,7 @@ class _DummyYouTubeClient:
         self.quota_budget = _QuotaBudget(begin_window=begin_window)
         self.search_calls = []
         self.trending_calls = []
+        self.channel_stats = {}
 
     def fetch_search_candidates(
         self,
@@ -44,11 +47,17 @@ class _DummyYouTubeClient:
         self.trending_calls.append((region_code, max_results, surface))
         return []
 
+    def fetch_channel_stats(self, channel_ids):
+        return {channel_id: self.channel_stats.get(channel_id, {}) for channel_id in channel_ids}
+
 
 def _service(client: _DummyYouTubeClient) -> VideoDiscoveryService:
     db = SimpleNamespace(commit=lambda: None)
     service = VideoDiscoveryService(db, client)
-    service.repo = SimpleNamespace(record_run=lambda **_kwargs: None)
+    service.repo = SimpleNamespace(
+        record_run=lambda **_kwargs: None,
+        upsert_discovered_channels=lambda _channels: [],
+    )
     return service
 
 
@@ -126,3 +135,92 @@ def test_discover_uses_expanded_search_result_pages(monkeypatch):
 
     assert client.search_calls
     assert all(call[2] == 25 for call in client.search_calls)
+
+
+def test_filter_candidates_rejects_low_trust_discovery_channels():
+    client = _DummyYouTubeClient()
+    client.channel_stats = {
+        "channel-low": {"subscriber_count": 1200, "video_count": 8},
+        "channel-strong": {"subscriber_count": 54000, "video_count": 180},
+    }
+    service = _service(client)
+
+    weak = VideoEntry(
+        title="Google Maps Reimagined in 60 seconds",
+        video_url="https://www.youtube.com/watch?v=weak123",
+        thumbnail_url="https://img.youtube.com/vi/weak123/default.jpg",
+        summary="A quick update on Google Maps and AI directions.",
+        source="Random Tech Daily",
+        category="Technology",
+        video_id="weak123",
+        channel_id="channel-low",
+        channel_role=ChannelRole.EXPLAINER,
+        content_format=ContentFormat.LONG_FORM,
+        quality_tier=QualityTier.STANDARD,
+        is_short=False,
+        acquisition_lane="search",
+        source_status="discovery",
+        view_count=300,
+        like_count=2,
+        comment_count=0,
+        views_per_hour=0.0,
+        format_fit_score=1.0,
+    )
+    strong = VideoEntry(
+        title="Google Maps Gemini update explained",
+        video_url="https://www.youtube.com/watch?v=strong123",
+        thumbnail_url="https://img.youtube.com/vi/strong123/default.jpg",
+        summary="A solid explainer on the latest Google Maps AI features.",
+        source="Trusted Maps Lab",
+        category="Technology",
+        video_id="strong123",
+        channel_id="channel-strong",
+        channel_role=ChannelRole.EXPLAINER,
+        content_format=ContentFormat.LONG_FORM,
+        quality_tier=QualityTier.STANDARD,
+        is_short=False,
+        acquisition_lane="search",
+        source_status="discovery",
+        view_count=12000,
+        like_count=240,
+        comment_count=35,
+        views_per_hour=180.0,
+        format_fit_score=1.0,
+    )
+
+    accepted, counters = service._filter_candidates([weak, strong], "videos")
+
+    assert [entry.video_id for entry in accepted] == ["strong123"]
+    assert counters["quality"] == 1
+
+
+def test_filter_candidates_keeps_curated_core_channel_even_without_engagement():
+    client = _DummyYouTubeClient()
+    service = _service(client)
+
+    entry = VideoEntry(
+        title="What is your Tech Gripe?",
+        video_url="https://www.youtube.com/shorts/WVUn4j2DaTY",
+        thumbnail_url="https://img.youtube.com/vi/WVUn4j2DaTY/default.jpg",
+        summary="",
+        source="Linus Tech Tips",
+        category="Technology",
+        video_id="WVUn4j2DaTY",
+        channel_id="UCXuqSBlHAE6Xw-yeJA0Tunw",
+        channel_role=ChannelRole.SHORTS,
+        content_format=ContentFormat.SHORTS,
+        quality_tier=QualityTier.PREMIUM,
+        is_short=True,
+        acquisition_lane="curated",
+        source_status="core",
+        view_count=0,
+        like_count=0,
+        comment_count=0,
+        views_per_hour=0.0,
+        format_fit_score=1.0,
+    )
+
+    accepted, counters = service._filter_candidates([entry], "reels")
+
+    assert [video.video_id for video in accepted] == ["WVUn4j2DaTY"]
+    assert counters["quality"] == 0

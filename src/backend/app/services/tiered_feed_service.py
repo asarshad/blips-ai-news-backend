@@ -340,6 +340,9 @@ def tiered_item_to_dict(tiered: TieredItem) -> Dict[str, Any]:
     """
     item = tiered.item
     summary = item.summary or ""
+    if not summary and item.type == ContentType.VIDEO:
+        description = item.description or ""
+        summary = description[:320]
 
     # Base fields (backward compatible)
     result = {

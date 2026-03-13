@@ -246,6 +246,8 @@ class VideoEntry:
     format_fit_score: Optional[float] = None
     live_broadcast_content: Optional[str] = None
     default_language: Optional[str] = None
+    channel_subscriber_count: Optional[int] = None
+    channel_video_count: Optional[int] = None
 
 
 class YouTubeClient:
@@ -291,6 +293,7 @@ class YouTubeClient:
 
         # Best-effort cache to avoid repeated scraping.
         self._duration_cache_seconds: Dict[str, Optional[int]] = {}
+        self._channel_stats_cache: Dict[str, Dict[str, Optional[int]]] = {}
         # Shared retry budget for feed fetches in this client instance/run.
         self._retry_budget_remaining = max(0, int(os.getenv("CONNECTOR_RETRY_BUDGET", "40")))
         self._max_retries = max(0, int(os.getenv("CONNECTOR_MAX_RETRIES", "2")))
@@ -729,6 +732,61 @@ class YouTubeClient:
 
         return entries
 
+    def fetch_channel_stats(self, channel_ids: List[str]) -> Dict[str, Dict[str, Optional[int]]]:
+        """Batch-fetch channel statistics for discovery quality filtering."""
+        unique_ids = [channel_id for channel_id in dict.fromkeys(channel_ids) if channel_id]
+        missing_ids = [
+            channel_id for channel_id in unique_ids if channel_id not in self._channel_stats_cache
+        ]
+
+        for start in range(0, len(missing_ids), 50):
+            chunk = missing_ids[start : start + 50]
+            data = self._youtube_api_json(
+                "channels",
+                params={
+                    "part": "statistics",
+                    "id": ",".join(chunk),
+                },
+                quota_units=1,
+                timeout=10,
+                operation=f"channel stats for {len(chunk)} channels",
+            )
+            if not data:
+                for channel_id in chunk:
+                    self._channel_stats_cache.setdefault(
+                        channel_id,
+                        {"subscriber_count": None, "video_count": None, "view_count": None},
+                    )
+                continue
+
+            seen_ids: set[str] = set()
+            for item in data.get("items", []):
+                channel_id = item.get("id")
+                if not channel_id:
+                    continue
+                statistics = item.get("statistics", {})
+                self._channel_stats_cache[channel_id] = {
+                    "subscriber_count": self._safe_int(statistics.get("subscriberCount")),
+                    "video_count": self._safe_int(statistics.get("videoCount")),
+                    "view_count": self._safe_int(statistics.get("viewCount")),
+                }
+                seen_ids.add(channel_id)
+
+            for channel_id in chunk:
+                if channel_id not in seen_ids:
+                    self._channel_stats_cache.setdefault(
+                        channel_id,
+                        {"subscriber_count": None, "video_count": None, "view_count": None},
+                    )
+
+        return {
+            channel_id: self._channel_stats_cache.get(
+                channel_id,
+                {"subscriber_count": None, "video_count": None, "view_count": None},
+            )
+            for channel_id in unique_ids
+        }
+
     def _entry_from_api_item(
         self,
         item: dict,
@@ -812,6 +870,8 @@ class YouTubeClient:
             live_broadcast_content=snippet.get("liveBroadcastContent")
             or status.get("uploadStatus"),
             default_language=snippet.get("defaultAudioLanguage") or snippet.get("defaultLanguage"),
+            channel_subscriber_count=None,
+            channel_video_count=None,
         )
 
     def _guess_role(self, title: str, summary: str, surface: str) -> ChannelRole:
