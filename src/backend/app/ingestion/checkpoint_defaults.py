@@ -16,6 +16,7 @@ from typing import Dict, List
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentStatus, ContentType
+from app.services.video_content_policy import apply_content_policy
 
 logger = get_logger(__name__)
 
@@ -143,16 +144,14 @@ def get_reel_auto_pause_decisions(
 
 def _fresh_promoted_count(db, content_type: ContentType, *, hours: int) -> int:
     cutoff = datetime.utcnow() - timedelta(hours=hours)
-    count = (
-        db.query(ContentItem.id)
-        .filter(
-            ContentItem.type == content_type,
-            ContentItem.curation_status == ContentStatus.PROMOTED,
-            ContentItem.is_suppressed.is_(False),
-            ContentItem.published_at >= cutoff,
-        )
-        .count()
+    query = db.query(ContentItem.id).filter(
+        ContentItem.type == content_type,
+        ContentItem.curation_status == ContentStatus.PROMOTED,
+        ContentItem.is_suppressed.is_(False),
+        ContentItem.published_at >= cutoff,
     )
+    query = apply_content_policy(query, content_type=content_type)
+    count = query.count()
     return int(count or 0)
 
 

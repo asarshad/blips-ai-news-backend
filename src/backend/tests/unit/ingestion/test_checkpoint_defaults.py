@@ -34,6 +34,9 @@ class _FakeQuery:
     def all(self):
         return self._rows
 
+    def count(self):
+        return len(self._rows)
+
 
 class _FakeDb:
     def __init__(self, rows):
@@ -181,3 +184,19 @@ def test_reel_guardrail_pauses_after_five_low_conversion_days_when_enabled(monke
 
     assert "Low Conversion Feed" in paused
     assert "conversion<2%" in paused["Low Conversion Feed"]
+
+
+def test_fresh_promoted_count_applies_curated_only_policy(monkeypatch):
+    db = _FakeDb([object(), object(), object()])
+    seen = {}
+
+    def _apply_policy(query, *, content_type=None):
+        seen["content_type"] = content_type
+        return query
+
+    monkeypatch.setattr(checkpoint_defaults, "apply_content_policy", _apply_policy)
+
+    count = checkpoint_defaults._fresh_promoted_count(db, ContentType.VIDEO, hours=168)
+
+    assert count == 3
+    assert seen["content_type"] == ContentType.VIDEO
