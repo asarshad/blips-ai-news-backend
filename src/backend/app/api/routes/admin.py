@@ -4,7 +4,7 @@ These endpoints allow instant feature flag updates without redeploy.
 Should be protected in production (e.g., behind internal network or auth).
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from app.core.auth import require_admin_key
 from app.core.feature_flags import FeatureFlags, get_feature_flags
 from app.core.logging import get_logger
+from app.core.youtube_quota import YouTubeQuotaBudget
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(require_admin_key)])
@@ -214,6 +215,39 @@ def trigger_summarize():
         return {"status": "triggered", "message": "AI summarization triggered successfully"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@router.post("/youtube/reset-search-cooldown")
+def reset_youtube_search_cooldown(surface: Optional[str] = None):
+    """Clear Redis cooldown keys so operators can force a new discovery sweep."""
+    from app.core.dependencies import get_redis
+
+    normalized = (surface or "").strip().lower()
+    if normalized and normalized not in {"videos", "reels"}:
+        raise HTTPException(status_code=400, detail="surface must be 'videos' or 'reels'")
+
+    surfaces = [normalized] if normalized else ["videos", "reels"]
+    keys = [f"blips:youtube:search:cooldown:{surface_name}" for surface_name in surfaces]
+
+    try:
+        redis_client = get_redis()
+        deleted = redis_client.delete(*keys) if keys else 0
+        quota = YouTubeQuotaBudget(redis_client=redis_client)
+    except Exception as exc:
+        logger.error("Failed to reset YouTube search cooldown: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to reset YouTube cooldown") from exc
+
+    return {
+        "status": "ok",
+        "surfaces": surfaces,
+        "deleted_keys": deleted,
+        "quota_remaining": {
+            "all": quota.remaining_units(),
+            "search": quota.remaining_units(bucket="search"),
+            "duration": quota.remaining_units(bucket="duration"),
+        },
+        "lockout_active": quota.is_locked_out(),
+    }
 
 
 # ------------------------------------------------------------------
