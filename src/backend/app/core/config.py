@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     # Source fetch depth
     RSS_ENTRIES_PER_FEED: int = 50
     YT_VIDEOS_PER_CHANNEL: int = 30
+    YT_CURATED_LOOKBACK_HOURS: int = 168
+    YOUTUBE_CURATED_ONLY: bool = True
+    YOUTUBE_DISCOVERY_ENABLED: bool = False
 
     # Discovery signal ingest (Substack/Beehiiv lead pipeline)
     DISCOVERY_SIGNAL_ENABLED: bool = True
@@ -140,9 +143,9 @@ class Settings(BaseSettings):
     ARTICLES_BACKFILL_CREATED_HOURS: int = 24
     ARTICLES_EVERGREEN_MAX_DAYS: int = 14
 
-    # Videos: medium cycle
-    VIDEOS_FRESH_PUBLISHED_HOURS: int = 72
-    VIDEOS_BACKFILL_CREATED_HOURS: int = 48
+    # Videos: rank within a rolling 7-day curated pool
+    VIDEOS_FRESH_PUBLISHED_HOURS: int = 168
+    VIDEOS_BACKFILL_CREATED_HOURS: int = 72
     VIDEOS_EVERGREEN_MAX_DAYS: int = 30
 
     # Reels: long evergreen window (shorts stay relevant longer)
@@ -168,8 +171,8 @@ class Settings(BaseSettings):
 
     # Minimum fresh counts per surface (triggers top-up if below)
     MIN_FRESH_ARTICLES: int = 50
-    MIN_FRESH_VIDEOS: int = 35
-    MIN_FRESH_REELS: int = 28
+    MIN_FRESH_VIDEOS: int = 60
+    MIN_FRESH_REELS: int = 40
 
     # Reservoir sizes: total inventory cached for browsing
     RESERVOIR_ARTICLES: int = 250

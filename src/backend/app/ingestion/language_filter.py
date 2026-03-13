@@ -9,6 +9,7 @@ dependency chain (FastAPI, etc.), keeping it testable in isolation.
 """
 
 import logging
+import unicodedata
 from typing import Optional, Tuple
 
 # Seed langdetect for deterministic results (uses random sampling internally).
@@ -27,6 +28,20 @@ logger = logging.getLogger(__name__)
 # still catches most non-English content while avoiding false rejections on
 # short-but-valid titles.
 _MIN_DETECT_LENGTH = 30
+
+
+def _has_non_latin_letters(text: str) -> bool:
+    """Detect non-Latin scripts in titles before description text can dilute the result."""
+    for char in text:
+        if not char.isalpha():
+            continue
+        try:
+            name = unicodedata.name(char)
+        except ValueError:
+            continue
+        if "LATIN" not in name:
+            return True
+    return False
 
 
 def detect_language(title: str, description: Optional[str] = None) -> Tuple[Optional[str], float]:
@@ -86,7 +101,24 @@ def is_english(title: str, description: Optional[str] = None) -> bool:
         True if the content appears to be English or detection is inconclusive.
         False only if a non-English language is detected.
     """
-    lang, _prob = detect_language(title, description)
+    stripped_title = (title or "").strip()
+    if not stripped_title:
+        return True
+
+    if _has_non_latin_letters(stripped_title):
+        logger.warning("Non-Latin title detected: %s", stripped_title[:100])
+        return False
+
+    title_lang, _title_prob = detect_language(stripped_title)
+    if is_non_english(title_lang):
+        logger.warning(
+            "Non-English title detected (lang=%s): %s",
+            title_lang,
+            stripped_title[:100],
+        )
+        return False
+
+    lang, _prob = detect_language(stripped_title, description)
 
     if lang is None:
         # Too short or detection failed — allow through (safe default)

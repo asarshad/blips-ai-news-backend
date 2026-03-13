@@ -30,6 +30,7 @@ def test_run_curation_ingestion_runs_video_discovery(monkeypatch):
         ),
     )
     monkeypatch.setattr(tasks_ingestion, "get_redis", lambda: None)
+    monkeypatch.setattr(tasks_ingestion, "youtube_discovery_enabled", lambda: True)
 
     stats = JobStats(job_name="fetch_news")
     tasks_ingestion._run_curation_ingestion_with_stats(db, stats)

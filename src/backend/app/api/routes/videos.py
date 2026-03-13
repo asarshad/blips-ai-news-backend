@@ -86,7 +86,7 @@ def get_recent_videos(
     Get the most recent videos using tiered freshness strategy.
 
     Returns a blend of:
-    - Tier A (Fresh): videos published within rolling window
+    - Tier A (Fresh): videos published within the rolling 7-day curated window
     - Tier B (Backfill): videos added recently but published earlier
     - Tier C (Evergreen): older high-quality videos
 

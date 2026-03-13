@@ -83,6 +83,24 @@ class TestIsEnglish:
             is True
         )
 
+    def test_non_english_title_is_rejected_even_with_english_description(self):
+        assert (
+            is_english(
+                "🛑 रोज की ये गलती आप भी करते हो?",
+                "Tech tips, productivity workflow, Android settings and AI assistant shortcuts.",
+            )
+            is False
+        )
+
+    def test_transliterated_non_english_title_is_rejected_before_description_bias(self):
+        assert (
+            is_english(
+                "🚨 Teri Siri ab Google chalayega — $1 BILLION ki deal ho gayi!",
+                "Google AI update explained in English with tech news context and product recap.",
+            )
+            is False
+        )
+
     def test_description_is_truncated_to_500_chars(self):
         """Long descriptions should be truncated for performance."""
         long_desc = "Testing language detection. " * 100  # ~2700 chars

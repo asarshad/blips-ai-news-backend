@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.ingestion.canonical import canonical_key_for_article, canonical_key_for_youtube
 from app.ingestion.checkpoint_locks import pg_advisory_unlock, try_pg_advisory_lock
@@ -336,6 +337,9 @@ def process_progress_row_batch(
             )
 
             want_reel = progress.source_type == "youtube_reel"
+            lookback_cutoff = datetime.utcnow() - timedelta(
+                hours=settings.YT_CURATED_LOOKBACK_HOURS
+            )
 
             remaining = max(0, int(progress.target) - int(progress.items_ingested))
 
@@ -390,6 +394,12 @@ def process_progress_row_batch(
                     skipped_reasons["is_short_mismatch"] += 1
                     return
 
+                published_at = getattr(e, "published_at", None)
+                if published_at and published_at < lookback_cutoff:
+                    skipped_reasons.setdefault("outside_lookback", 0)
+                    skipped_reasons["outside_lookback"] += 1
+                    return
+
                 # Language gate: skip non-English content
                 if not is_english(e.title, getattr(e, "summary", None)):
                     skipped_reasons.setdefault("non_english", 0)
@@ -418,7 +428,7 @@ def process_progress_row_batch(
                         "ingestion_day": day_utc,
                         "is_suppressed": False,
                         "signal_hits": 0,
-                        "published_at": getattr(e, "published_at", None) or datetime.utcnow(),
+                        "published_at": published_at or datetime.utcnow(),
                         "title": e.title,
                         "description": (e.summary or "")[:500] if e.summary else None,
                         "content_text": None,

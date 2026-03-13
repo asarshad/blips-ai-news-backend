@@ -21,7 +21,7 @@ def test_get_recent_videos_surfaces_promoted_items_without_ai_gate(monkeypatch):
             source="db",
             cache_key="videos",
             cache_hit=False,
-            tier_config={"fresh_hours": 72},
+            tier_config={"fresh_hours": 168},
         )
         return (
             [

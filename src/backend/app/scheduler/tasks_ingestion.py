@@ -7,6 +7,7 @@ from app.core.feature_flags import feature_flags
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.scheduler.job_stats import JobStats, log_job_start
+from app.services.video_content_policy import youtube_discovery_enabled
 
 logger = get_logger(__name__)
 
@@ -54,7 +55,6 @@ def fetch_and_process_news():
 def _run_curation_ingestion_with_stats(db, stats: JobStats):
     try:
         from app.ingestion.checkpointing import run_checkpointed_ingestion
-        from app.ingestion.service import run_video_discovery_ingestion
         from app.scheduler.tasks_curation import run_clustering_job
         from app.scheduler.tasks_promotion import run_promotion_job
 
@@ -67,13 +67,18 @@ def _run_curation_ingestion_with_stats(db, stats: JobStats):
         result = run_checkpointed_ingestion(db, redis_client=redis_client)
         logger.info(f"[fetch_news] Curation ingestion: {result}")
 
-        discovery_result = run_video_discovery_ingestion(db)
-        logger.info(f"[fetch_news] Video discovery ingestion: {discovery_result}")
-        stats.items_processed += int(discovery_result.get("videos_ingested", 0)) + int(
-            discovery_result.get("reels_ingested", 0)
-        )
-        if int(discovery_result.get("errors", 0)) > 0:
-            stats.errors.append(f"Video discovery ingestion: {discovery_result}")
+        if youtube_discovery_enabled():
+            from app.ingestion.service import run_video_discovery_ingestion
+
+            discovery_result = run_video_discovery_ingestion(db)
+            logger.info(f"[fetch_news] Video discovery ingestion: {discovery_result}")
+            stats.items_processed += int(discovery_result.get("videos_ingested", 0)) + int(
+                discovery_result.get("reels_ingested", 0)
+            )
+            if int(discovery_result.get("errors", 0)) > 0:
+                stats.errors.append(f"Video discovery ingestion: {discovery_result}")
+        else:
+            logger.info("[fetch_news] Curated-only mode active; discovery ingestion skipped")
 
         logger.info("[fetch_news] Running clustering before promotion")
         run_clustering_job()

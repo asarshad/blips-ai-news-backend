@@ -11,9 +11,11 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.content import ContentItem, ContentStatus, ContentType, EventType, InteractionEvent
 from app.models.video_source import VideoDiscoveryRun, VideoSourceProfile
 from app.services.video_baseline_service import load_baseline_snapshot, numeric_delta
+from app.services.video_content_policy import apply_content_policy
 from app.services.video_source_service import refresh_video_source_health
 
 
@@ -22,7 +24,7 @@ def _surface_type(surface: str) -> ContentType:
 
 
 def _surface_floor(surface: str) -> int:
-    return 35 if surface == "reels" else 30
+    return settings.MIN_FRESH_REELS if surface == "reels" else settings.MIN_FRESH_VIDEOS
 
 
 def _channel_key(item: ContentItem) -> str:
@@ -59,7 +61,10 @@ def _load_promoted_items(
     end: Optional[datetime] = None,
 ) -> List[ContentItem]:
     query = (
-        db.query(ContentItem)
+        apply_content_policy(
+            db.query(ContentItem),
+            content_type=_surface_type(surface),
+        )
         .filter(
             ContentItem.type == _surface_type(surface),
             ContentItem.curation_status == ContentStatus.PROMOTED,
@@ -107,8 +112,12 @@ def _surface_metrics(
     interactions = {
         event_type: count
         for event_type, count in (
-            db.query(InteractionEvent.event_type, func.count(InteractionEvent.id))
-            .join(ContentItem, ContentItem.id == InteractionEvent.content_item_id)
+            apply_content_policy(
+                db.query(InteractionEvent.event_type, func.count(InteractionEvent.id)).join(
+                    ContentItem, ContentItem.id == InteractionEvent.content_item_id
+                ),
+                content_type=_surface_type(surface),
+            )
             .filter(
                 ContentItem.type == _surface_type(surface),
                 InteractionEvent.created_at >= start,

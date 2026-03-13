@@ -1,0 +1,898 @@
+[
+  {
+    "channel_id": "UCBJycsmduvYEL83R_U4JriQ",
+    "name": "Marques Brownlee (MKBHD)",
+    "role": "explainer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCdBK94H6oZT2Q7l0-b0xmMg",
+    "name": "ShortCircuit",
+    "role": "explainer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCeeFfhMcJa1kjtfZAGskOCA",
+    "name": "TechLinked",
+    "role": "news",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCXuqSBlHAE6Xw-yeJA0Tunw",
+    "name": "Linus Tech Tips",
+    "role": "explainer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCVYamHliCI9rw1tHR1xbkfw",
+    "name": "Dave2D",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCsTcErHg8oDvUnTzoqsYeNw",
+    "name": "Unbox Therapy",
+    "role": "explainer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCXGgrKt94gR6lmN4aN3mYTg",
+    "name": "Austin Evans",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCMiJRAwDNSNzuYeN2uWa0pA",
+    "name": "Mrwhosetheboss",
+    "role": "explainer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCTzLRZUgelatKZ4nyIKcAbg",
+    "name": "Hardware Canucks",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UC9-y-6csu5WGm29I7JiwpnA",
+    "name": "Computerphile",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCptwuAv0XQHo1OQUSaO6NHw",
+    "name": "Max Tech",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCr6JcgG9eskEzL-k6TtL9EQ",
+    "name": "Zone of Tech",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCH7_fVl9_71cNjNDCCZAH6w",
+    "name": "Snazzy Labs",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UC_1awbvccFZOnVRjAIkCG7Q",
+    "name": "Sam Beckman",
+    "role": "explainer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UC0MYNOsIrz6jmXfIMERyRHQ",
+    "name": "Karl Conrad",
+    "role": "explainer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UC9fSZHEh6XsRpX-xJc6lT3A",
+    "name": "UrAvgConsumer",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCaDBRJTQhIg_QhCkW7SxWGQ",
+    "name": "TheUnlockr",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCzlXf-yUIaOpOjEjPrOO9TA",
+    "name": "The Tech Chap",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCVLN0tY51ewH44wUtx3YZTA",
+    "name": "Tech Spurt",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCW6J17hZ_Vgr6cQgd_kHt5A",
+    "name": "MobileTechReview",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCT3MTXYJzXrHgOXB5qicr_w",
+    "name": "Canoopsy",
+    "role": "explainer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCa962e5dqRMO1nUldwaaRMw",
+    "name": "Tailosive Tech",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "supplemental"
+  },
+  {
+    "channel_id": "UCEAMLkMKtq6YhmaZdUT1ywA",
+    "name": "This Is Tech Today",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCWFKCr40YwOZQx8FHU_ZqqQ",
+    "name": "JerryRigEverything",
+    "role": "explainer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCSOpcUkE-is7u7c4AkLgqTw",
+    "name": "TheMrMobile",
+    "role": "explainer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UC-tZk0bsaiq9KANWZ2BPO8w",
+    "name": "DailyTekk",
+    "role": "explainer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCiQMYozSSTkJ2twtZM1bG9w",
+    "name": "Zollotech",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCoi3Uk6JtP9QgA5BRwnh6NQ",
+    "name": "Greg's Gadgets",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "supplemental"
+  },
+  {
+    "channel_id": "UCkRqiP0w6FZElpzZjGpbL2g",
+    "name": "Everyday Dad",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCtZO3K2p8mqFwiKWb9k7fXA",
+    "name": "TechAltar",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UC4QZ_LsYcvcq7qOsOhpAX4A",
+    "name": "ColdFusion",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCLBHPoY3NugnZYURxln3fKQ",
+    "name": "Rene Ritchie",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCey_c7U86mJGz1VJWH5CYPA",
+    "name": "iJustine",
+    "role": "explainer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCGCxnvvziu0gg23l5qgvI8A",
+    "name": "MKBHD Clips",
+    "role": "shorts",
+    "content_format": "shorts",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCc_ycus0q7DSd85ZkmEY5ig",
+    "name": "Waveform Clips",
+    "role": "shorts",
+    "content_format": "shorts",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCnmGIkw-KdI0W5siakKPKog",
+    "name": "Technology Connections Shorts",
+    "role": "shorts",
+    "content_format": "shorts",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCrM7B7SL_g1edFOnmj-SDKg",
+    "name": "Bloomberg Technology",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCrp_UI8XtuYfpiqluWLD7Lw",
+    "name": "CNBC Television",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCK7tptUDHh-RYDsdxO1-5QQ",
+    "name": "The Wall Street Journal",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCddiUEpeqJcYeBxX1IVBKvQ",
+    "name": "The Verge",
+    "role": "news",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCOmcA3f_RrH6b9NmcNa4tdg",
+    "name": "CNET",
+    "role": "news",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UC-6OW5aJYBFM33zXQlBKPNA",
+    "name": "Engadget",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCCjyq_K1Xwfg8Lndy7lKMpA",
+    "name": "TechCrunch",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCftwRNsjfRo08xYE31tkiyw",
+    "name": "WIRED",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UC8wXC0ZCfGt3HaVLy_fdTQw",
+    "name": "Digital Trends",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCgyqtNWZmIxTx3b6OxTSALw",
+    "name": "Android Authority",
+    "role": "news",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCzIO0iX4yKW2P4NkmmKq1PA",
+    "name": "9to5Google",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UChjRM_qQAaOAiLNbOGbYcRA",
+    "name": "9to5Mac",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCAY_M9HyJb8oMKPV1utQQyA",
+    "name": "TechRadar",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCO_vmeInQm5Z6dEZ6R5Kk0A",
+    "name": "Pocketnow",
+    "role": "news",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UC8jkbVLPvztz8TuE98OYo8Q",
+    "name": "Front Page Tech",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCsBjURrPoezykLs9EqgamOA",
+    "name": "Fireship",
+    "role": "engineer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCbRP3c757lWg9M-U7TyEkXA",
+    "name": "Theo - t3.gg",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCUyeluBRhGPCW4rPe_UvBZQ",
+    "name": "The Primeagen",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UChWZsjdoRvZ0T9QWZOD6UpA",
+    "name": "Hussein Nasser",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UC1kBxkk2bcG78YBX7LMl9pQ",
+    "name": "code_report",
+    "role": "engineer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCFbNIlppjAuEX4znoulh0Cw",
+    "name": "Web Dev Simplified",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UC29ju8bIPH5as8OGnQzwJyA",
+    "name": "Traversy Media",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UC8butISFwT-Wl7EV0hUK0BQ",
+    "name": "freeCodeCamp.org",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCW5YeuERMmlnqo4oq8vwUpg",
+    "name": "The Net Ninja",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCdngmbVKX1Tgre699-XLlUA",
+    "name": "TechWorld with Nana",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCS0N5baNlQWJCUrhCEo8WlA",
+    "name": "Ben Eater",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UC6biysICWOJ-C3P4Tyeggzg",
+    "name": "Low Level TV",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UC9x0AN7BWHpCDHSm9NiJFJQ",
+    "name": "NetworkChuck",
+    "role": "engineer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCvjgXvBlbQiydffZU7m1_aw",
+    "name": "The Coding Train",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCWv7vMbMWH4-V0ZXdmDpPBA",
+    "name": "Programming with Mosh",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCtxCXg-UvSnTKPOzLH4wJaQ",
+    "name": "Coding Tech",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCR-DXc1voovS8nhAvccRZhg",
+    "name": "Jeff Geerling",
+    "role": "engineer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCy0tKL1T7wFoYcxCe0xjN6Q",
+    "name": "Technology Connections",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCmtyQOKKmrMVaKuRXz02jbQ",
+    "name": "Sebastian Lague",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCVhQ2NnY5Rskt6UjCUkJ_DA",
+    "name": "ArjanCodes",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCZgt6AzoyjslHTC9dz0UoTw",
+    "name": "ByteByteGo",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCxJfChkaS_6tmgDbccQ1i6A",
+    "name": "Valentin Despa",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCfzlCWGWYyIQ0aLC5w48gBQ",
+    "name": "sentdex",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UC4w1YQAJMWOz4qtxinq55LQ",
+    "name": "Level1Techs",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCm9lqWLMec4klbLEtUxKSbg",
+    "name": "GamingOnLinux",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCp_9GybIeJV5CDJ7LlJkFvA",
+    "name": "AI Explained",
+    "role": "ai",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCk6nvkQnTQ1oVQRzPw6KMFQ",
+    "name": "AI Coffee Break with Letitia",
+    "role": "ai",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCP7jMXSY2xbc3KCAE0MHQ-A",
+    "name": "Google DeepMind",
+    "role": "ai",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCHlNU7kIZhRgSbhHvFoy72w",
+    "name": "Hugging Face",
+    "role": "ai",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCC-lyoTfSrcJzA1ab3APAgw",
+    "name": "LangChain",
+    "role": "ai",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCBp3w4DCEC64FZr4k9ROxig",
+    "name": "Weights & Biases",
+    "role": "ai",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCBHcMCGaiJhv-ESTcWGJPcw",
+    "name": "NVIDIA Developer",
+    "role": "ai",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCE_M8A5yxnLfW0KghEeajjw",
+    "name": "Apple",
+    "role": "official",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCK8sQmJBp8GCxrOtXWBpyEA",
+    "name": "Google",
+    "role": "official",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UC_x5XG1OV2P6uZZ5FSM9Ttw",
+    "name": "Google Developers",
+    "role": "official",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCJS9pqu9BzkAMNTmzNMNhvg",
+    "name": "Google Cloud Tech",
+    "role": "official",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCVHFbqXqoYvEWM1Ddxl0QDg",
+    "name": "Android Developers",
+    "role": "official",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCGW6D7GSvK7evQ66zA2qvMA",
+    "name": "Chrome for Developers",
+    "role": "official",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCsMica-v34Irf9KVTh6xx-g",
+    "name": "Microsoft Developer",
+    "role": "official",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCFtEEv80fQVKkD4h1PF-Xqw",
+    "name": "Microsoft",
+    "role": "official",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UC0m-80FnNY2Qb7obvTL_2fA",
+    "name": "Microsoft Azure",
+    "role": "official",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCT-nPlVzJI-ccQXlxjSvJmw",
+    "name": "AWS Developers",
+    "role": "official",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCLq8gNoee7oXM7MvTdjyQvA",
+    "name": "Vercel",
+    "role": "official",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCNTVzV1InxHV-YR0fSajqPQ",
+    "name": "Supabase",
+    "role": "official",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCdxd6zr7fODcJTpnUYYWz5g",
+    "name": "PlanetScale",
+    "role": "official",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UC7c3Kb6jYCRj4JOHHZTxKsQ",
+    "name": "GitHub",
+    "role": "official",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UC76AVf2JkrwjxNKMuPpscHQ",
+    "name": "Docker",
+    "role": "official",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCGp4UBwpTNegd_4nCpuBcow",
+    "name": "JetBrains TV",
+    "role": "official",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCgv3xMy6kECn0boYP9d2o-g",
+    "name": "Cloudflare",
+    "role": "official",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UC_9tBCeHdBG13If451X7FRw",
+    "name": "Intel Technology",
+    "role": "official",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCHQDjDDW8w2RieO-IuqYlyg",
+    "name": "AMD",
+    "role": "official",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCHuiy8bXnmK5nisYHUd1J5g",
+    "name": "NVIDIA",
+    "role": "official",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCH6eZr6vbZ6Bx53TyuSzxrg",
+    "name": "Qualcomm",
+    "role": "official",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCWwgaK7x0_FR1goeSRazfsQ",
+    "name": "Samsung",
+    "role": "official",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCuVQmkiETvqmLviDcBtQw4A",
+    "name": "Nothing Technology",
+    "role": "official",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCk-kXx3hH_oE87xEXkXCQdw",
+    "name": "OnePlus",
+    "role": "official",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCDiKw3GnFIwyNJBzhCoRI-Q",
+    "name": "Framework",
+    "role": "official",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCFIjVWFZ__KhtTXHDJ7vgng",
+    "name": "Raspberry Pi",
+    "role": "official",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCUpmmT1Gm_raVpqSvQYyd2Q",
+    "name": "Arduino",
+    "role": "official",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCsNGtpqGsyw0U6qEG-WHadA",
+    "name": "DJI",
+    "role": "official",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UCXZCJLdBC09xxGZ6gcdrc6A",
+    "name": "OpenAI",
+    "role": "official",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  }
+]

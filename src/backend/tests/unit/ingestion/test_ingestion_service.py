@@ -28,7 +28,7 @@ def test_discovery_remaining_needed_uses_fresh_promoted_gap_for_videos():
         created_remaining=0,
     )
 
-    assert remaining == 16
+    assert remaining == 46
 
 
 def test_discovery_remaining_needed_prefers_created_gap_when_larger():

@@ -12,24 +12,32 @@ def test_enabled_channels_are_unique_by_channel_id():
     assert len(channel_ids) == len(set(channel_ids))
 
 
-def test_dedupe_channel_configs_keeps_primary_channel_metadata():
-    unique = {channel.channel_id: channel for channel in dedupe_channel_configs(CHANNEL_REGISTRY)}
+def test_curated_registry_scales_to_trusted_roster():
+    enabled = get_enabled_channels()
+    assert len(enabled) >= 100
+    assert (
+        len([channel for channel in enabled if channel.content_format == ContentFormat.SHORTS]) >= 3
+    )
+    assert (
+        len([channel for channel in enabled if channel.content_format == ContentFormat.MIXED]) >= 20
+    )
 
+    unique = {channel.channel_id: channel for channel in dedupe_channel_configs(CHANNEL_REGISTRY)}
     mkbhd = unique["UCBJycsmduvYEL83R_U4JriQ"]
     assert mkbhd.name == "Marques Brownlee (MKBHD)"
     assert mkbhd.content_format == ContentFormat.MIXED
-
-    android = unique["UCVHFbqXqoYvEWM1Ddxl0QDg"]
-    assert android.name == "Android Developers"
-    assert android.enabled is True
 
 
 def test_corrected_channel_ids_resolve_expected_channels():
     techlinked = get_channel_by_id("UCeeFfhMcJa1kjtfZAGskOCA")
     hardware_canucks = get_channel_by_id("UCTzLRZUgelatKZ4nyIKcAbg")
+    openai = get_channel_by_id("UCXZCJLdBC09xxGZ6gcdrc6A")
 
     assert techlinked is not None
     assert techlinked.name == "TechLinked"
 
     assert hardware_canucks is not None
     assert hardware_canucks.name == "Hardware Canucks"
+
+    assert openai is not None
+    assert openai.name == "OpenAI"
