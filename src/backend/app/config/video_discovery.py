@@ -1,8 +1,9 @@
 """Static YouTube discovery query packs for videos and reels."""
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Iterable, List
+from typing import List
 
 DISCOVERY_REGIONS = ("US", "CA", "GB", "IN")
 
@@ -15,33 +16,39 @@ class DiscoveryQueryPack:
     query: str
     category: str
     surface: str
-    max_results: int = 6
+    max_results: int = 25
 
 
 VIDEO_QUERY_PACKS: List[DiscoveryQueryPack] = [
-    DiscoveryQueryPack("news-tech", "technology news today", "news", "videos", 6),
-    DiscoveryQueryPack("news-ai", "AI news today", "ai", "videos", 6),
+    DiscoveryQueryPack("news-tech", "technology news", "news", "videos", 25),
+    DiscoveryQueryPack("news-ai", "AI update", "ai", "videos", 25),
     DiscoveryQueryPack(
-        "explainer-mobile", "smartphone review hands on", "mobile/hardware", "videos", 6
+        "explainer-mobile", "smartphone hands on review", "mobile/hardware", "videos", 25
     ),
     DiscoveryQueryPack(
-        "explainer-hardware", "laptop review benchmark", "mobile/hardware", "videos", 6
+        "explainer-hardware", "laptop review benchmark", "mobile/hardware", "videos", 25
     ),
-    DiscoveryQueryPack("engineer-dev", "developer tooling update", "engineer/dev", "videos", 6),
+    DiscoveryQueryPack("engineer-dev", "developer tooling release", "engineer/dev", "videos", 25),
     DiscoveryQueryPack(
-        "security-privacy", "cybersecurity privacy update", "security/privacy", "videos", 6
+        "security-privacy", "cybersecurity privacy update", "security/privacy", "videos", 25
     ),
     DiscoveryQueryPack(
-        "industry-business", "tech industry analysis", "business/industry", "videos", 6
+        "industry-business", "tech industry analysis", "business/industry", "videos", 25
     ),
 ]
 
 REEL_QUERY_PACKS: List[DiscoveryQueryPack] = [
-    DiscoveryQueryPack("reels-tech-news", "technology news shorts", "news", "reels", 6),
-    DiscoveryQueryPack("reels-ai", "AI update shorts", "ai", "reels", 6),
-    DiscoveryQueryPack("reels-gadgets", "smartphone short review", "mobile/hardware", "reels", 6),
-    DiscoveryQueryPack("reels-security", "privacy tips shorts", "security/privacy", "reels", 6),
-    DiscoveryQueryPack("reels-dev", "developer tips shorts", "engineer/dev", "reels", 6),
+    DiscoveryQueryPack("reels-tech-news", "technology shorts", "news", "reels", 25),
+    DiscoveryQueryPack("reels-ai", "AI update shorts", "ai", "reels", 25),
+    DiscoveryQueryPack(
+        "reels-gadgets",
+        "smartphone hands on shorts",
+        "mobile/hardware",
+        "reels",
+        25,
+    ),
+    DiscoveryQueryPack("reels-security", "privacy update shorts", "security/privacy", "reels", 25),
+    DiscoveryQueryPack("reels-dev", "developer tips shorts", "engineer/dev", "reels", 25),
 ]
 
 
@@ -53,13 +60,13 @@ def get_query_packs(surface: str) -> List[DiscoveryQueryPack]:
 
 
 def discovery_cutoff(surface: str) -> datetime:
-    """Search discovery stays aggressive on recency."""
-    hours = 18 if surface == "reels" else 36
-    return datetime.utcnow() - timedelta(hours=hours)
-
-
-def iter_lane_matrix(surface: str) -> Iterable[tuple[DiscoveryQueryPack, str]]:
-    """Yield every configured query pack x region combination."""
-    for pack in get_query_packs(surface):
-        for region in DISCOVERY_REGIONS:
-            yield pack, region
+    """Search discovery uses a weekly pool and lets ranking decide what stays hot."""
+    env_name = (
+        "YOUTUBE_DISCOVERY_REELS_LOOKBACK_DAYS"
+        if surface == "reels"
+        else "YOUTUBE_DISCOVERY_VIDEOS_LOOKBACK_DAYS"
+    )
+    lookback_days = max(
+        1, int(os.getenv(env_name, os.getenv("YOUTUBE_DISCOVERY_LOOKBACK_DAYS", "7")))
+    )
+    return datetime.utcnow() - timedelta(days=lookback_days)

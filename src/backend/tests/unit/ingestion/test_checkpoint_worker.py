@@ -258,3 +258,97 @@ def test_worker_failure_schedules_retry_with_backoff_and_rolls_back(monkeypatch)
     assert progress.retry_count == 3
     assert progress.retry_at is not None
     assert before + timedelta(seconds=5) <= progress.retry_at <= after + timedelta(seconds=60)
+
+
+def test_worker_persists_youtube_metadata_fields(monkeypatch):
+    progress = _Progress(
+        id=1,
+        day_utc=None,
+        source_type="youtube_video",
+        feed_name="Channel One",
+        target=1,
+        items_ingested=0,
+        items_attempted=0,
+        status="running",
+    )
+    session = _FakeSession(progress)
+
+    class _FakeYouTubeEntry:
+        video_id = "abc123DEF45"
+        video_url = "https://www.youtube.com/watch?v=abc123DEF45"
+        title = "MacBook hands on review"
+        summary = "Apple announced a new MacBook and benchmarks look strong."
+        source = "Channel One"
+        channel_id = "channel-1"
+        is_short = False
+        published_at = datetime.utcnow()
+        acquisition_lane = "curated"
+        source_status = "core"
+        duration_seconds = 480
+        view_count = 120000
+        like_count = 3400
+        comment_count = 250
+        views_per_hour = 5500.0
+        format_fit_score = 1.0
+        thumbnail_url = "https://img.youtube.com/vi/abc123DEF45/hqdefault.jpg"
+
+    class _FakeYouTubeClient:
+        def __init__(self):
+            self.channel_configs = [
+                SimpleNamespace(
+                    name="Channel One",
+                    content_format=SimpleNamespace(value="mixed"),
+                    enabled=True,
+                )
+            ]
+
+        def _fetch_channel_with_config(self, _config, max_videos):  # noqa: ARG002
+            return [_FakeYouTubeEntry()]
+
+    pkg = ModuleType("app.integrations")
+    pkg.__path__ = []
+    rss_mod = ModuleType("app.integrations.rss_client")
+    rss_mod.RSSClient = lambda: _FakeRSSClient([])  # type: ignore[attr-defined]
+    yt_mod = ModuleType("app.integrations.youtube_client")
+    yt_mod.YouTubeClient = _FakeYouTubeClient  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "app.integrations", pkg)
+    monkeypatch.setitem(sys.modules, "app.integrations.rss_client", rss_mod)
+    monkeypatch.setitem(sys.modules, "app.integrations.youtube_client", yt_mod)
+    monkeypatch.setattr("app.db.base.SessionLocal", lambda: session)
+    monkeypatch.setattr(checkpoint_worker, "IngestionBudgetRepository", _FakeBudgetRepo)
+    monkeypatch.setattr(checkpoint_worker, "claim_lease", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(checkpoint_worker, "release_lease", lambda *_args, **_kwargs: True)
+
+    captured_values = []
+
+    def _capture_insert(_db, *, values):
+        captured_values.extend(values)
+        return len(values)
+
+    monkeypatch.setattr(checkpoint_worker, "_insert_content_items_postgres", _capture_insert)
+
+    result = checkpoint_worker.process_progress_row_batch(
+        row_id=1,
+        day_utc=datetime.utcnow().date(),
+        redis_client=object(),
+        owner_token="t",
+        ttl_ms=1000,
+        batch_size=1,
+        retry_base_seconds=1,
+        retry_max_seconds=10,
+    )
+
+    assert result["status"] == "ok"
+    assert result["inserted"] == 1
+    assert len(captured_values) == 1
+    inserted = captured_values[0]
+    assert inserted["channel_id"] == "channel-1"
+    assert inserted["acquisition_lane"] == "curated"
+    assert inserted["source_status"] == "core"
+    assert inserted["view_count_snapshot"] == 120000
+    assert inserted["engagement_snapshot"] == {"likes": 3400, "comments": 250}
+    assert inserted["views_per_hour"] == 5500.0
+    assert inserted["format_fit_score"] == 1.0
+    assert inserted["duration_seconds"] == 480
+    assert inserted["discovered_via"] == "yt_curated"

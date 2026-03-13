@@ -20,6 +20,7 @@ from app.services.promotion_service import (
     compute_cluster_hotness,
     compute_duplicate_penalty,
     compute_promotion_recency,
+    compute_story_importance,
     score_candidate,
 )
 
@@ -170,6 +171,10 @@ class TestScoreCandidate:
         item.cluster_id = cluster_id
         item.signal_hits = signal_hits
         item.published_at = datetime.now(timezone.utc) - timedelta(hours=hours_old)
+        item.topics = []
+        item.entities = []
+        item.description = ""
+        item.summary = ""
         return item
 
     def test_score_in_reasonable_range(self):
@@ -198,6 +203,49 @@ class TestScoreCandidate:
     def test_result_rounded_to_4_decimals(self):
         score = score_candidate(self._make_item(), {"c1": 1}, PromotionConfig())
         assert score == round(score, 4)
+
+    def test_story_importance_boosts_relevant_launch_candidate(self):
+        item = self._make_item(title="MacBook Air hands on review", hours_old=6)
+        item.entities = ["macbook", "apple"]
+        item.topics = ["mobile/hardware"]
+        item.description = "Apple launch coverage with benchmarks and hands-on impressions."
+
+        generic = score_candidate(
+            self._make_item(title="Generic tech roundup", hours_old=6),
+            {"c1": 1},
+            PromotionConfig(w_story=0.2),
+            story_topic_counts={"mobile/hardware": 6},
+            story_entity_counts={"macbook": 8, "apple": 6},
+        )
+        boosted = score_candidate(
+            item,
+            {"c1": 1},
+            PromotionConfig(w_story=0.2),
+            story_topic_counts={"mobile/hardware": 6},
+            story_entity_counts={"macbook": 8, "apple": 6},
+        )
+
+        assert boosted > generic
+
+
+class TestStoryImportance:
+    def test_launch_keywords_and_story_overlap_drive_score(self):
+        item = MagicMock(spec=ContentItem)
+        item.title = "OpenAI launch keynote recap"
+        item.description = "The new GPT update matters for developers."
+        item.summary = ""
+        item.topics = ["ai"]
+        item.entities = ["openai", "gpt"]
+        item.views_per_hour = 0.0
+        item.published_at = datetime.now(timezone.utc) - timedelta(hours=2)
+
+        score = compute_story_importance(
+            item,
+            {"ai": 10},
+            {"openai": 12, "gpt": 8},
+        )
+
+        assert score > 0.4
 
 
 # ── PromotionService ──────────────────────────────────────────────────────────

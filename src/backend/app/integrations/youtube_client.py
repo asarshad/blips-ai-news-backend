@@ -238,6 +238,7 @@ class VideoEntry:
     query_label: Optional[str] = None
     region: Optional[str] = None
     source_status: Optional[str] = None
+    duration_seconds: Optional[int] = None
     view_count: Optional[int] = None
     like_count: Optional[int] = None
     comment_count: Optional[int] = None
@@ -604,7 +605,7 @@ class YouTubeClient:
         query: str,
         *,
         region_code: str = "US",
-        max_results: int = 10,
+        max_results: int = 25,
         surface: str = "videos",
         published_after: Optional[datetime] = None,
     ) -> List[VideoEntry]:
@@ -654,9 +655,9 @@ class YouTubeClient:
         max_results: int = 20,
         surface: str = "videos",
     ) -> List[VideoEntry]:
-        """Fetch hydrated Science & Technology trending candidates."""
+        """Fetch Science & Technology trending candidates in a single API round trip."""
         params = {
-            "part": "snippet",
+            "part": "snippet,contentDetails,statistics,status",
             "chart": "mostPopular",
             "videoCategoryId": "28",
             "regionCode": region_code,
@@ -672,14 +673,18 @@ class YouTubeClient:
         if not data:
             return []
 
-        video_ids = [item.get("id") for item in data.get("items", []) if item.get("id")]
-        return self.hydrate_video_candidates(
-            video_ids=video_ids,
-            acquisition_lane="trending",
-            query_label="most_popular_science_technology",
-            region=region_code,
-            surface=surface,
-        )
+        entries: List[VideoEntry] = []
+        for item in data.get("items", []):
+            entry = self._entry_from_api_item(
+                item,
+                acquisition_lane="trending",
+                query_label="most_popular_science_technology",
+                region=region_code,
+                surface=surface,
+            )
+            if entry:
+                entries.append(entry)
+        return entries
 
     def hydrate_video_candidates(
         self,
@@ -748,6 +753,8 @@ class YouTubeClient:
         channel_name = snippet.get("channelTitle", "YouTube")
         published_at = self._parse_api_datetime(snippet.get("publishedAt"))
         duration_seconds = self._parse_iso_duration(content_details.get("duration", ""))
+        if duration_seconds is not None:
+            self._duration_cache_seconds[video_id] = duration_seconds
         view_count = self._safe_int(statistics.get("viewCount"))
         like_count = self._safe_int(statistics.get("likeCount"))
         comment_count = self._safe_int(statistics.get("commentCount"))
@@ -796,6 +803,7 @@ class YouTubeClient:
             query_label=query_label,
             region=region,
             source_status=source_status,
+            duration_seconds=duration_seconds,
             view_count=view_count,
             like_count=like_count,
             comment_count=comment_count,
@@ -809,7 +817,10 @@ class YouTubeClient:
     def _guess_role(self, title: str, summary: str, surface: str) -> ChannelRole:
         """Best-effort role inference for discovered channels."""
         text = f"{title} {summary}".lower()
-        if any(token in text for token in ("openai", "google", "apple", "microsoft", "developer")):
+        if any(
+            token in text
+            for token in ("openai", "google", "apple", "microsoft", "developer", "keynote")
+        ):
             return ChannelRole.OFFICIAL
         if any(token in text for token in ("ai", "model", "llm", "chatgpt", "gemini", "claude")):
             return ChannelRole.AI
@@ -820,7 +831,10 @@ class YouTubeClient:
             return ChannelRole.ENGINEER
         if surface == "reels":
             return ChannelRole.SHORTS
-        if any(token in text for token in ("news", "today", "update", "announced", "launch")):
+        if any(
+            token in text
+            for token in ("news", "update", "announced", "announcement", "launch", "released")
+        ):
             return ChannelRole.NEWS
         return ChannelRole.EXPLAINER
 
@@ -835,15 +849,25 @@ class YouTubeClient:
         """Return a [0,1] fit score for the requested surface."""
         if surface == "reels":
             if duration_seconds is None:
-                return 0.6 if is_short else 0.0
-            return 1.0 if 15 <= duration_seconds <= 75 else 0.0
+                return 0.75 if is_short else 0.0
+            if 10 <= duration_seconds <= 90:
+                return 1.0
+            if 91 <= duration_seconds <= 120:
+                return 0.7
+            if is_short and 6 <= duration_seconds < 10:
+                return 0.35
+            return 0.0
 
         if duration_seconds is None:
-            return 0.4
-        if 180 <= duration_seconds <= 1200:
+            return 0.55
+        if 120 <= duration_seconds <= 1500:
             return 1.0
+        if 90 <= duration_seconds < 120:
+            return 0.55
+        if duration_seconds <= 2400:
+            return 0.65
         if role in (ChannelRole.ENGINEER, ChannelRole.OFFICIAL) and duration_seconds <= 2700:
-            return 0.8
+            return 0.85
         return 0.0
 
     def _parse_api_datetime(self, value: Optional[str]) -> Optional[datetime]:
@@ -981,8 +1005,21 @@ class YouTubeClient:
 
             channel_name = feed.feed.get("title", config.name)
             logger.info(f"Channel: {channel_name}, Entries found: {len(feed.entries)}")
+            selected_entries = list(feed.entries[:max_videos])
 
-            for entry in feed.entries[:max_videos]:
+            if config.content_format == ContentFormat.MIXED:
+                self._prime_duration_cache(
+                    [
+                        video_id
+                        for video_id in (
+                            self._extract_video_id(entry.get("link", ""))
+                            for entry in selected_entries
+                        )
+                        if video_id
+                    ]
+                )
+
+            for entry in selected_entries:
                 try:
                     video_url = entry.get("link", "")
                     if not video_url:
@@ -996,6 +1033,14 @@ class YouTubeClient:
 
                     # Check if it's a short
                     is_short = self._detect_short(video_url, video_id, config, title=title)
+                    duration_seconds = self._duration_cache_seconds.get(video_id)
+                    source_status = "core" if config.enabled else "blocked"
+                    fit_score = self._compute_format_fit_score(
+                        duration_seconds=duration_seconds,
+                        is_short=is_short,
+                        surface="reels" if is_short else "videos",
+                        role=config.role,
+                    )
 
                     thumbnail_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
                     summary = self._get_summary(entry)
@@ -1017,6 +1062,10 @@ class YouTubeClient:
                             quality_tier=config.quality_tier,
                             is_short=is_short,
                             published_at=published_at,
+                            acquisition_lane="curated",
+                            source_status=source_status,
+                            duration_seconds=duration_seconds,
+                            format_fit_score=fit_score,
                         )
                     )
 
@@ -1031,6 +1080,39 @@ class YouTubeClient:
             raise
 
         return videos
+
+    def _prime_duration_cache(self, video_ids: List[str]) -> None:
+        """Batch-load video durations so mixed-format channels do not spend one API call per item."""
+        if not self._youtube_api_key():
+            return
+
+        pending_ids = [
+            video_id
+            for video_id in dict.fromkeys(video_ids)
+            if video_id and video_id not in self._duration_cache_seconds
+        ]
+        if not pending_ids:
+            return
+
+        for start in range(0, len(pending_ids), 50):
+            chunk = pending_ids[start : start + 50]
+            data = self._youtube_api_json(
+                "videos",
+                params={"part": "contentDetails", "id": ",".join(chunk)},
+                quota_units=1,
+                quota_bucket="duration",
+                timeout=5,
+                operation=f"batched duration lookup for {len(chunk)} ids",
+            )
+            if not data:
+                return
+
+            for item in data.get("items", []):
+                video_id = item.get("id")
+                if not video_id:
+                    continue
+                duration_iso = item.get("contentDetails", {}).get("duration", "")
+                self._duration_cache_seconds[video_id] = self._parse_iso_duration(duration_iso)
 
     def _detect_short(
         self,

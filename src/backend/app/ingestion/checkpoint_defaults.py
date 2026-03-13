@@ -17,7 +17,7 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Utility-first reel targets (YouTube-only) with explicit daily budget of 30.
+# Utility-first reel targets (YouTube-only) with an explicit reel-heavy budget of 40.
 # Environment overrides can still replace any of these values.
 DEFAULT_INGESTION_TARGET_OVERRIDES: Dict[str, int] = {
     "youtube_reel:The Verge": 4,
@@ -31,21 +31,22 @@ DEFAULT_INGESTION_TARGET_OVERRIDES: Dict[str, int] = {
     "youtube_reel:Marques Brownlee (MKBHD)": 2,
     "youtube_reel:ShortCircuit": 1,
     "youtube_reel:TechLinked": 1,
-    "youtube_reel:Android Developers": 0,
+    "youtube_reel:Android Developers": 1,
     "youtube_reel:Tech Vision": 0,
-    "youtube_reel:Linus Tech Tips": 0,
-    "youtube_reel:Fireship": 0,
-    "youtube_reel:Matt Wolfe": 0,
-    "youtube_reel:Jeff Geerling": 0,
+    "youtube_reel:Linus Tech Tips": 2,
+    "youtube_reel:Fireship": 2,
+    "youtube_reel:Matt Wolfe": 2,
+    "youtube_reel:Jeff Geerling": 2,
+    "youtube_reel:Snazzy Labs": 1,
     # Keep long-form throughput unchanged after enabling MIXED format.
     "youtube_video:Marques Brownlee (MKBHD)": 2,
     "youtube_video:ShortCircuit": 3,
     "youtube_video:TechLinked": 2,
 }
 
-REEL_AUTO_PAUSE_MIN_ATTEMPTS = 30
-REEL_AUTO_PAUSE_MIN_CONVERSION = 0.05
-REEL_AUTO_PAUSE_CONSECUTIVE_DAYS = 3
+REEL_AUTO_PAUSE_MIN_ATTEMPTS = 60
+REEL_AUTO_PAUSE_MIN_CONVERSION = 0.02
+REEL_AUTO_PAUSE_CONSECUTIVE_DAYS = 5
 
 
 @dataclass(frozen=True)

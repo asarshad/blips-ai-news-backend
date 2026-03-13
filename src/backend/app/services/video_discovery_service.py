@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections import Counter
+from datetime import datetime, timedelta
 from typing import Dict, List
 
 from sqlalchemy.orm import Session
@@ -16,6 +17,7 @@ from app.config.video_discovery import (
 )
 from app.core.logging import get_logger
 from app.integrations.youtube_client import VideoEntry, YouTubeClient
+from app.models.content import ContentItem, ContentStatus, ContentType
 from app.repositories.video_source_repo import VideoSourceProfileRepository
 from app.services.promotion_service import compute_clickbait_penalty
 from app.services.video_source_service import bootstrap_video_source_profiles
@@ -38,6 +40,16 @@ logger = get_logger(__name__)
 _DISCOVERY_REGION_PRIORITY = tuple(
     dict.fromkeys(os.getenv("YOUTUBE_DISCOVERY_REGION_PRIORITY", "US,GB,CA,IN").split(","))
 )
+_SKIP_STORY_ENTITIES = {
+    "technology",
+    "tech",
+    "news",
+    "video",
+    "videos",
+    "review",
+    "update",
+    "shorts",
+}
 
 
 class VideoDiscoveryService:
@@ -126,11 +138,11 @@ class VideoDiscoveryService:
         if deficit < min_deficit:
             return []
 
-        packs = get_query_packs(surface)
+        packs = self._prioritized_query_packs(surface)
         if not packs:
             return []
 
-        pack_limit = min(len(packs), 3)
+        pack_limit = min(len(packs), 4)
         region_limit = min(
             len(self._ordered_regions()), 2 if deficit >= (18 if surface == "videos" else 12) else 1
         )
@@ -144,6 +156,143 @@ class VideoDiscoveryService:
             region = selected_regions[(call_index // len(selected_packs)) % len(selected_regions)]
             plan.append((pack, region))
         return plan
+
+    def _prioritized_query_packs(self, surface: str) -> List[DiscoveryQueryPack]:
+        packs: List[DiscoveryQueryPack] = []
+        seen_queries: set[str] = set()
+
+        for pack in self._build_story_query_packs(surface) + get_query_packs(surface):
+            normalized = pack.query.strip().lower()
+            if not normalized or normalized in seen_queries:
+                continue
+            packs.append(pack)
+            seen_queries.add(normalized)
+
+        return packs
+
+    def _build_story_query_packs(self, surface: str) -> List[DiscoveryQueryPack]:
+        if not hasattr(self.db, "query"):
+            return []
+
+        cutoff = datetime.utcnow() - timedelta(
+            days=max(1, int(os.getenv("YOUTUBE_DISCOVERY_STORY_WINDOW_DAYS", "7")))
+        )
+        items = (
+            self.db.query(ContentItem)
+            .filter(
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.is_suppressed.is_(False),
+                ContentItem.published_at >= cutoff,
+            )
+            .order_by(ContentItem.published_at.desc())
+            .limit(250)
+            .all()
+        )
+        if not items:
+            return []
+
+        topic_counts: Counter = Counter()
+        entity_counts: Counter = Counter()
+        for item in items:
+            weight = 2 if item.type == ContentType.ARTICLE else 1
+            for topic in self._normalize_terms(item.topics)[:2]:
+                topic_counts[topic] += weight
+            for entity in self._normalize_terms(item.entities)[:3]:
+                entity_counts[entity] += weight
+
+        dynamic_packs: List[DiscoveryQueryPack] = []
+        for entity, count in entity_counts.most_common(4):
+            if count < 2 or entity in _SKIP_STORY_ENTITIES:
+                continue
+            category = self._infer_story_category(entity, topic_counts)
+            query = self._build_story_query(surface, entity, category)
+            if not query:
+                continue
+            dynamic_packs.append(
+                DiscoveryQueryPack(
+                    label=f"story-{entity.replace(' ', '-')[:32]}",
+                    query=query,
+                    category=category,
+                    surface=surface,
+                    max_results=25,
+                )
+            )
+            if len(dynamic_packs) >= 2:
+                break
+
+        return dynamic_packs
+
+    def _normalize_terms(self, values: object) -> List[str]:
+        if not isinstance(values, list):
+            return []
+
+        normalized: List[str] = []
+        seen: set[str] = set()
+        for value in values:
+            if isinstance(value, str):
+                term = value.strip().lower()
+            elif isinstance(value, dict):
+                term = str(value.get("name") or value.get("value") or "").strip().lower()
+            else:
+                continue
+            if not term or term in seen:
+                continue
+            normalized.append(term)
+            seen.add(term)
+        return normalized
+
+    def _infer_story_category(self, entity: str, topic_counts: Counter) -> str:
+        text = entity.lower()
+        if any(
+            token in text for token in ("iphone", "pixel", "galaxy", "macbook", "ipad", "laptop")
+        ):
+            return "mobile/hardware"
+        if any(
+            token in text for token in ("openai", "chatgpt", "gpt", "claude", "gemini", "copilot")
+        ):
+            return "ai"
+        if any(
+            token in text
+            for token in ("linux", "python", "react", "typescript", "docker", "kubernetes")
+        ):
+            return "engineer/dev"
+        if any(token in text for token in ("privacy", "security", "vpn", "breach", "ransomware")):
+            return "security/privacy"
+
+        if topic_counts:
+            topic, _count = topic_counts.most_common(1)[0]
+            if topic in {
+                "ai",
+                "mobile/hardware",
+                "engineer/dev",
+                "security/privacy",
+                "business/industry",
+            }:
+                return topic
+        return "news"
+
+    def _build_story_query(self, surface: str, entity: str, category: str) -> str:
+        if surface == "reels":
+            suffix_by_category = {
+                "ai": "update shorts",
+                "mobile/hardware": "hands on shorts",
+                "engineer/dev": "quick take shorts",
+                "security/privacy": "update shorts",
+                "business/industry": "quick take shorts",
+                "news": "update shorts",
+            }
+        else:
+            suffix_by_category = {
+                "ai": "update",
+                "mobile/hardware": "hands on review",
+                "engineer/dev": "release overview",
+                "security/privacy": "security update",
+                "business/industry": "analysis",
+                "news": "launch update",
+            }
+
+        suffix = suffix_by_category.get(category, suffix_by_category["news"])
+        return f"{entity} {suffix}".strip()
 
     def _max_search_calls(self, surface: str, deficit: int) -> int:
         if surface == "reels":

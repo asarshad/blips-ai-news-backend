@@ -60,7 +60,7 @@ def _install_fake_integrations(monkeypatch, *, channels, rss_feeds=None):
     monkeypatch.setitem(sys.modules, "app.integrations.youtube_client", yt_client_mod)
 
 
-def test_build_defaults_applies_explicit_reel_targets_to_total_30(monkeypatch):
+def test_build_defaults_applies_explicit_reel_targets_to_total_40(monkeypatch):
     channels = [
         _Channel("The Verge", _ContentFormat.MIXED, 3),
         _Channel("Technology Connections Shorts", _ContentFormat.SHORTS, 2),
@@ -79,6 +79,7 @@ def test_build_defaults_applies_explicit_reel_targets_to_total_30(monkeypatch):
         _Channel("Fireship", _ContentFormat.MIXED, 2),
         _Channel("Matt Wolfe", _ContentFormat.MIXED, 2),
         _Channel("Jeff Geerling", _ContentFormat.MIXED, 3),
+        _Channel("Snazzy Labs", _ContentFormat.MIXED, 1),
     ]
     _install_fake_integrations(monkeypatch, channels=channels)
     monkeypatch.delenv("INGESTION_TARGET_DEFAULTS", raising=False)
@@ -87,19 +88,20 @@ def test_build_defaults_applies_explicit_reel_targets_to_total_30(monkeypatch):
     reel_targets = {d.feed_name: d.target for d in defaults if d.source_type == "youtube_reel"}
     video_targets = {d.feed_name: d.target for d in defaults if d.source_type == "youtube_video"}
 
-    assert sum(reel_targets.values()) == 30
+    assert sum(reel_targets.values()) == 40
     assert reel_targets["The Verge"] == 4
     assert reel_targets["Technology Connections Shorts"] == 4
     assert reel_targets["Marques Brownlee (MKBHD)"] == 2
     assert reel_targets["ShortCircuit"] == 1
     assert reel_targets["TechLinked"] == 1
+    assert reel_targets["Android Developers"] == 1
+    assert reel_targets["Linus Tech Tips"] == 2
+    assert reel_targets["Fireship"] == 2
+    assert reel_targets["Matt Wolfe"] == 2
+    assert reel_targets["Jeff Geerling"] == 2
+    assert reel_targets["Snazzy Labs"] == 1
 
-    assert "Android Developers" not in reel_targets
     assert "Tech Vision" not in reel_targets
-    assert "Linus Tech Tips" not in reel_targets
-    assert "Fireship" not in reel_targets
-    assert "Matt Wolfe" not in reel_targets
-    assert "Jeff Geerling" not in reel_targets
 
     # Converted MIXED channels keep original video throughput via explicit overrides.
     assert video_targets["Marques Brownlee (MKBHD)"] == 2
@@ -125,7 +127,7 @@ def test_reel_guardrail_pauses_after_exhausted_day():
             SimpleNamespace(
                 feed_name="No Yield Feed",
                 day_utc=date(2026, 3, 8),
-                items_attempted=35,
+                items_attempted=65,
                 items_ingested=0,
             )
         ]
@@ -138,29 +140,41 @@ def test_reel_guardrail_pauses_after_exhausted_day():
     )
 
     assert "No Yield Feed" in paused
-    assert "attempted>=30 and inserted=0" in paused["No Yield Feed"]
+    assert "attempted>=60 and inserted=0" in paused["No Yield Feed"]
 
 
-def test_reel_guardrail_pauses_after_three_low_conversion_days():
+def test_reel_guardrail_pauses_after_five_low_conversion_days():
     db = _FakeDb(
         [
             SimpleNamespace(
                 feed_name="Low Conversion Feed",
                 day_utc=date(2026, 3, 8),
-                items_attempted=40,
+                items_attempted=100,
                 items_ingested=1,
             ),
             SimpleNamespace(
                 feed_name="Low Conversion Feed",
                 day_utc=date(2026, 3, 7),
-                items_attempted=45,
+                items_attempted=90,
                 items_ingested=1,
             ),
             SimpleNamespace(
                 feed_name="Low Conversion Feed",
                 day_utc=date(2026, 3, 6),
-                items_attempted=50,
-                items_ingested=2,
+                items_attempted=80,
+                items_ingested=1,
+            ),
+            SimpleNamespace(
+                feed_name="Low Conversion Feed",
+                day_utc=date(2026, 3, 5),
+                items_attempted=75,
+                items_ingested=1,
+            ),
+            SimpleNamespace(
+                feed_name="Low Conversion Feed",
+                day_utc=date(2026, 3, 4),
+                items_attempted=70,
+                items_ingested=1,
             ),
         ]
     )
@@ -172,4 +186,4 @@ def test_reel_guardrail_pauses_after_three_low_conversion_days():
     )
 
     assert "Low Conversion Feed" in paused
-    assert "conversion<5%" in paused["Low Conversion Feed"]
+    assert "conversion<2%" in paused["Low Conversion Feed"]

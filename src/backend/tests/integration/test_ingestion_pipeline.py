@@ -112,5 +112,5 @@ class TestYouTubeClientSafety:
             # Mock the API call to verify it's attempted
             with patch.object(client, "_get_duration_from_api", return_value=300) as mock_api:
                 duration = client.get_video_duration("test-video-id")
-                mock_api.assert_called_once_with("test-video-id", "test-key")
+                mock_api.assert_called_once_with("test-video-id")
                 assert duration == 300

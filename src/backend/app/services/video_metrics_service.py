@@ -22,7 +22,7 @@ def _surface_type(surface: str) -> ContentType:
 
 
 def _surface_floor(surface: str) -> int:
-    return 35 if surface == "reels" else 20
+    return 35 if surface == "reels" else 30
 
 
 def _channel_key(item: ContentItem) -> str:

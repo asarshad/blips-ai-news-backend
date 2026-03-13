@@ -153,8 +153,8 @@ class TestSurfaceConfig:
         assert cfg["fresh_hours"] == 36
         assert cfg["backfill_hours"] == 24
         assert cfg["evergreen_days"] == 14
-        assert cfg["min_fresh"] == 30
-        assert cfg["reservoir"] == 200
+        assert cfg["min_fresh"] == 50
+        assert cfg["reservoir"] == 250
 
     def test_videos_config(self):
         """Videos have longer windows than articles."""
