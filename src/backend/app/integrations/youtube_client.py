@@ -215,6 +215,18 @@ CATEGORY_KEYWORDS = {
     ],
 }
 
+_OFFICIAL_CHANNEL_NAMES = {
+    "android developers",
+    "apple",
+    "chrome developers",
+    "google",
+    "google developers",
+    "google cloud tech",
+    "google workspace",
+    "microsoft developer",
+    "openai",
+}
+
 
 @dataclass
 class VideoEntry:
@@ -610,13 +622,18 @@ class YouTubeClient:
         region_code: str = "US",
         max_results: int = 25,
         surface: str = "videos",
+        search_order: str = "relevance",
+        query_label: Optional[str] = None,
         published_after: Optional[datetime] = None,
     ) -> List[VideoEntry]:
         """Fetch hydrated search candidates from the YouTube Data API."""
+        normalized_order = (
+            search_order if search_order in {"date", "relevance", "viewCount"} else "relevance"
+        )
         params = {
             "part": "snippet",
             "type": "video",
-            "order": "date",
+            "order": normalized_order,
             "maxResults": min(max_results, 50),
             "q": query,
             "regionCode": region_code,
@@ -646,7 +663,7 @@ class YouTubeClient:
         return self.hydrate_video_candidates(
             video_ids=video_ids,
             acquisition_lane="search",
-            query_label=query,
+            query_label=query_label or query,
             region=region_code,
             surface=surface,
         )
@@ -825,7 +842,9 @@ class YouTubeClient:
 
         channel_cfg = get_channel_by_id(channel_id) if channel_id else None
         channel_role = (
-            channel_cfg.role if channel_cfg else self._guess_role(title, summary, surface)
+            channel_cfg.role
+            if channel_cfg
+            else self._guess_role(channel_name, title, summary, surface)
         )
         quality_tier = channel_cfg.quality_tier if channel_cfg else QualityTier.STANDARD
         source_status = "core" if channel_cfg and channel_cfg.enabled else "discovery"
@@ -874,13 +893,11 @@ class YouTubeClient:
             channel_video_count=None,
         )
 
-    def _guess_role(self, title: str, summary: str, surface: str) -> ChannelRole:
+    def _guess_role(self, channel_name: str, title: str, summary: str, surface: str) -> ChannelRole:
         """Best-effort role inference for discovered channels."""
+        channel_text = channel_name.lower().strip()
         text = f"{title} {summary}".lower()
-        if any(
-            token in text
-            for token in ("openai", "google", "apple", "microsoft", "developer", "keynote")
-        ):
+        if channel_text in _OFFICIAL_CHANNEL_NAMES:
             return ChannelRole.OFFICIAL
         if any(token in text for token in ("ai", "model", "llm", "chatgpt", "gemini", "claude")):
             return ChannelRole.AI

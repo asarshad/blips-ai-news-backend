@@ -23,3 +23,10 @@ def test_discovery_cutoff_uses_weekly_window():
 def test_query_packs_use_large_result_pages():
     assert all(pack.max_results == 25 for pack in get_query_packs("videos"))
     assert all(pack.max_results == 25 for pack in get_query_packs("reels"))
+
+
+def test_query_packs_use_hotness_aware_search_orders():
+    assert any(pack.order == "viewCount" for pack in get_query_packs("videos"))
+    assert any(pack.order == "viewCount" for pack in get_query_packs("reels"))
+    assert all(pack.order in {"relevance", "viewCount"} for pack in get_query_packs("videos"))
+    assert all(pack.order in {"relevance", "viewCount"} for pack in get_query_packs("reels"))

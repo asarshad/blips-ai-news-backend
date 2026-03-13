@@ -426,8 +426,10 @@ def score_candidate(
     )
     lane_penalty = 0.0
     lane = _safe_text(getattr(item, "acquisition_lane", None))
-    if lane in {"search", "trending"} and source_status not in {"core", "rotation"}:
+    if lane == "search" and source_status not in {"core", "rotation"}:
         lane_penalty = config.discovery_lane_penalty
+    elif lane == "trending" and source_status not in {"core", "rotation"}:
+        lane_penalty = config.discovery_lane_penalty * 0.25
 
     score = (
         config.w_source * source_quality

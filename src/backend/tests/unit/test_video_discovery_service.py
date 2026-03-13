@@ -36,9 +36,13 @@ class _DummyYouTubeClient:
         region_code: str = "US",
         max_results: int = 10,
         surface: str = "videos",
+        search_order: str = "relevance",
+        query_label: str | None = None,
         published_after=None,
     ):
-        self.search_calls.append((query, region_code, max_results, surface, published_after))
+        self.search_calls.append(
+            (query, region_code, max_results, surface, search_order, query_label, published_after)
+        )
         return []
 
     def fetch_trending_candidates(
@@ -114,9 +118,9 @@ def test_discover_runs_small_search_plan_when_deficit_is_high(monkeypatch):
 
     assert entries == []
     assert client.quota_budget.window_calls == ["videos"]
-    assert [(call[1], call[3]) for call in client.search_calls] == [
-        ("US", "videos"),
-        ("US", "videos"),
+    assert [(call[1], call[3], call[4]) for call in client.search_calls] == [
+        ("US", "videos", "viewCount"),
+        ("US", "videos", "viewCount"),
     ]
     assert client.trending_calls == [
         ("US", 20, "videos"),
@@ -135,6 +139,7 @@ def test_discover_uses_expanded_search_result_pages(monkeypatch):
 
     assert client.search_calls
     assert all(call[2] == 25 for call in client.search_calls)
+    assert all(call[4] == "viewCount" for call in client.search_calls)
 
 
 def test_filter_candidates_rejects_low_trust_discovery_channels():
@@ -171,7 +176,7 @@ def test_filter_candidates_rejects_low_trust_discovery_channels():
         video_url="https://www.youtube.com/watch?v=strong123",
         thumbnail_url="https://img.youtube.com/vi/strong123/default.jpg",
         summary="A solid explainer on the latest Google Maps AI features.",
-        source="Trusted Maps Lab",
+        source="Trusted Tech Lab",
         category="Technology",
         video_id="strong123",
         channel_id="channel-strong",
@@ -224,3 +229,69 @@ def test_filter_candidates_keeps_curated_core_channel_even_without_engagement():
 
     assert [video.video_id for video in accepted] == ["WVUn4j2DaTY"]
     assert counters["quality"] == 0
+
+
+def test_filter_candidates_rejects_story_led_zero_view_discovery_channel():
+    client = _DummyYouTubeClient()
+    client.channel_stats = {
+        "channel-story": {"subscriber_count": 26000, "video_count": 120},
+    }
+    service = _service(client)
+
+    entry = VideoEntry(
+        title="Google Maps Reimagined in a Decade",
+        video_url="https://www.youtube.com/watch?v=story123",
+        thumbnail_url="https://img.youtube.com/vi/story123/default.jpg",
+        summary="A random hot take on Google Maps.",
+        source="Random Media Daily",
+        category="Technology",
+        video_id="story123",
+        channel_id="channel-story",
+        channel_role=ChannelRole.EXPLAINER,
+        content_format=ContentFormat.LONG_FORM,
+        quality_tier=QualityTier.STANDARD,
+        is_short=False,
+        acquisition_lane="search",
+        query_label="story-google-maps",
+        source_status="discovery",
+        view_count=0,
+        like_count=4,
+        comment_count=2,
+        views_per_hour=0.0,
+        format_fit_score=1.0,
+    )
+
+    accepted, counters = service._filter_candidates([entry], "videos")
+
+    assert accepted == []
+    assert counters["quality"] == 1
+
+
+def test_filter_candidates_rejects_non_english_title_when_api_language_missing(monkeypatch):
+    client = _DummyYouTubeClient()
+    service = _service(client)
+    monkeypatch.setattr(discovery_module, "detect_language", lambda *_args, **_kwargs: ("hi", 0.99))
+
+    entry = VideoEntry(
+        title="Teri Siri ab Google chalayega",
+        video_url="https://www.youtube.com/watch?v=lang123",
+        thumbnail_url="https://img.youtube.com/vi/lang123/default.jpg",
+        summary="Hindi explainer about Siri and Google.",
+        source="Cyberdude",
+        category="Technology",
+        video_id="lang123",
+        channel_id="channel-lang",
+        channel_role=ChannelRole.EXPLAINER,
+        content_format=ContentFormat.SHORTS,
+        quality_tier=QualityTier.STANDARD,
+        is_short=True,
+        acquisition_lane="search",
+        source_status="discovery",
+        default_language=None,
+        format_fit_score=1.0,
+    )
+
+    accepted, counters = service._filter_candidates([entry], "reels")
+
+    assert accepted == []
+    assert counters["non_english"] == 1

@@ -17,38 +17,66 @@ class DiscoveryQueryPack:
     category: str
     surface: str
     max_results: int = 25
+    order: str = "relevance"
 
 
 VIDEO_QUERY_PACKS: List[DiscoveryQueryPack] = [
-    DiscoveryQueryPack("news-tech", "technology news", "news", "videos", 25),
-    DiscoveryQueryPack("news-ai", "AI update", "ai", "videos", 25),
+    DiscoveryQueryPack("news-tech", "technology news", "news", "videos", 25, "viewCount"),
+    DiscoveryQueryPack("news-ai", "AI update", "ai", "videos", 25, "viewCount"),
     DiscoveryQueryPack(
-        "explainer-mobile", "smartphone hands on review", "mobile/hardware", "videos", 25
+        "explainer-mobile",
+        "smartphone hands on review",
+        "mobile/hardware",
+        "videos",
+        25,
+        "viewCount",
     ),
     DiscoveryQueryPack(
-        "explainer-hardware", "laptop review benchmark", "mobile/hardware", "videos", 25
+        "explainer-hardware",
+        "laptop review benchmark",
+        "mobile/hardware",
+        "videos",
+        25,
+        "viewCount",
     ),
-    DiscoveryQueryPack("engineer-dev", "developer tooling release", "engineer/dev", "videos", 25),
     DiscoveryQueryPack(
-        "security-privacy", "cybersecurity privacy update", "security/privacy", "videos", 25
+        "engineer-dev", "developer tooling release", "engineer/dev", "videos", 25, "relevance"
     ),
     DiscoveryQueryPack(
-        "industry-business", "tech industry analysis", "business/industry", "videos", 25
+        "security-privacy",
+        "cybersecurity privacy update",
+        "security/privacy",
+        "videos",
+        25,
+        "relevance",
+    ),
+    DiscoveryQueryPack(
+        "industry-business",
+        "tech industry analysis",
+        "business/industry",
+        "videos",
+        25,
+        "relevance",
     ),
 ]
 
 REEL_QUERY_PACKS: List[DiscoveryQueryPack] = [
-    DiscoveryQueryPack("reels-tech-news", "technology shorts", "news", "reels", 25),
-    DiscoveryQueryPack("reels-ai", "AI update shorts", "ai", "reels", 25),
+    DiscoveryQueryPack("reels-tech-news", "technology shorts", "news", "reels", 25, "viewCount"),
+    DiscoveryQueryPack("reels-ai", "AI update shorts", "ai", "reels", 25, "viewCount"),
     DiscoveryQueryPack(
         "reels-gadgets",
         "smartphone hands on shorts",
         "mobile/hardware",
         "reels",
         25,
+        "viewCount",
     ),
-    DiscoveryQueryPack("reels-security", "privacy update shorts", "security/privacy", "reels", 25),
-    DiscoveryQueryPack("reels-dev", "developer tips shorts", "engineer/dev", "reels", 25),
+    DiscoveryQueryPack(
+        "reels-security", "privacy update shorts", "security/privacy", "reels", 25, "viewCount"
+    ),
+    DiscoveryQueryPack(
+        "reels-dev", "developer tips shorts", "engineer/dev", "reels", 25, "viewCount"
+    ),
 ]
 
 
