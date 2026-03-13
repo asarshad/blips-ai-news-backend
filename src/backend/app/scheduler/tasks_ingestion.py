@@ -55,6 +55,8 @@ def _run_curation_ingestion_with_stats(db, stats: JobStats):
     try:
         from app.ingestion.checkpointing import run_checkpointed_ingestion
         from app.ingestion.service import run_video_discovery_ingestion
+        from app.scheduler.tasks_curation import run_clustering_job
+        from app.scheduler.tasks_promotion import run_promotion_job
 
         redis_client = None
         try:
@@ -72,5 +74,10 @@ def _run_curation_ingestion_with_stats(db, stats: JobStats):
         )
         if int(discovery_result.get("errors", 0)) > 0:
             stats.errors.append(f"Video discovery ingestion: {discovery_result}")
+
+        logger.info("[fetch_news] Running clustering before promotion")
+        run_clustering_job()
+        logger.info("[fetch_news] Running promotion immediately after ingestion")
+        run_promotion_job()
     except Exception as e:
         stats.errors.append(f"Curation ingestion: {str(e)}")

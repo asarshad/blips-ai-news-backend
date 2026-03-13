@@ -1,8 +1,15 @@
 import time
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
+from app.integrations.youtube_channels import (
+    ChannelConfig,
+    ChannelRole,
+    ContentFormat,
+    QualityTier,
+)
 from app.integrations.youtube_client import YouTubeClient
 
 pytestmark = [pytest.mark.unit]
@@ -198,3 +205,116 @@ def test_fetch_trending_candidates_locks_out_on_quota_exceeded(monkeypatch):
     assert results == []
     assert quota.lockout_reasons == ["quotaExceeded"]
     assert quota.reserve_calls == [(1, "general")]
+
+
+def test_fetch_trending_candidates_uses_single_api_round_trip(monkeypatch):
+    quota = _FakeQuotaBudget()
+    client = YouTubeClient(channel_configs=[], quota_budget=quota)
+
+    monkeypatch.setenv("YOUTUBE_API_KEY", "test-key")
+
+    def _fake_get(_url, *, params=None, headers=None, timeout=None):
+        assert "key" not in params
+        assert params["part"] == "snippet,contentDetails,statistics,status"
+        assert headers["x-goog-api-key"] == "test-key"
+        assert timeout == 10
+        return _FakeResponse(
+            200,
+            {
+                "items": [
+                    {
+                        "id": "abc123DEF45",
+                        "snippet": {
+                            "title": "Daily tech news roundup",
+                            "description": "Top stories in tech today.",
+                            "channelId": "channel-1",
+                            "channelTitle": "Tech News",
+                            "publishedAt": "2026-03-12T12:00:00Z",
+                            "defaultLanguage": "en",
+                        },
+                        "contentDetails": {"duration": "PT8M"},
+                        "statistics": {"viewCount": "1000", "likeCount": "25"},
+                        "status": {"uploadStatus": "processed"},
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr("app.integrations.youtube_client.requests.get", _fake_get)
+    monkeypatch.setattr(
+        client,
+        "hydrate_video_candidates",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("hydrate should not run")),
+    )
+
+    results = client.fetch_trending_candidates(region_code="US", surface="videos")
+
+    assert len(results) == 1
+    assert results[0].video_id == "abc123DEF45"
+    assert results[0].source == "Tech News"
+    assert results[0].is_short is False
+    assert quota.reserve_calls == [(1, "general")]
+
+
+def test_fetch_channel_with_mixed_format_batches_duration_lookups(monkeypatch):
+    quota = _FakeQuotaBudget()
+    client = YouTubeClient(channel_configs=[], quota_budget=quota)
+    config = ChannelConfig(
+        channel_id="mixed-channel-1",
+        name="Mixed Channel",
+        role=ChannelRole.EXPLAINER,
+        content_format=ContentFormat.MIXED,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=2,
+    )
+
+    monkeypatch.setenv("YOUTUBE_API_KEY", "test-key")
+    monkeypatch.setattr(
+        client,
+        "_parse_feed_with_retries",
+        lambda _feed_url: SimpleNamespace(
+            bozo=False,
+            feed={"title": "Mixed Channel"},
+            entries=[
+                {
+                    "link": "https://www.youtube.com/watch?v=short12345A",
+                    "title": "Quick tip",
+                },
+                {
+                    "link": "https://www.youtube.com/watch?v=long12345AB",
+                    "title": "Deep dive",
+                },
+            ],
+        ),
+    )
+
+    calls = []
+
+    def _fake_api_json(
+        endpoint, *, params, quota_units, quota_bucket="general", timeout=10.0, operation
+    ):
+        calls.append((endpoint, params["id"], quota_units, quota_bucket, operation))
+        return {
+            "items": [
+                {"id": "short12345A", "contentDetails": {"duration": "PT30S"}},
+                {"id": "long12345AB", "contentDetails": {"duration": "PT10M"}},
+            ]
+        }
+
+    monkeypatch.setattr(client, "_youtube_api_json", _fake_api_json)
+
+    videos = client._fetch_channel_with_config(config, 2)
+
+    assert len(calls) == 1
+    assert calls[0][:4] == (
+        "videos",
+        "short12345A,long12345AB",
+        1,
+        "duration",
+    )
+    assert [video.is_short for video in videos] == [True, False]
+    assert [video.duration_seconds for video in videos] == [30, 600]
+    assert [video.source_status for video in videos] == ["core", "core"]
+    assert videos[0].acquisition_lane == "curated"
+    assert videos[0].format_fit_score == 1.0
+    assert videos[1].format_fit_score == 1.0

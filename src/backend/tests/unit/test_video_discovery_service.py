@@ -115,3 +115,14 @@ def test_discover_runs_small_search_plan_when_deficit_is_high(monkeypatch):
         ("CA", 20, "videos"),
         ("IN", 20, "videos"),
     ]
+
+
+def test_discover_uses_expanded_search_result_pages(monkeypatch):
+    monkeypatch.setattr(discovery_module, "bootstrap_video_source_profiles", lambda _db: None)
+    client = _DummyYouTubeClient(begin_window=True)
+    service = _service(client)
+
+    service.discover("reels", remaining_needed=10)
+
+    assert client.search_calls
+    assert all(call[2] == 25 for call in client.search_calls)

@@ -285,11 +285,14 @@ class IngestionPipeline:
             Created ContentItem or None if duplicate
         """
         # Get video duration
-        duration_seconds = None
-        try:
-            duration_seconds = self.youtube_client.get_video_duration(entry.video_id)
-        except Exception as e:
-            logger.warning(f"Failed to get duration for video {entry.title}: {e}")
+        duration_seconds = getattr(entry, "duration_seconds", None)
+        if not isinstance(duration_seconds, (int, float)):
+            duration_seconds = None
+        if duration_seconds is None:
+            try:
+                duration_seconds = self.youtube_client.get_video_duration(entry.video_id)
+            except Exception as e:
+                logger.warning(f"Failed to get duration for video {entry.title}: {e}")
 
         # Classify as REEL if it's a Short.
         # Priority: known duration > URL pattern > entry metadata hint.
@@ -875,6 +878,7 @@ class IngestionPipeline:
             result[f"{surface}_candidates"] = len(entries)
             entries.sort(
                 key=lambda entry: (
+                    1 if str(getattr(entry, "query_label", "") or "").startswith("story-") else 0,
                     getattr(entry, "format_fit_score", 0.0) or 0.0,
                     getattr(entry, "views_per_hour", 0.0) or 0.0,
                     entry.published_at or datetime.min,

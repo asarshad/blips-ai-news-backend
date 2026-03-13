@@ -91,9 +91,9 @@ class Settings(BaseSettings):
     PREFERENCE_DECAY_FACTOR: float = 0.95
 
     # Daily ingestion targets (per UTC day)
-    DAILY_TARGET_ARTICLES: int = 55
-    DAILY_TARGET_VIDEOS: int = 35
-    DAILY_TARGET_REELS: int = 30
+    DAILY_TARGET_ARTICLES: int = 100
+    DAILY_TARGET_VIDEOS: int = 60
+    DAILY_TARGET_REELS: int = 40
 
     # Ingestion durability controls
     INGESTION_ENABLED: bool = True
@@ -167,14 +167,14 @@ class Settings(BaseSettings):
     SOURCE_HEALTH_DEGRADED_THRESHOLD: float = 0.3  # below this, mark source degraded
 
     # Minimum fresh counts per surface (triggers top-up if below)
-    MIN_FRESH_ARTICLES: int = 30
-    MIN_FRESH_VIDEOS: int = 25
-    MIN_FRESH_REELS: int = 20
+    MIN_FRESH_ARTICLES: int = 50
+    MIN_FRESH_VIDEOS: int = 35
+    MIN_FRESH_REELS: int = 28
 
     # Reservoir sizes: total inventory cached for browsing
-    RESERVOIR_ARTICLES: int = 200
-    RESERVOIR_VIDEOS: int = 150
-    RESERVOIR_REELS: int = 300
+    RESERVOIR_ARTICLES: int = 250
+    RESERVOIR_VIDEOS: int = 180
+    RESERVOIR_REELS: int = 320
 
     # ------------------------------------------------------------------
     # Ads (architecture only — no SDK, all OFF by default)

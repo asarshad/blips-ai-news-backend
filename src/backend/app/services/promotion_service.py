@@ -10,17 +10,17 @@ Promotion Score Formula (all components 0-1 before weighting):
     promotion_score = (
         W_SOURCE   * source_quality        # publisher trust
       + W_CLUSTER  * cluster_hotness       # multi-source coverage + signal hits
-      + W_RECENCY  * recency               # time decay
+      + W_RECENCY  * recency               # freshness is a boost, not a hard gate
+      + W_VELOCITY * momentum              # age-normalized demand
+      + W_STORY    * story_importance      # launch/update/review relevance over a 7-day pool
       - W_CLICKBAIT * clickbait_penalty    # title quality gate
       - W_DEDUP    * duplicate_penalty     # cluster crowding penalty
     )
 
 Defaults:
-    W_SOURCE   = 0.25
-    W_CLUSTER  = 0.30
-    W_RECENCY  = 0.25
-    W_CLICKBAIT = 0.10
-    W_DEDUP    = 0.10
+    W_SOURCE / W_CLUSTER / W_RECENCY remain surface-specific.
+    Videos and reels additionally use velocity, format-fit, category-gap,
+    creator-fatigue, and story-importance components.
 
 Promotion threshold:  PROMOTE_MIN_SCORE  (default 0.30)
 Max promoted per run: TOP_N_PROMOTED     (default 50 per content type per 6-hour window)
@@ -61,6 +61,7 @@ class PromotionConfig:
     w_format_fit: float = 0.0
     w_category_gap: float = 0.0
     w_creator_fatigue: float = 0.0
+    w_story: float = 0.0
 
     # Minimum promotion score to be promoted
     min_score: float = 0.30
@@ -81,34 +82,36 @@ class PromotionConfig:
 
 _DEFAULT_CONFIG = PromotionConfig()
 _VIDEO_CONFIG = PromotionConfig(
-    w_source=0.22,
-    w_cluster=0.18,
-    w_recency=0.18,
-    w_clickbait=0.10,
-    w_duplicate=0.08,
-    w_velocity=0.12,
+    w_source=0.18,
+    w_cluster=0.14,
+    w_recency=0.10,
+    w_clickbait=0.09,
+    w_duplicate=0.07,
+    w_velocity=0.13,
     w_format_fit=0.08,
-    w_category_gap=0.06,
-    w_creator_fatigue=0.06,
-    min_score=0.34,
-    top_n_per_type=60,
-    recency_half_life_hours=12.0,
-    discovery_lane_penalty=0.08,
+    w_category_gap=0.05,
+    w_creator_fatigue=0.04,
+    w_story=0.16,
+    min_score=0.30,
+    top_n_per_type=80,
+    recency_half_life_hours=60.0,
+    discovery_lane_penalty=0.03,
 )
 _REEL_CONFIG = PromotionConfig(
-    w_source=0.16,
-    w_cluster=0.12,
-    w_recency=0.24,
-    w_clickbait=0.10,
-    w_duplicate=0.06,
+    w_source=0.14,
+    w_cluster=0.10,
+    w_recency=0.14,
+    w_clickbait=0.08,
+    w_duplicate=0.05,
     w_velocity=0.16,
-    w_format_fit=0.08,
+    w_format_fit=0.10,
     w_category_gap=0.04,
-    w_creator_fatigue=0.08,
-    min_score=0.38,
-    top_n_per_type=90,
-    recency_half_life_hours=8.0,
-    discovery_lane_penalty=0.10,
+    w_creator_fatigue=0.05,
+    w_story=0.16,
+    min_score=0.32,
+    top_n_per_type=120,
+    recency_half_life_hours=30.0,
+    discovery_lane_penalty=0.04,
 )
 
 
@@ -136,6 +139,25 @@ _CLICKBAIT_PATTERNS: list[re.Pattern[str]] = [
 
 # ALLCAPS title check: more than 40 % of alpha chars uppercase
 _ALLCAPS_THRESHOLD = 0.4
+_STORY_SIGNAL_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"\blaunch(?:ed|es|ing)?\b",
+        r"\bannounce(?:d|ment|s)?\b",
+        r"\bunveil(?:ed|s|ing)?\b",
+        r"\bkeynote\b",
+        r"\bhands?\s+on\b",
+        r"\bfirst\s+look\b",
+        r"\breview\b",
+        r"\bbenchmark(?:ed|ing|s)?\b",
+        r"\bcomparison\b",
+        r"\bvs\.?\b",
+        r"\brelease(?:d|s)?\b",
+        r"\bshipping\b",
+        r"\bavailable\s+now\b",
+        r"\bupdate\b",
+    ]
+]
 
 
 def compute_clickbait_penalty(title: str) -> float:
@@ -253,6 +275,51 @@ def compute_creator_fatigue_penalty(channel_count: int) -> float:
     return min((channel_count - 1) / 4.0, 1.0)
 
 
+def _normalize_metadata_terms(values: object) -> List[str]:
+    if not isinstance(values, list):
+        return []
+
+    normalized: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if isinstance(value, str):
+            term = value.strip().lower()
+        elif isinstance(value, dict):
+            term = str(value.get("name") or value.get("value") or "").strip().lower()
+        else:
+            continue
+        if not term or term in seen:
+            continue
+        normalized.append(term)
+        seen.add(term)
+    return normalized
+
+
+def compute_story_overlap(terms: List[str], story_counts: Dict[str, int]) -> float:
+    """Measure how strongly an item overlaps with the recent 7-day story graph."""
+    if not terms or not story_counts:
+        return 0.0
+
+    strongest = max(story_counts.get(term, 0) for term in terms)
+    if strongest <= 0:
+        return 0.0
+
+    peak = max(story_counts.values()) or 1
+    return min(math.log1p(strongest) / math.log1p(peak), 1.0)
+
+
+def compute_story_keyword_signal(title: str, description: str = "") -> float:
+    """Recognize launch/review/update framing that matters before engagement accumulates."""
+    text = f"{title} {description}".strip().lower()
+    if not text:
+        return 0.0
+
+    hits = sum(1 for pattern in _STORY_SIGNAL_PATTERNS if pattern.search(text))
+    if hits <= 0:
+        return 0.0
+    return min(0.25 + hits * 0.15, 1.0)
+
+
 def _safe_float(value: Optional[float], default: float = 0.0) -> float:
     try:
         return float(value)
@@ -262,6 +329,45 @@ def _safe_float(value: Optional[float], default: float = 0.0) -> float:
 
 def _safe_text(value: Optional[str]) -> str:
     return value.lower() if isinstance(value, str) else ""
+
+
+def compute_story_importance(
+    item: ContentItem,
+    story_topic_counts: Dict[str, int],
+    story_entity_counts: Dict[str, int],
+) -> float:
+    """Blend story overlap with event framing so important launches can cold-start strongly."""
+    topics = _normalize_metadata_terms(getattr(item, "topics", None))[:3]
+    entities = _normalize_metadata_terms(getattr(item, "entities", None))[:4]
+    topic_overlap = compute_story_overlap(topics, story_topic_counts)
+    entity_overlap = compute_story_overlap(entities, story_entity_counts)
+    description = (
+        getattr(item, "description", "")
+        if isinstance(getattr(item, "description", None), str)
+        else ""
+    )
+    summary = (
+        getattr(item, "summary", "") if isinstance(getattr(item, "summary", None), str) else ""
+    )
+    keyword_signal = compute_story_keyword_signal(
+        getattr(item, "title", "") if isinstance(getattr(item, "title", None), str) else "",
+        description or summary,
+    )
+
+    score = min(1.0, entity_overlap * 0.45 + topic_overlap * 0.25 + keyword_signal * 0.30)
+
+    published_at = getattr(item, "published_at", None)
+    if isinstance(published_at, datetime):
+        if published_at.tzinfo is None:
+            published_at = published_at.replace(tzinfo=timezone.utc)
+        hours_old = max(0.0, (datetime.now(timezone.utc) - published_at).total_seconds() / 3600)
+        if hours_old <= 24 and score >= 0.30:
+            cold_start_bonus = 0.12 * (
+                1.0 - compute_velocity_score(getattr(item, "views_per_hour", None))
+            )
+            score = min(1.0, score + cold_start_bonus)
+
+    return round(score, 4)
 
 
 # ── Per-item scoring ──────────────────────────────────────────────────────────
@@ -274,6 +380,8 @@ def score_candidate(
     *,
     promoted_topic_counts: Optional[Dict[str, int]] = None,
     promoted_channel_counts: Optional[Dict[str, int]] = None,
+    story_topic_counts: Optional[Dict[str, int]] = None,
+    story_entity_counts: Optional[Dict[str, int]] = None,
 ) -> float:
     """Compute the promotion score for a single ContentItem.
 
@@ -311,6 +419,11 @@ def score_candidate(
     creator_fatigue = compute_creator_fatigue_penalty(
         (promoted_channel_counts or {}).get(channel_key, 0)
     )
+    story_importance = compute_story_importance(
+        item,
+        story_topic_counts or {},
+        story_entity_counts or {},
+    )
     lane_penalty = 0.0
     lane = _safe_text(getattr(item, "acquisition_lane", None))
     if lane in {"search", "trending"} and source_status not in {"core", "rotation"}:
@@ -323,6 +436,7 @@ def score_candidate(
         + config.w_velocity * velocity
         + config.w_format_fit * format_fit
         + config.w_category_gap * category_gap_bonus
+        + config.w_story * story_importance
         - config.w_clickbait * clickbait
         - config.w_duplicate * duplicate_penalty
         - config.w_creator_fatigue * creator_fatigue
@@ -430,6 +544,30 @@ class PromotionService:
         )
         return {row[0]: row[1] for row in rows if row[0]}
 
+    def _get_recent_story_context(self) -> Tuple[Dict[str, int], Dict[str, int]]:
+        """Build a 7-day cross-surface story graph used for video/reel ranking."""
+        cutoff = datetime.utcnow() - timedelta(days=7)
+        items = (
+            self.db.query(ContentItem)
+            .filter(
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.is_suppressed.is_(False),
+                ContentItem.published_at >= cutoff,
+            )
+            .all()
+        )
+
+        topic_counts: Dict[str, int] = {}
+        entity_counts: Dict[str, int] = {}
+        for item in items:
+            weight = 2 if item.type == ContentType.ARTICLE else 1
+            for topic in _normalize_metadata_terms(item.topics)[:2]:
+                topic_counts[topic] = topic_counts.get(topic, 0) + weight
+            for entity in _normalize_metadata_terms(item.entities)[:3]:
+                entity_counts[entity] = entity_counts.get(entity, 0) + weight
+
+        return topic_counts, entity_counts
+
     def _config_for_type(self, content_type: ContentType) -> PromotionConfig:
         if self.config is not _DEFAULT_CONFIG:
             return self.config
@@ -448,6 +586,8 @@ class PromotionService:
         config: PromotionConfig,
         promoted_topic_counts: Optional[Dict[str, int]] = None,
         promoted_channel_counts: Optional[Dict[str, int]] = None,
+        story_topic_counts: Optional[Dict[str, int]] = None,
+        story_entity_counts: Optional[Dict[str, int]] = None,
     ) -> int:
         """Refresh promotion_score on PROMOTED items (no status change)."""
         cutoff = datetime.utcnow() - timedelta(hours=self.config.window_hours)
@@ -468,8 +608,15 @@ class PromotionService:
                 config,
                 promoted_topic_counts=promoted_topic_counts,
                 promoted_channel_counts=promoted_channel_counts,
+                story_topic_counts=story_topic_counts,
+                story_entity_counts=story_entity_counts,
             )
-            item.promotion_reason = self._promotion_reason(item, config)
+            item.promotion_reason = self._promotion_reason(
+                item,
+                config,
+                story_topic_counts=story_topic_counts,
+                story_entity_counts=story_entity_counts,
+            )
             count += 1
         return count
 
@@ -485,10 +632,16 @@ class PromotionService:
 
         try:
             cluster_sizes = self._get_cluster_sizes(hours_back=self.config.window_hours * 2)
+            story_topic_counts, story_entity_counts = self._get_recent_story_context()
 
             for content_type in (ContentType.ARTICLE, ContentType.VIDEO, ContentType.REEL):
                 try:
-                    promoted, evaluated, rescored = self._promote_type(content_type, cluster_sizes)
+                    promoted, evaluated, rescored = self._promote_type(
+                        content_type,
+                        cluster_sizes,
+                        story_topic_counts=story_topic_counts,
+                        story_entity_counts=story_entity_counts,
+                    )
                     result.promoted_count += promoted
                     result.candidates_evaluated += evaluated
                     result.already_promoted_rescored += rescored
@@ -525,6 +678,9 @@ class PromotionService:
         self,
         content_type: ContentType,
         cluster_sizes: Dict[str, int],
+        *,
+        story_topic_counts: Optional[Dict[str, int]] = None,
+        story_entity_counts: Optional[Dict[str, int]] = None,
     ) -> Tuple[int, int, int]:
         """Score and promote CANDIDATEs for a single content type.
 
@@ -545,9 +701,16 @@ class PromotionService:
                 config,
                 promoted_topic_counts=promoted_topic_counts,
                 promoted_channel_counts=promoted_channel_counts,
+                story_topic_counts=story_topic_counts,
+                story_entity_counts=story_entity_counts,
             )
             item.promotion_score = s
-            item.promotion_reason = self._promotion_reason(item, config)
+            item.promotion_reason = self._promotion_reason(
+                item,
+                config,
+                story_topic_counts=story_topic_counts,
+                story_entity_counts=story_entity_counts,
+            )
             scored.append((s, item))
 
         # Sort descending by promotion score
@@ -568,6 +731,8 @@ class PromotionService:
             config,
             promoted_topic_counts=promoted_topic_counts,
             promoted_channel_counts=promoted_channel_counts,
+            story_topic_counts=story_topic_counts,
+            story_entity_counts=story_entity_counts,
         )
 
         logger.info(
@@ -579,7 +744,14 @@ class PromotionService:
         )
         return promoted, evaluated, rescored
 
-    def _promotion_reason(self, item: ContentItem, config: PromotionConfig) -> str:
+    def _promotion_reason(
+        self,
+        item: ContentItem,
+        config: PromotionConfig,
+        *,
+        story_topic_counts: Optional[Dict[str, int]] = None,
+        story_entity_counts: Optional[Dict[str, int]] = None,
+    ) -> str:
         """Compact explanation persisted for admin diagnostics."""
         lane = (
             getattr(item, "acquisition_lane", None)
@@ -594,5 +766,6 @@ class PromotionService:
         return (
             f"{lane}|{source_status}|"
             f"fit={_safe_float(getattr(item, 'format_fit_score', None), 0.0):.2f}|"
-            f"vph={_safe_float(getattr(item, 'views_per_hour', None), 0.0):.1f}"
+            f"vph={_safe_float(getattr(item, 'views_per_hour', None), 0.0):.1f}|"
+            f"story={compute_story_importance(item, story_topic_counts or {}, story_entity_counts or {}):.2f}"
         )
