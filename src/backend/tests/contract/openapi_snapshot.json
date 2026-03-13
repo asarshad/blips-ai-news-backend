@@ -6208,6 +6208,63 @@
         ]
       }
     },
+    "/api/v1/admin/youtube/reset-search-cooldown": {
+      "post": {
+        "description": "Clear Redis cooldown keys so operators can force a new discovery sweep.",
+        "operationId": "reset_youtube_search_cooldown_api_v1_admin_youtube_reset_search_cooldown_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "surface",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Surface"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset Youtube Search Cooldown",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/ai/respond": {
       "post": {
         "description": "Generate AI response for a message about a content item.",
