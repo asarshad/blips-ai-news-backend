@@ -1,7 +1,7 @@
 """Repositories for video source governance and discovery metrics."""
 
 from datetime import datetime, timedelta
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -90,6 +90,68 @@ class VideoSourceProfileRepository:
         self.db.add(run)
         self.db.flush()
         return run
+
+    def upsert_discovered_channels(
+        self, channels: Iterable[Dict[str, str]]
+    ) -> List[VideoSourceProfile]:
+        """Persist accepted discovery channels so admin/source health can track them."""
+        normalized: Dict[str, Dict[str, str]] = {}
+        for channel in channels:
+            channel_id = (channel.get("channel_id") or "").strip()
+            if not channel_id:
+                continue
+            normalized[channel_id] = channel
+
+        if not normalized:
+            return []
+
+        existing_profiles = {
+            profile.channel_id: profile
+            for profile in (
+                self.db.query(VideoSourceProfile)
+                .filter(VideoSourceProfile.channel_id.in_(list(normalized.keys())))
+                .all()
+            )
+        }
+
+        profiles: List[VideoSourceProfile] = []
+        for channel_id, channel in normalized.items():
+            profile = existing_profiles.get(channel_id)
+            role = (channel.get("role") or "explainer").strip() or "explainer"
+            content_format = (channel.get("content_format") or "mixed").strip() or "mixed"
+            quality_tier = (channel.get("quality_tier") or "standard").strip() or "standard"
+            channel_name = (channel.get("channel_name") or "YouTube").strip() or "YouTube"
+
+            if profile is None:
+                profile = VideoSourceProfile(
+                    channel_id=channel_id,
+                    channel_name=channel_name,
+                    role=role,
+                    content_format=content_format,
+                    quality_tier=quality_tier,
+                    status="discovery",
+                    enabled=True,
+                    curated_seed=False,
+                    daily_video_cap=1,
+                    daily_reel_cap=1,
+                    allow_curated=False,
+                    allow_search=True,
+                    allow_trending=True,
+                )
+                self.db.add(profile)
+                existing_profiles[channel_id] = profile
+            else:
+                profile.channel_name = channel_name
+                profile.role = role
+                profile.content_format = content_format
+                profile.quality_tier = quality_tier
+                if not profile.curated_seed and profile.status == "blocked":
+                    profile.status = "discovery"
+
+            profiles.append(profile)
+
+        self.db.flush()
+        return profiles
 
     def recent_runs(self, hours_back: int = 168) -> List[VideoDiscoveryRun]:
         cutoff = datetime.utcnow() - timedelta(hours=hours_back)

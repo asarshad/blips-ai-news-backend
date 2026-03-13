@@ -88,15 +88,15 @@ class TestArticlesDiagnosticHeaders:
 
 
 class TestVideosFeedAiProcessed:
-    """Videos must also require AI processing — only show summarized videos."""
+    """Videos must surface immediately after promotion; AI enrichment is asynchronous."""
 
-    def test_videos_recent_requires_ai_processed(self):
+    def test_videos_recent_does_not_wait_for_ai_processed(self):
         import inspect
 
         from app.api.routes.videos import get_recent_videos
 
         source = inspect.getsource(get_recent_videos)
-        assert "require_ai_processed=True" in source
+        assert "require_ai_processed=False" in source
 
     def test_videos_returns_cursor_envelope_instead_of_404(self):
         import inspect

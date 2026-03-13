@@ -256,6 +256,51 @@ def test_fetch_trending_candidates_uses_single_api_round_trip(monkeypatch):
     assert quota.reserve_calls == [(1, "general")]
 
 
+def test_fetch_channel_stats_batches_channel_requests(monkeypatch):
+    quota = _FakeQuotaBudget()
+    client = YouTubeClient(channel_configs=[], quota_budget=quota)
+
+    monkeypatch.setenv("YOUTUBE_API_KEY", "test-key")
+
+    def _fake_get(_url, *, params=None, headers=None, timeout=None):
+        assert params["part"] == "statistics"
+        assert params["id"] == "channel-1,channel-2"
+        assert headers["x-goog-api-key"] == "test-key"
+        assert timeout == 10
+        return _FakeResponse(
+            200,
+            {
+                "items": [
+                    {
+                        "id": "channel-1",
+                        "statistics": {
+                            "subscriberCount": "12000",
+                            "videoCount": "320",
+                            "viewCount": "5000000",
+                        },
+                    },
+                    {
+                        "id": "channel-2",
+                        "statistics": {
+                            "subscriberCount": "45000",
+                            "videoCount": "910",
+                            "viewCount": "12000000",
+                        },
+                    },
+                ]
+            },
+        )
+
+    monkeypatch.setattr("app.integrations.youtube_client.requests.get", _fake_get)
+
+    stats = client.fetch_channel_stats(["channel-1", "channel-2", "channel-1"])
+
+    assert stats["channel-1"]["subscriber_count"] == 12000
+    assert stats["channel-1"]["video_count"] == 320
+    assert stats["channel-2"]["subscriber_count"] == 45000
+    assert quota.reserve_calls == [(1, "general")]
+
+
 def test_fetch_channel_with_mixed_format_batches_duration_lookups(monkeypatch):
     quota = _FakeQuotaBudget()
     client = YouTubeClient(channel_configs=[], quota_budget=quota)
