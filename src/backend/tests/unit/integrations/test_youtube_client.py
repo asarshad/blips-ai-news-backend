@@ -148,6 +148,7 @@ def test_fetch_search_candidates_uses_header_auth_and_no_query_key(monkeypatch):
     quota = _FakeQuotaBudget()
     client = YouTubeClient(channel_configs=[], quota_budget=quota)
     captured = {}
+    hydrated = {}
 
     monkeypatch.setenv("YOUTUBE_API_KEY", "test-key")
 
@@ -167,15 +168,49 @@ def test_fetch_search_candidates_uses_header_auth_and_no_query_key(monkeypatch):
         )
 
     monkeypatch.setattr("app.integrations.youtube_client.requests.get", _fake_get)
-    monkeypatch.setattr(client, "hydrate_video_candidates", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        client,
+        "hydrate_video_candidates",
+        lambda **kwargs: hydrated.update(kwargs) or [],
+    )
 
-    results = client.fetch_search_candidates("technology news today", region_code="US")
+    results = client.fetch_search_candidates(
+        "technology news",
+        region_code="US",
+        search_order="viewCount",
+        query_label="story-google-maps",
+    )
 
     assert results == []
     assert captured["url"].endswith("/search")
     assert captured["headers"]["x-goog-api-key"] == "test-key"
     assert "key" not in captured["params"]
+    assert captured["params"]["order"] == "viewCount"
+    assert hydrated["query_label"] == "story-google-maps"
     assert quota.reserve_calls == [(100, "search")]
+
+
+def test_guess_role_requires_official_channel_name_instead_of_topic_terms():
+    client = YouTubeClient(channel_configs=[])
+
+    assert (
+        client._guess_role(
+            "Random Tech Daily",
+            "Apple launches new iPhone",
+            "Roundup of the keynote highlights.",
+            "videos",
+        )
+        != ChannelRole.OFFICIAL
+    )
+    assert (
+        client._guess_role(
+            "Apple",
+            "Spring Event keynote",
+            "Official launch stream",
+            "videos",
+        )
+        == ChannelRole.OFFICIAL
+    )
 
 
 def test_fetch_trending_candidates_locks_out_on_quota_exceeded(monkeypatch):

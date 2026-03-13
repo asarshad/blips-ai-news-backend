@@ -227,6 +227,38 @@ class TestScoreCandidate:
 
         assert boosted > generic
 
+    def test_trending_discovery_is_penalized_less_than_search(self):
+        search_item = self._make_item(title="Google Maps update recap", hours_old=6)
+        search_item.acquisition_lane = "search"
+        search_item.source_status = "discovery"
+        search_item.views_per_hour = 2200.0
+        search_item.format_fit_score = 1.0
+        search_item.channel_id = "channel-1"
+
+        trending_item = self._make_item(title="Google Maps update recap", hours_old=6)
+        trending_item.acquisition_lane = "trending"
+        trending_item.source_status = "discovery"
+        trending_item.views_per_hour = 2200.0
+        trending_item.format_fit_score = 1.0
+        trending_item.channel_id = "channel-1"
+
+        config = PromotionConfig(
+            w_source=0.18,
+            w_cluster=0.14,
+            w_recency=0.10,
+            w_clickbait=0.09,
+            w_duplicate=0.07,
+            w_velocity=0.13,
+            w_format_fit=0.08,
+            w_story=0.16,
+            discovery_lane_penalty=0.04,
+        )
+
+        search_score = score_candidate(search_item, {"c1": 1}, config)
+        trending_score = score_candidate(trending_item, {"c1": 1}, config)
+
+        assert trending_score > search_score
+
 
 class TestStoryImportance:
     def test_launch_keywords_and_story_overlap_drive_score(self):

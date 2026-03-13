@@ -16,6 +16,8 @@ from app.config.video_discovery import (
     get_query_packs,
 )
 from app.core.logging import get_logger
+from app.ingestion.language_filter import detect_language, is_non_english
+from app.integrations.youtube_channels import ChannelRole
 from app.integrations.youtube_client import VideoEntry, YouTubeClient
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.repositories.video_source_repo import VideoSourceProfileRepository
@@ -64,6 +66,50 @@ _DISCOVERY_MIN_ENGAGEMENT_RATE = max(
 _DISCOVERY_STORY_MIN_SUBSCRIBERS = max(
     1, int(os.getenv("YOUTUBE_DISCOVERY_STORY_MIN_SUBSCRIBERS", "5000"))
 )
+_DISCOVERY_MIN_INITIAL_VIDEO_VIEWS = max(
+    1, int(os.getenv("YOUTUBE_DISCOVERY_MIN_INITIAL_VIDEO_VIEWS", "250"))
+)
+_DISCOVERY_MIN_INITIAL_VIEWS_PER_HOUR = max(
+    1.0, float(os.getenv("YOUTUBE_DISCOVERY_MIN_INITIAL_VIEWS_PER_HOUR", "10"))
+)
+_DISCOVERY_HIGH_AUTHORITY_SUBSCRIBERS = max(
+    _DISCOVERY_MIN_CHANNEL_SUBSCRIBERS,
+    int(os.getenv("YOUTUBE_DISCOVERY_HIGH_AUTHORITY_SUBSCRIBERS", "100000")),
+)
+_TECH_CHANNEL_HINTS = (
+    "tech",
+    "ai",
+    "apple",
+    "google",
+    "android",
+    "pixel",
+    "iphone",
+    "mac",
+    "code",
+    "coding",
+    "dev",
+    "developer",
+    "program",
+    "byte",
+    "gadget",
+    "review",
+    "benchmark",
+    "hardware",
+    "software",
+    "linux",
+    "cloud",
+    "cyber",
+    "privacy",
+    "security",
+    "openai",
+    "anthropic",
+    "gemini",
+    "claude",
+    "copilot",
+    "silicon",
+    "startup",
+    "venture",
+)
 
 
 class VideoDiscoveryService:
@@ -93,6 +139,8 @@ class VideoDiscoveryService:
                         region_code=region,
                         max_results=pack.max_results,
                         surface=surface,
+                        search_order=pack.order,
+                        query_label=pack.label,
                         published_after=cutoff,
                     )
                     accepted, counters = self._filter_candidates(candidates, surface)
@@ -229,6 +277,7 @@ class VideoDiscoveryService:
                     category=category,
                     surface=surface,
                     max_results=25,
+                    order="relevance",
                 )
             )
             if len(dynamic_packs) >= 2:
@@ -413,7 +462,11 @@ class VideoDiscoveryService:
 
     def _is_english(self, entry: VideoEntry) -> bool:
         lang = (entry.default_language or "").lower()
-        return not lang or lang.startswith("en")
+        if lang:
+            return lang.startswith("en")
+
+        detected_lang, _confidence = detect_language(entry.title, entry.summary)
+        return not is_non_english(detected_lang)
 
     def _is_live_or_scheduled(self, entry: VideoEntry) -> bool:
         status = (entry.live_broadcast_content or "").lower()
@@ -429,7 +482,9 @@ class VideoDiscoveryService:
         views_per_hour = entry.views_per_hour or 0.0
         likes = entry.like_count or 0
         comments = entry.comment_count or 0
-        engagement_rate = (likes + comments * 2) / max(view_count, 1)
+        engagement_rate = 0.0
+        if view_count >= _DISCOVERY_MIN_INITIAL_VIDEO_VIEWS:
+            engagement_rate = (likes + comments * 2) / view_count
         strong_channel = (
             subscribers >= _DISCOVERY_MIN_CHANNEL_SUBSCRIBERS
             and channel_videos >= _DISCOVERY_MIN_CHANNEL_VIDEOS
@@ -439,23 +494,42 @@ class VideoDiscoveryService:
             or views_per_hour >= _DISCOVERY_MIN_VIEWS_PER_HOUR
         )
         strong_engagement = engagement_rate >= _DISCOVERY_MIN_ENGAGEMENT_RATE
+        basic_traction = (
+            view_count >= _DISCOVERY_MIN_INITIAL_VIDEO_VIEWS
+            or views_per_hour >= _DISCOVERY_MIN_INITIAL_VIEWS_PER_HOUR
+        )
         story_led = (
             isinstance(entry.query_label, str)
             and entry.query_label.startswith("story-")
             and subscribers >= _DISCOVERY_STORY_MIN_SUBSCRIBERS
         )
+        trusted_channel = (
+            entry.channel_role == ChannelRole.OFFICIAL
+            or self._channel_name_looks_tech(entry.source)
+            or subscribers >= _DISCOVERY_HIGH_AUTHORITY_SUBSCRIBERS
+        )
 
-        if strong_channel and (strong_video or strong_engagement or story_led):
-            return True
-        if story_led and strong_video:
+        if strong_channel and trusted_channel and strong_video:
             return True
         if (
-            strong_video
-            and strong_engagement
-            and subscribers >= (_DISCOVERY_MIN_CHANNEL_SUBSCRIBERS // 2)
+            entry.acquisition_lane == "trending"
+            and trusted_channel
+            and (strong_video or basic_traction)
         ):
             return True
+        if story_led and trusted_channel and (basic_traction or strong_engagement):
+            return True
+        if strong_video and strong_engagement and trusted_channel:
+            return True
         return False
+
+    def _channel_name_looks_tech(self, source: str | None) -> bool:
+        if not isinstance(source, str):
+            return False
+        text = source.strip().lower()
+        if not text:
+            return False
+        return any(token in text for token in _TECH_CHANNEL_HINTS)
 
     def _stat_as_int(self, value: object) -> int | None:
         try:
