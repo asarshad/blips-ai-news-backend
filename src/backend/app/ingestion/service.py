@@ -641,8 +641,16 @@ class IngestionPipeline:
             # Dedicated YouTube discovery lane for broader coverage and recency.
             try:
                 discovery = VideoDiscoveryService(self.db, self.youtube_client)
-                discovered_videos = discovery.discover("videos")
-                discovered_reels = discovery.discover("reels")
+                discovered_videos = (
+                    discovery.discover("videos", remaining_needed=remaining_videos)
+                    if remaining_videos > 0
+                    else []
+                )
+                discovered_reels = (
+                    discovery.discover("reels", remaining_needed=remaining_reels)
+                    if remaining_reels > 0
+                    else []
+                )
                 video_entries.extend(discovered_videos)
                 video_entries.extend(discovered_reels)
                 logger.info(
@@ -855,7 +863,10 @@ class IngestionPipeline:
                 continue
 
             try:
-                entries = discovery.discover(surface)
+                entries = discovery.discover(
+                    surface,
+                    remaining_needed=remaining_videos if surface == "videos" else remaining_reels,
+                )
             except Exception as exc:
                 logger.error("[video_discovery] %s discovery failed: %s", surface, exc)
                 result["errors"] = int(result["errors"]) + 1

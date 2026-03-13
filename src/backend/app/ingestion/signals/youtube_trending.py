@@ -17,6 +17,7 @@ from typing import List, Optional
 
 import requests
 
+from app.core.youtube_quota import YouTubeQuotaBudget
 from app.ingestion.signals import SignalItem
 from app.models.signal import SignalSource
 
@@ -49,21 +50,55 @@ def fetch_yt_trending(
         logger.info("[yt_trending_signal] YOUTUBE_API_KEY not configured – skipping YT trending")
         return []
 
+    quota = YouTubeQuotaBudget()
+    if quota.is_locked_out():
+        logger.warning("[yt_trending_signal] YouTube API lockout active – skipping YT trending")
+        return []
+    if not quota.try_reserve(1):
+        logger.info("[yt_trending_signal] YouTube API budget exhausted – skipping YT trending")
+        return []
+
     params = {
         "part": "snippet,statistics",
         "chart": "mostPopular",
         "videoCategoryId": _TECH_CATEGORY_ID,
         "regionCode": region_code,
         "maxResults": min(max_results, 50),
-        "key": api_key,
     }
 
     try:
-        resp = requests.get(_YT_VIDEOS_API, params=params, timeout=_TIMEOUT)
-        resp.raise_for_status()
+        resp = requests.get(
+            _YT_VIDEOS_API,
+            params=params,
+            headers={"x-goog-api-key": api_key},
+            timeout=_TIMEOUT,
+        )
         data = resp.json()
     except requests.RequestException as exc:
         logger.warning("[yt_trending_signal] YouTube API request failed: %s", exc)
+        return []
+    except ValueError:
+        logger.warning("[yt_trending_signal] YouTube API returned invalid JSON")
+        return []
+
+    if resp.status_code == 403:
+        errors = data.get("error", {}).get("errors", [])
+        reason = errors[0].get("reason") if errors else data.get("error", {}).get("status")
+        if reason == "quotaExceeded":
+            quota.lock_out_until_reset(reason="quotaExceeded")
+            logger.warning(
+                "[yt_trending_signal] YouTube quotaExceeded; lockout active until Pacific reset"
+            )
+            return []
+
+    if resp.status_code >= 400:
+        errors = data.get("error", {}).get("errors", [])
+        reason = errors[0].get("reason") if errors else data.get("error", {}).get("status")
+        logger.warning(
+            "[yt_trending_signal] YouTube API failed: HTTP %s%s",
+            resp.status_code,
+            f" ({reason})" if reason else "",
+        )
         return []
 
     items = data.get("items", [])

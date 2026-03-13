@@ -104,3 +104,97 @@ def test_parse_entry_published_at_prefers_published_then_updated():
     assert updated_at is not None
     assert updated_at.year == 2024
     assert client._parse_entry_published_at(empty_entry) is None
+
+
+class _FakeQuotaBudget:
+    def __init__(self, *, locked: bool = False, begin_window: bool = True):
+        self.locked = locked
+        self.begin_window = begin_window
+        self.reserve_calls = []
+        self.lockout_reasons = []
+
+    def try_reserve(self, units, *, bucket="general"):
+        self.reserve_calls.append((units, bucket))
+        return not self.locked
+
+    def is_locked_out(self):
+        return self.locked
+
+    def lock_out_until_reset(self, *, reason="quotaExceeded"):
+        self.locked = True
+        self.lockout_reasons.append(reason)
+
+    def begin_search_window(self, _surface):
+        return self.begin_window
+
+
+class _FakeResponse:
+    def __init__(self, status_code, payload):
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+def test_fetch_search_candidates_uses_header_auth_and_no_query_key(monkeypatch):
+    quota = _FakeQuotaBudget()
+    client = YouTubeClient(channel_configs=[], quota_budget=quota)
+    captured = {}
+
+    monkeypatch.setenv("YOUTUBE_API_KEY", "test-key")
+
+    def _fake_get(url, *, params=None, headers=None, timeout=None):
+        captured["url"] = url
+        captured["params"] = params
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return _FakeResponse(
+            200,
+            {
+                "items": [
+                    {"id": {"videoId": "abc123DEF45"}},
+                    {"id": {"videoId": "abc123DEF45"}},
+                ]
+            },
+        )
+
+    monkeypatch.setattr("app.integrations.youtube_client.requests.get", _fake_get)
+    monkeypatch.setattr(client, "hydrate_video_candidates", lambda **_kwargs: [])
+
+    results = client.fetch_search_candidates("technology news today", region_code="US")
+
+    assert results == []
+    assert captured["url"].endswith("/search")
+    assert captured["headers"]["x-goog-api-key"] == "test-key"
+    assert "key" not in captured["params"]
+    assert quota.reserve_calls == [(100, "search")]
+
+
+def test_fetch_trending_candidates_locks_out_on_quota_exceeded(monkeypatch):
+    quota = _FakeQuotaBudget()
+    client = YouTubeClient(channel_configs=[], quota_budget=quota)
+
+    monkeypatch.setenv("YOUTUBE_API_KEY", "test-key")
+
+    def _fake_get(_url, *, params=None, headers=None, timeout=None):
+        assert "key" not in params
+        assert headers["x-goog-api-key"] == "test-key"
+        assert timeout == 10
+        return _FakeResponse(
+            403,
+            {
+                "error": {
+                    "status": "PERMISSION_DENIED",
+                    "errors": [{"reason": "quotaExceeded"}],
+                }
+            },
+        )
+
+    monkeypatch.setattr("app.integrations.youtube_client.requests.get", _fake_get)
+
+    results = client.fetch_trending_candidates(region_code="US")
+
+    assert results == []
+    assert quota.lockout_reasons == ["quotaExceeded"]
+    assert quota.reserve_calls == [(1, "general")]

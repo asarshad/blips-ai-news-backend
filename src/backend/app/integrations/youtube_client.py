@@ -11,13 +11,14 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import feedparser
 import requests
 
 from app.core.circuit_breaker import CircuitBreaker, get_youtube_breaker
 from app.core.logging import get_logger
+from app.core.youtube_quota import YouTubeQuotaBudget
 from app.integrations.youtube_channels import (
     ChannelConfig,
     ChannelRole,
@@ -260,6 +261,7 @@ class YouTubeClient:
         daily_video_cap_per_channel: int = 2,
         daily_shorts_cap_per_channel: int = 4,
         circuit_breaker: Optional[CircuitBreaker] = None,
+        quota_budget: Optional[YouTubeQuotaBudget] = None,
     ):
         """
         Initialize YouTube client with channel configuration.
@@ -276,6 +278,7 @@ class YouTubeClient:
 
         # Circuit breaker for external HTTP calls
         self._breaker = circuit_breaker or get_youtube_breaker()
+        self._quota_budget = quota_budget or YouTubeQuotaBudget()
 
         # Track ingestion counts per channel per day
         self._daily_counts: Dict[str, Dict[str, int]] = defaultdict(
@@ -294,6 +297,11 @@ class YouTubeClient:
         self._backoff_base_seconds = max(
             0.0, float(os.getenv("CONNECTOR_BACKOFF_BASE_SECONDS", "0.5"))
         )
+
+    @property
+    def quota_budget(self) -> YouTubeQuotaBudget:
+        """Expose the shared YouTube quota controller."""
+        return self._quota_budget
 
     def _reset_daily_counts_if_needed(self):
         """Reset daily counts at UTC midnight."""
@@ -364,9 +372,8 @@ class YouTubeClient:
             return cached
 
         # Try YouTube Data API first (if API key available)
-        api_key = os.getenv("YOUTUBE_API_KEY")
-        if api_key:
-            duration = self._get_duration_from_api(video_id, api_key)
+        if self._youtube_api_key():
+            duration = self._get_duration_from_api(video_id)
             if duration is not None:
                 self._duration_cache_seconds[video_id] = duration
                 return duration
@@ -380,37 +387,26 @@ class YouTubeClient:
         self._duration_cache_seconds[video_id] = None
         return None
 
-    def _get_duration_from_api(self, video_id: str, api_key: str) -> Optional[int]:
+    def _get_duration_from_api(self, video_id: str) -> Optional[int]:
         """Get duration using YouTube Data API."""
-        if not self._breaker.allow_request():
-            logger.debug("Circuit open - skipping API duration for %s", video_id)
+        data = self._youtube_api_json(
+            "videos",
+            params={"part": "contentDetails", "id": video_id},
+            quota_units=1,
+            quota_bucket="duration",
+            timeout=5,
+            operation=f"duration lookup for {video_id}",
+        )
+        if not data:
             return None
-        try:
-            url = f"https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id={video_id}&key={api_key}"
-            response = requests.get(url, timeout=5)
 
-            if response.status_code == 200:
-                self._breaker.record_success()
-                data = response.json()
-                items = data.get("items", [])
-                if items:
-                    duration_iso = items[0].get("contentDetails", {}).get("duration", "")
-                    seconds = self._parse_iso_duration(duration_iso)
-                    if seconds is not None:
-                        logger.info(
-                            "get_video_duration: vid=%s -> %d seconds (API)", video_id, seconds
-                        )
-                        return seconds
-            else:
-                self._breaker.record_failure()
-                logger.warning(
-                    "get_video_duration: API error HTTP %d for vid=%s",
-                    response.status_code,
-                    video_id,
-                )
-        except Exception as e:
-            self._breaker.record_failure()
-            logger.warning("get_video_duration: API exception for vid=%s: %s", video_id, str(e))
+        items = data.get("items", [])
+        if items:
+            duration_iso = items[0].get("contentDetails", {}).get("duration", "")
+            seconds = self._parse_iso_duration(duration_iso)
+            if seconds is not None:
+                logger.info("get_video_duration: vid=%s -> %d seconds (API)", video_id, seconds)
+                return seconds
         return None
 
     def _parse_iso_duration(self, duration: str) -> Optional[int]:
@@ -613,14 +609,6 @@ class YouTubeClient:
         published_after: Optional[datetime] = None,
     ) -> List[VideoEntry]:
         """Fetch hydrated search candidates from the YouTube Data API."""
-        api_key = os.getenv("YOUTUBE_API_KEY")
-        if not api_key:
-            logger.info("Skipping YouTube search for '%s': no API key configured", query)
-            return []
-        if not self._breaker.allow_request():
-            logger.warning("Circuit open - skipping YouTube search for '%s'", query)
-            return []
-
         params = {
             "part": "snippet",
             "type": "video",
@@ -631,23 +619,19 @@ class YouTubeClient:
             "videoCategoryId": "28",
             "relevanceLanguage": "en",
             "safeSearch": "moderate",
-            "key": api_key,
         }
         if published_after:
             params["publishedAfter"] = published_after.replace(microsecond=0).isoformat() + "Z"
 
-        try:
-            response = requests.get(
-                "https://www.googleapis.com/youtube/v3/search",
-                params=params,
-                timeout=10,
-            )
-            response.raise_for_status()
-            self._breaker.record_success()
-            data = response.json()
-        except Exception as exc:
-            self._breaker.record_failure()
-            logger.warning("YouTube search failed for '%s': %s", query, exc)
+        data = self._youtube_api_json(
+            "search",
+            params=params,
+            quota_units=100,
+            quota_bucket="search",
+            timeout=10,
+            operation=f"search query '{query}' ({region_code})",
+        )
+        if not data:
             return []
 
         video_ids = [
@@ -671,34 +655,21 @@ class YouTubeClient:
         surface: str = "videos",
     ) -> List[VideoEntry]:
         """Fetch hydrated Science & Technology trending candidates."""
-        api_key = os.getenv("YOUTUBE_API_KEY")
-        if not api_key:
-            logger.info("Skipping YouTube trending: no API key configured")
-            return []
-        if not self._breaker.allow_request():
-            logger.warning("Circuit open - skipping YouTube trending fetch")
-            return []
-
         params = {
             "part": "snippet",
             "chart": "mostPopular",
             "videoCategoryId": "28",
             "regionCode": region_code,
             "maxResults": min(max_results, 50),
-            "key": api_key,
         }
-        try:
-            response = requests.get(
-                "https://www.googleapis.com/youtube/v3/videos",
-                params=params,
-                timeout=10,
-            )
-            response.raise_for_status()
-            self._breaker.record_success()
-            data = response.json()
-        except Exception as exc:
-            self._breaker.record_failure()
-            logger.warning("YouTube trending fetch failed: %s", exc)
+        data = self._youtube_api_json(
+            "videos",
+            params=params,
+            quota_units=1,
+            timeout=10,
+            operation=f"trending fetch ({region_code})",
+        )
+        if not data:
             return []
 
         video_ids = [item.get("id") for item in data.get("items", []) if item.get("id")]
@@ -720,31 +691,24 @@ class YouTubeClient:
         surface: str,
     ) -> List[VideoEntry]:
         """Hydrate video IDs into enriched candidates via videos.list."""
-        api_key = os.getenv("YOUTUBE_API_KEY")
-        if not api_key or not video_ids:
+        if not self._youtube_api_key() or not video_ids:
             return []
 
         unique_ids = list(dict.fromkeys(video_ids))
         entries: List[VideoEntry] = []
         for start in range(0, len(unique_ids), 50):
             chunk = unique_ids[start : start + 50]
-            params = {
-                "part": "snippet,contentDetails,statistics,liveStreamingDetails,status",
-                "id": ",".join(chunk),
-                "key": api_key,
-            }
-            try:
-                response = requests.get(
-                    "https://www.googleapis.com/youtube/v3/videos",
-                    params=params,
-                    timeout=10,
-                )
-                response.raise_for_status()
-                self._breaker.record_success()
-                data = response.json()
-            except Exception as exc:
-                self._breaker.record_failure()
-                logger.warning("YouTube hydration failed for %s ids: %s", len(chunk), exc)
+            data = self._youtube_api_json(
+                "videos",
+                params={
+                    "part": "snippet,contentDetails,statistics,liveStreamingDetails,status",
+                    "id": ",".join(chunk),
+                },
+                quota_units=1,
+                timeout=10,
+                operation=f"hydration for {len(chunk)} ids",
+            )
+            if not data:
                 continue
 
             for item in data.get("items", []):
@@ -900,6 +864,94 @@ class YouTubeClient:
             return int(value)
         except (TypeError, ValueError):
             return None
+
+    def _youtube_api_key(self) -> Optional[str]:
+        api_key = (os.getenv("YOUTUBE_API_KEY") or "").strip()
+        return api_key or None
+
+    def _youtube_api_json(
+        self,
+        endpoint: str,
+        *,
+        params: Dict[str, Any],
+        quota_units: int,
+        quota_bucket: str = "general",
+        timeout: float = 10.0,
+        operation: str,
+    ) -> Optional[dict]:
+        """Execute a YouTube Data API request with shared auth and quota guards."""
+        api_key = self._youtube_api_key()
+        if not api_key:
+            logger.info("Skipping YouTube %s: no API key configured", operation)
+            return None
+        if self._quota_budget.is_locked_out():
+            logger.warning("Skipping YouTube %s: quota lockout active", operation)
+            return None
+        if not self._breaker.allow_request():
+            logger.warning("Circuit open - skipping YouTube %s", operation)
+            return None
+        if not self._quota_budget.try_reserve(quota_units, bucket=quota_bucket):
+            logger.info("Skipping YouTube %s: %s budget exhausted", operation, quota_bucket)
+            return None
+
+        try:
+            response = requests.get(
+                f"https://www.googleapis.com/youtube/v3/{endpoint}",
+                params=params,
+                headers={"x-goog-api-key": api_key},
+                timeout=timeout,
+            )
+        except Exception as exc:
+            self._breaker.record_failure()
+            logger.warning("YouTube %s request failed: %s", operation, exc)
+            return None
+
+        if self._is_quota_exceeded_response(response):
+            self._quota_budget.lock_out_until_reset(reason="quotaExceeded")
+            logger.warning(
+                "YouTube %s hit quotaExceeded; discovery locked until Pacific reset",
+                operation,
+            )
+            return None
+
+        if response.status_code >= 400:
+            self._breaker.record_failure()
+            reason = self._response_error_reason(response)
+            logger.warning(
+                "YouTube %s failed: HTTP %s%s",
+                operation,
+                response.status_code,
+                f" ({reason})" if reason else "",
+            )
+            return None
+
+        try:
+            data = response.json()
+        except ValueError:
+            self._breaker.record_failure()
+            logger.warning("YouTube %s returned invalid JSON", operation)
+            return None
+
+        self._breaker.record_success()
+        return data
+
+    def _is_quota_exceeded_response(self, response: requests.Response) -> bool:
+        if response.status_code != 403:
+            return False
+        return self._response_error_reason(response) == "quotaExceeded"
+
+    def _response_error_reason(self, response: requests.Response) -> Optional[str]:
+        try:
+            payload = response.json()
+        except ValueError:
+            return None
+
+        errors = payload.get("error", {}).get("errors", [])
+        if errors:
+            reason = errors[0].get("reason")
+            if reason:
+                return str(reason)
+        return payload.get("error", {}).get("status")
 
     def _fetch_channel_with_config(
         self, config: ChannelConfig, max_videos: int
