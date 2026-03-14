@@ -110,6 +110,7 @@ def get_recent_videos(
         limit=limit,
         offset=offset,
         require_ai_processed=False,
+        hybrid_video_rerank=flags.is_enabled("video_hybrid_rerank"),
     )
 
     # Log tier distribution (from cached results)
@@ -184,6 +185,7 @@ def get_reels(
         limit=limit,
         offset=offset,
         require_ai_processed=False,  # Reels don't need AI processing
+        hybrid_video_rerank=False,
     )
 
     # Log tier distribution (from cached results)
