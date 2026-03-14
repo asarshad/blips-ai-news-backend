@@ -54,6 +54,8 @@ FEATURE_DEFAULTS = {
     "signals": True,
     # Quality Gate: promote CANDIDATE items to PROMOTED based on scoring
     "promotion": True,
+    # Video-only hybrid reranking for curated + freshness balancing
+    "video_hybrid_rerank": False,
 }
 
 # Production defaults - more conservative
@@ -67,6 +69,7 @@ PROD_DEFAULTS = {
     "personalization": True,  # Low risk, local computation
     "signals": True,  # Coverage Guarantee - ON in prod
     "promotion": True,  # Quality Gate - ON in prod
+    "video_hybrid_rerank": False,  # OFF until validated
 }
 
 # Redis key prefix for feature flags

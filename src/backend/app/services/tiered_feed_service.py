@@ -30,6 +30,7 @@ from app.models.content import ContentItem, ContentStatus, ContentType
 from app.services.diversity_mixer import mix_feed
 from app.services.inventory_service import FreshnessTier, Surface, _get_surface_config
 from app.services.video_content_policy import apply_content_policy
+from app.services.video_hybrid_rerank import rerank_video_candidates
 
 logger = get_logger(__name__)
 
@@ -60,9 +61,18 @@ def _get_redis_client():
         return None
 
 
-def _cache_key(surface: Surface, limit: int, offset: int, require_ai: bool) -> str:
+def _cache_key(
+    surface: Surface,
+    limit: int,
+    offset: int,
+    require_ai: bool,
+    hybrid_video_rerank: bool,
+) -> str:
     """Generate cache key for tiered feed."""
-    return f"blips:tiered_feed:{surface.value}:l{limit}:o{offset}:ai{int(require_ai)}"
+    return (
+        f"blips:tiered_feed:{surface.value}:l{limit}:o{offset}:ai{int(require_ai)}:"
+        f"hybrid{int(hybrid_video_rerank)}"
+    )
 
 
 def invalidate_tiered_feed_cache(surface: Optional[Surface] = None):
@@ -133,6 +143,7 @@ def get_tiered_feed(
     offset: int = 0,
     now: Optional[datetime] = None,
     require_ai_processed: bool = True,
+    hybrid_video_rerank: bool = False,
 ) -> Tuple[List[TieredItem], bool]:
     """
     Get a tiered blend of content items for a surface.
@@ -289,6 +300,9 @@ def get_tiered_feed(
     # Extract raw items for mixing
     raw_items = [t.item for t in results]
 
+    if surface == Surface.VIDEOS and hybrid_video_rerank:
+        raw_items = rerank_video_candidates(raw_items, target_count=target_count)
+
     # Mix for diversity (this returns a subset in mixed order)
     surface_name = surface.value
     mixed_items = mix_feed(raw_items, surface=surface_name, target_size=target_count)
@@ -415,6 +429,7 @@ def get_cached_tiered_feed(
     limit: int = 20,
     offset: int = 0,
     require_ai_processed: bool = True,
+    hybrid_video_rerank: bool = False,
 ) -> Tuple[List[Dict[str, Any]], bool, FeedResponseMeta]:
     """
     Get tiered feed with Redis caching.
@@ -433,7 +448,13 @@ def get_cached_tiered_feed(
         Tuple of (list of item dicts, has_more, metadata)
     """
     now = datetime.utcnow()
-    cache_key = _cache_key(surface, limit, offset, require_ai_processed)
+    cache_key = _cache_key(
+        surface,
+        limit,
+        offset,
+        require_ai_processed,
+        hybrid_video_rerank,
+    )
     redis_client = _get_redis_client()
     cfg = _get_surface_config(surface)
 
@@ -474,6 +495,7 @@ def get_cached_tiered_feed(
         limit=limit,
         offset=offset,
         require_ai_processed=require_ai_processed,
+        hybrid_video_rerank=hybrid_video_rerank,
     )
 
     items = [tiered_item_to_dict(t) for t in tiered_items]
