@@ -8,6 +8,7 @@ turning this module into a giant hand-maintained Python list.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -86,6 +87,14 @@ def _load_channel_registry() -> List[ChannelConfig]:
 CHANNEL_REGISTRY: List[ChannelConfig] = _load_channel_registry()
 
 
+def _normalize_channel_name(name: str) -> str:
+    """Normalize channel names for resilient source matching."""
+    if not name:
+        return ""
+    normalized = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+    return re.sub(r"\s+", " ", normalized)
+
+
 def _channel_config_priority(config: ChannelConfig) -> tuple[int, int, int]:
     """Prefer enabled, non-shorts, mixed-capable configs for duplicate IDs."""
     format_rank = {
@@ -150,11 +159,34 @@ def get_channel_by_id(channel_id: str) -> Optional[ChannelConfig]:
 
 
 def get_channel_by_name(name: str) -> Optional[ChannelConfig]:
-    """Look up a channel by case-insensitive partial name match."""
-    name_lower = name.lower()
+    """Look up a channel by normalized exact or near-exact name match."""
+    normalized_name = _normalize_channel_name(name)
+    if not normalized_name:
+        return None
+
+    best_match: Optional[ChannelConfig] = None
+    best_score = -1
+    best_name_length = 10**9
+
     for channel in dedupe_channel_configs(CHANNEL_REGISTRY):
-        if name_lower in channel.name.lower():
-            return channel
+        normalized_channel = _normalize_channel_name(channel.name)
+        if not normalized_channel:
+            continue
+
+        score = -1
+        if normalized_name == normalized_channel:
+            score = 3
+        elif normalized_name in normalized_channel or normalized_channel in normalized_name:
+            score = 2
+        if score > best_score or (
+            score == best_score and score >= 0 and len(normalized_channel) < best_name_length
+        ):
+            best_match = channel
+            best_score = score
+            best_name_length = len(normalized_channel)
+
+    if best_score >= 0:
+        return best_match
     return None
 
 

@@ -255,12 +255,14 @@ def ui_dashboard(
         metrics = video_supply["surfaces"][surface]
         fresh_delta = metrics["deltas"]["fresh_inventory_24h"]
         dominance_delta = metrics["deltas"]["dominant_channel_pct_top20"]
+        window_label = metrics["inventory_window_label"]
         return _stat_card(
             label,
-            str(metrics["fresh_inventory_24h"]),
+            str(metrics["fresh_inventory_window"]),
             (
+                f"rolling window {window_label} | "
                 f"median age {metrics['median_age_top20_hours'] or '—'}h | "
-                f"distinct channels {metrics['distinct_active_channels_24h']} | "
+                f"distinct channels {metrics['distinct_active_channels_window']} | "
                 f"baseline {video_supply.get('baseline_tag') or '—'} {_fmt_delta(fresh_delta['baseline'])} | "
                 f"24h {_fmt_delta(fresh_delta['vs_24h'])} | "
                 f"7d {_fmt_delta(fresh_delta['vs_7d'])} | "
@@ -495,24 +497,28 @@ def ui_dashboard(
 
     <h2 class="text-lg font-semibold text-gray-700 mb-3">Video And Reels Health</h2>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-      {_video_kpi_card("videos", "Videos fresh inventory")}
-      {_video_kpi_card("reels", "Reels fresh inventory")}
+      {_video_kpi_card("videos", "Videos rolling inventory")}
+      {_video_kpi_card("reels", "Reels rolling inventory")}
     </div>
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
       <div class="bg-white rounded-lg shadow p-5">
         <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide">Launch gates</h3>
+          <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide">Supply gates</h3>
           <a href="/api/v1/admin/ui/video-lanes?key={
         admin_key
     }" class="text-sm text-blue-600 hover:underline">Lane performance →</a>
         </div>
         <div class="space-y-2 text-sm text-gray-700">
-          <div class="flex justify-between"><span>Videos fresh inventory</span><span class="font-semibold">{
-        video_supply["surfaces"]["videos"]["fresh_inventory_24h"]
-    } / 20</span></div>
-          <div class="flex justify-between"><span>Reels fresh inventory</span><span class="font-semibold">{
-        video_supply["surfaces"]["reels"]["fresh_inventory_24h"]
-    } / 35</span></div>
+          <div class="flex justify-between"><span>Videos rolling inventory</span><span class="font-semibold">{
+        video_supply["surfaces"]["videos"]["fresh_inventory_window"]
+    } / {video_supply["surfaces"]["videos"]["floor_target"]} ({
+        video_supply["surfaces"]["videos"]["inventory_window_label"]
+    })</span></div>
+          <div class="flex justify-between"><span>Reels rolling inventory</span><span class="font-semibold">{
+        video_supply["surfaces"]["reels"]["fresh_inventory_window"]
+    } / {video_supply["surfaces"]["reels"]["floor_target"]} ({
+        video_supply["surfaces"]["reels"]["inventory_window_label"]
+    })</span></div>
           <div class="flex justify-between"><span>Videos median age</span><span class="font-semibold">{
         video_supply["surfaces"]["videos"]["median_age_top20_hours"] or "—"
     }h</span></div>

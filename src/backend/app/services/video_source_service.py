@@ -8,12 +8,15 @@ from typing import Dict, Iterable, List
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.integrations.youtube_channels import (
     CHANNEL_REGISTRY,
     ChannelConfig,
     dedupe_channel_configs,
+    get_channel_by_id,
+    get_channel_by_name,
 )
-from app.models.content import ContentItem, ContentStatus, EventType, InteractionEvent
+from app.models.content import ContentItem, ContentStatus, ContentType, EventType, InteractionEvent
 from app.models.video_source import VideoSourceProfile
 from app.repositories.video_source_repo import VideoSourceProfileRepository
 from app.services.promotion_service import compute_clickbait_penalty
@@ -29,8 +32,108 @@ def bootstrap_video_source_profiles(
     return profiles
 
 
+def _metadata_lookback_days() -> int:
+    return max(settings.VIDEOS_EVERGREEN_MAX_DAYS, settings.REELS_EVERGREEN_MAX_DAYS)
+
+
+def _looks_like_youtube_url(value: str | None) -> bool:
+    lowered = (value or "").lower()
+    return "youtube.com" in lowered or "youtu.be" in lowered
+
+
+def _infer_lane(item: ContentItem) -> str | None:
+    if item.acquisition_lane:
+        return item.acquisition_lane
+
+    discovered_via = (item.discovered_via or "").strip().lower()
+    if discovered_via.startswith("yt_"):
+        lane = discovered_via.removeprefix("yt_")
+        if lane in {"curated", "search", "trending"}:
+            return lane
+    return None
+
+
+def repair_video_source_metadata(
+    db: Session,
+    *,
+    lookback_days: int | None = None,
+) -> Dict[str, int]:
+    """Backfill missing curated video/reel source metadata for recent YouTube rows."""
+    cutoff = datetime.utcnow() - timedelta(days=lookback_days or _metadata_lookback_days())
+
+    items = (
+        db.query(ContentItem)
+        .filter(
+            ContentItem.type.in_([ContentType.VIDEO, ContentType.REEL]),
+            ContentItem.published_at >= cutoff,
+            (
+                ContentItem.channel_id.is_(None)
+                | ContentItem.acquisition_lane.is_(None)
+                | ContentItem.source_status.is_(None)
+            ),
+        )
+        .order_by(ContentItem.published_at.desc())
+        .all()
+    )
+
+    scanned = 0
+    matched = 0
+    updated = 0
+    unresolved = 0
+
+    for item in items:
+        scanned += 1
+        if not any(
+            _looks_like_youtube_url(candidate)
+            for candidate in (item.source_url, item.video_url, item.canonical_url)
+        ):
+            continue
+
+        channel_config = get_channel_by_id(item.channel_id or "")
+        if channel_config is None:
+            channel_config = get_channel_by_name(item.source or "")
+
+        lane = _infer_lane(item)
+        if lane is None and channel_config is not None:
+            lane = "curated"
+
+        if channel_config is None and lane is None:
+            unresolved += 1
+            continue
+
+        matched += 1
+        changed = False
+
+        if item.channel_id is None and channel_config is not None:
+            item.channel_id = channel_config.channel_id
+            changed = True
+
+        if item.acquisition_lane is None and lane is not None:
+            item.acquisition_lane = lane
+            changed = True
+
+        if item.source_status is None and channel_config is not None:
+            item.source_status = "core" if channel_config.enabled else "blocked"
+            changed = True
+
+        if changed:
+            updated += 1
+
+    if updated:
+        db.commit()
+
+    return {
+        "scanned": scanned,
+        "matched": matched,
+        "updated": updated,
+        "unresolved": unresolved,
+        "lookback_days": lookback_days or _metadata_lookback_days(),
+    }
+
+
 def refresh_video_source_health(db: Session, hours_back: int = 24 * 7) -> List[VideoSourceProfile]:
     """Update rolling 7-day health stats and status for video source profiles."""
+    repair_video_source_metadata(db)
     profiles = bootstrap_video_source_profiles(db)
     cutoff = datetime.utcnow() - timedelta(hours=hours_back)
 

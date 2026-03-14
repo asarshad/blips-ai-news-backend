@@ -27,6 +27,33 @@ def _surface_floor(surface: str) -> int:
     return settings.MIN_FRESH_REELS if surface == "reels" else settings.MIN_FRESH_VIDEOS
 
 
+def _surface_window_hours(surface: str) -> int:
+    return (
+        settings.REELS_FRESH_PUBLISHED_HOURS
+        if surface == "reels"
+        else settings.VIDEOS_FRESH_PUBLISHED_HOURS
+    )
+
+
+def _window_label(hours: int) -> str:
+    if hours == 24:
+        return "24h"
+    if hours % 24 == 0:
+        return f"{hours // 24}d"
+    return f"{hours}h"
+
+
+def _comparison_window(
+    *,
+    now: datetime,
+    window_hours: int,
+    lag: timedelta,
+) -> tuple[datetime, datetime]:
+    end = now - lag
+    start = end - timedelta(hours=window_hours)
+    return start, end
+
+
 def _channel_key(item: ContentItem) -> str:
     return item.channel_id or item.source or "unknown"
 
@@ -140,11 +167,19 @@ def _surface_metrics(
     candidate_count = sum(run.candidate_count for run in runs)
     duplicate_rejections = sum(run.duplicate_rejections for run in runs)
     clickbait_rejections = sum(run.clickbait_rejections for run in runs)
+    window_end = end or now
+    window_hours = round((window_end - start).total_seconds() / 3600, 2)
+    floor = _surface_floor(surface)
 
     return {
+        "inventory_window_hours": window_hours,
+        "inventory_window_label": _window_label(int(window_hours)),
+        "floor_target": floor,
+        "fresh_inventory_window": len(items),
         "fresh_inventory_24h": len(items),
         "median_age_top20_hours": round(median(ages), 2) if ages else None,
         "p95_age_top20_hours": _percentile(ages, 95.0),
+        "distinct_active_channels_window": len({_channel_key(item) for item in items}),
         "distinct_active_channels_24h": len({_channel_key(item) for item in items}),
         "dominant_channel": dominant_channel or None,
         "dominant_channel_pct_top20": round(dominant_count / max(len(top20), 1) * 100, 2),
@@ -232,20 +267,46 @@ def compute_video_supply_metrics(
     refresh_video_source_health(db)
     profiles = _profile_lookup(db)
     now = datetime.utcnow()
-    current_start = now - timedelta(hours=24)
-    prev_start = now - timedelta(hours=48)
-    week_start = now - timedelta(days=7)
-    week_prev_start = now - timedelta(days=14)
     baseline = load_baseline_snapshot(baseline_tag)
 
     surfaces: Dict[str, Any] = {}
     for surface in ("videos", "reels"):
-        current = _surface_metrics(db, surface, start=current_start, profiles=profiles)
+        window_hours = _surface_window_hours(surface)
+        current_start, current_end = _comparison_window(
+            now=now,
+            window_hours=window_hours,
+            lag=timedelta(),
+        )
+        prev_24h_start, prev_24h_end = _comparison_window(
+            now=now,
+            window_hours=window_hours,
+            lag=timedelta(hours=24),
+        )
+        prev_7d_start, prev_7d_end = _comparison_window(
+            now=now,
+            window_hours=window_hours,
+            lag=timedelta(days=7),
+        )
+        current = _surface_metrics(
+            db,
+            surface,
+            start=current_start,
+            end=current_end,
+            profiles=profiles,
+        )
         previous = _surface_metrics(
-            db, surface, start=prev_start, end=current_start, profiles=profiles
+            db,
+            surface,
+            start=prev_24h_start,
+            end=prev_24h_end,
+            profiles=profiles,
         )
         weekly = _surface_metrics(
-            db, surface, start=week_prev_start, end=week_start, profiles=profiles
+            db,
+            surface,
+            start=prev_7d_start,
+            end=prev_7d_end,
+            profiles=profiles,
         )
         baseline_surface = (baseline or {}).get("video_supply", {}).get(surface)
         surfaces[surface] = {
