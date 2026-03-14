@@ -28,3 +28,24 @@ def test_curated_only_youtube_defaults():
     assert settings.YOUTUBE_CURATED_ONLY is True
     assert settings.YOUTUBE_DISCOVERY_ENABLED is False
     assert settings.YT_CURATED_LOOKBACK_HOURS == 168
+
+
+def test_runtime_ads_defaults_support_backend_controlled_surfaces():
+    settings = Settings()
+
+    assert settings.ADS_RUNTIME_ENABLED is True
+    assert settings.ADS_PROVIDER == "admob_native"
+    assert settings.ADS_RUNTIME_CANARY_PERCENT == 5
+    assert settings.ADS_CONFIG_TTL_SECONDS == 300
+
+    assert settings.ADS_ARTICLES_ENABLED is True
+    assert settings.ADS_ARTICLES_FREQUENCY == 8
+    assert settings.ADS_ARTICLES_FIRST_SLOT_AFTER == 2
+
+    assert settings.ADS_VIDEOS_ENABLED is True
+    assert settings.ADS_VIDEOS_FREQUENCY == 8
+    assert settings.ADS_VIDEOS_FIRST_SLOT_AFTER == 2
+
+    assert settings.ADS_REELS_ENABLED is False
+    assert settings.ADS_REELS_FREQUENCY == 0
+    assert settings.ADS_REELS_FIRST_SLOT_AFTER == 0

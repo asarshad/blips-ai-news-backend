@@ -1,47 +1,295 @@
 {
   "components": {
     "schemas": {
-      "AdsConfig": {
-        "description": "Server-side ad feature flag bundle.\n\nAll flags default to ``False`` / ``0``, ensuring ads are\ncompletely disabled unless the operator explicitly enables them.",
+      "AdSurfaceConfig": {
+        "description": "Per-surface ad settings.",
         "properties": {
-          "ads_banner_enabled": {
+          "enabled": {
             "default": false,
-            "title": "Ads Banner Enabled",
+            "title": "Enabled",
             "type": "boolean"
           },
-          "ads_canary_percent": {
+          "first_slot_after": {
             "default": 0,
-            "description": "Percent of requests that receive ads (for gradual rollout).",
-            "maximum": 100.0,
+            "description": "Minimum number of organic cards before the first slot becomes eligible.",
             "minimum": 0.0,
-            "title": "Ads Canary Percent",
+            "title": "First Slot After",
             "type": "integer"
           },
-          "ads_enabled": {
-            "default": false,
-            "title": "Ads Enabled",
-            "type": "boolean"
-          },
-          "ads_feed_card_enabled": {
-            "default": false,
-            "title": "Ads Feed Card Enabled",
-            "type": "boolean"
-          },
-          "ads_feed_frequency": {
+          "frequency": {
             "default": 0,
             "description": "Insert one ad every N organic items (0 = disabled).",
-            "title": "Ads Feed Frequency",
+            "minimum": 0.0,
+            "title": "Frequency",
             "type": "integer"
           }
         },
-        "title": "AdsConfig",
+        "title": "AdSurfaceConfig",
+        "type": "object"
+      },
+      "AdSurfaceConfigPatch": {
+        "additionalProperties": false,
+        "description": "Partial per-surface ad config update.",
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "first_slot_after": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Slot After"
+          },
+          "frequency": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frequency"
+          }
+        },
+        "title": "AdSurfaceConfigPatch",
+        "type": "object"
+      },
+      "AdsClientConfig": {
+        "description": "Effective caller-specific runtime ad settings.",
+        "properties": {
+          "canary_percent": {
+            "default": 0,
+            "description": "Percent of devices that are eligible to request ads.",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Canary Percent",
+            "type": "integer"
+          },
+          "config_ttl_seconds": {
+            "default": 300,
+            "description": "Client-side cache TTL for config refresh.",
+            "minimum": 1.0,
+            "title": "Config Ttl Seconds",
+            "type": "integer"
+          },
+          "eligible": {
+            "default": false,
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "provider": {
+            "const": "admob_native",
+            "default": "admob_native",
+            "title": "Provider",
+            "type": "string"
+          },
+          "surfaces": {
+            "$ref": "#/components/schemas/AdsSurfacesConfig"
+          }
+        },
+        "title": "AdsClientConfig",
+        "type": "object"
+      },
+      "AdsConfigAdminResponse": {
+        "description": "Admin response for the raw ads config.",
+        "properties": {
+          "ads": {
+            "$ref": "#/components/schemas/AdsRuntimeConfig"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ads",
+          "source"
+        ],
+        "title": "AdsConfigAdminResponse",
+        "type": "object"
+      },
+      "AdsRuntimeConfig": {
+        "description": "Raw operator-configurable runtime ad settings.",
+        "properties": {
+          "canary_percent": {
+            "default": 0,
+            "description": "Percent of devices that are eligible to request ads.",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Canary Percent",
+            "type": "integer"
+          },
+          "config_ttl_seconds": {
+            "default": 300,
+            "description": "Client-side cache TTL for config refresh.",
+            "minimum": 1.0,
+            "title": "Config Ttl Seconds",
+            "type": "integer"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "provider": {
+            "const": "admob_native",
+            "default": "admob_native",
+            "title": "Provider",
+            "type": "string"
+          },
+          "surfaces": {
+            "$ref": "#/components/schemas/AdsSurfacesConfig"
+          }
+        },
+        "title": "AdsRuntimeConfig",
+        "type": "object"
+      },
+      "AdsRuntimeConfigPatch": {
+        "additionalProperties": false,
+        "description": "Partial runtime config update.",
+        "properties": {
+          "canary_percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canary Percent"
+          },
+          "config_ttl_seconds": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Ttl Seconds"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "const": "admob_native",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "surfaces": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdsSurfacesConfigPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "AdsRuntimeConfigPatch",
+        "type": "object"
+      },
+      "AdsSurfacesConfig": {
+        "description": "Surface-specific ad settings.",
+        "properties": {
+          "articles": {
+            "$ref": "#/components/schemas/AdSurfaceConfig"
+          },
+          "reels": {
+            "$ref": "#/components/schemas/AdSurfaceConfig"
+          },
+          "videos": {
+            "$ref": "#/components/schemas/AdSurfaceConfig"
+          }
+        },
+        "title": "AdsSurfacesConfig",
+        "type": "object"
+      },
+      "AdsSurfacesConfigPatch": {
+        "additionalProperties": false,
+        "description": "Partial surface config update.",
+        "properties": {
+          "articles": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdSurfaceConfigPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reels": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdSurfaceConfigPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "videos": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdSurfaceConfigPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "AdsSurfacesConfigPatch",
         "type": "object"
       },
       "AppConfigResponse": {
         "description": "Top-level response for GET /config.",
         "properties": {
           "ads": {
-            "$ref": "#/components/schemas/AdsConfig"
+            "$ref": "#/components/schemas/AdsClientConfig"
           }
         },
         "title": "AppConfigResponse",
@@ -1554,6 +1802,18 @@
             "description": "Ad identifier (mutually exclusive with content_id).",
             "title": "Ad Id"
           },
+          "ad_unit_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "AdMob ad unit identifier for the rendered ad slot.",
+            "title": "Ad Unit Id"
+          },
           "content_id": {
             "anyOf": [
               {
@@ -1571,6 +1831,30 @@
             "title": "Item Type",
             "type": "string"
           },
+          "load_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Load result for ad lifecycle events, e.g. 'loaded' or 'failed'.",
+            "title": "Load Status"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ads provider for ad events, e.g. 'admob_native'.",
+            "title": "Provider"
+          },
           "session_id": {
             "anyOf": [
               {
@@ -1582,6 +1866,19 @@
             ],
             "description": "Anonymous session identifier (no PII).",
             "title": "Session Id"
+          },
+          "slot_index": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Zero-based ad slot index within the current feed surface.",
+            "title": "Slot Index"
           },
           "surface": {
             "description": "Where the event happened: 'feed', 'video', 'reel'.",
@@ -2628,6 +2925,141 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/admin/ads/config": {
+      "delete": {
+        "description": "Reset runtime ads config to environment defaults.",
+        "operationId": "reset_ads_config_api_v1_admin_ads_config_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsConfigAdminResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset Ads Config",
+        "tags": [
+          "admin"
+        ]
+      },
+      "get": {
+        "description": "Return the raw runtime ads config and its source.",
+        "operationId": "get_ads_config_api_v1_admin_ads_config_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsConfigAdminResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Ads Config",
+        "tags": [
+          "admin"
+        ]
+      },
+      "patch": {
+        "description": "Update runtime ads config with a partial patch.",
+        "operationId": "patch_ads_config_api_v1_admin_ads_config_patch",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdsRuntimeConfigPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsConfigAdminResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Ads Config",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/editorial/candidates": {
       "get": {
         "description": "List pending CANDIDATE items for editorial review triage.",
@@ -6636,6 +7068,24 @@
       "get": {
         "description": "Returns current server-side feature flags and ad settings. Clients should fetch on app start and cache with a reasonable TTL.",
         "operationId": "get_app_config_api_v1_config_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Device-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Device-Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -6646,6 +7096,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Client configuration",

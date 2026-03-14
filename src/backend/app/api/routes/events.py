@@ -24,12 +24,16 @@ router = APIRouter()
 def record_impression(payload: EventPayload) -> EventResponse:
     """Log that a user viewed a feed item or ad."""
     logger.info(
-        "impression event: type=%s content_id=%s ad_id=%s surface=%s session=%s",
+        "impression event: type=%s content_id=%s ad_id=%s surface=%s session=%s provider=%s slot=%s unit=%s status=%s",
         payload.item_type,
         payload.content_id,
         payload.ad_id,
         payload.surface,
         payload.session_id,
+        payload.provider,
+        payload.slot_index,
+        payload.ad_unit_id,
+        payload.load_status,
     )
     return EventResponse(status="ok")
 
@@ -42,11 +46,15 @@ def record_impression(payload: EventPayload) -> EventResponse:
 def record_click(payload: EventPayload) -> EventResponse:
     """Log that a user tapped / clicked a feed item or ad."""
     logger.info(
-        "click event: type=%s content_id=%s ad_id=%s surface=%s session=%s",
+        "click event: type=%s content_id=%s ad_id=%s surface=%s session=%s provider=%s slot=%s unit=%s status=%s",
         payload.item_type,
         payload.content_id,
         payload.ad_id,
         payload.surface,
         payload.session_id,
+        payload.provider,
+        payload.slot_index,
+        payload.ad_unit_id,
+        payload.load_status,
     )
     return EventResponse(status="ok")

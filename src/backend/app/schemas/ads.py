@@ -1,13 +1,6 @@
-"""
-Ad-related Pydantic schemas (contract only — no SDK).
+"""Ad-related API schemas."""
 
-Defines the data contract for synthetic ad items that may later be
-injected into feed responses.  The backend never calls an ad network;
-these schemas exist purely so that the API contract is stable before
-any provider is integrated.
-"""
-
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -63,29 +56,95 @@ class AdItem(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class AdsConfig(BaseModel):
-    """Server-side ad feature flag bundle.
+class AdSurfaceConfig(BaseModel):
+    """Per-surface ad settings."""
 
-    All flags default to ``False`` / ``0``, ensuring ads are
-    completely disabled unless the operator explicitly enables them.
-    """
-
-    ads_enabled: bool = False
-    ads_feed_card_enabled: bool = False
-    ads_banner_enabled: bool = False
-    ads_feed_frequency: int = Field(
+    enabled: bool = False
+    frequency: int = Field(
         default=0,
+        ge=0,
         description="Insert one ad every N organic items (0 = disabled).",
     )
-    ads_canary_percent: int = Field(
+    first_slot_after: int = Field(
+        default=0,
+        ge=0,
+        description="Minimum number of organic cards before the first slot becomes eligible.",
+    )
+
+
+class AdsSurfacesConfig(BaseModel):
+    """Surface-specific ad settings."""
+
+    articles: AdSurfaceConfig = Field(default_factory=AdSurfaceConfig)
+    videos: AdSurfaceConfig = Field(default_factory=AdSurfaceConfig)
+    reels: AdSurfaceConfig = Field(default_factory=AdSurfaceConfig)
+
+
+class AdsRuntimeConfig(BaseModel):
+    """Raw operator-configurable runtime ad settings."""
+
+    enabled: bool = False
+    provider: Literal["admob_native"] = "admob_native"
+    canary_percent: int = Field(
         default=0,
         ge=0,
         le=100,
-        description="Percent of requests that receive ads (for gradual rollout).",
+        description="Percent of devices that are eligible to request ads.",
     )
+    config_ttl_seconds: int = Field(
+        default=300,
+        ge=1,
+        description="Client-side cache TTL for config refresh.",
+    )
+    surfaces: AdsSurfacesConfig = Field(default_factory=AdsSurfacesConfig)
+
+
+class AdsClientConfig(AdsRuntimeConfig):
+    """Effective caller-specific runtime ad settings."""
+
+    eligible: bool = False
+
+
+class AdSurfaceConfigPatch(BaseModel):
+    """Partial per-surface ad config update."""
+
+    enabled: bool | None = None
+    frequency: int | None = Field(default=None, ge=0)
+    first_slot_after: int | None = Field(default=None, ge=0)
+
+    model_config = {"extra": "forbid"}
+
+
+class AdsSurfacesConfigPatch(BaseModel):
+    """Partial surface config update."""
+
+    articles: AdSurfaceConfigPatch | None = None
+    videos: AdSurfaceConfigPatch | None = None
+    reels: AdSurfaceConfigPatch | None = None
+
+    model_config = {"extra": "forbid"}
+
+
+class AdsRuntimeConfigPatch(BaseModel):
+    """Partial runtime config update."""
+
+    enabled: bool | None = None
+    provider: Literal["admob_native"] | None = None
+    canary_percent: int | None = Field(default=None, ge=0, le=100)
+    config_ttl_seconds: int | None = Field(default=None, ge=1)
+    surfaces: AdsSurfacesConfigPatch | None = None
+
+    model_config = {"extra": "forbid"}
+
+
+class AdsConfigAdminResponse(BaseModel):
+    """Admin response for the raw ads config."""
+
+    ads: AdsRuntimeConfig
+    source: str
 
 
 class AppConfigResponse(BaseModel):
     """Top-level response for GET /config."""
 
-    ads: AdsConfig = Field(default_factory=AdsConfig)
+    ads: AdsClientConfig = Field(default_factory=AdsClientConfig)

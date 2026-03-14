@@ -10,12 +10,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.core.auth import require_admin_key
+from app.core.dependencies import get_redis
 from app.core.feature_flags import FeatureFlags, get_feature_flags
 from app.core.logging import get_logger
 from app.core.youtube_quota import YouTubeQuotaBudget
+from app.schemas.ads import AdsConfigAdminResponse, AdsRuntimeConfigPatch
+from app.services.ad_config_service import AdConfigService
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(require_admin_key)])
+
+
+def get_ad_config_service(redis_client=Depends(get_redis)) -> AdConfigService:
+    """Provide the runtime ad config service."""
+    return AdConfigService(redis_client=redis_client)
 
 
 class FeatureFlagUpdate(BaseModel):
@@ -30,6 +38,44 @@ class FeatureFlagResponse(BaseModel):
     feature: str
     enabled: bool
     source: str
+
+
+@router.get("/ads/config", response_model=AdsConfigAdminResponse)
+def get_ads_config(
+    ad_config_service: AdConfigService = Depends(get_ad_config_service),
+):
+    """Return the raw runtime ads config and its source."""
+    config, source = ad_config_service.get_raw_config()
+    return AdsConfigAdminResponse(ads=config, source=source)
+
+
+@router.patch("/ads/config", response_model=AdsConfigAdminResponse)
+def patch_ads_config(
+    update: AdsRuntimeConfigPatch,
+    ad_config_service: AdConfigService = Depends(get_ad_config_service),
+):
+    """Update runtime ads config with a partial patch."""
+    try:
+        config = ad_config_service.update_config(update)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    logger.info("Runtime ads config updated")
+    return AdsConfigAdminResponse(ads=config, source="redis")
+
+
+@router.delete("/ads/config", response_model=AdsConfigAdminResponse)
+def reset_ads_config(
+    ad_config_service: AdConfigService = Depends(get_ad_config_service),
+):
+    """Reset runtime ads config to environment defaults."""
+    try:
+        config = ad_config_service.reset_config()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    logger.info("Runtime ads config reset to defaults")
+    return AdsConfigAdminResponse(ads=config, source="default")
 
 
 @router.get("/flags", response_model=Dict[str, Any])
