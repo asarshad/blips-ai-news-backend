@@ -3,6 +3,7 @@ from app.integrations.youtube_channels import (
     ContentFormat,
     dedupe_channel_configs,
     get_channel_by_id,
+    get_channel_by_name,
     get_enabled_channels,
 )
 
@@ -41,3 +42,17 @@ def test_corrected_channel_ids_resolve_expected_channels():
 
     assert openai is not None
     assert openai.name == "OpenAI"
+
+
+def test_channel_name_lookup_prefers_high_confidence_matches():
+    mkbhd = get_channel_by_name("Marques Brownlee")
+    apple = get_channel_by_name("Apple")
+    unknown = get_channel_by_name("Unknown Tech Channel")
+
+    assert mkbhd is not None
+    assert mkbhd.name == "Marques Brownlee (MKBHD)"
+
+    assert apple is not None
+    assert apple.name == "Apple"
+
+    assert unknown is None
