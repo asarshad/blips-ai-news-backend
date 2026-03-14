@@ -180,13 +180,33 @@ class Settings(BaseSettings):
     RESERVOIR_REELS: int = 320
 
     # ------------------------------------------------------------------
-    # Ads (architecture only — no SDK, all OFF by default)
+    # Legacy backend-injected ads (kept OFF; session playlist is organic-only)
     # ------------------------------------------------------------------
     ADS_ENABLED: bool = False
     ADS_FEED_CARD_ENABLED: bool = False
     ADS_BANNER_ENABLED: bool = False
     ADS_FEED_FREQUENCY: int = 0  # 1 ad every N organic items (0 = disabled)
     ADS_CANARY_PERCENT: int = 0  # % of requests that receive ads (gradual rollout)
+
+    # ------------------------------------------------------------------
+    # Runtime mobile ads config (Redis override + env fallback)
+    # ------------------------------------------------------------------
+    ADS_RUNTIME_ENABLED: bool = True
+    ADS_PROVIDER: str = "admob_native"
+    ADS_RUNTIME_CANARY_PERCENT: int = 5
+    ADS_CONFIG_TTL_SECONDS: int = 300
+
+    ADS_ARTICLES_ENABLED: bool = True
+    ADS_ARTICLES_FREQUENCY: int = 8
+    ADS_ARTICLES_FIRST_SLOT_AFTER: int = 2
+
+    ADS_VIDEOS_ENABLED: bool = True
+    ADS_VIDEOS_FREQUENCY: int = 8
+    ADS_VIDEOS_FIRST_SLOT_AFTER: int = 2
+
+    ADS_REELS_ENABLED: bool = False
+    ADS_REELS_FREQUENCY: int = 0
+    ADS_REELS_FIRST_SLOT_AFTER: int = 0
 
     # Top-up controls
     TOPUP_LOCK_TTL_SECONDS: int = 120
