@@ -200,3 +200,20 @@ def test_fresh_promoted_count_applies_curated_only_policy(monkeypatch):
 
     assert count == 3
     assert seen["content_type"] == ContentType.VIDEO
+
+
+def test_should_fill_surface_when_recent_video_refresh_is_stale(monkeypatch):
+    counts = {
+        (ContentType.VIDEO, 168): 79,
+        (ContentType.VIDEO, checkpoint_defaults.settings.VIDEOS_REFRESH_PUBLISHED_HOURS): 0,
+    }
+
+    monkeypatch.setattr(
+        checkpoint_defaults,
+        "_fresh_promoted_count",
+        lambda _db, content_type, *, hours: counts[(content_type, hours)],
+    )
+
+    should_fill = checkpoint_defaults._should_fill_surface(object(), ContentType.VIDEO)
+
+    assert should_fill is True

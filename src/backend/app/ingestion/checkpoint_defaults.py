@@ -155,6 +155,14 @@ def _fresh_promoted_count(db, content_type: ContentType, *, hours: int) -> int:
     return int(count or 0)
 
 
+def _recent_refresh_requirement(content_type: ContentType) -> tuple[int, int]:
+    if content_type == ContentType.VIDEO:
+        return settings.VIDEOS_REFRESH_PUBLISHED_HOURS, settings.MIN_REFRESH_VIDEOS
+    if content_type == ContentType.REEL:
+        return settings.REELS_REFRESH_PUBLISHED_HOURS, settings.MIN_REFRESH_REELS
+    return settings.ARTICLES_FRESH_PUBLISHED_HOURS, settings.MIN_FRESH_ARTICLES
+
+
 def _should_fill_surface(db, content_type: ContentType) -> bool:
     if db is None:
         return True
@@ -165,14 +173,26 @@ def _should_fill_surface(db, content_type: ContentType) -> bool:
             ContentType.VIDEO,
             hours=settings.VIDEOS_FRESH_PUBLISHED_HOURS,
         )
-        return fresh_count < settings.MIN_FRESH_VIDEOS
+        refresh_hours, refresh_min = _recent_refresh_requirement(ContentType.VIDEO)
+        recent_count = _fresh_promoted_count(
+            db,
+            ContentType.VIDEO,
+            hours=refresh_hours,
+        )
+        return fresh_count < settings.MIN_FRESH_VIDEOS or recent_count < refresh_min
 
     fresh_count = _fresh_promoted_count(
         db,
         ContentType.REEL,
         hours=settings.REELS_FRESH_PUBLISHED_HOURS,
     )
-    return fresh_count < settings.MIN_FRESH_REELS
+    refresh_hours, refresh_min = _recent_refresh_requirement(ContentType.REEL)
+    recent_count = _fresh_promoted_count(
+        db,
+        ContentType.REEL,
+        hours=refresh_hours,
+    )
+    return fresh_count < settings.MIN_FRESH_REELS or recent_count < refresh_min
 
 
 def build_defaults(*, db=None, day_utc: date | None = None) -> List[FeedDefault]:

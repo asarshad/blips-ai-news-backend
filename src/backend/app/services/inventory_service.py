@@ -88,6 +88,9 @@ class SurfaceHealth:
     min_fresh_threshold: int
     reservoir_threshold: int
     source_distribution: SourceDistribution
+    recent_refresh_count: int = 0
+    recent_refresh_threshold: int = 0
+    refresh_window_hours: int = 0
     is_healthy: bool = True
     issues: List[str] = field(default_factory=list)
 
@@ -99,6 +102,9 @@ class SurfaceHealth:
             "oldest_tier_a_age_seconds": self.oldest_tier_a_age_seconds,
             "reservoir_count": self.reservoir_count,
             "min_fresh_threshold": self.min_fresh_threshold,
+            "recent_refresh_count": self.recent_refresh_count,
+            "recent_refresh_threshold": self.recent_refresh_threshold,
+            "refresh_window_hours": self.refresh_window_hours,
             "reservoir_threshold": self.reservoir_threshold,
             "is_healthy": self.is_healthy,
             "issues": self.issues,
@@ -142,6 +148,8 @@ def _get_surface_config(surface: Surface) -> Dict[str, int]:
             "backfill_hours": settings.VIDEOS_BACKFILL_CREATED_HOURS,
             "evergreen_days": settings.VIDEOS_EVERGREEN_MAX_DAYS,
             "min_fresh": settings.MIN_FRESH_VIDEOS,
+            "refresh_hours": settings.VIDEOS_REFRESH_PUBLISHED_HOURS,
+            "min_refresh": settings.MIN_REFRESH_VIDEOS,
             "reservoir": settings.RESERVOIR_VIDEOS,
         }
     else:  # REELS
@@ -150,6 +158,8 @@ def _get_surface_config(surface: Surface) -> Dict[str, int]:
             "backfill_hours": settings.REELS_BACKFILL_CREATED_HOURS,
             "evergreen_days": settings.REELS_EVERGREEN_MAX_DAYS,
             "min_fresh": settings.MIN_FRESH_REELS,
+            "refresh_hours": settings.REELS_REFRESH_PUBLISHED_HOURS,
+            "min_refresh": settings.MIN_REFRESH_REELS,
             "reservoir": settings.RESERVOIR_REELS,
         }
 
@@ -182,6 +192,7 @@ def compute_surface_health(
     content_type = _surface_to_content_type(surface)
 
     fresh_cutoff = now - timedelta(hours=cfg["fresh_hours"])
+    refresh_cutoff = now - timedelta(hours=cfg.get("refresh_hours", cfg["fresh_hours"]))
     backfill_cutoff = now - timedelta(hours=cfg["backfill_hours"])
     evergreen_cutoff = now - timedelta(days=cfg["evergreen_days"])
 
@@ -243,6 +254,16 @@ def compute_surface_health(
         tier_c=tier_c_count,
     )
 
+    recent_refresh_count = (
+        apply_content_policy(
+            db.query(func.count(ContentItem.id)).select_from(ContentItem),
+            content_type=content_type,
+        )
+        .filter(base_filter, ContentItem.published_at >= refresh_cutoff)
+        .scalar()
+        or 0
+    )
+
     # Reservoir count (total available content within max age)
     reservoir_count = (
         apply_content_policy(
@@ -296,6 +317,14 @@ def compute_surface_health(
         issues.append(f"Fresh content below minimum: {tier_a_count} < {cfg['min_fresh']}")
         is_healthy = False
 
+    if recent_refresh_count < cfg.get("min_refresh", cfg["min_fresh"]):
+        issues.append(
+            "Recent refresh below minimum: "
+            f"{recent_refresh_count} < {cfg.get('min_refresh', cfg['min_fresh'])} "
+            f"in last {cfg.get('refresh_hours', cfg['fresh_hours'])}h"
+        )
+        is_healthy = False
+
     if reservoir_count < cfg["reservoir"]:
         issues.append(f"Reservoir below target: {reservoir_count} < {cfg['reservoir']}")
         is_healthy = False
@@ -311,6 +340,9 @@ def compute_surface_health(
         oldest_tier_a_age_seconds=oldest_tier_a_age,
         reservoir_count=reservoir_count,
         min_fresh_threshold=cfg["min_fresh"],
+        recent_refresh_count=recent_refresh_count,
+        recent_refresh_threshold=cfg.get("min_refresh", cfg["min_fresh"]),
+        refresh_window_hours=cfg.get("refresh_hours", cfg["fresh_hours"]),
         reservoir_threshold=cfg["reservoir"],
         source_distribution=source_distribution,
         is_healthy=is_healthy,
