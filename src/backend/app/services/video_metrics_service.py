@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.content import ContentItem, ContentStatus, ContentType, EventType, InteractionEvent
 from app.models.video_source import VideoDiscoveryRun, VideoSourceProfile
+from app.services.inventory_service import Surface, SurfaceHealth, compute_surface_health
 from app.services.video_baseline_service import load_baseline_snapshot, numeric_delta
 from app.services.video_content_policy import apply_content_policy
 from app.services.video_source_service import refresh_video_source_health
@@ -21,6 +22,10 @@ from app.services.video_source_service import refresh_video_source_health
 
 def _surface_type(surface: str) -> ContentType:
     return ContentType.REEL if surface == "reels" else ContentType.VIDEO
+
+
+def _inventory_surface(surface: str) -> Surface:
+    return Surface.REELS if surface == "reels" else Surface.VIDEOS
 
 
 def _surface_floor(surface: str) -> int:
@@ -216,17 +221,64 @@ def _surface_metrics(
 
 
 def _inventory_state(
-    surface: str, fresh_inventory: int, top_count: int, dominant_count: int
+    surface: str,
+    fresh_inventory: int,
+    top_count: int,
+    dominant_count: int,
+    *,
+    recent_refresh_count: Optional[int] = None,
+    recent_refresh_threshold: Optional[int] = None,
+    is_surface_healthy: Optional[bool] = None,
 ) -> str:
     floor = _surface_floor(surface)
     dominant_pct = dominant_count / max(top_count, 1)
     if fresh_inventory < floor:
         return "warming_up"
+    if (
+        recent_refresh_count is not None
+        and recent_refresh_threshold is not None
+        and recent_refresh_count < recent_refresh_threshold
+    ):
+        return "needs_refresh"
     if surface == "reels" and dominant_pct > 0.15:
         return "imbalanced"
     if surface == "videos" and dominant_pct > 0.20:
         return "imbalanced"
+    if is_surface_healthy is False:
+        return "degraded"
     return "healthy"
+
+
+def _merge_surface_health(
+    surface: str,
+    metrics: Dict[str, Any],
+    surface_health: SurfaceHealth,
+) -> Dict[str, Any]:
+    top_count = min(metrics.get("fresh_inventory_window", 0), 20)
+    dominant_pct = float(metrics.get("dominant_channel_pct_top20") or 0.0)
+    dominant_count = round(dominant_pct * top_count / 100) if top_count else 0
+
+    return {
+        **metrics,
+        "recent_refresh_count": surface_health.recent_refresh_count,
+        "recent_refresh_threshold": surface_health.recent_refresh_threshold,
+        "refresh_window_hours": surface_health.refresh_window_hours,
+        "reservoir_count": surface_health.reservoir_count,
+        "reservoir_threshold": surface_health.reservoir_threshold,
+        "newest_item_age_seconds": surface_health.newest_item_age_seconds,
+        "oldest_tier_a_age_seconds": surface_health.oldest_tier_a_age_seconds,
+        "is_healthy": surface_health.is_healthy,
+        "issues": list(surface_health.issues),
+        "inventory_state": _inventory_state(
+            surface,
+            metrics.get("fresh_inventory_window", 0),
+            top_count,
+            dominant_count,
+            recent_refresh_count=surface_health.recent_refresh_count,
+            recent_refresh_threshold=surface_health.recent_refresh_threshold,
+            is_surface_healthy=surface_health.is_healthy,
+        ),
+    }
 
 
 def _with_deltas(
@@ -268,6 +320,10 @@ def compute_video_supply_metrics(
     profiles = _profile_lookup(db)
     now = datetime.utcnow()
     baseline = load_baseline_snapshot(baseline_tag)
+    surface_health = {
+        surface: compute_surface_health(db, _inventory_surface(surface), now)
+        for surface in ("videos", "reels")
+    }
 
     surfaces: Dict[str, Any] = {}
     for surface in ("videos", "reels"):
@@ -294,6 +350,7 @@ def compute_video_supply_metrics(
             end=current_end,
             profiles=profiles,
         )
+        current = _merge_surface_health(surface, current, surface_health[surface])
         previous = _surface_metrics(
             db,
             surface,
