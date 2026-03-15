@@ -251,15 +251,30 @@ def ui_dashboard(
         prefix = "+" if value > 0 else ""
         return f"{prefix}{value}"
 
+    def _health_color(state: str) -> str:
+        return {
+            "healthy": "green",
+            "imbalanced": "red",
+            "needs_refresh": "yellow",
+            "warming_up": "yellow",
+            "degraded": "red",
+        }.get(state, "gray")
+
     def _video_kpi_card(surface: str, label: str) -> str:
         metrics = video_supply["surfaces"][surface]
         fresh_delta = metrics["deltas"]["fresh_inventory_24h"]
         dominance_delta = metrics["deltas"]["dominant_channel_pct_top20"]
         window_label = metrics["inventory_window_label"]
+        state = metrics["inventory_state"].replace("_", " ")
+        issues = metrics.get("issues") or []
+        issue_hint = f" | issue: {issues[0]}" if issues else ""
         return _stat_card(
             label,
             str(metrics["fresh_inventory_window"]),
             (
+                f"state {state} | "
+                f"refresh {metrics['recent_refresh_count']}/{metrics['recent_refresh_threshold']} "
+                f"in {metrics['refresh_window_hours']}h{issue_hint} | "
                 f"rolling window {window_label} | "
                 f"median age {metrics['median_age_top20_hours'] or '—'}h | "
                 f"distinct channels {metrics['distinct_active_channels_window']} | "
@@ -268,7 +283,7 @@ def ui_dashboard(
                 f"7d {_fmt_delta(fresh_delta['vs_7d'])} | "
                 f"dominance {metrics['dominant_channel_pct_top20']}% ({_fmt_delta(dominance_delta['vs_24h'])})"
             ),
-            "purple" if surface == "reels" else "blue",
+            _health_color(metrics["inventory_state"]),
         )
 
     # ── Pipeline counts (48h window) ──────────────────────────────────────
@@ -514,11 +529,21 @@ def ui_dashboard(
     } / {video_supply["surfaces"]["videos"]["floor_target"]} ({
         video_supply["surfaces"]["videos"]["inventory_window_label"]
     })</span></div>
+          <div class="flex justify-between"><span>Videos recent refresh</span><span class="font-semibold">{
+        video_supply["surfaces"]["videos"]["recent_refresh_count"]
+    } / {video_supply["surfaces"]["videos"]["recent_refresh_threshold"]} ({
+        video_supply["surfaces"]["videos"]["refresh_window_hours"]
+    }h)</span></div>
           <div class="flex justify-between"><span>Reels rolling inventory</span><span class="font-semibold">{
         video_supply["surfaces"]["reels"]["fresh_inventory_window"]
     } / {video_supply["surfaces"]["reels"]["floor_target"]} ({
         video_supply["surfaces"]["reels"]["inventory_window_label"]
     })</span></div>
+          <div class="flex justify-between"><span>Reels recent refresh</span><span class="font-semibold">{
+        video_supply["surfaces"]["reels"]["recent_refresh_count"]
+    } / {video_supply["surfaces"]["reels"]["recent_refresh_threshold"]} ({
+        video_supply["surfaces"]["reels"]["refresh_window_hours"]
+    }h)</span></div>
           <div class="flex justify-between"><span>Videos median age</span><span class="font-semibold">{
         video_supply["surfaces"]["videos"]["median_age_top20_hours"] or "—"
     }h</span></div>
@@ -531,6 +556,30 @@ def ui_dashboard(
           <div class="flex justify-between"><span>Reels dominant channel</span><span class="font-semibold">{
         video_supply["surfaces"]["reels"]["dominant_channel_pct_top20"]
     }%</span></div>
+          <div class="flex justify-between"><span>Videos state</span><span class="font-semibold">{
+        video_supply["surfaces"]["videos"]["inventory_state"].replace("_", " ")
+    }</span></div>
+          <div class="flex justify-between"><span>Reels state</span><span class="font-semibold">{
+        video_supply["surfaces"]["reels"]["inventory_state"].replace("_", " ")
+    }</span></div>
+          {
+        (
+            '<div class="pt-2 border-t border-gray-100">'
+            '<div class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Active issues</div>'
+            + "".join(
+                f'<div class="text-sm text-gray-700 mb-1">Videos: {_esc(issue)}</div>'
+                for issue in video_supply["surfaces"]["videos"]["issues"]
+            )
+            + "".join(
+                f'<div class="text-sm text-gray-700 mb-1">Reels: {_esc(issue)}</div>'
+                for issue in video_supply["surfaces"]["reels"]["issues"]
+            )
+            + "</div>"
+        )
+        if video_supply["surfaces"]["videos"]["issues"]
+        or video_supply["surfaces"]["reels"]["issues"]
+        else '<div class="pt-2 border-t border-gray-100 text-sm text-gray-400">No active video/reel health issues.</div>'
+    }
         </div>
       </div>
       <div class="bg-white rounded-lg shadow p-5">
