@@ -52,6 +52,9 @@ class TestSurfaceHealth:
             min_fresh_threshold=min_fresh,
             reservoir_threshold=reservoir,
             source_distribution=SourceDistribution(),
+            recent_refresh_count=min(tier_a, 8),
+            recent_refresh_threshold=8,
+            refresh_window_hours=24,
             is_healthy=tier_a >= min_fresh,
             issues=[],
         )
@@ -86,6 +89,9 @@ class TestInventoryHealth:
             min_fresh_threshold=min_fresh,
             reservoir_threshold=200,
             source_distribution=SourceDistribution(),
+            recent_refresh_count=min(tier_a, 8),
+            recent_refresh_threshold=8,
+            refresh_window_hours=24,
             is_healthy=is_healthy,
             issues=[] if is_healthy else [f"Below min fresh: {tier_a}/{min_fresh}"],
         )
@@ -142,6 +148,15 @@ class TestInventoryHealth:
         assert d["is_healthy"] is True
         assert d["needs_topup"] is False
         assert "articles" in d["surfaces"]
+
+    def test_surface_health_serializes_recent_refresh_fields(self):
+        health = TestSurfaceHealth()._make_surface_health()
+
+        data = health.to_dict()
+
+        assert data["recent_refresh_count"] == 8
+        assert data["recent_refresh_threshold"] == 8
+        assert data["refresh_window_hours"] == 24
 
 
 class TestHealthCaching:

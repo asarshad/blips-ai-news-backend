@@ -147,11 +147,15 @@ class Settings(BaseSettings):
     VIDEOS_FRESH_PUBLISHED_HOURS: int = 168
     VIDEOS_BACKFILL_CREATED_HOURS: int = 72
     VIDEOS_EVERGREEN_MAX_DAYS: int = 30
+    VIDEOS_REFRESH_PUBLISHED_HOURS: int = 36
+    MIN_REFRESH_VIDEOS: int = 8
 
     # Reels: long evergreen window (shorts stay relevant longer)
     REELS_FRESH_PUBLISHED_HOURS: int = 168  # 7 days
     REELS_BACKFILL_CREATED_HOURS: int = 72
     REELS_EVERGREEN_MAX_DAYS: int = 45
+    REELS_REFRESH_PUBLISHED_HOURS: int = 24
+    MIN_REFRESH_REELS: int = 12
 
     # Reels quality enforcement (defense-in-depth)
     REEL_MAX_DURATION_SECONDS: int = 180  # 3 minutes — anything longer is a VIDEO
