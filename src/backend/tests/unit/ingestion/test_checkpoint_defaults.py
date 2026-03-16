@@ -7,7 +7,7 @@ from enum import Enum
 from types import ModuleType, SimpleNamespace
 
 from app.ingestion import checkpoint_defaults
-from app.ingestion.checkpoint_defaults import build_defaults, get_reel_auto_pause_decisions
+from app.ingestion.checkpoint_defaults import build_defaults
 from app.models.content import ContentType
 
 
@@ -115,75 +115,6 @@ def test_build_defaults_always_creates_youtube_rows_regardless_of_inventory(monk
     assert "rss" in source_types
     assert "youtube_video" in source_types
     assert "youtube_reel" in source_types
-
-
-def test_reel_guardrail_is_disabled_in_curated_only_mode(monkeypatch):
-    db = _FakeDb(
-        [
-            SimpleNamespace(
-                feed_name="No Yield Feed",
-                day_utc=date(2026, 3, 8),
-                items_attempted=65,
-                items_ingested=0,
-            )
-        ]
-    )
-    monkeypatch.setattr(checkpoint_defaults.settings, "YOUTUBE_CURATED_ONLY", True)
-
-    paused = get_reel_auto_pause_decisions(
-        db=db,
-        day_utc=date(2026, 3, 9),
-        feed_names=["No Yield Feed"],
-    )
-
-    assert paused == {}
-
-
-def test_reel_guardrail_pauses_after_five_low_conversion_days_when_enabled(monkeypatch):
-    db = _FakeDb(
-        [
-            SimpleNamespace(
-                feed_name="Low Conversion Feed",
-                day_utc=date(2026, 3, 8),
-                items_attempted=100,
-                items_ingested=1,
-            ),
-            SimpleNamespace(
-                feed_name="Low Conversion Feed",
-                day_utc=date(2026, 3, 7),
-                items_attempted=90,
-                items_ingested=1,
-            ),
-            SimpleNamespace(
-                feed_name="Low Conversion Feed",
-                day_utc=date(2026, 3, 6),
-                items_attempted=80,
-                items_ingested=1,
-            ),
-            SimpleNamespace(
-                feed_name="Low Conversion Feed",
-                day_utc=date(2026, 3, 5),
-                items_attempted=75,
-                items_ingested=1,
-            ),
-            SimpleNamespace(
-                feed_name="Low Conversion Feed",
-                day_utc=date(2026, 3, 4),
-                items_attempted=70,
-                items_ingested=1,
-            ),
-        ]
-    )
-    monkeypatch.setattr(checkpoint_defaults.settings, "YOUTUBE_CURATED_ONLY", False)
-
-    paused = get_reel_auto_pause_decisions(
-        db=db,
-        day_utc=date(2026, 3, 9),
-        feed_names=["Low Conversion Feed"],
-    )
-
-    assert "Low Conversion Feed" in paused
-    assert "conversion<2%" in paused["Low Conversion Feed"]
 
 
 def test_fresh_promoted_count_applies_curated_only_policy(monkeypatch):

@@ -58,12 +58,7 @@ def get_source_health_metrics(db: Session = Depends(get_db)):
     yesterday = today - timedelta(days=1)
 
     try:
-        from app.ingestion.checkpoint_defaults import (
-            build_defaults as build_ingestion_defaults,
-        )
-        from app.ingestion.checkpoint_defaults import (
-            get_reel_auto_pause_decisions,
-        )
+        from app.models.video_source import VideoSourceProfile
 
         # Get today's ingestion progress for all feeds
         progress_rows = (
@@ -161,17 +156,13 @@ def get_source_health_metrics(db: Session = Depends(get_db)):
                 }
             )
 
-        reel_feed_names = sorted(
-            {
-                d.feed_name
-                for d in build_ingestion_defaults(day_utc=today)
-                if d.source_type == "youtube_reel"
-            }
-        )
-        paused_reel_feeds = get_reel_auto_pause_decisions(
-            db=db,
-            day_utc=today,
-            feed_names=reel_feed_names,
+        demoted_channels = (
+            db.query(VideoSourceProfile)
+            .filter(
+                VideoSourceProfile.enabled.is_(True),
+                VideoSourceProfile.status.in_(["discovery", "blocked"]),
+            )
+            .all()
         )
 
         return {
@@ -179,15 +170,22 @@ def get_source_health_metrics(db: Session = Depends(get_db)):
             "today": today.isoformat(),
             "sources": list(sources.values()),
             "source_daily_stats": daily_stats,
-            "auto_paused_reel_feeds": [
-                {"feed_name": feed_name, "reason": reason}
-                for feed_name, reason in sorted(paused_reel_feeds.items())
+            "demoted_channels": [
+                {
+                    "channel_id": ch.channel_id,
+                    "channel_name": ch.channel_name,
+                    "status": ch.status,
+                    "score_7d": ch.score_7d,
+                    "promotion_rate_7d": ch.promotion_rate_7d,
+                }
+                for ch in sorted(demoted_channels, key=lambda c: c.score_7d or 0)
             ],
             "problem_feeds": problem_feeds,
             "summary": {
                 "total_sources": len(sources),
                 "total_problem_feeds": len(problem_feeds),
                 "sources_with_failures": sum(1 for s in sources.values() if s["feeds_failed"] > 0),
+                "demoted_channel_count": len(demoted_channels),
             },
         }
 
