@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import math
 import secrets
+from collections import Counter
 from datetime import date, datetime, timedelta
 from typing import Optional
 from urllib.parse import parse_qsl, urlencode, urlparse
@@ -79,29 +80,107 @@ ACTOR = "admin"
 
 def _nav(key: str, active: str = "") -> str:
     def _link(href: str, label: str, name: str) -> str:
-        base = "px-3 py-2 rounded-md text-sm font-medium transition-colors"
+        base = (
+            "shrink-0 inline-flex items-center rounded-full px-3 py-2 text-sm font-medium "
+            "transition-all duration-150"
+        )
         if active == name:
-            cls = f"{base} bg-gray-900 text-white"
+            cls = f"{base} bg-white text-slate-950 shadow-sm"
         else:
-            cls = f"{base} text-gray-300 hover:bg-gray-700 hover:text-white"
+            cls = f"{base} text-slate-300 hover:bg-slate-800/80 hover:text-white"
         return f'<a href="{href}?key={key}" class="{cls}">{label}</a>'
 
     return f"""
-    <nav class="bg-gray-800 shadow mb-8">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="flex items-center justify-between h-14">
-          <div class="flex items-center gap-1">
-            <span class="text-white font-bold text-lg mr-4">⚡ Blips Admin</span>
-            {_link("/api/v1/admin/ui/dashboard", "Dashboard", "dashboard")}
-            {_link("/api/v1/admin/ui/video-lanes", "Video Lanes", "video-lanes")}
-            {_link("/api/v1/admin/ui/video-sources", "Video Sources", "video-sources")}
-            {_link("/api/v1/admin/ui/review", "Review Queue", "review")}
-            {_link("/api/v1/admin/ui/content", "Content", "content")}
-            {_link("/api/v1/admin/ui/submit", "Submit URL", "submit")}
+    <nav class="sticky top-0 z-40 border-b border-slate-200/70 bg-white/85 backdrop-blur-xl">
+      <div class="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div class="min-w-0">
+            <div class="flex items-center gap-3">
+              <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-sm font-semibold tracking-[0.24em] text-white shadow-lg shadow-slate-900/20">BL</div>
+              <div class="min-w-0">
+                <p class="truncate text-base font-semibold tracking-tight text-slate-950">Blips Admin</p>
+                <p class="truncate text-xs text-slate-500">Operations, curation, and feed monitoring</p>
+              </div>
+            </div>
+          </div>
+          <div class="rounded-[1.4rem] bg-slate-950 p-1.5 shadow-[0_18px_50px_-24px_rgba(15,23,42,0.95)] ring-1 ring-slate-800/80">
+            <div class="no-scrollbar flex items-center gap-1 overflow-x-auto px-0.5">
+              {_link("/api/v1/admin/ui/dashboard", "Dashboard", "dashboard")}
+              {_link("/api/v1/admin/ui/video-lanes", "Video Lanes", "video-lanes")}
+              {_link("/api/v1/admin/ui/video-sources", "Video Sources", "video-sources")}
+              {_link("/api/v1/admin/ui/review", "Review Queue", "review")}
+              {_link("/api/v1/admin/ui/content", "Content", "content")}
+              {_link("/api/v1/admin/ui/submit", "Submit URL", "submit")}
+            </div>
           </div>
         </div>
       </div>
     </nav>"""
+
+
+_ADMIN_STYLES = """
+<style>
+  :root {
+    --admin-bg: #f3f6fb;
+    --admin-ink: #0f172a;
+    --admin-muted: #64748b;
+    --admin-line: rgba(148, 163, 184, 0.22);
+    --admin-panel: rgba(255, 255, 255, 0.84);
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+    color: var(--admin-ink);
+    background:
+      radial-gradient(circle at top left, rgba(251, 191, 36, 0.16), transparent 26%),
+      radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 24%),
+      linear-gradient(180deg, #f8fafc 0%, var(--admin-bg) 52%, #eef3f9 100%);
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .glass-panel {
+    background: var(--admin-panel);
+    border: 1px solid var(--admin-line);
+    box-shadow: 0 24px 60px -36px rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(18px);
+  }
+
+  .panel-kicker {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--admin-muted);
+  }
+
+  .table-shell {
+    overflow-x: auto;
+    border-radius: 1.25rem;
+  }
+
+  .table-shell table {
+    min-width: 100%;
+  }
+
+  @media (max-width: 640px) {
+    main {
+      padding-bottom: 5rem;
+    }
+  }
+</style>
+"""
 
 
 def _base(body: str, key: str = "", active: str = "") -> HTMLResponse:
@@ -112,10 +191,11 @@ def _base(body: str, key: str = "", active: str = "") -> HTMLResponse:
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Blips Admin</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  {_ADMIN_STYLES}
 </head>
-<body class="bg-gray-100 min-h-screen">
+<body class="min-h-screen">
   {_nav(key, active)}
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
+  <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
     {body}
   </main>
 </body>
@@ -169,37 +249,170 @@ def _resolve_next_ui_url(
 
 
 def _esc(s: str) -> str:
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    value = "" if s is None else str(s)
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _badge(text: str, color: str) -> str:
     palettes = {
-        "green": "bg-green-100 text-green-800",
-        "yellow": "bg-yellow-100 text-yellow-800",
-        "red": "bg-red-100 text-red-800",
-        "blue": "bg-blue-100 text-blue-800",
-        "gray": "bg-gray-100 text-gray-700",
-        "purple": "bg-purple-100 text-purple-800",
+        "green": "bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200",
+        "yellow": "bg-amber-100 text-amber-900 ring-1 ring-amber-200",
+        "red": "bg-rose-100 text-rose-900 ring-1 ring-rose-200",
+        "blue": "bg-sky-100 text-sky-900 ring-1 ring-sky-200",
+        "gray": "bg-slate-100 text-slate-700 ring-1 ring-slate-200",
+        "purple": "bg-violet-100 text-violet-900 ring-1 ring-violet-200",
     }
     cls = palettes.get(color, palettes["gray"])
-    return f'<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium {cls}">{_esc(text)}</span>'
+    return f'<span class="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium {cls}">{_esc(text)}</span>'
 
 
 def _stat_card(label: str, value: str, sub: str = "", color: str = "blue") -> str:
     border = {
-        "blue": "border-blue-500",
-        "green": "border-green-500",
-        "yellow": "border-yellow-500",
-        "red": "border-red-500",
-        "purple": "border-purple-500",
-        "gray": "border-gray-400",
-    }.get(color, "border-blue-500")
+        "blue": "from-sky-500 to-cyan-400",
+        "green": "from-emerald-500 to-teal-400",
+        "yellow": "from-amber-500 to-orange-400",
+        "red": "from-rose-500 to-pink-400",
+        "purple": "from-violet-500 to-fuchsia-400",
+        "gray": "from-slate-500 to-slate-400",
+    }.get(color, "from-sky-500 to-cyan-400")
     return f"""
-    <div class="bg-white rounded-lg shadow p-5 border-l-4 {border}">
-      <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</div>
-      <div class="mt-1 text-3xl font-bold text-gray-900">{value}</div>
-      {f'<div class="mt-1 text-xs text-gray-500">{sub}</div>' if sub else ""}
+    <div class="glass-panel relative h-full overflow-hidden rounded-[1.6rem] p-5">
+      <div class="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r {border}"></div>
+      <div class="panel-kicker">{label}</div>
+      <div class="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{value}</div>
+      {f'<div class="mt-2 text-sm leading-6 text-slate-600">{sub}</div>' if sub else ""}
     </div>"""
+
+
+def _panel(title: str, body: str, subtitle: str = "", action: str = "", tone: str = "blue") -> str:
+    accent = {
+        "blue": "from-sky-500/40 via-sky-300/0 to-transparent",
+        "green": "from-emerald-500/40 via-emerald-300/0 to-transparent",
+        "yellow": "from-amber-500/45 via-amber-300/0 to-transparent",
+        "red": "from-rose-500/40 via-rose-300/0 to-transparent",
+        "purple": "from-violet-500/45 via-violet-300/0 to-transparent",
+        "slate": "from-slate-500/35 via-slate-300/0 to-transparent",
+    }.get(tone, "from-sky-500/40 via-sky-300/0 to-transparent")
+    return f"""
+    <section class="glass-panel relative overflow-hidden rounded-[1.8rem] p-5 sm:p-6">
+      <div class="absolute inset-x-0 top-0 h-24 bg-gradient-to-r {accent}"></div>
+      <div class="relative">
+        <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p class="panel-kicker">{title}</p>
+            {f'<p class="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{subtitle}</p>' if subtitle else ""}
+          </div>
+          {action}
+        </div>
+        {body}
+      </div>
+    </section>"""
+
+
+def _mini_metric(label: str, value: str, sub: str = "", tone: str = "blue") -> str:
+    palette = {
+        "blue": "border-sky-200 bg-sky-50/80",
+        "green": "border-emerald-200 bg-emerald-50/80",
+        "yellow": "border-amber-200 bg-amber-50/85",
+        "red": "border-rose-200 bg-rose-50/80",
+        "purple": "border-violet-200 bg-violet-50/80",
+        "slate": "border-slate-200 bg-slate-50/80",
+    }.get(tone, "border-sky-200 bg-sky-50/80")
+    return f"""
+    <div class="rounded-2xl border {palette} p-3">
+      <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</div>
+      <div class="mt-1 text-2xl font-semibold tracking-tight text-slate-950">{value}</div>
+      {f'<div class="mt-1 text-xs leading-5 text-slate-500">{sub}</div>' if sub else ""}
+    </div>"""
+
+
+def _data_rows(rows: list[tuple[str, str, str | None]]) -> str:
+    return (
+        '<div class="divide-y divide-slate-200/80">'
+        + "".join(
+            f"""
+            <div class="flex flex-col gap-1 py-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+              <div class="min-w-0">
+                <div class="text-sm font-medium text-slate-700">{_esc(label)}</div>
+                {f'<div class="text-xs leading-5 text-slate-500">{_esc(sub)}</div>' if sub else ""}
+              </div>
+              <div class="text-sm font-semibold text-slate-950">{value}</div>
+            </div>"""
+            for label, value, sub in rows
+        )
+        + "</div>"
+    )
+
+
+def _lane_bucket(value: Optional[str]) -> str:
+    lane = str(value or "").lower()
+    if any(token in lane for token in ("search", "trending", "discovery")):
+        return "discovery"
+    return "curated"
+
+
+def _source_status_tone(status: Optional[str]) -> str:
+    normalized = str(status or "").lower()
+    return {
+        "core": "green",
+        "rotation": "blue",
+        "discovery": "yellow",
+        "paused": "red",
+        "disabled": "red",
+    }.get(normalized, "gray")
+
+
+def _feed_channel(item: dict) -> str:
+    return str(item.get("channel_id") or item.get("source") or "unknown")
+
+
+def _summarize_feed_window(
+    page_one: list[dict],
+    page_two: list[dict],
+    *,
+    remaining_count: int,
+    duration_limit: Optional[int] = None,
+) -> dict:
+    combined = list(page_one) + list(page_two)
+    channels = [_feed_channel(item) for item in combined]
+    channel_counts = Counter(channels)
+    lane_counts = Counter(
+        _lane_bucket(item.get("acquisition_lane") or item.get("discovered_via"))
+        for item in combined
+    )
+    source_status_counts = Counter(str(item.get("source_status") or "unknown") for item in combined)
+    known_durations = [
+        int(item["duration_seconds"])
+        for item in combined
+        if isinstance(item.get("duration_seconds"), (int, float))
+    ]
+
+    return {
+        "item_count": len(combined),
+        "page_one_count": len(page_one),
+        "state": "warming_up"
+        if not page_one
+        else ("caught_up" if remaining_count == 0 else "healthy"),
+        "remaining_count": remaining_count,
+        "unique_channels": len(set(channels)),
+        "max_channel_count": max(channel_counts.values()) if channel_counts else 0,
+        "adjacent_duplicates": sum(
+            1 for a, b in zip(channels, channels[1:], strict=False) if a == b
+        ),
+        "boundary_duplicate": bool(
+            page_one and page_two and _feed_channel(page_one[-1]) == _feed_channel(page_two[0])
+        ),
+        "lane_counts": dict(lane_counts),
+        "source_status_counts": dict(source_status_counts),
+        "known_duration_count": len(known_durations),
+        "max_known_duration": max(known_durations) if known_durations else None,
+        "duration_violations": (
+            sum(1 for value in known_durations if value > duration_limit)
+            if duration_limit is not None
+            else 0
+        ),
+        "sample_items": combined[:6],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -225,9 +438,12 @@ def ui_dashboard(
 ):
     from sqlalchemy import and_, func, or_
 
-    from app.models.content import ContentItem, ContentStatus
+    from app.core.feature_flags import FeatureFlags
+    from app.models.content import ContentItem, ContentStatus, ContentType
     from app.models.signal import SignalURL
-    from app.services.inventory_service import get_pipeline_counts
+    from app.models.video_source import VideoSourceProfile
+    from app.services.inventory_service import Surface, get_pipeline_counts
+    from app.services.tiered_feed_service import get_cached_tiered_feed
     from app.services.video_metrics_service import (
         compute_video_lane_metrics,
         compute_video_supply_metrics,
@@ -242,14 +458,26 @@ def ui_dashboard(
     day_str = selected_date.isoformat()
     day_start = datetime.combine(selected_date, datetime.min.time())
     day_end = day_start + timedelta(days=1)
+    now = datetime.utcnow()
+    window_start = now - timedelta(days=7)
     video_supply = compute_video_supply_metrics(db)
     video_lanes = compute_video_lane_metrics(db, hours=24)
+    feature_flags = FeatureFlags()
+    hybrid_video_rerank = feature_flags.is_enabled("video_hybrid_rerank")
 
     def _fmt_delta(value: Optional[float]) -> str:
         if value is None:
             return "—"
         prefix = "+" if value > 0 else ""
         return f"{prefix}{value}"
+
+    def _fmt_hours(value: Optional[float]) -> str:
+        if value is None:
+            return "—"
+        return f"{round(float(value), 1)}h"
+
+    def _fmt_dt(value: Optional[datetime]) -> str:
+        return value.strftime("%Y-%m-%d %H:%M UTC") if value else "—"
 
     def _health_color(state: str) -> str:
         return {
@@ -286,6 +514,192 @@ def ui_dashboard(
             _health_color(metrics["inventory_state"]),
         )
 
+    def _pipeline_card(label: str, candidate: int, promoted: int, tone: str) -> str:
+        total = candidate + promoted
+        pct = round(promoted / total * 100) if total else 0
+        bar_color = {
+            "blue": "bg-sky-500",
+            "green": "bg-emerald-500",
+            "purple": "bg-violet-500",
+        }.get(tone, "bg-slate-500")
+        return f"""
+        <div class="glass-panel rounded-[1.6rem] p-5">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="panel-kicker">{label}</div>
+              <div class="mt-2 text-3xl font-semibold tracking-tight text-slate-950">{promoted}</div>
+              <div class="mt-1 text-sm text-slate-500">promoted in the last 48 hours</div>
+            </div>
+            {_badge(f"{candidate} candidate", "yellow")}
+          </div>
+          <div class="mt-5">
+            <div class="mb-2 flex items-center justify-between text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+              <span>Promotion rate</span>
+              <span>{pct}%</span>
+            </div>
+            <div class="h-2 overflow-hidden rounded-full bg-slate-200">
+              <div class="{bar_color} h-2 rounded-full" style="width:{pct}%"></div>
+            </div>
+            <div class="mt-3 text-xs text-slate-500">{total} total items through this stage in the last 48 hours.</div>
+          </div>
+        </div>"""
+
+    def _sample_item_card(item: dict) -> str:
+        age_seconds = item.get("published_age_seconds")
+        age_hours = (
+            f"{round(float(age_seconds) / 3600, 1)}h old"
+            if isinstance(age_seconds, (int, float))
+            else None
+        )
+        lane = _lane_bucket(item.get("acquisition_lane") or item.get("discovered_via"))
+        return f"""
+        <div class="rounded-2xl border border-slate-200 bg-white/80 p-3">
+          <div class="flex flex-wrap items-center gap-2">
+            {_badge(f"Tier {item.get('freshness_tier') or '?'}", "blue")}
+            {_badge(lane, "purple" if lane == "discovery" else "gray")}
+          </div>
+          <div class="mt-3 text-sm font-medium leading-6 text-slate-900">{_esc((item.get("title") or "Untitled")[:96])}</div>
+          <div class="mt-2 text-xs text-slate-500">{_esc(item.get("source") or "Unknown")}{f" · {age_hours}" if age_hours else ""}</div>
+        </div>"""
+
+    def _live_surface_card(
+        label: str, surface_key: str, snapshot: dict, duration_limit: Optional[int] = None
+    ) -> str:
+        metrics = video_supply["surfaces"][surface_key]
+        total_items = snapshot["item_count"]
+        discovery_items = snapshot["lane_counts"].get("discovery", 0)
+        discovery_share = round(discovery_items / max(total_items, 1) * 100) if total_items else 0
+        source_badges = "".join(
+            _badge(f"{status} {count}", _source_status_tone(status))
+            for status, count in sorted(
+                snapshot["source_status_counts"].items(),
+                key=lambda item: (-item[1], item[0]),
+            )[:4]
+        ) or _badge("No source tags", "gray")
+        lane_badges = "".join(
+            _badge(
+                f"{bucket} {count}",
+                "purple" if bucket == "discovery" else "gray",
+            )
+            for bucket, count in sorted(
+                snapshot["lane_counts"].items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ) or _badge("No lane mix", "gray")
+        supply_tone = "green" if metrics["is_healthy"] else "yellow"
+        duplicate_summary = (
+            f"{snapshot['adjacent_duplicates']} adjacent"
+            f" · {'yes' if snapshot['boundary_duplicate'] else 'no'} boundary repeat"
+        )
+        rows = [
+            (
+                "Inventory state",
+                _badge(
+                    snapshot["state"].replace("_", " "), _health_color(metrics["inventory_state"])
+                ),
+                f"{metrics['fresh_inventory_window']} promoted items in the rolling window",
+            ),
+            (
+                "Lane mix in sampled feed",
+                lane_badges,
+                f"{discovery_items} discovery items surfaced in the first {total_items}",
+            ),
+            (
+                "Source profile states",
+                source_badges,
+                "Current governance status for channels represented in the sampled window",
+            ),
+            (
+                "Duplicate guard",
+                duplicate_summary,
+                "Measures adjacent duplicates and page-boundary repeats across the first 40 items",
+            ),
+        ]
+        if duration_limit is not None:
+            rows.insert(
+                2,
+                (
+                    "Format integrity",
+                    _badge(
+                        f"{snapshot['duration_violations']} violations",
+                        "red" if snapshot["duration_violations"] else "green",
+                    ),
+                    f"{snapshot['known_duration_count']} known durations, max {snapshot['max_known_duration'] or '—'}s, limit {duration_limit}s",
+                ),
+            )
+        issues_html = (
+            "".join(
+                f'<p class="text-sm leading-6 text-slate-600">{_esc(issue)}</p>'
+                for issue in (metrics.get("issues") or [])[:3]
+            )
+            or '<p class="text-sm leading-6 text-slate-500">No active supply issues.</p>'
+        )
+        sample_html = "".join(_sample_item_card(item) for item in snapshot["sample_items"][:4]) or (
+            '<div class="rounded-2xl border border-dashed border-slate-300 bg-white/70 p-4 text-sm text-slate-500">No surfaced items yet.</div>'
+        )
+        return f"""
+        <div class="rounded-[1.6rem] border border-slate-200/80 bg-white/70 p-5 shadow-[0_20px_45px_-36px_rgba(15,23,42,0.6)]">
+          <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div class="panel-kicker">{label}</div>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                {_badge(metrics["inventory_state"].replace("_", " "), _health_color(metrics["inventory_state"]))}
+                {_badge(f"{discovery_share}% discovery", "purple" if discovery_share else "gray")}
+              </div>
+            </div>
+            <div class="text-sm text-slate-500">Sampled from page 1 and page 2 of the live feed.</div>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {_mini_metric("Page 1 remaining", str(snapshot["page_one_remaining"]), "7-day promoted items after the first page", "blue")}
+            {_mini_metric("Page 2 remaining", str(snapshot["page_two_remaining"]), "remaining after the first 40 items", "slate")}
+            {_mini_metric("Unique channels", str(snapshot["unique_channels"]), "represented in the first 40", "green")}
+            {_mini_metric("Discovery share", f"{discovery_share}%", f"{discovery_items}/{max(total_items, 1)} items", "purple")}
+            {_mini_metric("Refresh gate", f"{metrics['recent_refresh_count']}/{metrics['recent_refresh_threshold']}", f"in the last {metrics['refresh_window_hours']} hours", supply_tone)}
+            {_mini_metric("Reservoir", f"{metrics['reservoir_count']}/{metrics['reservoir_threshold']}", "rolling pool behind the feed", supply_tone)}
+          </div>
+          <div class="mt-5">{_data_rows(rows)}</div>
+          <div class="mt-5 rounded-[1.4rem] border border-slate-200 bg-slate-50/80 p-4">
+            <div class="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Active issues</div>
+            {issues_html}
+          </div>
+          <div class="mt-5 grid gap-3 sm:grid-cols-2">{sample_html}</div>
+        </div>"""
+
+    def _mix_surface_card(surface_key: str, label: str, tone: str) -> str:
+        counts = mix_counts[surface_key]
+        status_counts = promoted_source_status[surface_key]
+        total = sum(counts.values())
+        discovery = counts.get("discovery", 0)
+        curated = counts.get("curated", 0)
+        discovery_share = round(discovery / max(total, 1) * 100) if total else 0
+        status_badges = "".join(
+            _badge(f"{status} {count}", _source_status_tone(status))
+            for status, count in sorted(
+                status_counts.items(), key=lambda item: (-item[1], item[0])
+            )[:4]
+        ) or _badge("No source statuses", "gray")
+        metrics = video_supply["surfaces"][surface_key]
+        return f"""
+        <div class="rounded-[1.5rem] border border-slate-200 bg-white/75 p-4">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="panel-kicker">{label}</div>
+              <div class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{total}</div>
+              <div class="mt-1 text-sm text-slate-500">promoted items published in the last 7 days</div>
+            </div>
+            {_badge(f"{discovery_share}% discovery", tone if discovery else "gray")}
+          </div>
+          <div class="mt-4 grid gap-3 sm:grid-cols-3">
+            {_mini_metric("Curated", str(curated), "promoted in the last 7 days", "slate")}
+            {_mini_metric("Discovery", str(discovery), "search + trending + discovery", tone)}
+            {_mini_metric("Refresh", f"{metrics['recent_refresh_count']}/{metrics['recent_refresh_threshold']}", f"{metrics['inventory_state'].replace('_', ' ')}", "green" if metrics["is_healthy"] else "yellow")}
+          </div>
+          <div class="mt-4">
+            <div class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Source statuses in the promoted pool</div>
+            <div class="mt-2 flex flex-wrap gap-2">{status_badges}</div>
+          </div>
+        </div>"""
+
     # ── Pipeline counts (48h window) ──────────────────────────────────────
     pipeline = get_pipeline_counts(db)
     per_type = pipeline.get("per_type", {})
@@ -299,35 +713,6 @@ def ui_dashboard(
     vid_prom = _pipe_count("videos", "promoted")
     ree_cand = _pipe_count("reels", "candidate")
     ree_prom = _pipe_count("reels", "promoted")
-
-    def _pipeline_card(label: str, candidate: int, promoted: int) -> str:
-        total = candidate + promoted
-        pct = round(promoted / total * 100) if total else 0
-        bar_color = "bg-green-500" if pct >= 50 else "bg-yellow-400"
-        return f"""
-        <div class="bg-white rounded-lg shadow p-5">
-          <div class="flex justify-between items-center mb-3">
-            <span class="font-semibold text-gray-700">{label}</span>
-            <span class="text-xs text-gray-400">{total} total (48h)</span>
-          </div>
-          <div class="flex gap-4 mb-3">
-            <div class="text-center">
-              <div class="text-2xl font-bold text-yellow-600">{candidate}</div>
-              <div class="text-xs text-gray-500">Candidate</div>
-            </div>
-            <div class="text-center">
-              <div class="text-2xl font-bold text-green-600">{promoted}</div>
-              <div class="text-xs text-gray-500">Promoted</div>
-            </div>
-            <div class="text-center ml-auto">
-              <div class="text-2xl font-bold text-gray-700">{pct}%</div>
-              <div class="text-xs text-gray-500">promotion rate</div>
-            </div>
-          </div>
-          <div class="w-full bg-gray-200 rounded-full h-2">
-            <div class="{bar_color} h-2 rounded-full" style="width:{pct}%"></div>
-          </div>
-        </div>"""
 
     # ── Day bucket (ingestion-aware, with legacy fallback) ───────────────
     day_bucket_filter = or_(
@@ -376,7 +761,7 @@ def ui_dashboard(
     # Signal stats (24h)
     signal_seen = (
         db.query(func.count(SignalURL.id))
-        .filter(SignalURL.first_seen_at >= datetime.utcnow() - timedelta(hours=24))
+        .filter(SignalURL.first_seen_at >= now - timedelta(hours=24))
         .scalar()
         or 0
     )
@@ -418,34 +803,58 @@ def ui_dashboard(
         .filter(
             ContentItem.curation_status == ContentStatus.CANDIDATE,
             ContentItem.is_suppressed.is_(False),
-            ContentItem.published_at >= datetime.utcnow() - timedelta(hours=48),
+            ContentItem.published_at >= now - timedelta(hours=48),
         )
         .order_by(ContentItem.promotion_score.desc().nullslast())
         .limit(5)
         .all()
     )
     dashboard_next = f"/api/v1/admin/ui/dashboard?{urlencode({'day': day_str})}"
+    pending_cards_html = ""
     pending_rows_html = ""
     for p in pending_promo:
         score = f"{p.promotion_score:.3f}" if p.promotion_score else "—"
+        discovered_via = _esc(p.discovered_via or "—")
+        item_type = p.type.value if p.type else ""
+        pending_cards_html += f"""
+        <article class="rounded-[1.5rem] border border-slate-200 bg-white/80 p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">#{p.id} · {item_type}</div>
+              <a href="/api/v1/admin/ui/detail/{p.id}?key={admin_key}" class="mt-2 block text-sm font-semibold leading-6 text-slate-900 hover:text-sky-700">{_esc((p.title or "")[:120])}</a>
+            </div>
+            {_badge(f"score {score}", "blue")}
+          </div>
+          <div class="mt-3 flex flex-wrap gap-2">
+            {_badge(discovered_via, "gray")}
+          </div>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <form method="post" action="/api/v1/admin/ui/action/{p.id}/approve-publish?key={admin_key}">
+              <input type="hidden" name="next" value="{dashboard_next}">
+              <input type="hidden" name="boost_level" value="3">
+              <button class="inline-flex items-center rounded-full bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700">Publish top</button>
+            </form>
+            <a href="/api/v1/admin/ui/detail/{p.id}?key={admin_key}" class="inline-flex items-center rounded-full border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Review</a>
+          </div>
+        </article>"""
         pending_rows_html += f"""
-        <tr class="hover:bg-gray-50">
-          <td class="px-3 py-2 text-sm">
-            <a href="/api/v1/admin/ui/detail/{p.id}?key={admin_key}" class="text-blue-600 hover:underline">{p.id}</a>
+        <tr class="border-b border-slate-200/80 last:border-0 hover:bg-slate-50/70">
+          <td class="px-3 py-3 text-sm">
+            <a href="/api/v1/admin/ui/detail/{p.id}?key={admin_key}" class="font-medium text-sky-700 hover:underline">{p.id}</a>
           </td>
-          <td class="px-3 py-2 text-sm text-gray-800 max-w-xs truncate">{_esc((p.title or "")[:70])}</td>
-          <td class="px-3 py-2 text-sm">{p.type.value if p.type else ""}</td>
-          <td class="px-3 py-2 text-sm font-mono">{score}</td>
-          <td class="px-3 py-2 text-sm">{_esc(p.discovered_via or "—")}</td>
-          <td class="px-3 py-2">
+          <td class="max-w-xs px-3 py-3 text-sm text-slate-800">{_esc((p.title or "")[:100])}</td>
+          <td class="px-3 py-3 text-sm">{item_type}</td>
+          <td class="px-3 py-3 text-sm font-mono">{score}</td>
+          <td class="px-3 py-3 text-sm">{discovered_via}</td>
+          <td class="px-3 py-3">
             <div class="flex gap-1">
               <form method="post" action="/api/v1/admin/ui/action/{p.id}/approve-publish?key={admin_key}">
                 <input type="hidden" name="next" value="{dashboard_next}">
                 <input type="hidden" name="boost_level" value="3">
-                <button class="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">Publish top</button>
+                <button class="rounded-full bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700">Publish top</button>
               </form>
               <a href="/api/v1/admin/ui/detail/{p.id}?key={admin_key}"
-                 class="px-2 py-1 text-xs bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50">
+                 class="rounded-full border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
                 Review
               </a>
             </div>
@@ -453,21 +862,251 @@ def ui_dashboard(
         </tr>"""
 
     if not pending_rows_html:
-        pending_rows_html = '<tr><td colspan="6" class="px-3 py-4 text-sm text-gray-400 text-center">No pending candidates</td></tr>'
+        pending_rows_html = '<tr><td colspan="6" class="px-3 py-6 text-center text-sm text-slate-400">No pending candidates</td></tr>'
+    if not pending_cards_html:
+        pending_cards_html = '<div class="rounded-[1.5rem] border border-dashed border-slate-300 bg-white/70 p-5 text-sm text-slate-500">No pending candidates in the last 48 hours.</div>'
 
-    # Day summary table
-    day_table_rows = ""
+    # Day summary cards
+    day_rows_for_panel: list[tuple[str, str, str | None]] = []
     for t in ["ARTICLE", "VIDEO", "REEL"]:
         cand = day_summary.get(t, {}).get("CANDIDATE", 0)
         prom = day_summary.get(t, {}).get("PROMOTED", 0)
         total_t = cand + prom
-        day_table_rows += f"""
-        <tr class="border-b border-gray-100">
-          <td class="px-3 py-2 text-sm font-medium text-gray-700">{t}</td>
-          <td class="px-3 py-2 text-center">{_badge(str(cand), "yellow") if cand else _badge("0", "gray")}</td>
-          <td class="px-3 py-2 text-center">{_badge(str(prom), "green") if prom else _badge("0", "gray")}</td>
-          <td class="px-3 py-2 text-center text-sm text-gray-500">{total_t}</td>
-        </tr>"""
+        day_rows_for_panel.append(
+            (
+                t.title(),
+                f"{prom} promoted · {cand} candidate",
+                f"{total_t} total published on {day_str}",
+            )
+        )
+
+    video_page_one, _, video_meta_one = get_cached_tiered_feed(
+        db,
+        Surface.VIDEOS,
+        limit=20,
+        offset=0,
+        require_ai_processed=False,
+        hybrid_video_rerank=hybrid_video_rerank,
+    )
+    video_page_two, _, video_meta_two = get_cached_tiered_feed(
+        db,
+        Surface.VIDEOS,
+        limit=20,
+        offset=20,
+        require_ai_processed=False,
+        hybrid_video_rerank=hybrid_video_rerank,
+    )
+    reel_page_one, _, reel_meta_one = get_cached_tiered_feed(
+        db,
+        Surface.REELS,
+        limit=20,
+        offset=0,
+        require_ai_processed=False,
+        hybrid_video_rerank=False,
+    )
+    reel_page_two, _, reel_meta_two = get_cached_tiered_feed(
+        db,
+        Surface.REELS,
+        limit=20,
+        offset=20,
+        require_ai_processed=False,
+        hybrid_video_rerank=False,
+    )
+
+    video_window = _summarize_feed_window(
+        video_page_one,
+        video_page_two,
+        remaining_count=(
+            video_meta_two.remaining_window_count
+            if video_page_two
+            else video_meta_one.remaining_window_count
+        ),
+    )
+    video_window["page_one_remaining"] = int(video_meta_one.remaining_window_count or 0)
+    video_window["page_two_remaining"] = int(
+        video_meta_two.remaining_window_count
+        if video_page_two
+        else video_meta_one.remaining_window_count
+    )
+
+    reels_window = _summarize_feed_window(
+        reel_page_one,
+        reel_page_two,
+        remaining_count=(
+            reel_meta_two.remaining_window_count
+            if reel_page_two
+            else reel_meta_one.remaining_window_count
+        ),
+        duration_limit=settings.REEL_MAX_DURATION_SECONDS,
+    )
+    reels_window["page_one_remaining"] = int(reel_meta_one.remaining_window_count or 0)
+    reels_window["page_two_remaining"] = int(
+        reel_meta_two.remaining_window_count
+        if reel_page_two
+        else reel_meta_one.remaining_window_count
+    )
+
+    mix_rows = (
+        db.query(
+            ContentItem.type,
+            ContentItem.acquisition_lane,
+            ContentItem.discovered_via,
+            ContentItem.source_status,
+        )
+        .filter(
+            ContentItem.type.in_([ContentType.VIDEO, ContentType.REEL]),
+            ContentItem.curation_status == ContentStatus.PROMOTED,
+            ContentItem.is_suppressed.is_(False),
+            ContentItem.published_at >= window_start,
+        )
+        .all()
+    )
+    mix_counts = {"videos": Counter(), "reels": Counter()}
+    promoted_source_status = {"videos": Counter(), "reels": Counter()}
+    for content_type, acquisition_lane, discovered_via, source_status in mix_rows:
+        surface_key = "reels" if content_type == ContentType.REEL else "videos"
+        mix_counts[surface_key][_lane_bucket(acquisition_lane or discovered_via)] += 1
+        promoted_source_status[surface_key][str(source_status or "unknown")] += 1
+
+    source_status_counts = Counter(
+        {
+            status: count
+            for status, count in db.query(
+                VideoSourceProfile.status,
+                func.count(VideoSourceProfile.channel_id),
+            )
+            .group_by(VideoSourceProfile.status)
+            .all()
+        }
+    )
+    recent_source_actions = (
+        db.query(VideoSourceProfile)
+        .filter(
+            VideoSourceProfile.status_changed_at.isnot(None),
+            VideoSourceProfile.status_changed_at >= window_start,
+        )
+        .order_by(VideoSourceProfile.status_changed_at.desc())
+        .limit(8)
+        .all()
+    )
+
+    reel_base = [
+        ContentItem.type == ContentType.REEL,
+        ContentItem.curation_status == ContentStatus.PROMOTED,
+        ContentItem.is_suppressed.is_(False),
+        ContentItem.published_at >= window_start,
+    ]
+    reel_total_count = db.query(func.count(ContentItem.id)).filter(*reel_base).scalar() or 0
+    reel_known_count = (
+        db.query(func.count(ContentItem.id))
+        .filter(*reel_base, ContentItem.duration_seconds.isnot(None))
+        .scalar()
+        or 0
+    )
+    reel_duration_violations = (
+        db.query(func.count(ContentItem.id))
+        .filter(
+            *reel_base,
+            ContentItem.duration_seconds.isnot(None),
+            ContentItem.duration_seconds > settings.REEL_MAX_DURATION_SECONDS,
+        )
+        .scalar()
+        or 0
+    )
+    reel_max_duration = (
+        db.query(func.max(ContentItem.duration_seconds))
+        .filter(*reel_base, ContentItem.duration_seconds.isnot(None))
+        .scalar()
+    )
+    reel_unknown_count = max(0, reel_total_count - reel_known_count)
+
+    lane_snapshot_rows: list[tuple[str, str, str | None]] = []
+    for surface_key in ("videos", "reels"):
+        ranked_lanes = sorted(
+            video_lanes["surfaces"].get(surface_key, []),
+            key=lambda row: (row["promoted"], row["promotion_rate"], row["candidates"]),
+            reverse=True,
+        )
+        for row in ranked_lanes[:3]:
+            lane_snapshot_rows.append(
+                (
+                    f"{surface_key.title()} · {row['lane']}",
+                    f"{row['promoted']}/{row['candidates']} ({row['promotion_rate']}%)",
+                    f"median {_fmt_hours(row['median_promoted_age'])} · channels {row['distinct_promoted_channels']} · dup {row['duplicate_rejection_rate']}% · clickbait {row['clickbait_rejection_rate']}%",
+                )
+            )
+
+    top_sources_body = (
+        _data_rows(
+            [
+                (source or "Unknown", str(count), "promoted items on the selected day")
+                for source, count in source_rows
+            ]
+        )
+        if source_rows
+        else '<p class="text-sm leading-6 text-slate-500">No promoted sources for this day.</p>'
+    )
+
+    signal_queue_body = _data_rows(
+        [
+            ("Pending", _badge(str(sig_pending), "yellow"), "waiting to be ingested"),
+            ("Ingested", _badge(str(sig_ingested), "green"), "accepted into the pipeline"),
+            ("Duplicates", _badge(str(sig_duplicate), "gray"), "skipped by dedupe"),
+            ("Rejected", _badge(str(sig_rejected), "red"), "filtered out before ingest"),
+        ]
+    )
+
+    day_bucket_body = _data_rows(day_rows_for_panel)
+
+    source_status_badges = "".join(
+        _badge(f"{status} {count}", _source_status_tone(status))
+        for status, count in sorted(
+            source_status_counts.items(), key=lambda item: (-item[1], item[0])
+        )
+    ) or _badge("No source profiles", "gray")
+
+    source_action_cards = "".join(
+        f"""
+        <div class="rounded-2xl border border-slate-200 bg-white/80 p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-sm font-semibold leading-6 text-slate-900">{_esc(profile.channel_name)}</div>
+              <div class="truncate text-xs font-mono text-slate-500">{_esc(profile.channel_id)}</div>
+            </div>
+            {_badge(profile.status, _source_status_tone(profile.status))}
+          </div>
+          <div class="mt-3 text-xs leading-5 text-slate-500">
+            Changed {_fmt_dt(profile.status_changed_at)}
+            {f" · probation until {_fmt_dt(profile.probation_until)}" if profile.probation_until else ""}
+          </div>
+        </div>"""
+        for profile in recent_source_actions
+    ) or (
+        '<div class="rounded-2xl border border-dashed border-slate-300 bg-white/70 p-4 text-sm text-slate-500">No source status changes recorded in the last 7 days.</div>'
+    )
+
+    lane_snapshot_body = (
+        _data_rows(lane_snapshot_rows)
+        if lane_snapshot_rows
+        else '<p class="text-sm leading-6 text-slate-500">No discovery lane runs captured in the selected window.</p>'
+    )
+
+    reels_supply = video_supply["surfaces"]["reels"]
+    reels_refresh_gap = max(
+        0,
+        reels_supply["recent_refresh_threshold"] - reels_supply["recent_refresh_count"],
+    )
+    reels_reservoir_gap = max(
+        0,
+        reels_supply["reservoir_threshold"] - reels_supply["reservoir_count"],
+    )
+    reel_issues_html = (
+        "".join(
+            f'<p class="text-sm leading-6 text-slate-600">{_esc(issue)}</p>'
+            for issue in (reels_supply.get("issues") or [])[:4]
+        )
+        or '<p class="text-sm leading-6 text-slate-500">No active reel health issues.</p>'
+    )
 
     # Date nav
     prev_day = (selected_date - timedelta(days=1)).isoformat()
@@ -475,197 +1114,242 @@ def ui_dashboard(
     is_today = selected_date == date.today()
 
     body = f"""
-    <div class="flex items-center gap-3 mb-6">
-      <h1 class="text-2xl font-bold text-gray-900">Dashboard</h1>
-      <div class="flex items-center gap-2 ml-4">
-        <a href="?key={admin_key}&day={
+    <section class="mb-8 flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+      <div class="max-w-3xl">
+        <p class="panel-kicker">Operations Dashboard</p>
+        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">Continuous 7-day feed monitor</h1>
+        <p class="mt-3 text-sm leading-7 text-slate-600">
+          Live supply depth, discovery contribution, source health, and editorial load for the video and reel surfaces.
+        </p>
+      </div>
+      <div class="glass-panel rounded-[1.7rem] p-4 sm:p-5">
+        <div class="flex flex-wrap items-center gap-2">
+          <a href="?key={admin_key}&day={
         prev_day
-    }" class="px-2 py-1 rounded bg-white shadow text-sm hover:bg-gray-50">←</a>
-        <form method="get" class="flex items-center gap-2">
-          <input type="hidden" name="key" value="{admin_key}">
-          <input type="date" name="day" value="{day_str}"
-                 class="rounded border border-gray-300 text-sm px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                 onchange="this.form.submit()">
-        </form>
-        {
-        f'<a href="?key={admin_key}&day={next_day}" class="px-2 py-1 rounded bg-white shadow text-sm hover:bg-gray-50">→</a>'
+    }" class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-50">←</a>
+          <form method="get" class="flex flex-wrap items-center gap-2">
+            <input type="hidden" name="key" value="{admin_key}">
+            <input
+              type="date"
+              name="day"
+              value="{day_str}"
+              class="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+              onchange="this.form.submit()"
+            >
+          </form>
+          {
+        f'<a href="?key={admin_key}&day={next_day}" class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-50">→</a>'
         if not is_today
         else ""
     }
-        {_badge("Today", "blue") if is_today else ""}
+          {_badge("Today", "blue") if is_today else _badge(day_str, "gray")}
+        </div>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <a href="/api/v1/admin/ui/video-lanes?key={
+        admin_key
+    }" class="inline-flex items-center rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">Lane performance</a>
+          <a href="/api/v1/admin/ui/video-sources?key={
+        admin_key
+    }" class="inline-flex items-center rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Channel health</a>
+          <a href="/api/v1/admin/ui/review?key={
+        admin_key
+    }" class="inline-flex items-center rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Review queue</a>
+        </div>
       </div>
-    </div>
+    </section>
 
-    <h2 class="text-lg font-semibold text-gray-700 mb-3">Pipeline (last 48 h)</h2>
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-      {_pipeline_card("Articles", art_cand, art_prom)}
-      {_pipeline_card("Videos", vid_cand, vid_prom)}
-      {_pipeline_card("Reels", ree_cand, ree_prom)}
-    </div>
-
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+    <div class="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {_stat_card("Signal URLs seen (24h)", str(signal_seen), "", "purple")}
       {_stat_card("Ingested → candidate", str(sig_ingested), "", "blue")}
       {_stat_card("Duplicates skipped", str(sig_duplicate), "", "gray")}
       {_stat_card("Avg promotion score", str(avg_score), f"promoted items on {day_str}", "green")}
     </div>
 
-    <h2 class="text-lg font-semibold text-gray-700 mb-3">Video And Reels Health</h2>
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+    <div class="mb-8 grid gap-4 lg:grid-cols-3">
+      {_pipeline_card("Articles", art_cand, art_prom, "blue")}
+      {_pipeline_card("Videos", vid_cand, vid_prom, "green")}
+      {_pipeline_card("Reels", ree_cand, ree_prom, "purple")}
+    </div>
+
+    <div class="mb-8 grid gap-4 lg:grid-cols-2">
       {_video_kpi_card("videos", "Videos rolling inventory")}
       {_video_kpi_card("reels", "Reels rolling inventory")}
     </div>
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-      <div class="bg-white rounded-lg shadow p-5">
-        <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide">Supply gates</h3>
-          <a href="/api/v1/admin/ui/video-lanes?key={
-        admin_key
-    }" class="text-sm text-blue-600 hover:underline">Lane performance →</a>
+    {
+        _panel(
+            "Live Feed Experience",
+            f'''
+        <div class="grid gap-6 xl:grid-cols-2">
+          {_live_surface_card("Videos", "videos", video_window)}
+          {_live_surface_card("Reels", "reels", reels_window, duration_limit=settings.REEL_MAX_DURATION_SECONDS)}
         </div>
-        <div class="space-y-2 text-sm text-gray-700">
-          <div class="flex justify-between"><span>Videos rolling inventory</span><span class="font-semibold">{
-        video_supply["surfaces"]["videos"]["fresh_inventory_window"]
-    } / {video_supply["surfaces"]["videos"]["floor_target"]} ({
-        video_supply["surfaces"]["videos"]["inventory_window_label"]
-    })</span></div>
-          <div class="flex justify-between"><span>Videos recent refresh</span><span class="font-semibold">{
-        video_supply["surfaces"]["videos"]["recent_refresh_count"]
-    } / {video_supply["surfaces"]["videos"]["recent_refresh_threshold"]} ({
-        video_supply["surfaces"]["videos"]["refresh_window_hours"]
-    }h)</span></div>
-          <div class="flex justify-between"><span>Reels rolling inventory</span><span class="font-semibold">{
-        video_supply["surfaces"]["reels"]["fresh_inventory_window"]
-    } / {video_supply["surfaces"]["reels"]["floor_target"]} ({
-        video_supply["surfaces"]["reels"]["inventory_window_label"]
-    })</span></div>
-          <div class="flex justify-between"><span>Reels recent refresh</span><span class="font-semibold">{
-        video_supply["surfaces"]["reels"]["recent_refresh_count"]
-    } / {video_supply["surfaces"]["reels"]["recent_refresh_threshold"]} ({
-        video_supply["surfaces"]["reels"]["refresh_window_hours"]
-    }h)</span></div>
-          <div class="flex justify-between"><span>Videos median age</span><span class="font-semibold">{
-        video_supply["surfaces"]["videos"]["median_age_top20_hours"] or "—"
-    }h</span></div>
-          <div class="flex justify-between"><span>Reels median age</span><span class="font-semibold">{
-        video_supply["surfaces"]["reels"]["median_age_top20_hours"] or "—"
-    }h</span></div>
-          <div class="flex justify-between"><span>Videos dominant channel</span><span class="font-semibold">{
-        video_supply["surfaces"]["videos"]["dominant_channel_pct_top20"]
-    }%</span></div>
-          <div class="flex justify-between"><span>Reels dominant channel</span><span class="font-semibold">{
-        video_supply["surfaces"]["reels"]["dominant_channel_pct_top20"]
-    }%</span></div>
-          <div class="flex justify-between"><span>Videos state</span><span class="font-semibold">{
-        video_supply["surfaces"]["videos"]["inventory_state"].replace("_", " ")
-    }</span></div>
-          <div class="flex justify-between"><span>Reels state</span><span class="font-semibold">{
-        video_supply["surfaces"]["reels"]["inventory_state"].replace("_", " ")
-    }</span></div>
-          {
-        (
-            '<div class="pt-2 border-t border-gray-100">'
-            '<div class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Active issues</div>'
-            + "".join(
-                f'<div class="text-sm text-gray-700 mb-1">Videos: {_esc(issue)}</div>'
-                for issue in video_supply["surfaces"]["videos"]["issues"]
-            )
-            + "".join(
-                f'<div class="text-sm text-gray-700 mb-1">Reels: {_esc(issue)}</div>'
-                for issue in video_supply["surfaces"]["reels"]["issues"]
-            )
-            + "</div>"
+        ''',
+            subtitle="These cards mirror what the app is actually serving on page 1 and page 2, rather than only showing backend supply counters.",
         )
-        if video_supply["surfaces"]["videos"]["issues"]
-        or video_supply["surfaces"]["reels"]["issues"]
-        else '<div class="pt-2 border-t border-gray-100 text-sm text-gray-400">No active video/reel health issues.</div>'
     }
-        </div>
-      </div>
-      <div class="bg-white rounded-lg shadow p-5">
-        <div class="flex items-center justify-between mb-3">
-          <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide">Lane snapshot (24h)</h3>
-          <a href="/api/v1/admin/ui/video-sources?key={
-        admin_key
-    }" class="text-sm text-blue-600 hover:underline">Channel health →</a>
-        </div>
-        <div class="space-y-2 text-sm text-gray-700">
-          {
-        "".join(
-            f'<div class="flex justify-between"><span>{surface.title()} {lane["lane"]}</span><span class="font-semibold">{lane["promoted"]}/{lane["candidates"]} ({lane["promotion_rate"]}%)</span></div>'
-            for surface, lanes in video_lanes["surfaces"].items()
-            for lane in lanes[:2]
+
+    <div class="mb-8 grid gap-6 xl:grid-cols-2">
+      {
+        _panel(
+            "Acquisition Mix",
+            f'''
+          <div class="grid gap-4 lg:grid-cols-2">
+            {_mix_surface_card("videos", "Videos", "blue")}
+            {_mix_surface_card("reels", "Reels", "purple")}
+          </div>
+          <div class="mt-5 rounded-[1.5rem] border border-slate-200 bg-white/75 p-4">
+            <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div class="panel-kicker">Lane snapshot (24h)</div>
+              <a href="/api/v1/admin/ui/video-lanes?key={admin_key}" class="text-sm font-medium text-sky-700 hover:underline">Detailed lane view →</a>
+            </div>
+            {lane_snapshot_body}
+          </div>
+          ''',
+            subtitle="Curated and discovery should both contribute. The lane snapshot shows which discovery lanes are actually converting.",
         )
-        or '<p class="text-sm text-gray-400">No discovery runs captured yet.</p>'
     }
-        </div>
-      </div>
+      {
+        _panel(
+            "Source Governance",
+            f'''
+          <div class="rounded-[1.5rem] border border-slate-200 bg-white/75 p-4">
+            <div class="panel-kicker">Current status mix</div>
+            <div class="mt-3 flex flex-wrap gap-2">{source_status_badges}</div>
+          </div>
+          <div class="mt-5 grid gap-3">{source_action_cards}</div>
+          ''',
+            subtitle="Recent source transitions and the current distribution of discovery, rotation, and core channels.",
+            action=f'<a href="/api/v1/admin/ui/video-sources?key={admin_key}" class="text-sm font-medium text-sky-700 hover:underline">Channel health →</a>',
+        )
+    }
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-      <div class="bg-white rounded-lg shadow p-5">
-        <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">
-          Published on {day_str}
-        </h3>
-        <table class="w-full">
-          <thead>
-            <tr class="text-xs text-gray-500 uppercase">
-              <th class="px-3 py-2 text-left">Type</th>
-              <th class="px-3 py-2 text-center">Candidate</th>
-              <th class="px-3 py-2 text-center">Promoted</th>
-              <th class="px-3 py-2 text-center">Total</th>
-            </tr>
-          </thead>
-          <tbody>{day_table_rows}</tbody>
-        </table>
-      </div>
-
-      <div class="bg-white rounded-lg shadow p-5">
-        <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Signal queue (all time)</h3>
-        <div class="space-y-2">
-          <div class="flex justify-between"><span class="text-sm text-gray-600">Pending</span>{
-        _badge(str(sig_pending), "yellow")
-    }</div>
-          <div class="flex justify-between"><span class="text-sm text-gray-600">Ingested</span>{
-        _badge(str(sig_ingested), "green")
-    }</div>
-          <div class="flex justify-between"><span class="text-sm text-gray-600">Duplicate</span>{
-        _badge(str(sig_duplicate), "gray")
-    }</div>
-          <div class="flex justify-between"><span class="text-sm text-gray-600">Rejected</span>{
-        _badge(str(sig_rejected), "red")
-    }</div>
-        </div>
-      </div>
-
-      <div class="bg-white rounded-lg shadow p-5">
-        <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">
-          Top sources (promoted, {day_str})
-        </h3>
-        {top_sources_html or '<p class="text-sm text-gray-400">No data for this day</p>'}
-      </div>
+    <div class="mb-8 grid gap-6 xl:grid-cols-[0.95fr,1.05fr]">
+      {
+        _panel(
+            "Reels Integrity",
+            f'''
+          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {
+                _mini_metric(
+                    "Known durations",
+                    f"{reel_known_count}/{reel_total_count}",
+                    f"{reel_unknown_count} unknown",
+                    "blue",
+                )
+            }
+            {
+                _mini_metric(
+                    "Max known duration",
+                    f"{reel_max_duration or '—'}s",
+                    f"limit {settings.REEL_MAX_DURATION_SECONDS}s",
+                    "purple",
+                )
+            }
+            {
+                _mini_metric(
+                    "Violations",
+                    str(reel_duration_violations),
+                    "promoted reels over the duration cap",
+                    "red" if reel_duration_violations else "green",
+                )
+            }
+            {
+                _mini_metric(
+                    "Refresh gap",
+                    str(reels_refresh_gap),
+                    f"reservoir gap {reels_reservoir_gap}",
+                    "yellow" if reels_refresh_gap or reels_reservoir_gap else "green",
+                )
+            }
+          </div>
+          <div class="mt-5">{
+                _data_rows(
+                    [
+                        (
+                            "Inventory state",
+                            _badge(
+                                reels_supply["inventory_state"].replace("_", " "),
+                                _health_color(reels_supply["inventory_state"]),
+                            ),
+                            f"refresh {reels_supply['recent_refresh_count']}/{reels_supply['recent_refresh_threshold']} · reservoir {reels_supply['reservoir_count']}/{reels_supply['reservoir_threshold']}",
+                        ),
+                        (
+                            "Dominant channel share",
+                            f"{reels_supply['dominant_channel_pct_top20']}%",
+                            "share of the top 20 reel feed currently occupied by the largest creator",
+                        ),
+                        (
+                            "Median age top 20",
+                            _fmt_hours(reels_supply["median_age_top20_hours"]),
+                            "fresh reels should stay young without collapsing discovery mix",
+                        ),
+                    ]
+                )
+            }</div>
+          <div class="mt-5 rounded-[1.5rem] border border-slate-200 bg-white/75 p-4">
+            <div class="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Open reel issues</div>
+            {reel_issues_html}
+          </div>
+          ''',
+            subtitle="Reels are the most fragile surface. This card tracks duration integrity and whether the 7-day reservoir is deep enough to avoid caught-up states.",
+            tone="purple",
+        )
+    }
+      {
+        _panel(
+            "Day Bucket",
+            f'''
+          <div class="grid gap-4 lg:grid-cols-3">
+            <div class="rounded-[1.5rem] border border-slate-200 bg-white/75 p-4">
+              <div class="mb-3 panel-kicker">Published on {day_str}</div>
+              {day_bucket_body}
+            </div>
+            <div class="rounded-[1.5rem] border border-slate-200 bg-white/75 p-4">
+              <div class="mb-3 panel-kicker">Signal queue</div>
+              {signal_queue_body}
+            </div>
+            <div class="rounded-[1.5rem] border border-slate-200 bg-white/75 p-4">
+              <div class="mb-3 panel-kicker">Top promoted sources</div>
+              {top_sources_body}
+            </div>
+          </div>
+          ''',
+            subtitle="The selected day still matters for editorial operations even though video and reel serving now uses a rolling 7-day inventory model.",
+            tone="green",
+        )
+    }
     </div>
 
-    <div class="bg-white rounded-lg shadow p-5 mb-8">
-        <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">
-        Top candidates awaiting editorial decision (last 48 h)
-        </h3>
-      <div class="overflow-x-auto">
-        <table class="min-w-full">
-          <thead class="bg-gray-50">
-            <tr class="text-xs text-gray-500 uppercase">
-              <th class="px-3 py-2 text-left">ID</th>
-              <th class="px-3 py-2 text-left">Title</th>
-              <th class="px-3 py-2 text-left">Type</th>
-              <th class="px-3 py-2 text-left">Score</th>
-              <th class="px-3 py-2 text-left">Discovered via</th>
-              <th class="px-3 py-2 text-left">Action</th>
-            </tr>
-          </thead>
-          <tbody>{pending_rows_html}</tbody>
-        </table>
-      </div>
-    </div>"""
+    {
+        _panel(
+            "Editorial Queue",
+            f'''
+        <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div class="text-sm leading-6 text-slate-600">Highest-scoring candidates from the last 48 hours that still need editorial attention.</div>
+          <a href="/api/v1/admin/ui/review?key={admin_key}" class="text-sm font-medium text-sky-700 hover:underline">Open review queue →</a>
+        </div>
+        <div class="grid gap-3 md:hidden">{pending_cards_html}</div>
+        <div class="table-shell hidden md:block">
+          <table class="min-w-full overflow-hidden rounded-[1.5rem] bg-white/80">
+            <thead class="bg-slate-50/90">
+              <tr class="text-xs uppercase tracking-[0.16em] text-slate-500">
+                <th class="px-3 py-3 text-left">ID</th>
+                <th class="px-3 py-3 text-left">Title</th>
+                <th class="px-3 py-3 text-left">Type</th>
+                <th class="px-3 py-3 text-left">Score</th>
+                <th class="px-3 py-3 text-left">Discovered via</th>
+                <th class="px-3 py-3 text-left">Action</th>
+              </tr>
+            </thead>
+            <tbody>{pending_rows_html}</tbody>
+          </table>
+        </div>
+        ''',
+            subtitle="This queue stays separate from the supply metrics so operators can distinguish feed health from manual editorial load.",
+            tone="yellow",
+        )
+    }"""
     return _base(body, key=admin_key, active="dashboard")
 
 
@@ -684,69 +1368,128 @@ def ui_video_lanes(
 
     payload = compute_video_lane_metrics(db, hours=hours)
 
-    def _rows(surface: str) -> str:
-        rows = payload["surfaces"].get(surface, [])
+    def _surface_rows(surface: str) -> list[dict]:
+        return sorted(
+            payload["surfaces"].get(surface, []),
+            key=lambda row: (row["promoted"], row["promotion_rate"], row["candidates"]),
+            reverse=True,
+        )
+
+    def _surface_summary(surface: str) -> dict:
+        rows = _surface_rows(surface)
+        candidates = sum(int(row["candidates"]) for row in rows)
+        promoted = sum(int(row["promoted"]) for row in rows)
+        best = rows[0] if rows else None
+        return {
+            "rows": rows,
+            "candidates": candidates,
+            "promoted": promoted,
+            "lane_count": len(rows),
+            "promotion_rate": round(promoted / max(candidates, 1) * 100, 2) if rows else 0,
+            "best": best,
+        }
+
+    def _lane_card(row: dict, tone: str) -> str:
+        return f"""
+        <div class="rounded-[1.5rem] border border-slate-200 bg-white/80 p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="panel-kicker">{_esc(row["lane"])}</div>
+              <div class="mt-2 text-xl font-semibold tracking-tight text-slate-950">{row["promoted"]}/{row["candidates"]}</div>
+              <div class="mt-1 text-sm text-slate-500">promotion rate {row["promotion_rate"]}%</div>
+            </div>
+            {_badge(f"{row['distinct_promoted_channels']} channels", tone)}
+          </div>
+          <div class="mt-4 grid gap-3 sm:grid-cols-2">
+            {_mini_metric("Median age", f"{row['median_promoted_age'] or '—'}h", "promoted items", "slate")}
+            {_mini_metric("Dup / Clickbait", f"{row['duplicate_rejection_rate']}% / {row['clickbait_rejection_rate']}%", "rejection rates", tone)}
+          </div>
+        </div>"""
+
+    def _table_rows(surface: str) -> str:
+        rows = _surface_rows(surface)
         if not rows:
-            return '<tr><td colspan="7" class="px-3 py-4 text-sm text-gray-400 text-center">No data</td></tr>'
+            return '<tr><td colspan="7" class="px-3 py-6 text-center text-sm text-slate-400">No lane data in this window.</td></tr>'
         return "".join(
             f"""
-            <tr class="border-b border-gray-100">
-              <td class="px-3 py-2 text-sm font-medium text-gray-800">{_esc(row["lane"])}</td>
-              <td class="px-3 py-2 text-sm text-right">{row["candidates"]}</td>
-              <td class="px-3 py-2 text-sm text-right">{row["promoted"]}</td>
-              <td class="px-3 py-2 text-sm text-right">{row["promotion_rate"]}%</td>
-              <td class="px-3 py-2 text-sm text-right">{row["median_promoted_age"] or "—"}h</td>
-              <td class="px-3 py-2 text-sm text-right">{row["distinct_promoted_channels"]}</td>
-              <td class="px-3 py-2 text-sm text-right">{row["duplicate_rejection_rate"]}% / {row["clickbait_rejection_rate"]}%</td>
+            <tr class="border-b border-slate-200/80 last:border-0 hover:bg-slate-50/70">
+              <td class="px-3 py-3 text-sm font-medium text-slate-800">{_esc(row["lane"])}</td>
+              <td class="px-3 py-3 text-right text-sm">{row["candidates"]}</td>
+              <td class="px-3 py-3 text-right text-sm">{row["promoted"]}</td>
+              <td class="px-3 py-3 text-right text-sm">{row["promotion_rate"]}%</td>
+              <td class="px-3 py-3 text-right text-sm">{row["median_promoted_age"] or "—"}h</td>
+              <td class="px-3 py-3 text-right text-sm">{row["distinct_promoted_channels"]}</td>
+              <td class="px-3 py-3 text-right text-sm">{row["duplicate_rejection_rate"]}% / {row["clickbait_rejection_rate"]}%</td>
             </tr>"""
             for row in rows
         )
 
+    def _surface_panel(label: str, surface: str, tone: str) -> str:
+        summary = _surface_summary(surface)
+        best = summary["best"]
+        best_text = f"{best['lane']} · {best['promotion_rate']}%" if best else "No lane data"
+        cards = "".join(_lane_card(row, tone) for row in summary["rows"]) or (
+            '<div class="rounded-[1.5rem] border border-dashed border-slate-300 bg-white/70 p-5 text-sm text-slate-500">No lane data in this window.</div>'
+        )
+        return _panel(
+            label,
+            f"""
+            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {_mini_metric("Candidates", str(summary["candidates"]), f"in the last {hours} hours", "slate")}
+              {_mini_metric("Promoted", str(summary["promoted"]), "made it through scoring", tone)}
+              {_mini_metric("Overall rate", f"{summary['promotion_rate']}%", "weighted by candidates", "green" if summary["promotion_rate"] >= 25 else "yellow")}
+              {_mini_metric("Active lanes", str(summary["lane_count"]), best_text, tone)}
+            </div>
+            <div class="mt-5 grid gap-3 md:hidden">{cards}</div>
+            <div class="table-shell mt-5 hidden md:block">
+              <table class="min-w-full overflow-hidden rounded-[1.5rem] bg-white/80">
+                <thead class="bg-slate-50/90">
+                  <tr class="text-xs uppercase tracking-[0.16em] text-slate-500">
+                    <th class="px-3 py-3 text-left">Lane</th>
+                    <th class="px-3 py-3 text-right">Candidates</th>
+                    <th class="px-3 py-3 text-right">Promoted</th>
+                    <th class="px-3 py-3 text-right">Rate</th>
+                    <th class="px-3 py-3 text-right">Median age</th>
+                    <th class="px-3 py-3 text-right">Channels</th>
+                    <th class="px-3 py-3 text-right">Dup / Clickbait</th>
+                  </tr>
+                </thead>
+                <tbody>{_table_rows(surface)}</tbody>
+              </table>
+            </div>
+            """,
+            subtitle=f"Per-lane conversion and rejection quality for the last {hours} hours.",
+            tone=tone,
+        )
+
+    video_summary = _surface_summary("videos")
+    reels_summary = _surface_summary("reels")
+
     body = f"""
-    <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold text-gray-900">Video Lanes</h1>
-      <form method="get" class="flex items-center gap-2">
+    <section class="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <div class="max-w-3xl">
+        <p class="panel-kicker">Video Discovery Lanes</p>
+        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Lane conversion and rejection quality</h1>
+        <p class="mt-3 text-sm leading-7 text-slate-600">Compare search, trending, and curated lanes over a rolling window and see which ones are actually producing promotable inventory.</p>
+      </div>
+      <form method="get" class="glass-panel flex flex-wrap items-center gap-2 rounded-[1.6rem] p-4">
         <input type="hidden" name="key" value="{admin_key}">
-        <label class="text-sm text-gray-600">Window (hours)</label>
-        <input type="number" min="1" max="{24 * 14}" name="hours" value="{hours}" class="w-24 rounded border border-gray-300 px-2 py-1 text-sm">
-        <button class="px-3 py-1.5 rounded bg-gray-900 text-white text-sm">Apply</button>
+        <label class="text-sm font-medium text-slate-600">Window (hours)</label>
+        <input type="number" min="1" max="{24 * 14}" name="hours" value="{hours}" class="w-28 rounded-full border border-slate-300 px-4 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500">
+        <button class="inline-flex items-center rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">Apply</button>
       </form>
+    </section>
+
+    <div class="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {_stat_card("Video candidates", str(video_summary["candidates"]), f"{video_summary['lane_count']} lanes in the last {hours}h", "blue")}
+      {_stat_card("Video promoted", str(video_summary["promoted"]), f"weighted rate {video_summary['promotion_rate']}%", "green")}
+      {_stat_card("Reel candidates", str(reels_summary["candidates"]), f"{reels_summary['lane_count']} lanes in the last {hours}h", "purple")}
+      {_stat_card("Reel promoted", str(reels_summary["promoted"]), f"weighted rate {reels_summary['promotion_rate']}%", "green")}
     </div>
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div class="bg-white rounded-lg shadow p-5">
-        <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Videos</h2>
-        <table class="min-w-full">
-          <thead class="bg-gray-50">
-            <tr class="text-xs text-gray-500 uppercase">
-              <th class="px-3 py-2 text-left">Lane</th>
-              <th class="px-3 py-2 text-right">Candidates</th>
-              <th class="px-3 py-2 text-right">Promoted</th>
-              <th class="px-3 py-2 text-right">Rate</th>
-              <th class="px-3 py-2 text-right">Median age</th>
-              <th class="px-3 py-2 text-right">Channels</th>
-              <th class="px-3 py-2 text-right">Dup / Clickbait</th>
-            </tr>
-          </thead>
-          <tbody>{_rows("videos")}</tbody>
-        </table>
-      </div>
-      <div class="bg-white rounded-lg shadow p-5">
-        <h2 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Reels</h2>
-        <table class="min-w-full">
-          <thead class="bg-gray-50">
-            <tr class="text-xs text-gray-500 uppercase">
-              <th class="px-3 py-2 text-left">Lane</th>
-              <th class="px-3 py-2 text-right">Candidates</th>
-              <th class="px-3 py-2 text-right">Promoted</th>
-              <th class="px-3 py-2 text-right">Rate</th>
-              <th class="px-3 py-2 text-right">Median age</th>
-              <th class="px-3 py-2 text-right">Channels</th>
-              <th class="px-3 py-2 text-right">Dup / Clickbait</th>
-            </tr>
-          </thead>
-          <tbody>{_rows("reels")}</tbody>
-        </table>
-      </div>
+
+    <div class="grid gap-6 xl:grid-cols-2">
+      {_surface_panel("Videos", "videos", "blue")}
+      {_surface_panel("Reels", "reels", "purple")}
     </div>"""
     return _base(body, key=admin_key, active="video-lanes")
 
@@ -764,54 +1507,245 @@ def ui_video_sources(
     from app.services.video_metrics_service import compute_video_source_metrics
 
     payload = compute_video_source_metrics(db)
-    rows = payload["sources"]
-    body_rows = (
-        "".join(
+    rows = sorted(
+        payload["sources"],
+        key=lambda row: (
+            {"core": 0, "rotation": 1, "discovery": 2, "paused": 3}.get(row["status"], 4),
+            -float(row["score_7d"]),
+            -float(row["completion_rate"]),
+            row["channel_name"],
+        ),
+    )
+    status_counts = Counter(row["status"] for row in rows)
+    role_counts = Counter(row["role"] for row in rows)
+    flagged_rows = sorted(
+        [
+            row
+            for row in rows
+            if row["suppression_rate"] >= 20
+            or row["early_skip_rate"] >= 25
+            or row["completion_rate"] <= 20
+        ],
+        key=lambda row: (
+            max(float(row["suppression_rate"]), float(row["early_skip_rate"])),
+            -float(row["completion_rate"]),
+        ),
+        reverse=True,
+    )[:6]
+    leaders = sorted(
+        rows,
+        key=lambda row: (
+            float(row["score_7d"]),
+            float(row["completion_rate"]),
+            float(row["save_share_rate"]),
+        ),
+        reverse=True,
+    )[:6]
+
+    def _fmt_iso(value: Optional[str]) -> str:
+        return value.replace("T", " ")[:16] if value else "—"
+
+    def _source_card(row: dict) -> str:
+        return f"""
+        <article class="rounded-[1.5rem] border border-slate-200 bg-white/80 p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-sm font-semibold leading-6 text-slate-900">{_esc(row["channel_name"])}</div>
+              <div class="truncate text-xs font-mono text-slate-500">{_esc(row["channel_id"])}</div>
+            </div>
+            {_badge(row["status"], _source_status_tone(row["status"]))}
+          </div>
+          <div class="mt-3 flex flex-wrap gap-2">
+            {_badge(row["role"], "gray")}
+            {_badge(row["content_format"], "gray")}
+            {_badge(row["quality_tier"], "gray")}
+          </div>
+          <div class="mt-4 grid gap-3 sm:grid-cols-2">
+            {_mini_metric("Score 7d", str(row["score_7d"]), "source quality composite", "blue")}
+            {_mini_metric("Promoted share", f"{row['promoted_share']}%", "share of sampled items promoted", "green")}
+            {_mini_metric("Suppression", f"{row['suppression_rate']}%", "higher means more filtered out", "yellow" if row["suppression_rate"] >= 20 else "slate")}
+            {_mini_metric("Completion", f"{row['completion_rate']}%", f"early skip {row['early_skip_rate']}%", "purple")}
+          </div>
+          <div class="mt-4 text-xs leading-5 text-slate-500">Save/share {row["save_share_rate"]}% · last promoted {_fmt_iso(row["last_promoted_at"])}</div>
+        </article>"""
+
+    def _table_rows() -> str:
+        if not rows:
+            return '<tr><td colspan="10" class="px-3 py-6 text-center text-sm text-slate-400">No source profiles found.</td></tr>'
+        return "".join(
             f"""
-        <tr class="border-b border-gray-100">
-          <td class="px-3 py-2 text-sm">
-            <div class="font-medium text-gray-900">{_esc(row["channel_name"])}</div>
-            <div class="text-xs text-gray-500 font-mono">{_esc(row["channel_id"])}</div>
-          </td>
-          <td class="px-3 py-2 text-sm">{_badge(row["status"], "green" if row["status"] == "core" else "blue" if row["status"] == "rotation" else "yellow" if row["status"] == "discovery" else "red")}</td>
-          <td class="px-3 py-2 text-sm">{_esc(row["role"])}</td>
-          <td class="px-3 py-2 text-sm text-right">{row["score_7d"]}</td>
-          <td class="px-3 py-2 text-sm text-right">{row["promoted_share"]}%</td>
-          <td class="px-3 py-2 text-sm text-right">{row["suppression_rate"]}%</td>
-          <td class="px-3 py-2 text-sm text-right">{row["early_skip_rate"]}%</td>
-          <td class="px-3 py-2 text-sm text-right">{row["completion_rate"]}%</td>
-          <td class="px-3 py-2 text-sm text-right">{row["save_share_rate"]}%</td>
-          <td class="px-3 py-2 text-xs text-gray-500">{_esc(row["last_promoted_at"] or "—")}</td>
-        </tr>"""
+            <tr class="border-b border-slate-200/80 last:border-0 hover:bg-slate-50/70">
+              <td class="px-3 py-3 text-sm">
+                <div class="font-medium text-slate-900">{_esc(row["channel_name"])}</div>
+                <div class="text-xs font-mono text-slate-500">{_esc(row["channel_id"])}</div>
+              </td>
+              <td class="px-3 py-3 text-sm">{_badge(row["status"], _source_status_tone(row["status"]))}</td>
+              <td class="px-3 py-3 text-sm">
+                <div>{_esc(row["role"])}</div>
+                <div class="text-xs text-slate-500">{_esc(row["content_format"])} · {_esc(row["quality_tier"])}</div>
+              </td>
+              <td class="px-3 py-3 text-right text-sm">{row["score_7d"]}</td>
+              <td class="px-3 py-3 text-right text-sm">{row["promoted_share"]}%</td>
+              <td class="px-3 py-3 text-right text-sm">{row["suppression_rate"]}%</td>
+              <td class="px-3 py-3 text-right text-sm">{row["early_skip_rate"]}%</td>
+              <td class="px-3 py-3 text-right text-sm">{row["completion_rate"]}%</td>
+              <td class="px-3 py-3 text-right text-sm">{row["save_share_rate"]}%</td>
+              <td class="px-3 py-3 text-xs text-slate-500">{_fmt_iso(row["last_promoted_at"])}</td>
+            </tr>"""
             for row in rows
         )
-        or '<tr><td colspan="10" class="px-3 py-4 text-sm text-gray-400 text-center">No source profiles found</td></tr>'
+
+    flagged_body = (
+        _data_rows(
+            [
+                (
+                    row["channel_name"],
+                    _badge(row["status"], _source_status_tone(row["status"])),
+                    f"suppression {row['suppression_rate']}% · early skip {row['early_skip_rate']}% · completion {row['completion_rate']}%",
+                )
+                for row in flagged_rows
+            ]
+        )
+        if flagged_rows
+        else '<p class="text-sm leading-6 text-slate-500">No source profiles currently cross the attention thresholds.</p>'
+    )
+    leaders_body = (
+        _data_rows(
+            [
+                (
+                    row["channel_name"],
+                    f"{row['score_7d']} score · {row['completion_rate']}% completion",
+                    f"{row['status']} · promoted share {row['promoted_share']}% · save/share {row['save_share_rate']}%",
+                )
+                for row in leaders
+            ]
+        )
+        if leaders
+        else '<p class="text-sm leading-6 text-slate-500">No source profiles available yet.</p>'
+    )
+    role_badges = "".join(
+        _badge(f"{role} {count}", "gray")
+        for role, count in sorted(role_counts.items(), key=lambda item: (-item[1], item[0]))
+    ) or _badge("No roles", "gray")
+    mobile_cards = "".join(_source_card(row) for row in rows) or (
+        '<div class="rounded-[1.5rem] border border-dashed border-slate-300 bg-white/70 p-5 text-sm text-slate-500">No source profiles found.</div>'
     )
 
     body = f"""
-    <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold text-gray-900">Video Sources</h1>
-      <a href="/api/v1/admin/ui/dashboard?key={admin_key}" class="text-sm text-blue-600 hover:underline">Back to dashboard</a>
+    <section class="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <div class="max-w-3xl">
+        <p class="panel-kicker">Video Source Health</p>
+        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Channel governance and quality</h1>
+        <p class="mt-3 text-sm leading-7 text-slate-600">Use this view to decide which channels should stay in discovery, graduate into rotation or core, or get demoted when quality slips.</p>
+      </div>
+      <a href="/api/v1/admin/ui/dashboard?key={
+        admin_key
+    }" class="inline-flex items-center rounded-full border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Back to dashboard</a>
+    </section>
+
+    <div class="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      {
+        _stat_card(
+            "Total profiles",
+            str(len(rows)),
+            f"{len(flagged_rows)} currently need attention",
+            "blue",
+        )
+    }
+      {
+        _stat_card(
+            "Core",
+            str(status_counts.get("core", 0)),
+            "trusted channels kept in steady rotation",
+            "green",
+        )
+    }
+      {
+        _stat_card(
+            "Rotation", str(status_counts.get("rotation", 0)), "proven but not yet core", "blue"
+        )
+    }
+      {
+        _stat_card(
+            "Discovery",
+            str(status_counts.get("discovery", 0)),
+            "channels still proving themselves",
+            "yellow",
+        )
+    }
+      {
+        _stat_card(
+            "Flagged",
+            str(len(flagged_rows)),
+            "suppression, skip, or completion risk",
+            "red" if flagged_rows else "green",
+        )
+    }
     </div>
-    <div class="bg-white rounded-lg shadow p-5">
-      <table class="min-w-full">
-        <thead class="bg-gray-50">
-          <tr class="text-xs text-gray-500 uppercase">
-            <th class="px-3 py-2 text-left">Channel</th>
-            <th class="px-3 py-2 text-left">Status</th>
-            <th class="px-3 py-2 text-left">Role</th>
-            <th class="px-3 py-2 text-right">Score 7d</th>
-            <th class="px-3 py-2 text-right">Promoted share</th>
-            <th class="px-3 py-2 text-right">Suppression</th>
-            <th class="px-3 py-2 text-right">Early skip</th>
-            <th class="px-3 py-2 text-right">Completion</th>
-            <th class="px-3 py-2 text-right">Save/share</th>
-            <th class="px-3 py-2 text-left">Last promoted</th>
-          </tr>
-        </thead>
-        <tbody>{body_rows}</tbody>
-      </table>
-    </div>"""
+
+    <div class="mb-8 grid gap-6 xl:grid-cols-2">
+      {
+        _panel(
+            "Operator Snapshot",
+            f'''
+          <div class="rounded-[1.5rem] border border-slate-200 bg-white/75 p-4">
+            <div class="panel-kicker">Role mix</div>
+            <div class="mt-3 flex flex-wrap gap-2">{role_badges}</div>
+          </div>
+          <div class="mt-5 rounded-[1.5rem] border border-slate-200 bg-white/75 p-4">
+            <div class="mb-3 panel-kicker">Needs attention</div>
+            {flagged_body}
+          </div>
+          ''',
+            subtitle="Profiles are flagged here when suppression is high, skips are elevated, or completion drops too low.",
+            tone="yellow",
+        )
+    }
+      {
+        _panel(
+            "Performance Leaders",
+            f'''
+          <div class="rounded-[1.5rem] border border-slate-200 bg-white/75 p-4">
+            <div class="mb-3 panel-kicker">Top current performers</div>
+            {leaders_body}
+          </div>
+          ''',
+            subtitle="These channels currently combine high score, strong completion, and healthy save/share behavior.",
+            tone="green",
+        )
+    }
+    </div>
+
+    {
+        _panel(
+            "Source Directory",
+            f'''
+        <div class="mb-4 text-sm leading-6 text-slate-600">The mobile view uses stacked cards; the full comparison table is still available once there is room for it.</div>
+        <div class="grid gap-3 md:hidden">{mobile_cards}</div>
+        <div class="table-shell hidden md:block">
+          <table class="min-w-full overflow-hidden rounded-[1.5rem] bg-white/80">
+            <thead class="bg-slate-50/90">
+              <tr class="text-xs uppercase tracking-[0.16em] text-slate-500">
+                <th class="px-3 py-3 text-left">Channel</th>
+                <th class="px-3 py-3 text-left">Status</th>
+                <th class="px-3 py-3 text-left">Role</th>
+                <th class="px-3 py-3 text-right">Score 7d</th>
+                <th class="px-3 py-3 text-right">Promoted share</th>
+                <th class="px-3 py-3 text-right">Suppression</th>
+                <th class="px-3 py-3 text-right">Early skip</th>
+                <th class="px-3 py-3 text-right">Completion</th>
+                <th class="px-3 py-3 text-right">Save/share</th>
+                <th class="px-3 py-3 text-left">Last promoted</th>
+              </tr>
+            </thead>
+            <tbody>{_table_rows()}</tbody>
+          </table>
+        </div>
+        ''',
+            subtitle="All current source profiles with the metrics used to guide promotions, demotions, and discovery lane allowances.",
+            tone="blue",
+        )
+    }"""
     return _base(body, key=admin_key, active="video-sources")
 
 
@@ -961,7 +1895,7 @@ def ui_review_queue(
         )
 
     filter_form = f"""
-    <div class="bg-white rounded-lg shadow p-4 mb-4">
+    <div class="glass-panel rounded-[1.5rem] p-4 mb-4">
       <form method="get" action="/api/v1/admin/ui/review" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-10 gap-3 items-end">
         <input type="hidden" name="key" value="{admin_key}">
         <div>
@@ -1059,7 +1993,7 @@ def ui_review_queue(
         </tr>"""
 
         mobile_cards_html += f"""
-        <div class="bg-white rounded-lg shadow p-3 border {mobile_selected_ring}">
+        <div class="glass-panel rounded-[1.25rem] p-3 border {mobile_selected_ring}">
           <div class="flex items-start gap-2">
             <input type="checkbox" value="{item.id}" class="bulk-item mt-1 rounded border-gray-300" aria-label="Select {item.id}">
             <div class="min-w-0 flex-1">
@@ -1163,7 +2097,7 @@ def ui_review_queue(
             </tr>"""
 
         selected_panel_html = f"""
-        <div id="review-detail" class="bg-white rounded-lg shadow sticky top-4">
+        <div id="review-detail" class="glass-panel rounded-[1.5rem] sticky top-24">
           <div class="p-4 border-b border-gray-100">
             <h2 class="text-lg font-semibold text-gray-900 leading-snug">{_esc((selected_item.title or "Untitled")[:120])}</h2>
             <div class="mt-2 flex flex-wrap gap-1">{selected_status}</div>
@@ -1242,7 +2176,7 @@ def ui_review_queue(
         </div>"""
     else:
         selected_panel_html = """
-        <div id="review-detail" class="bg-white rounded-lg shadow p-6 text-sm text-gray-500">
+        <div id="review-detail" class="glass-panel rounded-[1.5rem] p-6 text-sm text-gray-500">
           Select an item from the queue to open details and apply single-item actions here.
         </div>"""
 
@@ -1262,8 +2196,8 @@ def ui_review_queue(
     </div>
     {flash_html}
     {filter_form}
-    <div class="bg-white rounded-lg shadow p-4 mb-4">
-      <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
+    <div class="glass-panel rounded-[1.5rem] p-4 mb-4">
+      <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h2 class="text-sm font-semibold text-gray-800 uppercase tracking-wide">Bulk actions</h2>
           <p class="text-xs text-gray-500 mt-1">Select multiple rows and apply one action in a single submission.</p>
@@ -1294,11 +2228,11 @@ def ui_review_queue(
       </div>
     </div>
 
-    <div class="flex justify-between items-center mb-2">{pagination}</div>
+    <div class="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">{pagination}</div>
     <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
       <section class="xl:col-span-7">
         <div class="md:hidden space-y-2">{mobile_cards_html}</div>
-        <div class="hidden md:block bg-white shadow rounded-lg overflow-x-auto">
+        <div class="table-shell hidden md:block glass-panel">
           <table class="min-w-full">
             <thead class="bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wide">
               <tr>
@@ -1642,7 +2576,7 @@ def ui_content_list(
         return f'<select name="{name}" class="w-full rounded border-gray-300 text-sm px-2 py-1">{o}</select>'
 
     filter_form = f"""
-    <div class="bg-white rounded-lg shadow p-4 mb-4">
+    <div class="glass-panel rounded-[1.5rem] p-4 mb-4">
       <form method="get" action="/api/v1/admin/ui/content" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 items-end">
         <input type="hidden" name="key" value="{admin_key}">
         <div>
@@ -1706,8 +2640,8 @@ def ui_content_list(
     <h1 class="text-2xl font-bold text-gray-900 mb-4">Content</h1>
     {flash_html}
     {filter_form}
-    <div class="flex justify-between items-center mb-2">{pagination}</div>
-    <div class="bg-white shadow rounded-lg overflow-x-auto">
+    <div class="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">{pagination}</div>
+    <div class="table-shell glass-panel">
       <table class="min-w-full">
         <thead class="bg-gray-50">
           <tr class="text-xs font-medium text-gray-500 uppercase tracking-wide">
@@ -1869,7 +2803,7 @@ def ui_content_detail(
     </div>
     {flash_html}
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div class="lg:col-span-2 bg-white rounded-lg shadow">
+      <div class="glass-panel lg:col-span-2 rounded-[1.5rem]">
         <div class="p-5 border-b border-gray-100">
           <h1 class="text-xl font-bold text-gray-900 leading-snug">{_esc((item.title or "")[:120])}</h1>
           <div class="mt-2 flex flex-wrap gap-1">{badges}</div>
@@ -1895,7 +2829,7 @@ def ui_content_detail(
       </div>
 
       <div class="space-y-4">
-        <div class="bg-white rounded-lg shadow p-5">
+        <div class="glass-panel rounded-[1.5rem] p-5">
           <div class="flex items-center justify-between mb-3">
             <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide">Editorial decision</h3>
             {state_hint}
@@ -1943,11 +2877,11 @@ def ui_content_detail(
             </button>
           </form>
         </div>
-        <div class="bg-white rounded-lg shadow p-5">
+        <div class="glass-panel rounded-[1.5rem] p-5">
           <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Visibility</h3>
           {suppress_btn}
         </div>
-        <div class="bg-white rounded-lg shadow p-5">
+        <div class="glass-panel rounded-[1.5rem] p-5">
           <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Editorial boost</h3>
           <form method="post" action="/api/v1/admin/ui/action/{content_id}/boost?key={admin_key}" class="flex gap-2">
             <input type="hidden" name="next" value="{detail_next}">
@@ -1958,7 +2892,7 @@ def ui_content_detail(
       </div>
     </div>
 
-    <div class="mt-6 bg-white rounded-lg shadow">
+    <div class="glass-panel mt-6 rounded-[1.5rem]">
       <div class="p-4 border-b border-gray-100">
         <h3 class="font-semibold text-gray-700">Audit trail</h3>
       </div>
