@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentStatus, ContentType
-from app.services.diversity_mixer import mix_feed
+from app.services.diversity_mixer import enforce_channel_caps, mix_feed
 from app.services.inventory_service import FreshnessTier, Surface, _get_surface_config
 from app.services.video_content_policy import apply_content_policy
 from app.services.video_hybrid_rerank import rerank_video_candidates
@@ -306,6 +306,9 @@ def get_tiered_feed(
     # Mix for diversity (this returns a subset in mixed order)
     surface_name = surface.value
     mixed_items = mix_feed(raw_items, surface=surface_name, target_size=target_count)
+
+    # Enforce position-based channel caps (videos/reels only)
+    mixed_items = enforce_channel_caps(mixed_items, surface=surface_name)
 
     # Map back to tiered items
     item_to_tiered = {t.item.id: t for t in results}

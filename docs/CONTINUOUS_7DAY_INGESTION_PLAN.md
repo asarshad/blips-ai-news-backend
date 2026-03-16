@@ -9,7 +9,7 @@
 | Step 3: Unify Reel Classification ≤120s | ✅ Done | config.py + youtube_client.py updated, reclassify_reels.py verified |
 | Step 4: Replace Auto-Pause with Demotion | ✅ Done | Removed auto-pause guardrail, metrics report demoted_channels |
 | Step 5: Auto-Graduation for Discovery | ✅ Done | Graduated transitions, 7d cooldown, 14d probation, 16 tests |
-| Step 6: Expand Reel Source Roster | ⬜ Not started | |
+| Step 6: Expand Reel Source Roster | ✅ Done | 3 new reel query packs; channel additions need manual ID verification |
 | Step 7: Feed Diversity Caps | ⬜ Not started | |
 | Step 8: Feed Endpoints & caught_up | ⬜ Not started | |
 | Step 9: Strengthen Language Filtering | ⬜ Not started | |
