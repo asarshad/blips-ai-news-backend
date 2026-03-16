@@ -65,19 +65,27 @@ def run_checkpointed_ingestion(
     budget_repo = IngestionBudgetRepository(db)
 
     defaults = _build_defaults(db=db, day_utc=day)
-    created = repo.ensure_rows(
-        day_utc=day, defaults=[(d.source_type, d.feed_name, d.target) for d in defaults]
-    )
+    defaults_tuples = [(d.source_type, d.feed_name, d.target) for d in defaults]
+    created = repo.ensure_rows(day_utc=day, defaults=defaults_tuples)
     if created:
         logger.info("Created %s ingestion_progress rows for %s", created, day.isoformat())
 
+    # Reopen completed YouTube rows so they can be polled again this cycle.
+    # RSS rows keep daily checkpoint behavior unchanged.
+    reopened = repo.reopen_youtube_rows(day_utc=day, defaults=defaults_tuples)
+    if reopened:
+        logger.info("Reopened %s YouTube progress rows for %s", reopened, day.isoformat())
+
     # Ensure strict per-type budgets from configured per-feed targets.
+    # Videos/reels use a high multiplier so the budget never blocks continuous
+    # ingestion (budget table kept for Phase A concurrency safety; daily cap
+    # enforcement is removed).
     article_target = sum(d.target for d in defaults if d.source_type == "rss")
     video_target = sum(d.target for d in defaults if d.source_type == "youtube_video")
     reel_target = sum(d.target for d in defaults if d.source_type == "youtube_reel")
     budget_repo.ensure(day=day, content_type=ContentType.ARTICLE, target=article_target)
-    budget_repo.ensure(day=day, content_type=ContentType.VIDEO, target=video_target)
-    budget_repo.ensure(day=day, content_type=ContentType.REEL, target=reel_target)
+    budget_repo.ensure(day=day, content_type=ContentType.VIDEO, target=video_target * 10)
+    budget_repo.ensure(day=day, content_type=ContentType.REEL, target=reel_target * 10)
 
     owner = _owner_token()
     ttl_ms = int(os.getenv("INGESTION_LEASE_TTL_MS", "60000"))

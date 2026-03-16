@@ -163,6 +163,57 @@ class IngestionProgressRepository:
             self.db.commit()
         return created
 
+    def reopen_youtube_rows(
+        self,
+        *,
+        day_utc: date,
+        defaults: Iterable[Tuple[str, str, int]],
+    ) -> int:
+        """Reopen completed YouTube rows for the next ingestion cycle.
+
+        For each YouTube row that has met its target (complete or
+        items_ingested >= target), bump the target additively and clear
+        exhaustion state so the checkpoint loop picks it up again.
+        RSS rows are left unchanged.
+
+        Uses ``skip_locked=True`` to avoid clobbering a row that another
+        process (top-up or scheduler) is actively working on.
+        """
+        reopened = 0
+        now = datetime.utcnow()
+        for source_type, feed_name, per_cycle_target in defaults:
+            if source_type == "rss":
+                continue
+            row = (
+                self.db.query(IngestionProgress)
+                .filter(
+                    IngestionProgress.day_utc == day_utc,
+                    IngestionProgress.source_type == source_type,
+                    IngestionProgress.feed_name == feed_name,
+                )
+                .with_for_update(skip_locked=True)
+                .one_or_none()
+            )
+            if row is None:
+                continue
+            # Only reopen rows that are finished or at/above target
+            if row.status not in ("complete",) and int(row.items_ingested or 0) < int(
+                row.target or 0
+            ):
+                continue
+            # Bump target so remaining = per_cycle_target
+            row.target = int(row.items_ingested or 0) + per_cycle_target
+            row.status = "running"
+            row.items_attempted = 0
+            row.retry_count = 0
+            row.retry_at = None
+            row.last_error = None
+            row.updated_at = now
+            reopened += 1
+        if reopened:
+            self.db.commit()
+        return reopened
+
     def mark_failed(self, row_id: int, error: str) -> None:
         row = self.db.query(IngestionProgress).filter(IngestionProgress.id == row_id).one()
         row.status = "failed"

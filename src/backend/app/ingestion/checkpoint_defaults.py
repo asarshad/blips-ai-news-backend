@@ -205,8 +205,6 @@ def build_defaults(*, db=None, day_utc: date | None = None) -> List[FeedDefault]
     overrides = parse_target_overrides()
 
     defaults: List[FeedDefault] = []
-    fill_videos = _should_fill_surface(db, ContentType.VIDEO)
-    fill_reels = _should_fill_surface(db, ContentType.REEL)
 
     # RSS: 1 row per feed
     rss_client = RSSClient()
@@ -215,24 +213,20 @@ def build_defaults(*, db=None, day_utc: date | None = None) -> List[FeedDefault]
         target = int(overrides.get(key, cfg.daily_cap))
         defaults.append(FeedDefault("rss", cfg.name, max(0, target)))
 
-    # YouTube: split per channel into video vs reel targets based on format
+    # YouTube: split per channel into video vs reel targets based on format.
+    # YouTube rows are always created (no freshness gating); they are reopened
+    # each scheduler cycle for continuous ingestion.
     yt_client = YouTubeClient()
     for cfg in yt_client.channel_configs:
         if cfg.content_format == ContentFormat.LONG_FORM:
-            if not fill_videos:
-                continue
             key = f"youtube_video:{cfg.name}"
             target = int(overrides.get(key, cfg.daily_cap))
             defaults.append(FeedDefault("youtube_video", cfg.name, max(0, target)))
         elif cfg.content_format == ContentFormat.SHORTS:
-            if not fill_reels:
-                continue
             key = f"youtube_reel:{cfg.name}"
             target = int(overrides.get(key, cfg.daily_cap))
             defaults.append(FeedDefault("youtube_reel", cfg.name, max(0, target)))
         else:
-            if not fill_videos and not fill_reels:
-                continue
             # MIXED: split daily_cap across video and reels
             video_target = max(1, int(cfg.daily_cap) // 2)
             reel_target = max(0, int(cfg.daily_cap) - video_target)
@@ -242,9 +236,8 @@ def build_defaults(*, db=None, day_utc: date | None = None) -> List[FeedDefault]
             video_target = int(overrides.get(key_v, video_target))
             reel_target = int(overrides.get(key_r, reel_target))
 
-            if fill_videos:
-                defaults.append(FeedDefault("youtube_video", cfg.name, max(0, video_target)))
-            if fill_reels and reel_target > 0:
+            defaults.append(FeedDefault("youtube_video", cfg.name, max(0, video_target)))
+            if reel_target > 0:
                 defaults.append(FeedDefault("youtube_reel", cfg.name, max(0, reel_target)))
 
     reel_feeds = [d.feed_name for d in defaults if d.source_type == "youtube_reel" and d.target > 0]
