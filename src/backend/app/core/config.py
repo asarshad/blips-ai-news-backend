@@ -117,8 +117,8 @@ class Settings(BaseSettings):
     RSS_ENTRIES_PER_FEED: int = 50
     YT_VIDEOS_PER_CHANNEL: int = 30
     YT_CURATED_LOOKBACK_HOURS: int = 168
-    YOUTUBE_CURATED_ONLY: bool = True
-    YOUTUBE_DISCOVERY_ENABLED: bool = False
+    YOUTUBE_CURATED_ONLY: bool = False
+    YOUTUBE_DISCOVERY_ENABLED: bool = True
 
     # Discovery signal ingest (Substack/Beehiiv lead pipeline)
     DISCOVERY_SIGNAL_ENABLED: bool = True
@@ -163,7 +163,7 @@ class Settings(BaseSettings):
     MIN_REFRESH_REELS: int = 12
 
     # Reels quality enforcement (defense-in-depth)
-    REEL_MAX_DURATION_SECONDS: int = 180  # 3 minutes — anything longer is a VIDEO
+    REEL_MAX_DURATION_SECONDS: int = 120  # 2 minutes — anything longer is a VIDEO
 
     # ------------------------------------------------------------------
     # Content extraction (Phase: extraction hardening)

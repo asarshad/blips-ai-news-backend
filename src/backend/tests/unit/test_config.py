@@ -25,8 +25,8 @@ def test_inventory_threshold_defaults_match_higher_targets():
 def test_curated_only_youtube_defaults():
     settings = Settings()
 
-    assert settings.YOUTUBE_CURATED_ONLY is True
-    assert settings.YOUTUBE_DISCOVERY_ENABLED is False
+    assert settings.YOUTUBE_CURATED_ONLY is False
+    assert settings.YOUTUBE_DISCOVERY_ENABLED is True
     assert settings.YT_CURATED_LOOKBACK_HOURS == 168
 
 

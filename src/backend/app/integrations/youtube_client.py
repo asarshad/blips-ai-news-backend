@@ -836,7 +836,7 @@ class YouTubeClient:
 
         is_short = bool(
             duration_seconds is not None
-            and duration_seconds <= int(os.getenv("YT_SHORT_MAX_SECONDS", "75"))
+            and duration_seconds <= int(os.getenv("YT_SHORT_MAX_SECONDS", "120"))
         )
         content_format = ContentFormat.SHORTS if is_short else ContentFormat.LONG_FORM
 
@@ -1230,7 +1230,7 @@ class YouTubeClient:
         # YouTube RSS links are commonly /watch?v=... for both videos and Shorts,
         # so URL-only detection is unreliable.
         if config.content_format == ContentFormat.MIXED:
-            short_max_seconds = int(os.getenv("YT_SHORT_MAX_SECONDS", "75"))
+            short_max_seconds = int(os.getenv("YT_SHORT_MAX_SECONDS", "120"))
 
             # Try duration (requires API key - scraping blocked in Docker by consent pages)
             duration = self.get_video_duration(video_id)
