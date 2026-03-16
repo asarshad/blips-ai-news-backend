@@ -72,5 +72,5 @@ def test_reels_best_effort_avoids_back_to_back_when_alternatives_exist():
 
     result = enforce_channel_caps(items, "reels")
 
-    for prev, current in zip(result, result[1:], strict=True):
+    for prev, current in zip(result[:-1], result[1:], strict=True):
         assert prev["channel_id"] != current["channel_id"]
