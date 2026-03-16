@@ -403,7 +403,11 @@ def process_progress_row_batch(
                     return
 
                 # Language gate: skip non-English content
-                if not is_english(e.title, getattr(e, "summary", None)):
+                if not is_english(
+                    e.title,
+                    getattr(e, "summary", None),
+                    channel_language=getattr(e, "default_language", None),
+                ):
                     skipped_reasons.setdefault("non_english", 0)
                     skipped_reasons["non_english"] += 1
                     return

@@ -28,7 +28,7 @@ from app.extraction.pipeline import (
     run_extraction,
 )
 from app.ingestion.extractors import extract_entities, extract_source, extract_topics
-from app.ingestion.language_filter import detect_language, is_non_english
+from app.ingestion.language_filter import detect_language, is_english
 from app.ingestion.url_normalizer import normalize_url
 from app.integrations.llm_client import LLMClient
 from app.integrations.rss_client import FeedEntry, RSSClient
@@ -153,8 +153,8 @@ class IngestionPipeline:
             return None
 
         # Language gate: reject non-English content before spending LLM tokens
-        detected_lang, _conf = detect_language(entry.title, entry.content)
-        if is_non_english(detected_lang):
+        if not is_english(entry.title, entry.content):
+            detected_lang, _conf = detect_language(entry.title, entry.content)
             logger.info(
                 "[language_filter] Skipping non-English article (lang=%s): %s",
                 detected_lang,
@@ -387,8 +387,12 @@ class IngestionPipeline:
             return None
 
         # Language gate: reject non-English videos before spending LLM tokens
-        detected_lang, _conf = detect_language(entry.title, entry.summary)
-        if is_non_english(detected_lang):
+        if not is_english(
+            entry.title,
+            entry.summary,
+            channel_language=getattr(entry, "default_language", None),
+        ):
+            detected_lang, _conf = detect_language(entry.title, entry.summary)
             logger.info(
                 "[language_filter] Skipping non-English video (lang=%s): %s",
                 detected_lang,
