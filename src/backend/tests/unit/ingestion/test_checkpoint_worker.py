@@ -92,6 +92,16 @@ class _Entry:
         self.published_date = None
 
 
+def test_youtube_entry_is_reel_for_134_second_shorts_url():
+    entry = SimpleNamespace(
+        duration_seconds=134,
+        is_short=False,
+        video_url="https://www.youtube.com/shorts/VvGaDPViMKY",
+    )
+
+    assert checkpoint_worker._youtube_entry_is_reel(entry) is True
+
+
 def test_worker_skips_when_retry_at_in_future(monkeypatch):
     # Inject dummy integration modules to avoid importing feedparser under Python 3.14.
     pkg = ModuleType("app.integrations")

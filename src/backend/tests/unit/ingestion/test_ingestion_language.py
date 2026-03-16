@@ -14,6 +14,7 @@ from typing import Optional
 from unittest.mock import MagicMock, patch
 
 from app.extraction.metrics import ExtractionMetrics
+from app.models.content import ContentType
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -265,6 +266,23 @@ class TestYouTubeIngestionLanguageFilter:
             pipeline.ingest_youtube_entry(entry)
 
         pipeline.llm_client.summarize_video.assert_not_called()
+
+    def test_explicit_shorts_url_with_134_seconds_is_stored_as_reel(self):
+        """3-minute-era Shorts URLs should still land on the reels surface."""
+        pipeline = _make_pipeline()
+        pipeline.youtube_client.get_video_duration.return_value = 134
+        entry = _make_video_entry(
+            title="Why I intentionally misuse my fitness tracker",
+            video_id="VvGaDPViMKY",
+            video_url="https://www.youtube.com/shorts/VvGaDPViMKY",
+            source="The Verge",
+        )
+
+        with patch("app.ingestion.service.extraction_metrics"):
+            pipeline.ingest_youtube_entry(entry)
+
+        added = pipeline.db.add.call_args[0][0]
+        assert added.type == ContentType.REEL
 
 
 # ── Metrics counter tests ─────────────────────────────────────────────────────

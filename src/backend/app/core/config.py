@@ -163,7 +163,7 @@ class Settings(BaseSettings):
     MIN_REFRESH_REELS: int = 12
 
     # Reels quality enforcement (defense-in-depth)
-    REEL_MAX_DURATION_SECONDS: int = 120  # 2 minutes — anything longer is a VIDEO
+    REEL_MAX_DURATION_SECONDS: int = 180  # 3 minutes — anything longer is a VIDEO
 
     # ------------------------------------------------------------------
     # Content extraction (Phase: extraction hardening)
