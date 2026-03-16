@@ -566,18 +566,17 @@ class IngestionPipeline:
 
         while True:
             # Enforce per-day quotas based on items created today (UTC).
+            # Articles retain daily caps; videos/reels are continuous (no daily stop).
             today = datetime.utcnow().date()
             existing_articles = self.content_repo.count_created_on_date(ContentType.ARTICLE, today)
             existing_videos = self.content_repo.count_created_on_date(ContentType.VIDEO, today)
             existing_reels = self.content_repo.count_created_on_date(ContentType.REEL, today)
 
             remaining_articles = max(0, DAILY_TARGET_ARTICLES - existing_articles)
-            remaining_videos = max(0, DAILY_TARGET_VIDEOS - existing_videos)
-            remaining_reels = max(0, DAILY_TARGET_REELS - existing_reels)
 
-            if remaining_articles == 0 and remaining_videos == 0 and remaining_reels == 0:
+            if remaining_articles == 0:
                 logger.info(
-                    "Daily targets already met (UTC %s): articles=%s, videos=%s, reels=%s",
+                    "Article daily target met (UTC %s): articles=%s, videos=%s, reels=%s",
                     today,
                     existing_articles,
                     existing_videos,
@@ -593,11 +592,9 @@ class IngestionPipeline:
 
             if attempts >= max_catchup_attempts:
                 logger.warning(
-                    "Catch-up attempt limit reached (%s) with remaining targets: articles=%s videos=%s reels=%s",
+                    "Catch-up attempt limit reached (%s) with remaining article target: %s",
                     max_catchup_attempts,
                     remaining_articles,
-                    remaining_videos,
-                    remaining_reels,
                 )
                 aggregate["attempts"] = attempts
                 return aggregate
@@ -605,11 +602,9 @@ class IngestionPipeline:
             elapsed = time.monotonic() - start_time
             if elapsed >= max_catchup_seconds:
                 logger.warning(
-                    "Catch-up time budget reached (%ss) with remaining targets: articles=%s videos=%s reels=%s",
+                    "Catch-up time budget reached (%ss) with remaining article target: %s",
                     int(max_catchup_seconds),
                     remaining_articles,
-                    remaining_videos,
-                    remaining_reels,
                 )
                 aggregate["attempts"] = attempts
                 return aggregate
@@ -620,12 +615,12 @@ class IngestionPipeline:
             videos_per_channel = min(int(VIDEOS_PER_CHANNEL * attempt_num), 50)
 
             logger.info(
-                "Ingestion attempt %s (UTC %s): remaining articles=%s videos=%s reels=%s (fetch depth: rss=%s/channel=%s)",
+                "Ingestion attempt %s (UTC %s): remaining articles=%s existing videos=%s reels=%s (fetch depth: rss=%s/channel=%s)",
                 attempt_num,
                 today,
                 remaining_articles,
-                remaining_videos,
-                remaining_reels,
+                existing_videos,
+                existing_reels,
                 entries_per_feed,
                 videos_per_channel,
             )
@@ -687,16 +682,8 @@ class IngestionPipeline:
                     from app.services.video_discovery_service import VideoDiscoveryService
 
                     discovery = VideoDiscoveryService(self.db, self.youtube_client)
-                    discovered_videos = (
-                        discovery.discover("videos", remaining_needed=remaining_videos)
-                        if remaining_videos > 0
-                        else []
-                    )
-                    discovered_reels = (
-                        discovery.discover("reels", remaining_needed=remaining_reels)
-                        if remaining_reels > 0
-                        else []
-                    )
+                    discovered_videos = discovery.discover("videos", remaining_needed=None)
+                    discovered_reels = discovery.discover("reels", remaining_needed=None)
                     video_entries.extend(discovered_videos)
                     video_entries.extend(discovered_reels)
                     logger.info(
@@ -756,20 +743,16 @@ class IngestionPipeline:
                 for feed, count in sorted(feed_article_counts.items(), key=lambda x: -x[1]):
                     logger.info(f"  {feed}: {count}")
 
-            # Process YouTube entries until we hit remaining daily targets for VIDEO and REEL.
+            # Process YouTube entries (no daily cap; per-channel caps still enforced).
             # Track channels to prevent excessive repetition
             channel_video_counts: Dict[str, int] = defaultdict(int)
             channel_reel_counts: Dict[str, int] = defaultdict(int)
 
             logger.info(
-                "Processing YouTube for UTC %s: videos existing=%s target=%s remaining=%s | reels existing=%s target=%s remaining=%s",
+                "Processing YouTube for UTC %s: existing videos=%s reels=%s",
                 today,
                 existing_videos,
-                DAILY_TARGET_VIDEOS,
-                remaining_videos,
                 existing_reels,
-                DAILY_TARGET_REELS,
-                remaining_reels,
             )
             video_entries.sort(
                 key=lambda entry: (
@@ -780,18 +763,10 @@ class IngestionPipeline:
                 reverse=True,
             )
             for entry in video_entries:
-                if remaining_videos == 0 and remaining_reels == 0:
-                    break
-
                 # Use enhanced metadata for shorts detection
                 is_short = getattr(entry, "is_short", False)
                 is_shorts_url = bool(entry.video_url and "/shorts/" in entry.video_url)
                 is_reel = is_short or is_shorts_url
-
-                if is_reel and remaining_reels == 0:
-                    continue
-                if (not is_reel) and remaining_videos == 0:
-                    continue
 
                 # Apply per-channel caps to prevent creator fatigue
                 channel_id = getattr(entry, "channel_id", "") or entry.source
@@ -819,11 +794,9 @@ class IngestionPipeline:
                     # Update channel counts
                     if result.type == ContentType.REEL:
                         stats["reels_ingested"] += 1
-                        remaining_reels = max(0, remaining_reels - 1)
                         channel_reel_counts[channel_id] += 1
                     else:
                         stats["videos_ingested"] += 1
-                        remaining_videos = max(0, remaining_videos - 1)
                         channel_video_counts[channel_id] += 1
                 except Exception as e:
                     logger.error(f"Error ingesting video {entry.title}: {e}")
@@ -863,40 +836,26 @@ class IngestionPipeline:
                 "errors": 0,
             }
 
-        today = datetime.utcnow().date()
-        created_remaining_videos = max(
+        # Use promoted inventory gaps to determine discovery batch size.
+        # Videos/reels are no longer daily-capped; discovery runs every cycle.
+        promoted_gap_videos = max(
             0,
-            DAILY_TARGET_VIDEOS - self.content_repo.count_created_on_date(ContentType.VIDEO, today),
+            DISCOVERY_FRESH_VIDEO_FLOOR - self._fresh_promoted_inventory_count(ContentType.VIDEO),
         )
-        created_remaining_reels = max(
+        promoted_gap_reels = max(
             0,
-            DAILY_TARGET_REELS - self.content_repo.count_created_on_date(ContentType.REEL, today),
+            DISCOVERY_FRESH_REEL_FLOOR - self._fresh_promoted_inventory_count(ContentType.REEL),
         )
-        remaining_videos = self._discovery_remaining_needed(
-            ContentType.VIDEO,
-            created_remaining=created_remaining_videos,
-        )
-        remaining_reels = self._discovery_remaining_needed(
-            ContentType.REEL,
-            created_remaining=created_remaining_reels,
-        )
-        if remaining_videos == 0 and remaining_reels == 0:
-            return {
-                "status": "targets_met",
-                "videos_candidates": 0,
-                "videos_ingested": 0,
-                "reels_candidates": 0,
-                "reels_ingested": 0,
-                "duplicates": 0,
-                "errors": 0,
-            }
+        # Always discover at least a baseline batch even when inventory is healthy
+        remaining_videos = max(promoted_gap_videos, 10)
+        remaining_reels = max(promoted_gap_reels, 10)
 
         logger.info(
-            "[video_discovery] remaining_needed videos=%s (created_gap=%s) reels=%s (created_gap=%s)",
+            "[video_discovery] remaining_needed videos=%s (promoted_gap=%s) reels=%s (promoted_gap=%s)",
             remaining_videos,
-            created_remaining_videos,
+            promoted_gap_videos,
             remaining_reels,
-            created_remaining_reels,
+            promoted_gap_reels,
         )
 
         from app.services.video_discovery_service import VideoDiscoveryService
@@ -917,11 +876,6 @@ class IngestionPipeline:
         }
 
         for surface in ("videos", "reels"):
-            if surface == "videos" and remaining_videos <= 0:
-                continue
-            if surface == "reels" and remaining_reels <= 0:
-                continue
-
             try:
                 entries = discovery.discover(
                     surface,
@@ -944,11 +898,6 @@ class IngestionPipeline:
             )
 
             for entry in entries:
-                if surface == "videos" and remaining_videos <= 0:
-                    break
-                if surface == "reels" and remaining_reels <= 0:
-                    break
-
                 channel_id = getattr(entry, "channel_id", "") or entry.source or "unknown"
                 if surface == "videos":
                     if channel_video_counts[channel_id] >= 2:
@@ -975,11 +924,9 @@ class IngestionPipeline:
                     continue
 
                 if item.type == ContentType.REEL:
-                    remaining_reels = max(0, remaining_reels - 1)
                     channel_reel_counts[channel_id] += 1
                     result["reels_ingested"] = int(result["reels_ingested"]) + 1
                 else:
-                    remaining_videos = max(0, remaining_videos - 1)
                     channel_video_counts[channel_id] += 1
                     result["videos_ingested"] = int(result["videos_ingested"]) + 1
 

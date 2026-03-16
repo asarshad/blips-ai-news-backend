@@ -73,7 +73,6 @@ def test_build_defaults_uses_curated_channel_caps(monkeypatch):
     ]
     _install_fake_integrations(monkeypatch, channels=channels)
     monkeypatch.delenv("INGESTION_TARGET_DEFAULTS", raising=False)
-    monkeypatch.setattr(checkpoint_defaults, "_should_fill_surface", lambda *_a, **_k: True)
 
     defaults = build_defaults(day_utc=date(2026, 3, 9))
     targets = {(d.source_type, d.feed_name): d.target for d in defaults}
@@ -88,7 +87,6 @@ def test_build_defaults_keeps_mixed_split_for_unoverridden_channels(monkeypatch)
     channels = [_Channel("Custom Mixed Feed", _ContentFormat.MIXED, 5)]
     _install_fake_integrations(monkeypatch, channels=channels)
     monkeypatch.delenv("INGESTION_TARGET_DEFAULTS", raising=False)
-    monkeypatch.setattr(checkpoint_defaults, "_should_fill_surface", lambda *_a, **_k: True)
 
     defaults = build_defaults(day_utc=date(2026, 3, 9))
     targets = {(d.source_type, d.feed_name): d.target for d in defaults}
@@ -97,7 +95,11 @@ def test_build_defaults_keeps_mixed_split_for_unoverridden_channels(monkeypatch)
     assert targets[("youtube_reel", "Custom Mixed Feed")] == 3
 
 
-def test_build_defaults_skips_video_and_reel_surfaces_when_inventory_is_healthy(monkeypatch):
+def test_build_defaults_always_creates_youtube_rows_regardless_of_inventory(monkeypatch):
+    """YouTube rows are always created for continuous ingestion (Phase A).
+
+    _should_fill_surface is no longer used to gate YouTube row creation.
+    """
     channels = [
         _Channel("Long Feed", _ContentFormat.LONG_FORM, 1),
         _Channel("Mixed Feed", _ContentFormat.MIXED, 2),
@@ -107,14 +109,12 @@ def test_build_defaults_skips_video_and_reel_surfaces_when_inventory_is_healthy(
     _install_fake_integrations(monkeypatch, channels=channels, rss_feeds=rss_feeds)
     monkeypatch.delenv("INGESTION_TARGET_DEFAULTS", raising=False)
 
-    def _fill_surface(_db, content_type):
-        return content_type == ContentType.ARTICLE
-
-    monkeypatch.setattr(checkpoint_defaults, "_should_fill_surface", _fill_surface)
-
     defaults = build_defaults(day_utc=date(2026, 3, 9))
+    source_types = {d.source_type for d in defaults}
 
-    assert [(d.source_type, d.feed_name, d.target) for d in defaults] == [("rss", "RSS Feed", 2)]
+    assert "rss" in source_types
+    assert "youtube_video" in source_types
+    assert "youtube_reel" in source_types
 
 
 def test_reel_guardrail_is_disabled_in_curated_only_mode(monkeypatch):
