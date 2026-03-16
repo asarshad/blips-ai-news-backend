@@ -95,6 +95,11 @@ class Settings(BaseSettings):
     DAILY_TARGET_VIDEOS: int = 60
     DAILY_TARGET_REELS: int = 40
 
+    # Editorial / review pipeline
+    # When enabled, content that would normally enter the review queue as
+    # CANDIDATE is promoted immediately instead.
+    AUTO_APPROVE_REVIEW_CONTENT: bool = False
+
     # Ingestion durability controls
     INGESTION_ENABLED: bool = True
     INGESTION_CRON_DISABLED: bool = False

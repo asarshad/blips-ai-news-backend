@@ -9,6 +9,7 @@ Covers:
 
 from unittest.mock import MagicMock, patch
 
+from app.core.config import settings
 from app.ingestion.signal_ingestion import (
     _build_candidate_stub,
     _detect_content_type,
@@ -116,6 +117,15 @@ class TestBuildCandidateStub:
             ContentType.ARTICLE,
         )
         assert stub.curation_status == ContentStatus.CANDIDATE
+
+    def test_curation_status_is_promoted_when_auto_approve_enabled(self, monkeypatch):
+        monkeypatch.setattr(settings, "AUTO_APPROVE_REVIEW_CONTENT", True)
+        stub = _build_candidate_stub(
+            "https://example.com/article",
+            self._make_item(),
+            ContentType.ARTICLE,
+        )
+        assert stub.curation_status == ContentStatus.PROMOTED
 
     def test_ai_processed_false(self):
         stub = _build_candidate_stub(

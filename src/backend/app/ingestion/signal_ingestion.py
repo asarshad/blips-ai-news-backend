@@ -7,16 +7,17 @@ This module is the core "Coverage Guarantee" engine.  It:
 3. Upserts each into ``signal_urls`` (bumps hit_count on repeat sightings).
 4. Cross-checks against ``content_items``:
    a. If the URL already exists  → mark as DUPLICATE, increment signal_hits.
-   b. If the URL is new          → create a minimal CANDIDATE stub so the
+   b. If the URL is new          → create a minimal review-queue stub so the
       promotion + extraction pipeline can take over.
 
-CANDIDATE stubs have:
-  - ``curation_status = CANDIDATE``  (invisible in feed endpoints)
+Review-queue stubs have:
+  - ``curation_status = CANDIDATE`` by default, or ``PROMOTED`` when
+    ``AUTO_APPROVE_REVIEW_CONTENT=true``
   - ``ai_processed = False``          (LLM skipped until promoted)
   - ``discovered_via`` set to the signal source label
 
-Only after the PromotionService promotes them to PROMOTED do items become
-eligible for AI summarisation and feed display.
+Normally only after the PromotionService promotes them to PROMOTED do items
+become eligible for AI summarisation and feed display.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config.source_tiering import get_domain_policy, is_allowed_domain
+from app.core.curation import review_queue_target_status
 from app.ingestion.canonical import canonical_key_for_article, extract_youtube_video_id
 from app.ingestion.signals import SignalItem
 from app.ingestion.signals.discovery_feeds import fetch_discovery_leads
@@ -38,7 +40,7 @@ from app.ingestion.signals.hacker_news import fetch_hn_best, fetch_hn_top
 from app.ingestion.signals.youtube_trending import fetch_yt_trending
 from app.ingestion.url_normalizer import normalize_url
 from app.models.candidate_audit import CandidateAuditEvent
-from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.content import ContentItem, ContentType
 from app.models.signal import SignalSource
 from app.repositories.content_repo import ContentItemRepository
 from app.repositories.signal_repo import SignalURLRepository
@@ -174,7 +176,7 @@ def _build_candidate_stub(
         recency_score=1.0,
         trend_score=0.0,
         global_score=0.0,
-        curation_status=ContentStatus.CANDIDATE,
+        curation_status=review_queue_target_status(),
         discovered_via=discovered_via,
         signal_hits=1,
     )

@@ -49,8 +49,9 @@ class ContentStatus(enum.Enum):
     NOTE: SUPPRESSED content uses the existing ``is_suppressed`` boolean flag.
     ContentStatus only controls the candidate→promoted pipeline.
 
-    Default for newly-ingested items is CANDIDATE unless the item was added
-    manually (manual_added=True), in which case it starts as PROMOTED.
+    Default for newly-ingested review-queue items is CANDIDATE unless
+    AUTO_APPROVE_REVIEW_CONTENT is enabled. Manually-added content starts
+    as PROMOTED.
     """
 
     CANDIDATE = "CANDIDATE"
@@ -132,7 +133,8 @@ class ContentItem(Base):
     # CANDIDATE = ingested but not yet promoted (no AI, not in feed)
     # PROMOTED  = passed quality gate, eligible for AI + feed
     # Default is PROMOTED for backward compatibility with pre-existing items
-    # and manually-added content.  Signal ingestion explicitly sets CANDIDATE.
+    # and manually-added content. Review-queue ingestion paths explicitly
+    # decide between CANDIDATE and PROMOTED at runtime.
     curation_status = Column(
         ContentStatusEnum,
         nullable=False,
