@@ -134,6 +134,8 @@ def is_non_english(lang: Optional[str]) -> bool:
 
 def _normalize_primary_language_tag(lang: Optional[str]) -> Optional[str]:
     """Return the primary lower-cased language subtag from a BCP-47-ish value."""
+    if not isinstance(lang, str):
+        return None
     normalized = (lang or "").strip().lower()
     if not normalized:
         return None

@@ -82,6 +82,11 @@ class TestIsEnglish:
         assert len(short) < _MIN_DETECT_LENGTH
         assert is_english(short, channel_language="en_GB") is True
 
+    def test_short_english_title_ignores_non_string_channel_language(self):
+        short = "AI news"
+        assert len(short) < _MIN_DETECT_LENGTH
+        assert is_english(short, channel_language=MagicMock()) is True
+
     def test_title_with_description_improves_detection(self):
         """Description provides additional context for detection."""
         # A short title might be ambiguous, but description helps
