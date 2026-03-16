@@ -34,15 +34,18 @@ This backend supports restart-resilient ingestion that continues until per-feed 
 - `CONNECTOR_TIMEOUT_SECONDS` (default: `15`): HTTP timeout for RSS/YouTube feed fetch calls
 - `CONNECTOR_BACKOFF_BASE_SECONDS` (default: `0.5`): exponential backoff base for connector retries
 
-### Reel guardrail (auto-pause)
+### Source health demotion
 
-Reel feeds are auto-paused for the next day when either condition is met:
+Low-performing channels are soft-demoted via `VideoSourceProfile.status`
+transitions computed by `refresh_video_source_health()`:
 
-- `items_attempted >= 30` and `items_ingested = 0` on the previous day
-- conversion `< 5%` for 3 consecutive days
+- Channels with `score_7d < 0.25` or `suppression_rate_7d >= 0.6` → `blocked` (zero promotion)
+- Channels with insufficient data (`< 3` items in 7 days) → `discovery` (reduced promotion)
+- Otherwise channels earn `rotation` or `core` status based on score_7d thresholds
 
-Paused feeds are exposed in admin metrics (`GET /metrics/sources`) under
-`auto_paused_reel_feeds`.
+Demoted channels remain in ingestion but receive lower promotion multipliers.
+The admin metrics endpoint (`GET /metrics/sources`) reports demoted channels
+under `demoted_channels`.
 
 ### Reel scorecard command
 

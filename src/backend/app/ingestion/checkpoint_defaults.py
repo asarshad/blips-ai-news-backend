@@ -22,10 +22,6 @@ logger = get_logger(__name__)
 
 DEFAULT_INGESTION_TARGET_OVERRIDES: Dict[str, int] = {}
 
-REEL_AUTO_PAUSE_MIN_ATTEMPTS = 60
-REEL_AUTO_PAUSE_MIN_CONVERSION = 0.02
-REEL_AUTO_PAUSE_CONSECUTIVE_DAYS = 5
-
 
 @dataclass(frozen=True)
 class FeedDefault:
@@ -63,83 +59,6 @@ def parse_target_overrides() -> Dict[str, int]:
             except Exception:
                 continue
     return result
-
-
-def get_reel_auto_pause_decisions(
-    *,
-    db=None,
-    day_utc: date | None = None,
-    feed_names: List[str] | None = None,
-) -> Dict[str, str]:
-    """Return reel feeds that should be auto-paused for the current day."""
-    if settings.YOUTUBE_CURATED_ONLY:
-        return {}
-    if db is None:
-        return {}
-
-    names = sorted({name for name in (feed_names or []) if str(name).strip()})
-    if not names:
-        return {}
-
-    from app.ingestion.time import get_ingestion_day
-    from app.models.ingestion_progress import IngestionProgress
-
-    today = day_utc or get_ingestion_day()
-    yesterday = today - timedelta(days=1)
-    start_day = today - timedelta(days=REEL_AUTO_PAUSE_CONSECUTIVE_DAYS)
-
-    rows = (
-        db.query(IngestionProgress)
-        .filter(
-            IngestionProgress.source_type == "youtube_reel",
-            IngestionProgress.feed_name.in_(names),
-            IngestionProgress.day_utc >= start_day,
-            IngestionProgress.day_utc <= yesterday,
-        )
-        .all()
-    )
-
-    by_feed_day = {(row.feed_name, row.day_utc): row for row in rows}
-    paused: Dict[str, str] = {}
-
-    for feed_name in names:
-        yesterday_row = by_feed_day.get((feed_name, yesterday))
-        attempted_yesterday = int(getattr(yesterday_row, "items_attempted", 0) or 0)
-        inserted_yesterday = int(getattr(yesterday_row, "items_ingested", 0) or 0)
-
-        if attempted_yesterday >= REEL_AUTO_PAUSE_MIN_ATTEMPTS and inserted_yesterday == 0:
-            paused[feed_name] = (
-                f"attempted>={REEL_AUTO_PAUSE_MIN_ATTEMPTS} and inserted=0 on "
-                f"{yesterday.isoformat()}"
-            )
-            continue
-
-        low_conversion_streak = True
-        for offset in range(1, REEL_AUTO_PAUSE_CONSECUTIVE_DAYS + 1):
-            day_to_check = today - timedelta(days=offset)
-            row = by_feed_day.get((feed_name, day_to_check))
-            if row is None:
-                low_conversion_streak = False
-                break
-
-            attempted = int(getattr(row, "items_attempted", 0) or 0)
-            inserted = int(getattr(row, "items_ingested", 0) or 0)
-            if attempted <= 0:
-                low_conversion_streak = False
-                break
-
-            conversion = inserted / attempted
-            if conversion >= REEL_AUTO_PAUSE_MIN_CONVERSION:
-                low_conversion_streak = False
-                break
-
-        if low_conversion_streak:
-            paused[feed_name] = (
-                f"conversion<{REEL_AUTO_PAUSE_MIN_CONVERSION:.0%} for "
-                f"{REEL_AUTO_PAUSE_CONSECUTIVE_DAYS} consecutive days"
-            )
-
-    return paused
 
 
 def _fresh_promoted_count(db, content_type: ContentType, *, hours: int) -> int:
@@ -239,21 +158,5 @@ def build_defaults(*, db=None, day_utc: date | None = None) -> List[FeedDefault]
             defaults.append(FeedDefault("youtube_video", cfg.name, max(0, video_target)))
             if reel_target > 0:
                 defaults.append(FeedDefault("youtube_reel", cfg.name, max(0, reel_target)))
-
-    reel_feeds = [d.feed_name for d in defaults if d.source_type == "youtube_reel" and d.target > 0]
-    paused_reel_feeds = get_reel_auto_pause_decisions(
-        db=db,
-        day_utc=day_utc,
-        feed_names=reel_feeds,
-    )
-
-    if paused_reel_feeds:
-        for feed_name, reason in paused_reel_feeds.items():
-            logger.warning("Auto-paused reel feed for today: %s (%s)", feed_name, reason)
-        defaults = [
-            d
-            for d in defaults
-            if not (d.source_type == "youtube_reel" and d.feed_name in paused_reel_feeds)
-        ]
 
     return [d for d in defaults if d.target > 0]
