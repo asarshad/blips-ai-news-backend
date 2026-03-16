@@ -54,6 +54,23 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
+def _youtube_entry_is_reel(entry) -> bool:
+    """Classify a YouTube entry using the same duration-first rule as live ingest."""
+    duration_seconds = getattr(entry, "duration_seconds", None)
+    if not isinstance(duration_seconds, (int, float)):
+        duration_seconds = None
+
+    is_short = bool(getattr(entry, "is_short", False))
+    video_url = getattr(entry, "video_url", None) or ""
+    is_shorts_url = "/shorts/" in video_url
+
+    if duration_seconds is not None:
+        return duration_seconds <= settings.REEL_MAX_DURATION_SECONDS
+    if is_shorts_url:
+        return True
+    return is_short
+
+
 def _insert_content_items_postgres(db: Session, *, values: List[dict]) -> int:
     if not values:
         return 0
@@ -382,14 +399,15 @@ def process_progress_row_batch(
                 if entry_cursor:
                     last_scanned_cursor = entry_cursor
 
-                is_reel = bool(e.is_short or (e.video_url and "/shorts/" in e.video_url))
+                is_reel = _youtube_entry_is_reel(e)
                 # Debug: trace the filter decision
                 logger.debug(
-                    "YT filter: want_reel=%s is_reel=%s e.is_short=%s url_has_shorts=%s video_id=%s",
+                    "YT filter: want_reel=%s is_reel=%s e.is_short=%s url_has_shorts=%s duration=%s video_id=%s",
                     want_reel,
                     is_reel,
                     e.is_short,
                     "/shorts/" in (e.video_url or ""),
+                    getattr(e, "duration_seconds", None),
                     e.video_id,
                 )
                 if want_reel != is_reel:

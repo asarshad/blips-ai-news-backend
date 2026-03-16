@@ -35,6 +35,7 @@ def _make_profile(**overrides) -> VideoSourceProfile:
         save_share_rate_7d=0.0,
         status_changed_at=None,
         probation_until=None,
+        low_promotion_since=None,
     )
     defaults.update(overrides)
     return VideoSourceProfile(**defaults)
@@ -190,6 +191,7 @@ def test_core_demoted_when_promotion_rate_low():
         status="core",
         promotion_rate_7d=0.05,
         score_7d=0.55,
+        low_promotion_since=datetime.utcnow() - timedelta(days=15),
     )
     assert (
         _compute_graduated_status(
@@ -204,12 +206,28 @@ def test_rotation_demoted_when_promotion_rate_low():
         status="rotation",
         promotion_rate_7d=0.08,
         score_7d=0.55,
+        low_promotion_since=datetime.utcnow() - timedelta(days=15),
     )
     assert (
         _compute_graduated_status(
             profile=p, promoted_count_7d=1, db=_FakeDb(), cutoff_30d=datetime.utcnow()
         )
         == "discovery"
+    )
+
+
+def test_core_not_demoted_before_sustained_low_rate_window():
+    p = _make_profile(
+        status="core",
+        promotion_rate_7d=0.05,
+        score_7d=0.55,
+        low_promotion_since=datetime.utcnow() - timedelta(days=13),
+    )
+    assert (
+        _compute_graduated_status(
+            profile=p, promoted_count_7d=1, db=_FakeDb(), cutoff_30d=datetime.utcnow()
+        )
+        == "core"
     )
 
 
@@ -266,12 +284,29 @@ def test_probation_channel_demoted_on_low_rate():
         promotion_rate_7d=0.05,
         score_7d=0.55,
         probation_until=datetime.utcnow() + timedelta(days=7),
+        low_promotion_since=datetime.utcnow() - timedelta(days=8),
     )
     assert (
         _compute_graduated_status(
             profile=p, promoted_count_7d=1, db=_FakeDb(), cutoff_30d=datetime.utcnow()
         )
         == "discovery"
+    )
+
+
+def test_probation_channel_not_demoted_before_shorter_window():
+    p = _make_profile(
+        status="rotation",
+        promotion_rate_7d=0.05,
+        score_7d=0.55,
+        probation_until=datetime.utcnow() + timedelta(days=7),
+        low_promotion_since=datetime.utcnow() - timedelta(days=6),
+    )
+    assert (
+        _compute_graduated_status(
+            profile=p, promoted_count_7d=1, db=_FakeDb(), cutoff_30d=datetime.utcnow()
+        )
+        == "rotation"
     )
 
 

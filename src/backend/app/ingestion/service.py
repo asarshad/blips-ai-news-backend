@@ -69,6 +69,22 @@ DISCOVERY_FRESH_REEL_FLOOR = max(
 )
 
 
+def _entry_is_reel(entry: VideoEntry) -> bool:
+    """Classify a YouTube entry with the same duration-first rule used at ingest time."""
+    duration_seconds = getattr(entry, "duration_seconds", None)
+    if not isinstance(duration_seconds, (int, float)):
+        duration_seconds = None
+
+    is_short = bool(getattr(entry, "is_short", False))
+    is_shorts_url = bool(entry.video_url and "/shorts/" in entry.video_url)
+
+    if duration_seconds is not None:
+        return duration_seconds <= settings.REEL_MAX_DURATION_SECONDS
+    if is_shorts_url:
+        return True
+    return is_short
+
+
 class IngestionPipeline:
     """
     Pipeline for ingesting content into the curation system.
@@ -768,9 +784,7 @@ class IngestionPipeline:
             )
             for entry in video_entries:
                 # Use enhanced metadata for shorts detection
-                is_short = getattr(entry, "is_short", False)
-                is_shorts_url = bool(entry.video_url and "/shorts/" in entry.video_url)
-                is_reel = is_short or is_shorts_url
+                is_reel = _entry_is_reel(entry)
 
                 # Apply per-channel caps to prevent creator fatigue
                 channel_id = getattr(entry, "channel_id", "") or entry.source

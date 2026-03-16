@@ -48,6 +48,7 @@ class FeedResponseMeta:
     generated_at: datetime
     tier_config: Dict[str, int]
     surface: str
+    remaining_window_count: int = 0
 
 
 def _get_redis_client():
@@ -144,7 +145,7 @@ def get_tiered_feed(
     now: Optional[datetime] = None,
     require_ai_processed: bool = True,
     hybrid_video_rerank: bool = False,
-) -> Tuple[List[TieredItem], bool]:
+) -> Tuple[List[TieredItem], bool, int]:
     """
     Get a tiered blend of content items for a surface.
 
@@ -163,7 +164,7 @@ def get_tiered_feed(
         require_ai_processed: Filter to AI-processed content (default True for articles/videos)
 
     Returns:
-        Tuple of (tiered items, has_more)
+        Tuple of (tiered items, has_more, remaining_window_count)
     """
     now = now or datetime.utcnow()
     cfg = _get_surface_config(surface)
@@ -202,11 +203,19 @@ def get_tiered_feed(
     # Calculate how many we need from each tier
     # We fetch more to allow diversity mixing
     fetch_multiplier = 3
-    target_count = limit + offset
+    target_count = limit + offset + 1
 
     # =========================================================================
     # TIER A: Fresh (published within window)
     # =========================================================================
+    total_fresh_count = (
+        apply_content_policy(
+            db.query(ContentItem).filter(base_filter),
+            content_type=content_type,
+        )
+        .filter(ContentItem.published_at >= fresh_cutoff)
+        .count()
+    )
     tier_a_query = apply_content_policy(
         db.query(ContentItem).filter(base_filter),
         content_type=content_type,
@@ -317,6 +326,8 @@ def get_tiered_feed(
     # Apply pagination
     paginated = mixed_tiered[offset : offset + limit]
     has_more = len(mixed_tiered) > offset + limit
+    served_fresh_count = sum(1 for t in mixed_tiered[: offset + limit] if t.tier == FreshnessTier.A)
+    remaining_window_count = max(0, int(total_fresh_count) - int(served_fresh_count))
 
     logger.info(
         f"Tiered feed for {surface.value}: "
@@ -326,7 +337,7 @@ def get_tiered_feed(
         f"total={len(paginated)}"
     )
 
-    return paginated, has_more
+    return paginated, has_more, remaining_window_count
 
 
 def _default_starters_for(item) -> Dict[str, Any]:
@@ -486,13 +497,14 @@ def get_cached_tiered_feed(
                     tier_config=cfg,
                     surface=surface.value,
                 )
+                meta.remaining_window_count = int(data.get("remaining_window_count", 0) or 0)
                 return data["items"], data["has_more"], meta
         except Exception as e:
             logger.debug(f"Cache read failed: {e}")
 
     # Cache miss - query database
     logger.debug(f"Cache MISS for {cache_key}")
-    tiered_items, has_more = get_tiered_feed(
+    tiered_items, has_more, remaining_window_count = get_tiered_feed(
         db,
         surface,
         limit=limit,
@@ -518,7 +530,13 @@ def get_cached_tiered_feed(
     # Cache the result
     if redis_client:
         try:
-            cache_data = json.dumps({"items": items, "has_more": has_more})
+            cache_data = json.dumps(
+                {
+                    "items": items,
+                    "has_more": has_more,
+                    "remaining_window_count": remaining_window_count,
+                }
+            )
             redis_client.setex(cache_key, TIERED_FEED_CACHE_TTL, cache_data)
             logger.debug(f"Cached {len(items)} items for {cache_key}")
         except Exception as e:
@@ -531,5 +549,6 @@ def get_cached_tiered_feed(
         generated_at=now,
         tier_config=cfg,
         surface=surface.value,
+        remaining_window_count=remaining_window_count,
     )
     return items, has_more, meta
