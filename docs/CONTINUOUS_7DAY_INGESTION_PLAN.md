@@ -10,12 +10,12 @@
 | Step 4: Replace Auto-Pause with Demotion | ✅ Done | Removed auto-pause guardrail, metrics report demoted_channels |
 | Step 5: Auto-Graduation for Discovery | ✅ Done | Graduated transitions, 7d cooldown, 14d probation, 16 tests |
 | Step 6: Expand Reel Source Roster | ✅ Done | 3 new reel query packs; channel additions need manual ID verification |
-| Step 7: Feed Diversity Caps | ⬜ Not started | |
-| Step 8: Feed Endpoints & caught_up | ⬜ Not started | |
+| Step 7: Feed Diversity Caps | ✅ Done | Position-based channel caps, graceful degradation, 7 tests |
+| Step 8: Feed Endpoints & caught_up | ✅ Done | window_days + remaining_count in /recent & /reels responses |
 | Step 9: Strengthen Language Filtering | ⬜ Not started | |
 | Step 10: Extend Admin Metrics | ⬜ Not started | |
 
-All 701 unit tests passing.
+All 708 unit tests passing.
 
 ---
 
