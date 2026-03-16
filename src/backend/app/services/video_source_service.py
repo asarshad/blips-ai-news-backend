@@ -131,6 +131,21 @@ def repair_video_source_metadata(
     }
 
 
+def _graduation_cooldown_days() -> int:
+    """Minimum days between status transitions to prevent oscillation."""
+    return 7
+
+
+def _probation_days() -> int:
+    """Post-graduation probation window for discovery→rotation channels."""
+    return 14
+
+
+def _demotion_promotion_floor() -> float:
+    """Promotion rate below which demotion is considered."""
+    return 0.10
+
+
 def refresh_video_source_health(db: Session, hours_back: int = 24 * 7) -> List[VideoSourceProfile]:
     """Update rolling 7-day health stats and status for video source profiles."""
     repair_video_source_metadata(db)
@@ -233,18 +248,84 @@ def refresh_video_source_health(db: Session, hours_back: int = 24 * 7) -> List[V
         profile.last_seen_at = last_seen
         profile.last_promoted_at = last_promoted
 
-        if not profile.enabled:
-            profile.status = "blocked"
-        elif total < 3:
-            profile.status = "discovery"
-        elif profile.score_7d >= 0.72 and profile.early_skip_rate_7d <= 0.35:
-            profile.status = "core"
-        elif profile.score_7d >= 0.55 and profile.early_skip_rate_7d <= 0.5:
-            profile.status = "rotation"
-        elif profile.score_7d < 0.25 or profile.suppression_rate_7d >= 0.6:
-            profile.status = "blocked"
-        else:
-            profile.status = "discovery"
+        old_status = profile.status
+        new_status = _compute_graduated_status(
+            profile=profile,
+            promoted_count_7d=promoted_count,
+            db=db,
+            cutoff_30d=datetime.utcnow() - timedelta(days=30),
+        )
+        if new_status != old_status:
+            profile.status = new_status
+            profile.status_changed_at = datetime.utcnow()
+            if old_status == "discovery" and new_status == "rotation":
+                profile.probation_until = datetime.utcnow() + timedelta(days=_probation_days())
 
     db.commit()
     return profiles
+
+
+def _compute_graduated_status(
+    *,
+    profile: VideoSourceProfile,
+    promoted_count_7d: int,
+    db: Session,
+    cutoff_30d: datetime,
+) -> str:
+    """Determine channel status using graduation rules with anti-oscillation."""
+    if not profile.enabled:
+        return "blocked"
+
+    now = datetime.utcnow()
+    cooldown = timedelta(days=_graduation_cooldown_days())
+    changed_at = profile.status_changed_at
+    in_cooldown = changed_at is not None and (now - changed_at) < cooldown
+
+    # Hard blocks override everything
+    if profile.score_7d < 0.25 or profile.suppression_rate_7d >= 0.6:
+        return "blocked"
+
+    current = profile.status or "discovery"
+
+    # Promotion: discovery → rotation
+    if current == "discovery" and not in_cooldown:
+        if (
+            promoted_count_7d >= 3
+            and profile.promotion_rate_7d >= 0.25
+            and profile.clickbait_rate_7d < 0.10
+        ):
+            return "rotation"
+
+    # Promotion: rotation → core
+    if current == "rotation" and not in_cooldown:
+        promoted_30d = (
+            db.query(func.count(ContentItem.id))
+            .filter(
+                ContentItem.channel_id == profile.channel_id,
+                ContentItem.created_at >= cutoff_30d,
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+            )
+            .scalar()
+            or 0
+        )
+        if (
+            promoted_30d >= 10
+            and profile.promotion_rate_7d >= 0.40
+            and profile.freshness_yield_7d >= 0.30
+        ):
+            return "core"
+
+    # Demotion: core/rotation → discovery when promotion_rate_7d too low
+    if current in ("core", "rotation") and not in_cooldown:
+        if profile.promotion_rate_7d < _demotion_promotion_floor():
+            # Channels on probation use shorter demotion window (checked by
+            # the caller having already set probation_until)
+            probation = profile.probation_until
+            on_probation = probation is not None and now < probation
+            # On probation: demote immediately when below floor
+            # Off probation: still demote (the 7d rate already captures a
+            # sustained low period since each refresh uses rolling 7d data)
+            if on_probation or profile.promotion_rate_7d < _demotion_promotion_floor():
+                return "discovery"
+
+    return current

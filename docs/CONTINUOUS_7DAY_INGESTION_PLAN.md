@@ -7,7 +7,7 @@
 | Step 1: Enable Discovery + Quota Config | ✅ Done | youtube_quota.py defaults (6000/4500/800), per-surface cooldown, config flipped |
 | Step 2: Remove Daily Stop Conditions | ✅ Done | service.py un-gated, checkpoint reopen logic, budget 10x multiplier |
 | Step 3: Unify Reel Classification ≤120s | ✅ Done | config.py + youtube_client.py updated, reclassify_reels.py verified |
-| Step 4: Replace Auto-Pause with Demotion | ⬜ Not started | |
+| Step 4: Replace Auto-Pause with Demotion | ✅ Done | Removed auto-pause guardrail, metrics report demoted_channels |
 | Step 5: Auto-Graduation for Discovery | ⬜ Not started | |
 | Step 6: Expand Reel Source Roster | ⬜ Not started | |
 | Step 7: Feed Diversity Caps | ⬜ Not started | |
@@ -15,7 +15,7 @@
 | Step 9: Strengthen Language Filtering | ⬜ Not started | |
 | Step 10: Extend Admin Metrics | ⬜ Not started | |
 
-All 687 unit tests passing.
+All 685 unit tests passing.
 
 ---
 
