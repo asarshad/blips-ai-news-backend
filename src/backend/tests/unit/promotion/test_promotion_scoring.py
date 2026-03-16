@@ -338,6 +338,23 @@ class TestPromotionService:
         assert candidate.curation_status == ContentStatus.CANDIDATE
         assert result.promoted_count == 0
 
+    def test_source_health_refresh_runs_even_without_promotions(self):
+        mock_db = MagicMock()
+        cfg = PromotionConfig(min_score=1.0)
+        svc = PromotionService(mock_db, config=cfg)
+
+        with (
+            patch("app.services.promotion_service.Session", object),
+            patch("app.services.video_source_service.refresh_video_source_health") as mock_refresh,
+            patch.object(svc, "_get_cluster_sizes", return_value={}),
+            patch.object(svc, "_get_candidates", return_value=[]),
+            patch.object(svc, "_rescore_promoted", return_value=0),
+        ):
+            result = svc.run_promotion_job()
+
+        mock_refresh.assert_called_once_with(mock_db)
+        assert result.promoted_count == 0
+
     def test_top_n_cap_respected(self):
         mock_db = MagicMock()
         cfg = PromotionConfig(top_n_per_type=2, min_score=0.0)

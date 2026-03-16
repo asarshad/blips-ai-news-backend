@@ -43,6 +43,7 @@ class VideoSourceProfile(Base):
     last_promoted_at = Column(DateTime, nullable=True, index=True)
     status_changed_at = Column(DateTime, nullable=True)
     probation_until = Column(DateTime, nullable=True)
+    low_promotion_since = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(
         DateTime,

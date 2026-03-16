@@ -171,8 +171,8 @@ class IngestionProgressRepository:
     ) -> int:
         """Reopen completed YouTube rows for the next ingestion cycle.
 
-        For each YouTube row that has met its target (complete or
-        items_ingested >= target), bump the target additively and clear
+        For each YouTube row that has met its target or has exhausted its
+        per-cycle attempt budget, bump the target additively and clear
         exhaustion state so the checkpoint loop picks it up again.
         RSS rows are left unchanged.
 
@@ -196,10 +196,13 @@ class IngestionProgressRepository:
             )
             if row is None:
                 continue
-            # Only reopen rows that are finished or at/above target
-            if row.status not in ("complete",) and int(row.items_ingested or 0) < int(
-                row.target or 0
-            ):
+            reached_target = int(row.items_ingested or 0) >= int(row.target or 0)
+            exhausted = row.status == "failed" and "Exhausted attempts:" in str(
+                row.last_error or ""
+            )
+            # Only reopen rows that are finished for this cycle or failed due
+            # to exhaustion. Unknown-channel/source failures should remain failed.
+            if not reached_target and row.status not in ("complete",) and not exhausted:
                 continue
             # Bump target so remaining = per_cycle_target
             row.target = int(row.items_ingested or 0) + per_cycle_target

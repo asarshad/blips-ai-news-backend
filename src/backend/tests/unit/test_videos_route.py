@@ -23,6 +23,7 @@ def test_get_recent_videos_surfaces_promoted_items_without_ai_gate(monkeypatch):
             cache_key="videos",
             cache_hit=False,
             tier_config={"fresh_hours": 168},
+            remaining_window_count=0,
         )
         return (
             [
@@ -74,6 +75,7 @@ def test_get_recent_videos_passes_hybrid_rerank_flag(monkeypatch):
             cache_key="videos",
             cache_hit=False,
             tier_config={"fresh_hours": 168},
+            remaining_window_count=0,
         )
         return ([], False, meta)
 
@@ -92,3 +94,43 @@ def test_get_recent_videos_passes_hybrid_rerank_flag(monkeypatch):
     assert captured["surface"].value == "videos"
     assert captured["hybrid_video_rerank"] is True
     assert result["inventory_state"] == "warming_up"
+
+
+def test_get_recent_videos_uses_remaining_window_count_for_caught_up(monkeypatch):
+    def _fake_feed(db, surface, *, limit, offset, require_ai_processed, hybrid_video_rerank):
+        meta = SimpleNamespace(
+            generated_at=datetime(2026, 3, 13, 12, 0, 0),
+            source="db",
+            cache_key="videos",
+            cache_hit=False,
+            tier_config={"fresh_hours": 168},
+            remaining_window_count=0,
+        )
+        return (
+            [
+                {
+                    "id": 1,
+                    "title": "Page item",
+                    "published_at": "2026-03-13T11:55:00",
+                    "freshness_tier": "A",
+                }
+            ],
+            True,
+            meta,
+        )
+
+    monkeypatch.setattr(videos_module, "get_cached_tiered_feed", _fake_feed)
+    monkeypatch.setattr(videos_module, "check_and_trigger_topup", lambda *_args, **_kwargs: None)
+
+    result = videos_module.get_recent_videos(
+        limit=1,
+        cursor="5",
+        page=None,
+        response=Response(),
+        db=object(),
+        flags=SimpleNamespace(is_enabled=lambda name: name == "videos"),
+    )
+
+    assert result["has_more"] is True
+    assert result["remaining_count"] == 0
+    assert result["inventory_state"] == "caught_up"

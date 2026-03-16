@@ -57,3 +57,20 @@ def test_graceful_degradation_with_single_channel():
     items = [_item(i, "ch-A") for i in range(10)]
     result = enforce_channel_caps(items, "reels")
     assert len(result) == 10
+
+
+def test_reels_best_effort_avoids_back_to_back_when_alternatives_exist():
+    items = [
+        _item(1, "ch-A"),
+        _item(2, "ch-A"),
+        _item(3, "ch-A"),
+        _item(4, "ch-B"),
+        _item(5, "ch-B"),
+        _item(6, "ch-C"),
+        _item(7, "ch-D"),
+    ]
+
+    result = enforce_channel_caps(items, "reels")
+
+    for prev, current in zip(result, result[1:], strict=True):
+        assert prev["channel_id"] != current["channel_id"]

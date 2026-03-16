@@ -675,7 +675,7 @@ class PromotionService:
                     result.errors.append(msg)
 
             self.db.commit()
-            if result.promoted_count > 0 and isinstance(self.db, Session):
+            if isinstance(self.db, Session):
                 from app.services.video_source_service import refresh_video_source_health
 
                 try:

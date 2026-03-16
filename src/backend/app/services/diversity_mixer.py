@@ -600,6 +600,16 @@ def _get_channel_key(item: Any) -> str:
     return getattr(item, "channel_id", None) or getattr(item, "source", None) or "unknown"
 
 
+def _violates_caps(channel: str, result: List[Any], caps: List[tuple[int, int]]) -> bool:
+    pos = len(result)
+    for limit, max_count in caps:
+        if pos < limit:
+            count_in_range = sum(1 for r in result if _get_channel_key(r) == channel)
+            if count_in_range >= max_count:
+                return True
+    return False
+
+
 def enforce_channel_caps(items: List[Any], surface: str) -> List[Any]:
     """Apply position-based channel caps, pushing excess items later in the list.
 
@@ -622,20 +632,7 @@ def enforce_channel_caps(items: List[Any], surface: str) -> List[Any]:
 
     for item in items:
         channel = _get_channel_key(item)
-        pos = len(result)
-
-        # Check if placing this item at `pos` would violate any cap
-        violates = False
-        for limit, max_count in caps:
-            if pos < limit:
-                # Count how many items from this channel are already in result
-                # within positions 0..limit-1 (all of result so far is < limit)
-                count_in_range = sum(1 for r in result if _get_channel_key(r) == channel)
-                if count_in_range >= max_count:
-                    violates = True
-                    break
-
-        if violates:
+        if _violates_caps(channel, result, caps):
             deferred.append(item)
         else:
             result.append(item)
@@ -650,6 +647,30 @@ def enforce_channel_caps(items: List[Any], surface: str) -> List[Any]:
                 surface,
                 len(items),
             )
-        result.extend(deferred)
+        pending = list(deferred)
+        while pending:
+            placed_idx = None
+            prev_channel = _get_channel_key(result[-1]) if result else None
+            for idx, item in enumerate(pending):
+                channel = _get_channel_key(item)
+                if prev_channel is not None and channel == prev_channel:
+                    continue
+                if _violates_caps(channel, result, caps):
+                    continue
+                placed_idx = idx
+                break
+
+            if placed_idx is None:
+                # Best-effort degradation: avoid back-to-back duplicates when
+                # possible, even if cap windows are already exhausted.
+                for idx, item in enumerate(pending):
+                    if _get_channel_key(item) != prev_channel:
+                        placed_idx = idx
+                        break
+
+            if placed_idx is None:
+                placed_idx = 0
+
+            result.append(pending.pop(placed_idx))
 
     return result

@@ -168,6 +168,36 @@ class TestReopenYoutubeRows:
         assert reopened == 1
         assert row.target == 11  # 6 + 5
 
+    def test_reopens_failed_exhausted_row_below_target(self):
+        """A row exhausted by attempt cap is reopened for another poll cycle."""
+        row = _make_progress(
+            source_type="youtube_video",
+            target=5,
+            items_ingested=2,
+            items_attempted=150,
+            status="failed",
+            retry_count=4,
+            retry_at=datetime(2026, 6, 1, 12, 0),
+            last_error="Exhausted attempts: attempted=150 max=150",
+        )
+
+        db = MagicMock()
+        db.query.return_value = _FakeQuery([row])
+        repo = IngestionProgressRepository(db)
+
+        reopened = repo.reopen_youtube_rows(
+            day_utc=date(2026, 6, 1),
+            defaults=[("youtube_video", "TestChannel", 5)],
+        )
+
+        assert reopened == 1
+        assert row.target == 7
+        assert row.status == "running"
+        assert row.items_attempted == 0
+        assert row.retry_count == 0
+        assert row.retry_at is None
+        assert row.last_error is None
+
     def test_skips_missing_row(self):
         """If the row doesn't exist yet, skip it."""
         db = MagicMock()

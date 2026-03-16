@@ -132,6 +132,15 @@ def is_non_english(lang: Optional[str]) -> bool:
     return lang is not None and lang != "en"
 
 
+def _normalize_primary_language_tag(lang: Optional[str]) -> Optional[str]:
+    """Return the primary lower-cased language subtag from a BCP-47-ish value."""
+    normalized = (lang or "").strip().lower()
+    if not normalized:
+        return None
+    normalized = normalized.replace("_", "-")
+    return normalized.split("-", 1)[0] or None
+
+
 def is_english(
     title: str,
     description: Optional[str] = None,
@@ -179,7 +188,8 @@ def is_english(
     if lang is None:
         # langdetect inconclusive (text too short) — fall back to channel
         # language metadata when available.
-        if channel_language and channel_language != "en":
+        primary_lang = _normalize_primary_language_tag(channel_language)
+        if primary_lang and primary_lang != "en":
             logger.warning(
                 "Short text inconclusive, channel_language=%s: %s",
                 channel_language,

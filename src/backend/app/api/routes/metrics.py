@@ -43,6 +43,16 @@ def get_db():
         db.close()
 
 
+def _curation_mix_bucket(discovered_via: Any) -> str:
+    """Map discovery lanes into curated vs discovery mix buckets."""
+    lane = str(discovered_via or "unknown").lower()
+    return (
+        "discovery"
+        if any(token in lane for token in ("discovery", "search", "trending"))
+        else "curated"
+    )
+
+
 @router.get("/sources", dependencies=[Depends(require_admin_key)])
 def get_source_health_metrics(db: Session = Depends(get_db)):
     """
@@ -202,8 +212,7 @@ def get_source_health_metrics(db: Session = Depends(get_db)):
             )
             breakdown = {}
             for lane, cnt in rows:
-                key = lane or "unknown"
-                bucket = "discovery" if "discovery" in key else "curated"
+                bucket = _curation_mix_bucket(lane)
                 breakdown[bucket] = breakdown.get(bucket, 0) + cnt
             curated_vs_discovery[ct.value] = breakdown
 

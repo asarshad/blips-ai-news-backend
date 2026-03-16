@@ -4,11 +4,9 @@ Updated to serve content from the unified content_items table with AI filtering.
 Includes tiered freshness strategy (A/B/C) and diversity mixing.
 """
 
-from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.feed_headers import FeedMetadata, compute_feed_version
@@ -18,16 +16,13 @@ from app.core.exceptions import not_found_exception
 from app.core.feature_flags import FeatureFlags, get_feature_flags
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
-from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.content import ContentType
 from app.repositories.content_repo import ContentItemRepository
 from app.schemas.video import Video as VideoSchema
 from app.services.ad_mixer import inject_ads
 from app.services.inventory_service import Surface
-from app.services.tiered_feed_service import (
-    get_cached_tiered_feed,
-)
+from app.services.tiered_feed_service import get_cached_tiered_feed
 from app.services.topup_service import check_and_trigger_topup
-from app.services.video_content_policy import apply_content_policy
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -70,30 +65,13 @@ def _cursor_to_offset(cursor: Optional[str], limit: int, page: Optional[int]) ->
 FEED_WINDOW_DAYS = 7
 
 
-def _inventory_state(has_more: bool, item_count: int) -> str:
+def _inventory_state(*, item_count: int, remaining_count: int, offset: int) -> str:
     """Surface-aware feed state for clients and admin diagnostics."""
     if item_count == 0:
-        return "warming_up"
-    if not has_more:
+        return "caught_up" if offset > 0 and remaining_count == 0 else "warming_up"
+    if remaining_count == 0:
         return "caught_up"
     return "healthy"
-
-
-def _remaining_in_window(db: Session, content_type: ContentType, offset: int, limit: int) -> int:
-    """Count promoted items in the 7-day window beyond the current page."""
-    try:
-        cutoff = datetime.now(datetime.UTC) - timedelta(days=FEED_WINDOW_DAYS)
-        query = db.query(func.count(ContentItem.id)).filter(
-            ContentItem.type == content_type,
-            ContentItem.curation_status == ContentStatus.PROMOTED,
-            ContentItem.is_suppressed.is_(False),
-            ContentItem.published_at >= cutoff,
-        )
-        query = apply_content_policy(query, content_type=content_type)
-        total = query.scalar() or 0
-        return max(0, total - offset - limit)
-    except Exception:
-        return 0
 
 
 @router.get("/recent", response_model=Dict[str, Any])
@@ -168,9 +146,13 @@ def get_recent_videos(
         "next_cursor": str(offset + limit) if has_more else None,
         "has_more": has_more,
         "served_at": meta.generated_at.isoformat(),
-        "inventory_state": _inventory_state(has_more, len(mixed)),
+        "inventory_state": _inventory_state(
+            item_count=len(mixed),
+            remaining_count=getattr(meta, "remaining_window_count", 0),
+            offset=offset,
+        ),
         "window_days": FEED_WINDOW_DAYS,
-        "remaining_count": _remaining_in_window(db, ContentType.VIDEO, offset, limit),
+        "remaining_count": getattr(meta, "remaining_window_count", 0),
     }
 
 
@@ -239,9 +221,13 @@ def get_reels(
         "next_cursor": str(offset + limit) if has_more else None,
         "has_more": has_more,
         "served_at": meta.generated_at.isoformat(),
-        "inventory_state": _inventory_state(has_more, len(videos)),
+        "inventory_state": _inventory_state(
+            item_count=len(videos),
+            remaining_count=getattr(meta, "remaining_window_count", 0),
+            offset=offset,
+        ),
         "window_days": FEED_WINDOW_DAYS,
-        "remaining_count": _remaining_in_window(db, ContentType.REEL, offset, limit),
+        "remaining_count": getattr(meta, "remaining_window_count", 0),
     }
 
 

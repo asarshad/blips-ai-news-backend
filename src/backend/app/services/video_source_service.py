@@ -146,6 +146,16 @@ def _demotion_promotion_floor() -> float:
     return 0.10
 
 
+def _demotion_days() -> int:
+    """Days of sustained low promotion before a normal demotion."""
+    return 14
+
+
+def _probation_demotion_days() -> int:
+    """Days of sustained low promotion before probationary demotion."""
+    return 7
+
+
 def refresh_video_source_health(db: Session, hours_back: int = 24 * 7) -> List[VideoSourceProfile]:
     """Update rolling 7-day health stats and status for video source profiles."""
     repair_video_source_metadata(db)
@@ -248,6 +258,12 @@ def refresh_video_source_health(db: Session, hours_back: int = 24 * 7) -> List[V
         profile.last_seen_at = last_seen
         profile.last_promoted_at = last_promoted
 
+        low_floor = _demotion_promotion_floor()
+        if profile.status in {"core", "rotation"} and profile.promotion_rate_7d < low_floor:
+            profile.low_promotion_since = profile.low_promotion_since or datetime.utcnow()
+        else:
+            profile.low_promotion_since = None
+
         old_status = profile.status
         new_status = _compute_graduated_status(
             profile=profile,
@@ -260,6 +276,11 @@ def refresh_video_source_health(db: Session, hours_back: int = 24 * 7) -> List[V
             profile.status_changed_at = datetime.utcnow()
             if old_status == "discovery" and new_status == "rotation":
                 profile.probation_until = datetime.utcnow() + timedelta(days=_probation_days())
+                profile.low_promotion_since = None
+            elif new_status != "rotation":
+                profile.probation_until = None
+            if new_status not in {"core", "rotation"}:
+                profile.low_promotion_since = None
 
     db.commit()
     return profiles
@@ -315,17 +336,16 @@ def _compute_graduated_status(
         ):
             return "core"
 
-    # Demotion: core/rotation → discovery when promotion_rate_7d too low
+    # Demotion: core/rotation → discovery when promotion_rate_7d stays low
     if current in ("core", "rotation") and not in_cooldown:
         if profile.promotion_rate_7d < _demotion_promotion_floor():
-            # Channels on probation use shorter demotion window (checked by
-            # the caller having already set probation_until)
             probation = profile.probation_until
             on_probation = probation is not None and now < probation
-            # On probation: demote immediately when below floor
-            # Off probation: still demote (the 7d rate already captures a
-            # sustained low period since each refresh uses rolling 7d data)
-            if on_probation or profile.promotion_rate_7d < _demotion_promotion_floor():
+            low_since = profile.low_promotion_since
+            if low_since is None:
+                return current
+            window_days = _probation_demotion_days() if on_probation else _demotion_days()
+            if (now - low_since) >= timedelta(days=window_days):
                 return "discovery"
 
     return current
