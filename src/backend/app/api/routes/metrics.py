@@ -17,6 +17,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.extraction.metrics import extraction_metrics
+from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.ingestion_progress import IngestionProgress
 from app.models.source import SourceDailyStat
 from app.services.ai_metrics import compute_ai_feed_metrics
@@ -165,6 +166,65 @@ def get_source_health_metrics(db: Session = Depends(get_db)):
             .all()
         )
 
+        # ── Pool & freshness counts per content type ──────────────────────
+        now_utc = datetime.now(timezone.utc)
+        cutoff_7d = now_utc - timedelta(days=7)
+        cutoff_24h = now_utc - timedelta(hours=24)
+
+        pool_counts = {}
+        recent_counts = {}
+        for ct in (ContentType.ARTICLE, ContentType.VIDEO, ContentType.REEL):
+            base_q = db.query(func.count(ContentItem.id)).filter(
+                ContentItem.type == ct,
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.is_suppressed.is_(False),
+            )
+            pool_counts[ct.value] = (
+                base_q.filter(ContentItem.published_at >= cutoff_7d).scalar() or 0
+            )
+            recent_counts[ct.value] = (
+                base_q.filter(ContentItem.published_at >= cutoff_24h).scalar() or 0
+            )
+
+        # ── Curated vs discovery mix (video/reel channels) ───────────────
+        curated_vs_discovery = {}
+        for ct in (ContentType.VIDEO, ContentType.REEL):
+            rows = (
+                db.query(ContentItem.discovered_via, func.count(ContentItem.id))
+                .filter(
+                    ContentItem.type == ct,
+                    ContentItem.curation_status == ContentStatus.PROMOTED,
+                    ContentItem.is_suppressed.is_(False),
+                    ContentItem.published_at >= cutoff_7d,
+                )
+                .group_by(ContentItem.discovered_via)
+                .all()
+            )
+            breakdown = {}
+            for lane, cnt in rows:
+                key = lane or "unknown"
+                bucket = "discovery" if "discovery" in key else "curated"
+                breakdown[bucket] = breakdown.get(bucket, 0) + cnt
+            curated_vs_discovery[ct.value] = breakdown
+
+        # ── Source promotion / demotion actions (last 7d) ─────────────────
+        status_actions = (
+            db.query(
+                VideoSourceProfile.status,
+                func.count(VideoSourceProfile.id),
+            )
+            .filter(
+                VideoSourceProfile.status_changed_at >= cutoff_7d,
+            )
+            .group_by(VideoSourceProfile.status)
+            .all()
+        )
+        promotion_demotion = {status: cnt for status, cnt in status_actions}
+
+        # ── Language filtered count (lifetime) ────────────────────────────
+        lang_counters = extraction_metrics.get_counters()
+        language_filtered_total = lang_counters.get("content_filtered_language_total", 0)
+
         return {
             "as_of": datetime.now(timezone.utc).isoformat(),
             "today": today.isoformat(),
@@ -181,6 +241,11 @@ def get_source_health_metrics(db: Session = Depends(get_db)):
                 for ch in sorted(demoted_channels, key=lambda c: c.score_7d or 0)
             ],
             "problem_feeds": problem_feeds,
+            "pool_7d": pool_counts,
+            "recent_24h": recent_counts,
+            "curated_vs_discovery_mix": curated_vs_discovery,
+            "source_promotion_demotion_actions": promotion_demotion,
+            "language_filtered_count": language_filtered_total,
             "summary": {
                 "total_sources": len(sources),
                 "total_problem_feeds": len(problem_feeds),
