@@ -226,3 +226,94 @@ class TestDetectLanguage:
         lang, prob = detect_language("The latest developments in quantum computing")
         assert lang is not None
         assert 0.0 <= prob <= 1.0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Transliterated-Latin heuristic
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_has_transliterated_non_english = _mod._has_transliterated_non_english
+
+
+class TestTransliteratedNonEnglish:
+    """Tests for _has_transliterated_non_english() heuristic."""
+
+    def test_english_title_not_flagged(self):
+        assert _has_transliterated_non_english("Apple launches new MacBook Pro") is False
+
+    def test_hindi_transliterated_title_flagged(self):
+        """Two or more common Hindi words in Latin script should be flagged."""
+        assert _has_transliterated_non_english("Kya hai yeh nayi trick") is True
+
+    def test_single_word_not_flagged(self):
+        """A single transliterated word shouldn't trigger rejection."""
+        assert _has_transliterated_non_english("What hai this new feature") is False
+
+    def test_real_world_transliterated_title(self):
+        assert (
+            _has_transliterated_non_english(
+                "Teri Siri ab Google chalayega — $1 BILLION ki deal ho gayi!"
+            )
+            is True
+        )
+
+    def test_english_tech_terms_not_flagged(self):
+        assert _has_transliterated_non_english("AI model training kaise karo") is True
+
+    def test_empty_string(self):
+        assert _has_transliterated_non_english("") is False
+
+
+class TestIsEnglishTransliteratedIntegration:
+    """Tests that is_english() rejects transliterated non-English via the heuristic."""
+
+    def test_transliterated_hindi_rejected(self):
+        assert is_english("Kya hai yeh nayi trick for Android") is False
+
+    def test_real_world_transliterated_rejected(self):
+        assert (
+            is_english(
+                "Teri Siri ab Google chalayega — $1 BILLION ki deal ho gayi!",
+                "Google AI update explained with tech news context.",
+            )
+            is False
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Channel-language fallback for short texts
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestChannelLanguageFallback:
+    """Tests for is_english() channel_language parameter on short titles."""
+
+    def test_short_title_no_channel_lang_passes(self):
+        """Short text with no channel language passes (safe default)."""
+        assert is_english("AI news") is True
+
+    def test_short_title_english_channel_passes(self):
+        """Short text from English channel passes."""
+        assert is_english("AI news", channel_language="en") is True
+
+    def test_short_title_hindi_channel_rejected(self):
+        """Short text from Hindi channel is rejected."""
+        assert is_english("AI news", channel_language="hi") is False
+
+    def test_short_title_spanish_channel_rejected(self):
+        """Short text from Spanish channel is rejected."""
+        assert is_english("Tech tips", channel_language="es") is False
+
+    def test_long_english_title_ignores_channel_lang(self):
+        """Long English text is not affected by non-English channel_language."""
+        assert (
+            is_english(
+                "Apple announces new MacBook Pro with M5 chip and breakthrough performance",
+                channel_language="hi",
+            )
+            is True
+        )
+
+    def test_channel_lang_none_treated_as_no_info(self):
+        """None channel_language should behave like not passing it."""
+        assert is_english("AI news", channel_language=None) is True

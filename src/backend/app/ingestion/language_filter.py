@@ -9,6 +9,7 @@ dependency chain (FastAPI, etc.), keeping it testable in isolation.
 """
 
 import logging
+import re
 import unicodedata
 from typing import Optional, Tuple
 
@@ -28,6 +29,51 @@ logger = logging.getLogger(__name__)
 # still catches most non-English content while avoiding false rejections on
 # short-but-valid titles.
 _MIN_DETECT_LENGTH = 30
+
+# ── Transliterated-Latin heuristic ────────────────────────────────────────────
+# Common Hindi / Urdu words that appear in Latin script and slip past both
+# `relevanceLanguage=en` and `langdetect`.  Two or more hits in a title is a
+# strong signal that the content is not English.
+_TRANSLITERATED_WORDS = {
+    "kya",
+    "hai",
+    "nahi",
+    "mein",
+    "yeh",
+    "aur",
+    "hoga",
+    "kaise",
+    "karo",
+    "dekho",
+    "gayi",
+    "wala",
+    "wali",
+    "bhai",
+    "dost",
+    "chalayega",
+    "karna",
+    "karega",
+    "karein",
+    "sabse",
+    "abhi",
+    "tera",
+    "teri",
+    "tere",
+    "matlab",
+    "sach",
+    "galti",
+    "sasta",
+    "accha",
+    "bahut",
+}
+_TRANSLITERATED_THRESHOLD = 2  # need ≥2 matches to reject
+_WORD_RE = re.compile(r"[A-Za-z]+")
+
+
+def _has_transliterated_non_english(text: str) -> bool:
+    """Return True if the title has ≥2 common transliterated non-English words."""
+    words = {w.lower() for w in _WORD_RE.findall(text)}
+    return len(words & _TRANSLITERATED_WORDS) >= _TRANSLITERATED_THRESHOLD
 
 
 def _has_non_latin_letters(text: str) -> bool:
@@ -86,7 +132,11 @@ def is_non_english(lang: Optional[str]) -> bool:
     return lang is not None and lang != "en"
 
 
-def is_english(title: str, description: Optional[str] = None) -> bool:
+def is_english(
+    title: str,
+    description: Optional[str] = None,
+    channel_language: Optional[str] = None,
+) -> bool:
     """Check if the given text is English.
 
     Returns True (safe default) on detection failure — curated sources are
@@ -96,6 +146,8 @@ def is_english(title: str, description: Optional[str] = None) -> bool:
     Args:
         title: Content title (required).
         description: Optional content body/description.
+        channel_language: Optional BCP-47 language of the channel (e.g. "hi").
+            Used as tie-breaker when langdetect is inconclusive on short text.
 
     Returns:
         True if the content appears to be English or detection is inconclusive.
@@ -107,6 +159,10 @@ def is_english(title: str, description: Optional[str] = None) -> bool:
 
     if _has_non_latin_letters(stripped_title):
         logger.warning("Non-Latin title detected: %s", stripped_title[:100])
+        return False
+
+    if _has_transliterated_non_english(stripped_title):
+        logger.warning("Transliterated non-English title detected: %s", stripped_title[:100])
         return False
 
     title_lang, _title_prob = detect_language(stripped_title)
@@ -121,7 +177,15 @@ def is_english(title: str, description: Optional[str] = None) -> bool:
     lang, _prob = detect_language(stripped_title, description)
 
     if lang is None:
-        # Too short or detection failed — allow through (safe default)
+        # langdetect inconclusive (text too short) — fall back to channel
+        # language metadata when available.
+        if channel_language and channel_language != "en":
+            logger.warning(
+                "Short text inconclusive, channel_language=%s: %s",
+                channel_language,
+                stripped_title[:100],
+            )
+            return False
         return True
 
     if is_non_english(lang):

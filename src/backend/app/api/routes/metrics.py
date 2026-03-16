@@ -220,6 +220,7 @@ def get_extraction_metrics() -> Dict[str, Any]:
     return {
         "as_of": datetime.now(timezone.utc).isoformat(),
         "counters": counters,
+        "language_filtered_count": counters.get("content_filtered_language_total", 0),
         "source_health": source_health,
         "degraded_sources": degraded,
         "config": {
