@@ -583,3 +583,73 @@ def mix_feed(
         )
 
     return result.items
+
+
+# ---------------------------------------------------------------------------
+# Position-based channel caps
+# ---------------------------------------------------------------------------
+
+# (position_limit, max_from_same_channel)
+VIDEO_CHANNEL_CAPS: List[tuple[int, int]] = [(20, 2), (50, 4)]
+REEL_CHANNEL_CAPS: List[tuple[int, int]] = [(10, 1), (20, 2), (50, 4)]
+
+
+def _get_channel_key(item: Any) -> str:
+    if isinstance(item, dict):
+        return item.get("channel_id") or item.get("source") or "unknown"
+    return getattr(item, "channel_id", None) or getattr(item, "source", None) or "unknown"
+
+
+def enforce_channel_caps(items: List[Any], surface: str) -> List[Any]:
+    """Apply position-based channel caps, pushing excess items later in the list.
+
+    Graceful degradation: if the promoted pool has fewer distinct channels
+    than the caps require, all items are kept with best-effort distribution
+    and a warning is logged.
+    """
+    if surface == "videos":
+        caps = VIDEO_CHANNEL_CAPS
+    elif surface == "reels":
+        caps = REEL_CHANNEL_CAPS
+    else:
+        return items
+
+    if not items:
+        return items
+
+    result: List[Any] = []
+    deferred: List[Any] = []
+
+    for item in items:
+        channel = _get_channel_key(item)
+        pos = len(result)
+
+        # Check if placing this item at `pos` would violate any cap
+        violates = False
+        for limit, max_count in caps:
+            if pos < limit:
+                # Count how many items from this channel are already in result
+                # within positions 0..limit-1 (all of result so far is < limit)
+                count_in_range = sum(1 for r in result if _get_channel_key(r) == channel)
+                if count_in_range >= max_count:
+                    violates = True
+                    break
+
+        if violates:
+            deferred.append(item)
+        else:
+            result.append(item)
+
+    if deferred:
+        distinct_channels = len(set(_get_channel_key(r) for r in result))
+        if distinct_channels < 5:
+            logger.warning(
+                "Channel diversity cap: only %d distinct channels in %s feed; "
+                "serving all %d items with best-effort distribution",
+                distinct_channels,
+                surface,
+                len(items),
+            )
+        result.extend(deferred)
+
+    return result
