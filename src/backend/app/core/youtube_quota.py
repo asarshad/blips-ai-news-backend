@@ -73,24 +73,34 @@ class YouTubeQuotaBudget:
     ) -> None:
         self.redis = redis_client or self._get_redis_client()
         self._now_provider = now_provider or _now_utc
-        self.daily_budget_units = max(0, int(os.getenv("YOUTUBE_API_DAILY_BUDGET_UNITS", "3000")))
+        self.daily_budget_units = max(0, int(os.getenv("YOUTUBE_API_DAILY_BUDGET_UNITS", "6000")))
         self.search_budget_units = max(
             0,
             min(
                 self.daily_budget_units,
-                int(os.getenv("YOUTUBE_API_SEARCH_DAILY_BUDGET_UNITS", "1800")),
+                int(os.getenv("YOUTUBE_API_SEARCH_DAILY_BUDGET_UNITS", "4500")),
             ),
         )
         self.duration_budget_units = max(
             0,
             min(
                 self.daily_budget_units,
-                int(os.getenv("YOUTUBE_API_DURATION_DAILY_BUDGET_UNITS", "600")),
+                int(os.getenv("YOUTUBE_API_DURATION_DAILY_BUDGET_UNITS", "800")),
             ),
         )
-        self.search_cooldown_minutes = max(
-            0, int(os.getenv("YOUTUBE_SEARCH_MIN_INTERVAL_MINUTES", "180"))
-        )
+        # Per-surface cooldown: surface-specific env overrides shared fallback
+        shared_cooldown = os.getenv("YOUTUBE_SEARCH_MIN_INTERVAL_MINUTES", "180")
+        self._search_cooldown_minutes_by_surface = {
+            "videos": max(
+                0,
+                int(os.getenv("YOUTUBE_VIDEO_SEARCH_MIN_INTERVAL_MINUTES", shared_cooldown)),
+            ),
+            "reels": max(
+                0,
+                int(os.getenv("YOUTUBE_REEL_SEARCH_MIN_INTERVAL_MINUTES", shared_cooldown)),
+            ),
+        }
+        self.search_cooldown_minutes = max(0, int(shared_cooldown))
 
     def try_reserve(self, units: int, *, bucket: str = "general") -> bool:
         """Reserve budget units conservatively before issuing a request."""
@@ -182,13 +192,16 @@ class YouTubeQuotaBudget:
 
     def begin_search_window(self, surface: str) -> bool:
         """Enforce a minimum interval between expensive search sweeps per surface."""
-        if self.search_cooldown_minutes <= 0:
+        cooldown = self._search_cooldown_minutes_by_surface.get(
+            surface, self.search_cooldown_minutes
+        )
+        if cooldown <= 0:
             return True
         if self.is_locked_out():
             return False
 
         key = self._search_cooldown_key(surface)
-        ttl = self.search_cooldown_minutes * 60
+        ttl = cooldown * 60
         if self.redis is not None:
             try:
                 return bool(self.redis.set(key, "1", nx=True, ex=ttl))

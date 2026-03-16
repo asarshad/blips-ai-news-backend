@@ -47,6 +47,27 @@ def test_begin_search_window_enforces_cooldown(monkeypatch):
     assert budget.begin_search_window("reels") is True
 
 
+def test_per_surface_cooldown_overrides_shared(monkeypatch):
+    monkeypatch.setenv("YOUTUBE_SEARCH_MIN_INTERVAL_MINUTES", "180")
+    monkeypatch.setenv("YOUTUBE_VIDEO_SEARCH_MIN_INTERVAL_MINUTES", "180")
+    monkeypatch.setenv("YOUTUBE_REEL_SEARCH_MIN_INTERVAL_MINUTES", "120")
+    budget = YouTubeQuotaBudget(now_provider=_fixed_now)
+
+    assert budget._search_cooldown_minutes_by_surface["videos"] == 180
+    assert budget._search_cooldown_minutes_by_surface["reels"] == 120
+    # Shared fallback is still 180 for unknown surfaces
+    assert budget.search_cooldown_minutes == 180
+
+
+def test_per_surface_cooldown_falls_back_to_shared(monkeypatch):
+    monkeypatch.setenv("YOUTUBE_SEARCH_MIN_INTERVAL_MINUTES", "90")
+    # No surface-specific env vars set
+    budget = YouTubeQuotaBudget(now_provider=_fixed_now)
+
+    assert budget._search_cooldown_minutes_by_surface["videos"] == 90
+    assert budget._search_cooldown_minutes_by_surface["reels"] == 90
+
+
 def test_lock_out_until_reset_marks_budget_unavailable():
     budget = YouTubeQuotaBudget(now_provider=_fixed_now)
 
