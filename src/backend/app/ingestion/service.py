@@ -43,7 +43,6 @@ from app.models.content import ContentItem, ContentStatus, ContentType
 from app.ranking.quality import compute_source_weight
 from app.ranking.service import ScoringService
 from app.repositories.content_repo import ContentItemRepository
-from app.services.video_content_policy import youtube_discovery_enabled
 
 logger = get_logger(__name__)
 
@@ -67,6 +66,13 @@ DISCOVERY_FRESH_REEL_FLOOR = max(
     1,
     int(os.getenv("VIDEO_DISCOVERY_MIN_FRESH_REEL_SUPPLY_24H", str(settings.MIN_FRESH_REELS))),
 )
+
+
+def _youtube_discovery_enabled() -> bool:
+    """Load discovery policy lazily to avoid service-package import cycles."""
+    from app.services.video_content_policy import youtube_discovery_enabled
+
+    return youtube_discovery_enabled()
 
 
 def _entry_is_reel(entry: VideoEntry) -> bool:
@@ -167,6 +173,8 @@ class IngestionPipeline:
         if existing:
             logger.debug(f"Article already ingested: {entry.title}")
             return None
+
+        detected_lang = None
 
         # Language gate: reject non-English content before spending LLM tokens
         if not is_english(entry.title, entry.content):
@@ -401,6 +409,8 @@ class IngestionPipeline:
         if existing:
             logger.debug(f"Video already ingested: {entry.title}")
             return None
+
+        detected_lang = None
 
         # Language gate: reject non-English videos before spending LLM tokens
         if not is_english(
@@ -696,7 +706,7 @@ class IngestionPipeline:
                     logger.error(f"Error fetching YouTube channels: {type(e).__name__}: {e}")
                     stats["errors"] += 1
 
-            if youtube_discovery_enabled():
+            if _youtube_discovery_enabled():
                 # Dedicated YouTube discovery lane for broader coverage and recency.
                 try:
                     from app.services.video_discovery_service import VideoDiscoveryService
@@ -843,7 +853,7 @@ class IngestionPipeline:
 
     def ingest_video_discovery_candidates(self) -> Dict[str, int | str]:
         """Fetch and persist YouTube search/trending candidates in the live worker path."""
-        if not youtube_discovery_enabled():
+        if not _youtube_discovery_enabled():
             return {
                 "status": "disabled",
                 "videos_candidates": 0,
