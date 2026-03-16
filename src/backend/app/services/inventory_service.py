@@ -24,6 +24,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.services.video_content_policy import apply_content_policy
+from app.services.video_surface_rules import surface_content_filter
 
 logger = get_logger(__name__)
 
@@ -199,7 +200,7 @@ def compute_surface_health(
     # Base query filters – only PROMOTED items count toward inventory health;
     # CANDIDATE stubs are invisible in feeds and must not inflate tier counts.
     base_filter = and_(
-        ContentItem.type == content_type,
+        surface_content_filter(surface.value),
         ContentItem.is_suppressed.is_(False),
         ContentItem.curation_status == ContentStatus.PROMOTED,
     )

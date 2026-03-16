@@ -17,6 +17,7 @@ import feedparser
 import requests
 
 from app.core.circuit_breaker import CircuitBreaker, get_youtube_breaker
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.youtube_quota import YouTubeQuotaBudget
 from app.integrations.youtube_channels import (
@@ -1230,7 +1231,9 @@ class YouTubeClient:
         # YouTube RSS links are commonly /watch?v=... for both videos and Shorts,
         # so URL-only detection is unreliable.
         if config.content_format == ContentFormat.MIXED:
-            short_max_seconds = int(os.getenv("YT_SHORT_MAX_SECONDS", "120"))
+            short_max_seconds = int(
+                os.getenv("YT_SHORT_MAX_SECONDS", str(settings.REEL_MAX_DURATION_SECONDS))
+            )
 
             # Try duration (requires API key - scraping blocked in Docker by consent pages)
             duration = self.get_video_duration(video_id)

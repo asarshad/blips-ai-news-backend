@@ -31,6 +31,7 @@ from app.services.diversity_mixer import enforce_channel_caps, mix_feed
 from app.services.inventory_service import FreshnessTier, Surface, _get_surface_config
 from app.services.video_content_policy import apply_content_policy
 from app.services.video_hybrid_rerank import rerank_video_candidates
+from app.services.video_surface_rules import effective_content_type, surface_content_filter
 
 logger = get_logger(__name__)
 
@@ -176,7 +177,7 @@ def get_tiered_feed(
 
     # Base filter
     base_filter = and_(
-        ContentItem.type == content_type,
+        surface_content_filter(surface.value),
         ContentItem.is_suppressed.is_(False),
         ContentItem.curation_status == ContentStatus.PROMOTED,
     )
@@ -343,7 +344,7 @@ def get_tiered_feed(
 def _default_starters_for(item) -> Dict[str, Any]:
     """Generate title-based conversation starters at serving time when DB value is empty."""
     short_title = item.title[:40] + "..." if len(item.title) > 40 else item.title
-    if item.type == ContentType.VIDEO:
+    if effective_content_type(item) == ContentType.VIDEO:
         starters = [
             f"What are the key takeaways from '{short_title}'?",
             "Can you explain the main concepts?",
@@ -372,8 +373,9 @@ def tiered_item_to_dict(tiered: TieredItem) -> Dict[str, Any]:
     Includes backward-compatible fields plus new tier annotations.
     """
     item = tiered.item
+    item_type = effective_content_type(item)
     summary = item.summary or ""
-    if not summary and item.type == ContentType.VIDEO:
+    if not summary and item_type == ContentType.VIDEO:
         description = item.description or ""
         summary = description[:320]
 
@@ -416,11 +418,11 @@ def tiered_item_to_dict(tiered: TieredItem) -> Dict[str, Any]:
     }
 
     # Type-specific fields
-    if item.type == ContentType.ARTICLE:
+    if item_type == ContentType.ARTICLE:
         result["read_time_minutes"] = max(1, len(summary) // 200)
         result["tags"] = [{"name": topic} for topic in (item.topics or [])]
 
-    elif item.type in (ContentType.VIDEO, ContentType.REEL):
+    elif item_type in (ContentType.VIDEO, ContentType.REEL):
         result["video_url"] = item.video_url or item.source_url
         result["thumbnail_url"] = item.image_url or None  # coerce empty string
         result["category"] = item.topics[0] if item.topics else "Technology"
