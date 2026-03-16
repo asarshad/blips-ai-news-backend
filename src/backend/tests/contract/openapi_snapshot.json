@@ -2094,6 +2094,23 @@
             ],
             "title": "Cluster Id"
           },
+          "conversation_starters": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Starters"
+          },
           "description": {
             "anyOf": [
               {

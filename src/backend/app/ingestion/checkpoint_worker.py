@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.curation import review_queue_target_status
 from app.core.logging import get_logger
 from app.ingestion.canonical import canonical_key_for_article, canonical_key_for_youtube
 from app.ingestion.checkpoint_locks import pg_advisory_unlock, try_pg_advisory_lock
@@ -17,7 +18,7 @@ from app.ingestion.extractors import extract_entities, extract_source, extract_t
 from app.ingestion.language_filter import is_english
 from app.ingestion.leases import claim_lease, lease_key, release_lease
 from app.ingestion.url_normalizer import normalize_url
-from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.content import ContentItem, ContentType
 from app.repositories.ingestion_budget_repo import IngestionBudgetRepository
 from app.repositories.ingestion_progress_repo import IngestionProgressRepository
 
@@ -95,6 +96,7 @@ def process_progress_row_batch(
     from app.models.ingestion_progress import IngestionProgress
 
     progress = db.query(IngestionProgress).filter(IngestionProgress.id == row_id).one()
+    review_queue_status = review_queue_target_status()
     logger.info(
         f"Processing row: id={row_id} type={progress.source_type} feed={progress.feed_name} target={progress.target} ingested={progress.items_ingested} status={progress.status}"
     )
@@ -206,7 +208,7 @@ def process_progress_row_batch(
                 values.append(
                     {
                         "type": ContentType.ARTICLE,
-                        "curation_status": ContentStatus.CANDIDATE,
+                        "curation_status": review_queue_status,
                         "discovered_via": "rss_ingestion",
                         "source": source,
                         "source_url": source_url,
@@ -414,7 +416,7 @@ def process_progress_row_batch(
                 values.append(
                     {
                         "type": ContentType.REEL if is_reel else ContentType.VIDEO,
-                        "curation_status": ContentStatus.CANDIDATE,
+                        "curation_status": review_queue_status,
                         "discovered_via": f"yt_{getattr(e, 'acquisition_lane', 'curated')}",
                         "source": e.source or "YouTube",
                         "source_url": source_url,

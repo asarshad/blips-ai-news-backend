@@ -9,7 +9,7 @@ Endpoints:
 """
 
 from enum import Enum
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import redis
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -101,6 +101,7 @@ class PlaylistItem(BaseModel):
     published_at: Optional[str]
     global_score: Optional[float]
     cluster_id: Optional[str]
+    conversation_starters: Optional[Dict[str, List[str]]] = None
 
 
 class PlaylistResponse(BaseModel):

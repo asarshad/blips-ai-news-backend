@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.clustering.dedupe import compute_dedupe_key, compute_title_simhash
 from app.clustering.service import ClusteringService
 from app.core.config import get_settings
+from app.core.curation import review_queue_target_status
 from app.core.logging import get_logger
 from app.extraction.metrics import extraction_metrics
 from app.extraction.pipeline import (
@@ -458,7 +459,7 @@ class IngestionPipeline:
             ai_processed=ai_processed,
             conversation_starters=inline_starters,
             language=detected_lang or "en",
-            curation_status=ContentStatus.CANDIDATE,
+            curation_status=review_queue_target_status(),
             discovered_via=f"yt_{getattr(entry, 'acquisition_lane', 'curated')}",
             acquisition_lane=getattr(entry, "acquisition_lane", "curated"),
             source_status=getattr(entry, "source_status", None),

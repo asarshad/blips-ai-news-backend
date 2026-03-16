@@ -125,6 +125,12 @@ class PlaylistService:
         playlist = None
         if self.redis:
             playlist = self._get_from_cache(cache_key)
+            if playlist and not self._is_cache_compatible(playlist):
+                logger.info(
+                    "Discarding stale session playlist cache for %s; missing conversation starters",
+                    content_type.value,
+                )
+                playlist = None
 
         if not playlist:
             # Generate new playlist snapshot
@@ -275,9 +281,14 @@ class PlaylistService:
         if self.redis:
             cache_key = self._get_cache_key(device_id, content_type)
             cached = self._get_from_cache(cache_key)
-            if cached:
+            if cached and self._is_cache_compatible(cached):
                 logger.info("Serving cached fallback playlist for %s", content_type.value)
                 return cached
+            if cached:
+                logger.info(
+                    "Discarding stale fallback playlist cache for %s; missing conversation starters",
+                    content_type.value,
+                )
 
         fallback_candidates = self._get_candidates(
             content_type=content_type,
@@ -470,7 +481,14 @@ class PlaylistService:
             "published_at": item.published_at.isoformat() if item.published_at else None,
             "global_score": item.global_score,
             "cluster_id": item.cluster_id,
+            "conversation_starters": item.conversation_starters,
         }
+
+    def _is_cache_compatible(self, playlist: List[Dict]) -> bool:
+        """Reject cached playlist snapshots created before starter payloads were included."""
+        if not playlist:
+            return True
+        return all("conversation_starters" in item for item in playlist)
 
     def _paginate(self, items: List[Dict], offset: int, size: int) -> List[Dict]:
         """Paginate playlist items."""
