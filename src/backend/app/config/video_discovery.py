@@ -77,6 +77,23 @@ REEL_QUERY_PACKS: List[DiscoveryQueryPack] = [
     DiscoveryQueryPack(
         "reels-dev", "developer tips shorts", "engineer/dev", "reels", 25, "viewCount"
     ),
+    DiscoveryQueryPack("reels-apps", "best apps tips shorts", "news", "reels", 25, "viewCount"),
+    DiscoveryQueryPack(
+        "reels-hardware-unbox",
+        "unboxing tech gadget shorts",
+        "mobile/hardware",
+        "reels",
+        25,
+        "viewCount",
+    ),
+    DiscoveryQueryPack(
+        "reels-coding-tips",
+        "coding programming tips shorts",
+        "engineer/dev",
+        "reels",
+        25,
+        "viewCount",
+    ),
 ]
 
 

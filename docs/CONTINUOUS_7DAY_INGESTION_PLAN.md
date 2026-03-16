@@ -8,14 +8,14 @@
 | Step 2: Remove Daily Stop Conditions | ✅ Done | service.py un-gated, checkpoint reopen logic, budget 10x multiplier |
 | Step 3: Unify Reel Classification ≤120s | ✅ Done | config.py + youtube_client.py updated, reclassify_reels.py verified |
 | Step 4: Replace Auto-Pause with Demotion | ✅ Done | Removed auto-pause guardrail, metrics report demoted_channels |
-| Step 5: Auto-Graduation for Discovery | ⬜ Not started | |
+| Step 5: Auto-Graduation for Discovery | ✅ Done | Graduated transitions, 7d cooldown, 14d probation, 16 tests |
 | Step 6: Expand Reel Source Roster | ⬜ Not started | |
 | Step 7: Feed Diversity Caps | ⬜ Not started | |
 | Step 8: Feed Endpoints & caught_up | ⬜ Not started | |
 | Step 9: Strengthen Language Filtering | ⬜ Not started | |
 | Step 10: Extend Admin Metrics | ⬜ Not started | |
 
-All 685 unit tests passing.
+All 701 unit tests passing.
 
 ---
 
