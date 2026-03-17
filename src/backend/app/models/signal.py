@@ -48,9 +48,24 @@ class EnqueueStatus(enum.Enum):
     REJECTED = "rejected"  # Failed URL normalization or outside tech scope
 
 
+def _enum_values(enum_cls: type[enum.Enum]) -> list[str]:
+    """Persist enum values instead of enum member names."""
+    return [member.value for member in enum_cls]
+
+
 # Standalone PgEnum objects (create_type=False: migration owns type creation)
-SignalSourceEnum = PgEnum(SignalSource, name="signalsource", create_type=False)
-EnqueueStatusEnum = PgEnum(EnqueueStatus, name="enqueuedstatus", create_type=False)
+SignalSourceEnum = PgEnum(
+    SignalSource,
+    name="signalsource",
+    values_callable=_enum_values,
+    create_type=False,
+)
+EnqueueStatusEnum = PgEnum(
+    EnqueueStatus,
+    name="enqueuedstatus",
+    values_callable=_enum_values,
+    create_type=False,
+)
 
 
 class SignalURL(Base):

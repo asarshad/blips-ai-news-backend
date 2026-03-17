@@ -38,8 +38,17 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
+from app.integrations.youtube_channels import (
+    ChannelConfig,
+    ChannelRole,
+    ContentFormat,
+    get_channel_by_id,
+    get_channel_by_name,
+)
 from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.video_source import VideoSourceProfile
 from app.ranking.quality import compute_source_weight
+from app.repositories.video_source_repo import VideoSourceProfileRepository
 from app.services.video_content_policy import apply_content_policy
 
 logger = get_logger(__name__)
@@ -105,16 +114,16 @@ _REEL_CONFIG = PromotionConfig(
     w_recency=0.14,
     w_clickbait=0.08,
     w_duplicate=0.05,
-    w_velocity=0.16,
+    w_velocity=0.12,
     w_format_fit=0.10,
     w_category_gap=0.04,
     w_creator_fatigue=0.05,
-    w_story=0.16,
-    min_score=0.32,
+    w_story=0.22,
+    min_score=0.36,
     top_n_per_type=120,
     window_hours=168,
     recency_half_life_hours=48.0,
-    discovery_lane_penalty=0.04,
+    discovery_lane_penalty=0.10,
 )
 
 
@@ -159,6 +168,76 @@ _STORY_SIGNAL_PATTERNS: list[re.Pattern[str]] = [
         r"\bshipping\b",
         r"\bavailable\s+now\b",
         r"\bupdate\b",
+    ]
+]
+_TECH_SIGNAL_TOKENS = (
+    "ai",
+    "android",
+    "api",
+    "app",
+    "apple",
+    "benchmark",
+    "camera",
+    "chatgpt",
+    "chip",
+    "claude",
+    "cloud",
+    "code",
+    "copilot",
+    "developer",
+    "device",
+    "fitness tracker",
+    "galaxy",
+    "gemini",
+    "github",
+    "gpt",
+    "gpu",
+    "hands on",
+    "hardware",
+    "health tech",
+    "iphone",
+    "linux",
+    "mac",
+    "openai",
+    "phone",
+    "pixel",
+    "privacy",
+    "review",
+    "security",
+    "software",
+    "tracker",
+    "update",
+    "wearable",
+)
+_OFF_TOPIC_SIGNAL_TOKENS = (
+    "audio only",
+    "campaign",
+    "election",
+    "family",
+    "mad money",
+    "manager",
+    "policy",
+    "president trump",
+    "prank",
+    "reaction",
+    "senate",
+    "skate park",
+    "splashdown",
+    "summit",
+    "tariff",
+    "travel",
+    "vlog",
+    "white house",
+)
+_VIDEO_LEAK_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"\baudio\s+only\b",
+        r"\bmad\s+money\b",
+        r"\bwhite\s+house\b",
+        r"\bpresident\s+trump\b",
+        r"\bvp\s+jd\s+vance\b",
+        r"\bchina\s+summit\b",
     ]
 ]
 
@@ -371,6 +450,131 @@ def compute_story_importance(
             score = min(1.0, score + cold_start_bonus)
 
     return round(score, 4)
+
+
+def _channel_config_for_item(item: ContentItem) -> ChannelConfig | None:
+    channel_id = getattr(item, "channel_id", None)
+    if isinstance(channel_id, str) and channel_id:
+        config = get_channel_by_id(channel_id)
+        if config is not None:
+            return config
+    source = getattr(item, "source", None)
+    if isinstance(source, str) and source:
+        return get_channel_by_name(source)
+    return None
+
+
+def _resolve_channel_role(
+    channel_config: ChannelConfig | None,
+    source_profile: VideoSourceProfile | None,
+) -> ChannelRole | None:
+    if channel_config is not None:
+        return channel_config.role
+    if source_profile is not None and source_profile.role:
+        try:
+            return ChannelRole(source_profile.role)
+        except ValueError:
+            return None
+    return None
+
+
+def _resolve_content_format(
+    channel_config: ChannelConfig | None,
+    source_profile: VideoSourceProfile | None,
+) -> ContentFormat | None:
+    if channel_config is not None:
+        return channel_config.content_format
+    if source_profile is not None and source_profile.content_format:
+        try:
+            return ContentFormat(source_profile.content_format)
+        except ValueError:
+            return None
+    return None
+
+
+def compute_editorial_tech_score(
+    item: ContentItem,
+    *,
+    channel_role: ChannelRole | None = None,
+) -> float:
+    """Estimate whether an item looks like substantive tech content."""
+    title = getattr(item, "title", "") if isinstance(getattr(item, "title", None), str) else ""
+    summary = (
+        getattr(item, "summary", "") if isinstance(getattr(item, "summary", None), str) else ""
+    )
+    description = (
+        getattr(item, "description", "")
+        if isinstance(getattr(item, "description", None), str)
+        else ""
+    )
+    terms = " ".join(
+        [
+            title,
+            summary,
+            description,
+            *(_normalize_metadata_terms(getattr(item, "topics", None))[:4]),
+            *(_normalize_metadata_terms(getattr(item, "entities", None))[:5]),
+        ]
+    ).lower()
+    if not terms:
+        return 0.0
+
+    keyword_hits = sum(1 for token in _TECH_SIGNAL_TOKENS if token in terms)
+    off_topic_hits = sum(1 for token in _OFF_TOPIC_SIGNAL_TOKENS if token in terms)
+
+    if channel_role in {ChannelRole.AI, ChannelRole.ENGINEER}:
+        base = 0.20
+    elif channel_role == ChannelRole.OFFICIAL:
+        base = 0.18
+    elif channel_role == ChannelRole.NEWS:
+        base = 0.12
+    elif channel_role == ChannelRole.SHORTS:
+        base = 0.15
+    else:
+        base = 0.08
+
+    score = base + min(keyword_hits, 6) * 0.10 - min(off_topic_hits, 3) * 0.20
+    return round(min(max(score, 0.0), 1.0), 4)
+
+
+def classify_promotion_block(
+    item: ContentItem,
+    content_type: ContentType,
+    *,
+    story_topic_counts: Dict[str, int],
+    story_entity_counts: Dict[str, int],
+    channel_config: ChannelConfig | None = None,
+    source_profile: VideoSourceProfile | None = None,
+) -> str | None:
+    """Return a short reason when an item should not promote despite its score."""
+    story_importance = compute_story_importance(item, story_topic_counts, story_entity_counts)
+    role = _resolve_channel_role(channel_config, source_profile)
+    content_format = _resolve_content_format(channel_config, source_profile)
+    tech_score = compute_editorial_tech_score(item, channel_role=role)
+    lane = _safe_text(getattr(item, "acquisition_lane", None))
+    source_status = _safe_text(getattr(item, "source_status", None))
+    title = getattr(item, "title", "") if isinstance(getattr(item, "title", None), str) else ""
+
+    if content_type == ContentType.REEL:
+        if story_importance < 0.08 and tech_score < 0.32:
+            return "weak_editorial_reel"
+        if lane in {"search", "trending"} and source_status not in {"core", "rotation"}:
+            if story_importance < 0.20:
+                return "low_story_discovery_reel"
+        if role == ChannelRole.OFFICIAL and story_importance < 0.12 and tech_score < 0.40:
+            return "low_signal_official_reel"
+
+    if (
+        content_type == ContentType.VIDEO
+        and role == ChannelRole.NEWS
+        and content_format == ContentFormat.LONG_FORM
+    ):
+        if any(pattern.search(title) for pattern in _VIDEO_LEAK_PATTERNS):
+            return "off_topic_news_video"
+        if story_importance < 0.20 and tech_score < 0.38:
+            return "weak_tech_signal_video"
+
+    return None
 
 
 # ── Per-item scoring ──────────────────────────────────────────────────────────
@@ -593,6 +797,40 @@ class PromotionService:
             return _REEL_CONFIG
         return self.config
 
+    def _get_source_profiles(self, items: List[ContentItem]) -> Dict[str, VideoSourceProfile]:
+        channel_ids = [
+            channel_id
+            for channel_id in (getattr(item, "channel_id", None) for item in items)
+            if isinstance(channel_id, str) and channel_id
+        ]
+        if not channel_ids:
+            return {}
+        repo = VideoSourceProfileRepository(self.db)
+        return repo.get_many(channel_ids)
+
+    def _channel_key_for_item(self, item: ContentItem) -> str:
+        channel_id = getattr(item, "channel_id", None)
+        if isinstance(channel_id, str) and channel_id:
+            return channel_id
+        source = getattr(item, "source", None)
+        return source if isinstance(source, str) else ""
+
+    def _surface_channel_cap(
+        self,
+        content_type: ContentType,
+        *,
+        item: ContentItem,
+        channel_config: ChannelConfig | None,
+        source_profile: VideoSourceProfile | None,
+    ) -> int | None:
+        if content_type != ContentType.REEL:
+            return None
+        if source_profile is not None:
+            return max(0, int(source_profile.daily_reel_cap or 0))
+        if channel_config is not None:
+            return channel_config.effective_daily_reel_cap
+        return 1
+
     # ── Re-score existing PROMOTED items ──────────────────────────────────
 
     def _rescore_promoted(
@@ -715,10 +953,21 @@ class PromotionService:
         config = self._config_for_type(content_type)
         promoted_topic_counts = self._get_recent_promoted_topic_counts(content_type)
         promoted_channel_counts = self._get_recent_promoted_channel_counts(content_type)
+        source_profiles = self._get_source_profiles(candidates)
 
         # Score every candidate
-        scored: List[Tuple[float, ContentItem]] = []
+        scored: List[
+            Tuple[
+                float,
+                ContentItem,
+                str | None,
+                ChannelConfig | None,
+                VideoSourceProfile | None,
+            ]
+        ] = []
         for item in candidates:
+            source_profile = source_profiles.get(getattr(item, "channel_id", None) or "")
+            channel_config = _channel_config_for_item(item)
             s = score_candidate(
                 item,
                 cluster_sizes,
@@ -728,6 +977,14 @@ class PromotionService:
                 story_topic_counts=story_topic_counts,
                 story_entity_counts=story_entity_counts,
             )
+            block_reason = classify_promotion_block(
+                item,
+                content_type,
+                story_topic_counts=story_topic_counts or {},
+                story_entity_counts=story_entity_counts or {},
+                channel_config=channel_config,
+                source_profile=source_profile,
+            )
             item.promotion_score = s
             item.promotion_reason = self._promotion_reason(
                 item,
@@ -735,19 +992,38 @@ class PromotionService:
                 story_topic_counts=story_topic_counts,
                 story_entity_counts=story_entity_counts,
             )
-            scored.append((s, item))
+            if block_reason:
+                item.promotion_reason = f"{item.promotion_reason}|blocked={block_reason}"
+            scored.append((s, item, block_reason, channel_config, source_profile))
 
         # Sort descending by promotion score
         scored.sort(key=lambda t: t[0], reverse=True)
 
         promoted = 0
-        for rank, (s, item) in enumerate(scored):
-            if rank >= config.top_n_per_type:
+        for s, item, block_reason, channel_config, source_profile in scored:
+            if promoted >= config.top_n_per_type:
                 break
             if s < config.min_score:
                 break
+            if block_reason:
+                continue
+            channel_key = self._channel_key_for_item(item)
+            cap = self._surface_channel_cap(
+                content_type,
+                item=item,
+                channel_config=channel_config,
+                source_profile=source_profile,
+            )
+            if cap is not None:
+                if cap <= 0:
+                    item.promotion_reason = f"{item.promotion_reason}|blocked=reel_cap_zero"
+                    continue
+                if promoted_channel_counts.get(channel_key, 0) >= cap:
+                    item.promotion_reason = f"{item.promotion_reason}|blocked=daily_reel_cap"
+                    continue
             item.curation_status = ContentStatus.PROMOTED
             promoted += 1
+            promoted_channel_counts[channel_key] = promoted_channel_counts.get(channel_key, 0) + 1
 
         rescored = self._rescore_promoted(
             content_type,

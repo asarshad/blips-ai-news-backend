@@ -51,6 +51,10 @@ class ChannelConfig:
     role: ChannelRole
     content_format: ContentFormat = ContentFormat.LONG_FORM
     daily_cap: int = 1
+    daily_reel_cap: Optional[int] = None
+    allow_reels: Optional[bool] = None
+    allow_search: bool = True
+    allow_trending: bool = True
     quality_tier: QualityTier = QualityTier.STANDARD
     enabled: bool = True
     notes: str = ""
@@ -59,6 +63,24 @@ class ChannelConfig:
     def feed_url(self) -> str:
         """Generate the YouTube RSS feed URL from the channel ID."""
         return f"https://www.youtube.com/feeds/videos.xml?channel_id={self.channel_id}"
+
+    @property
+    def reels_enabled(self) -> bool:
+        """Whether this channel should contribute to the reels surface."""
+        if self.allow_reels is not None:
+            return self.allow_reels
+        return self.content_format in (ContentFormat.SHORTS, ContentFormat.MIXED)
+
+    @property
+    def effective_daily_reel_cap(self) -> int:
+        """Resolved reel cap after applying defaults and explicit overrides."""
+        if not self.reels_enabled:
+            return 0
+        if self.daily_reel_cap is not None:
+            return max(0, int(self.daily_reel_cap))
+        if self.content_format == ContentFormat.LONG_FORM:
+            return 1
+        return self.daily_cap
 
 
 _DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "youtube_curated_channels.json"
@@ -76,6 +98,18 @@ def _load_channel_registry() -> List[ChannelConfig]:
                 role=ChannelRole(entry["role"]),
                 content_format=ContentFormat(entry.get("content_format", "long_form")),
                 daily_cap=max(1, int(entry.get("daily_cap", 1))),
+                daily_reel_cap=(
+                    max(0, int(entry["daily_reel_cap"]))
+                    if entry.get("daily_reel_cap") is not None
+                    else None
+                ),
+                allow_reels=(
+                    bool(entry["allow_reels"])
+                    if "allow_reels" in entry and entry.get("allow_reels") is not None
+                    else None
+                ),
+                allow_search=bool(entry.get("allow_search", True)),
+                allow_trending=bool(entry.get("allow_trending", True)),
                 quality_tier=QualityTier(entry.get("quality_tier", "standard")),
                 enabled=bool(entry.get("enabled", True)),
                 notes=str(entry.get("notes", "")),
@@ -141,7 +175,7 @@ def get_shorts_channels() -> List[ChannelConfig]:
     return [
         channel
         for channel in get_enabled_channels()
-        if channel.content_format in (ContentFormat.SHORTS, ContentFormat.MIXED)
+        if channel.reels_enabled and channel.effective_daily_reel_cap > 0
     ]
 
 
@@ -217,7 +251,7 @@ def get_channel_stats() -> Dict[str, object]:
     role_counts = {role.value: len(get_channels_by_role(role)) for role in ChannelRole}
     total_daily_cap = sum(channel.daily_cap for channel in enabled)
     long_form_cap = sum(channel.daily_cap for channel in get_long_form_channels())
-    shorts_cap = sum(channel.daily_cap for channel in get_shorts_channels())
+    shorts_cap = sum(channel.effective_daily_reel_cap for channel in get_shorts_channels())
     return {
         "total_channels": len(enabled),
         "total_daily_cap": total_daily_cap,

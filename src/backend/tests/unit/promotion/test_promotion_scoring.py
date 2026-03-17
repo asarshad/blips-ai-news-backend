@@ -12,13 +12,16 @@ Covers:
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
+from app.integrations.youtube_channels import ChannelConfig, ChannelRole, ContentFormat, QualityTier
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.services.promotion_service import (
     PromotionConfig,
     PromotionService,
+    classify_promotion_block,
     compute_clickbait_penalty,
     compute_cluster_hotness,
     compute_duplicate_penalty,
+    compute_editorial_tech_score,
     compute_promotion_recency,
     compute_story_importance,
     score_candidate,
@@ -280,6 +283,101 @@ class TestStoryImportance:
         assert score > 0.4
 
 
+class TestEditorialGates:
+    def _make_item(self, title: str, *, summary: str = "", description: str = "") -> ContentItem:
+        item = MagicMock(spec=ContentItem)
+        item.title = title
+        item.summary = summary
+        item.description = description
+        item.topics = []
+        item.entities = []
+        item.acquisition_lane = "search"
+        item.source_status = "discovery"
+        item.source = "Trusted Tech Lab"
+        item.channel_id = "channel-1"
+        item.published_at = datetime.now(timezone.utc) - timedelta(hours=2)
+        item.views_per_hour = 180.0
+        item.format_fit_score = 1.0
+        return item
+
+    def test_compute_editorial_tech_score_rejects_off_topic_news_language(self):
+        item = self._make_item(
+            "President Trump says White House is delaying China summit",
+            summary="Politics coverage with no clear technology angle.",
+        )
+
+        score = compute_editorial_tech_score(item, channel_role=ChannelRole.NEWS)
+
+        assert score < 0.2
+
+    def test_classify_promotion_block_rejects_low_story_discovery_reel(self):
+        item = self._make_item(
+            "He Couldn't Play More Than 5 Minutes!!",
+            summary="A dramatic short with very little actual tech context.",
+        )
+
+        reason = classify_promotion_block(
+            item,
+            ContentType.REEL,
+            story_topic_counts={},
+            story_entity_counts={},
+        )
+
+        assert reason == "weak_editorial_reel"
+
+    def test_classify_promotion_block_rejects_official_promo_reel(self):
+        item = self._make_item(
+            "Wait for the splashdown... | Osmo 360",
+            summary="A cinematic teaser with almost no editorial substance.",
+        )
+        item.acquisition_lane = "curated"
+        item.source_status = "core"
+
+        reason = classify_promotion_block(
+            item,
+            ContentType.REEL,
+            story_topic_counts={},
+            story_entity_counts={},
+            channel_config=ChannelConfig(
+                channel_id="channel-1",
+                name="DJI",
+                role=ChannelRole.OFFICIAL,
+                content_format=ContentFormat.LONG_FORM,
+                daily_cap=2,
+                daily_reel_cap=0,
+                allow_reels=False,
+                quality_tier=QualityTier.STANDARD,
+            ),
+        )
+
+        assert reason == "weak_editorial_reel"
+
+    def test_classify_promotion_block_rejects_audio_only_news_video(self):
+        item = self._make_item(
+            "Mad Money 03/16/26 | Audio Only",
+            summary="A market recap with no direct product or platform coverage.",
+        )
+        item.acquisition_lane = "curated"
+        item.source_status = "core"
+
+        reason = classify_promotion_block(
+            item,
+            ContentType.VIDEO,
+            story_topic_counts={},
+            story_entity_counts={},
+            channel_config=ChannelConfig(
+                channel_id="channel-1",
+                name="CNBC Television",
+                role=ChannelRole.NEWS,
+                content_format=ContentFormat.LONG_FORM,
+                daily_cap=2,
+                quality_tier=QualityTier.STANDARD,
+            ),
+        )
+
+        assert reason == "off_topic_news_video"
+
+
 # ── PromotionService ──────────────────────────────────────────────────────────
 
 
@@ -302,6 +400,15 @@ class TestPromotionService:
         item.published_at = datetime.now(timezone.utc) - timedelta(hours=1)
         item.is_suppressed = False
         item.promotion_score = None
+        item.summary = ""
+        item.description = ""
+        item.topics = []
+        item.entities = []
+        item.acquisition_lane = "curated"
+        item.source_status = "core"
+        item.channel_id = f"channel-{id_}"
+        item.views_per_hour = 220.0
+        item.format_fit_score = 1.0
         return item
 
     def test_candidate_gets_promoted_above_threshold(self):
@@ -405,3 +512,59 @@ class TestPromotionService:
         assert ContentType.REEL in called_types
         assert ContentType.ARTICLE in called_types
         assert ContentType.VIDEO in called_types
+
+    def test_reel_channel_cap_is_respected(self):
+        mock_db = MagicMock()
+        cfg = PromotionConfig(top_n_per_type=5, min_score=0.0)
+        svc = PromotionService(mock_db, config=cfg)
+        first = self._make_candidate(
+            id_=1, content_type=ContentType.REEL, title="GitHub Copilot tip"
+        )
+        second = self._make_candidate(
+            id_=2,
+            content_type=ContentType.REEL,
+            title="GitHub developer update",
+        )
+        first.source = "GitHub"
+        second.source = "GitHub"
+        first.channel_id = "channel-cap"
+        second.channel_id = "channel-cap"
+        first.summary = "Developer automation tip for Copilot users."
+        second.summary = "Developer workflow update for GitHub automation."
+
+        with (
+            patch.object(svc, "_get_cluster_sizes", return_value={}),
+            patch.object(
+                svc,
+                "_get_candidates",
+                side_effect=lambda content_type: (
+                    [first, second] if content_type == ContentType.REEL else []
+                ),
+            ),
+            patch.object(svc, "_get_source_profiles", return_value={}),
+            patch.object(
+                svc,
+                "_get_recent_promoted_channel_counts",
+                return_value={"channel-cap": 0},
+            ),
+            patch.object(svc, "_rescore_promoted", return_value=0),
+            patch(
+                "app.services.promotion_service._channel_config_for_item",
+                return_value=ChannelConfig(
+                    channel_id="channel-cap",
+                    name="GitHub",
+                    role=ChannelRole.OFFICIAL,
+                    content_format=ContentFormat.MIXED,
+                    daily_cap=2,
+                    daily_reel_cap=1,
+                    quality_tier=QualityTier.STANDARD,
+                ),
+            ),
+        ):
+            result = svc.run_promotion_job()
+
+        promoted = [
+            item for item in (first, second) if item.curation_status == ContentStatus.PROMOTED
+        ]
+        assert len(promoted) == 1
+        assert result.promoted_count == 1

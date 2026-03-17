@@ -59,6 +59,7 @@ def _service(client: _DummyYouTubeClient) -> VideoDiscoveryService:
     db = SimpleNamespace(commit=lambda: None)
     service = VideoDiscoveryService(db, client)
     service.repo = SimpleNamespace(
+        get_many=lambda _channel_ids: {},
         record_run=lambda **_kwargs: None,
         upsert_discovered_channels=lambda _channels: [],
     )
@@ -93,6 +94,7 @@ def test_discover_uses_trending_only_when_deficit_is_below_search_threshold(monk
 
 def test_discover_search_is_cooldown_gated_but_trending_still_runs(monkeypatch):
     monkeypatch.setattr(discovery_module, "bootstrap_video_source_profiles", lambda _db: None)
+    monkeypatch.setenv("YOUTUBE_REEL_TRENDING_ENABLED", "1")
     client = _DummyYouTubeClient(begin_window=False)
     service = _service(client)
 
@@ -107,6 +109,19 @@ def test_discover_search_is_cooldown_gated_but_trending_still_runs(monkeypatch):
         ("CA", 10, "reels"),
         ("IN", 10, "reels"),
     ]
+
+
+def test_discover_reels_skips_trending_by_default(monkeypatch):
+    monkeypatch.setattr(discovery_module, "bootstrap_video_source_profiles", lambda _db: None)
+    monkeypatch.delenv("YOUTUBE_REEL_TRENDING_ENABLED", raising=False)
+    client = _DummyYouTubeClient(begin_window=True)
+    service = _service(client)
+
+    entries = service.discover("reels", remaining_needed=14)
+
+    assert entries == []
+    assert client.search_calls
+    assert client.trending_calls == []
 
 
 def test_discover_runs_small_search_plan_when_deficit_is_high(monkeypatch):
@@ -262,6 +277,135 @@ def test_filter_candidates_rejects_story_led_zero_view_discovery_channel():
     )
 
     accepted, counters = service._filter_candidates([entry], "videos")
+
+    assert accepted == []
+    assert counters["quality"] == 1
+
+
+def test_filter_candidates_honors_profile_controls():
+    client = _DummyYouTubeClient()
+    client.channel_stats = {
+        "channel-profile": {"subscriber_count": 88000, "video_count": 240},
+    }
+    service = _service(client)
+    blocked_profile = SimpleNamespace(
+        enabled=True,
+        status="discovery",
+        allow_search=False,
+        allow_trending=True,
+        daily_reel_cap=1,
+    )
+    service.repo = SimpleNamespace(
+        get_many=lambda _channel_ids: {"channel-profile": blocked_profile},
+        record_run=lambda **_kwargs: None,
+        upsert_discovered_channels=lambda _channels: [],
+    )
+
+    entry = VideoEntry(
+        title="Google Pixel camera update explained",
+        video_url="https://www.youtube.com/watch?v=profile123",
+        thumbnail_url="https://img.youtube.com/vi/profile123/default.jpg",
+        summary="A concise explainer on the latest camera stack changes.",
+        source="Trusted Tech Lab",
+        category="Technology",
+        video_id="profile123",
+        channel_id="channel-profile",
+        channel_role=ChannelRole.EXPLAINER,
+        content_format=ContentFormat.LONG_FORM,
+        quality_tier=QualityTier.STANDARD,
+        is_short=False,
+        acquisition_lane="search",
+        source_status="discovery",
+        view_count=18000,
+        like_count=420,
+        comment_count=41,
+        views_per_hour=220.0,
+        format_fit_score=1.0,
+    )
+
+    accepted, counters = service._filter_candidates([entry], "videos")
+
+    assert accepted == []
+    assert counters["quality"] == 1
+
+
+def test_filter_candidates_rejects_reels_from_profile_with_zero_reel_cap():
+    client = _DummyYouTubeClient()
+    client.channel_stats = {
+        "channel-profile": {"subscriber_count": 88000, "video_count": 240},
+    }
+    service = _service(client)
+    blocked_profile = SimpleNamespace(
+        enabled=True,
+        status="rotation",
+        allow_search=True,
+        allow_trending=True,
+        daily_reel_cap=0,
+    )
+    service.repo = SimpleNamespace(
+        get_many=lambda _channel_ids: {"channel-profile": blocked_profile},
+        record_run=lambda **_kwargs: None,
+        upsert_discovered_channels=lambda _channels: [],
+    )
+
+    entry = VideoEntry(
+        title="Android 17 privacy shortcut",
+        video_url="https://www.youtube.com/shorts/cap123",
+        thumbnail_url="https://img.youtube.com/vi/cap123/default.jpg",
+        summary="A quick look at the latest Android privacy shortcut.",
+        source="Trusted Tech Lab",
+        category="Technology",
+        video_id="cap123",
+        channel_id="channel-profile",
+        channel_role=ChannelRole.EXPLAINER,
+        content_format=ContentFormat.SHORTS,
+        quality_tier=QualityTier.STANDARD,
+        is_short=True,
+        acquisition_lane="search",
+        source_status="rotation",
+        view_count=18000,
+        like_count=420,
+        comment_count=41,
+        views_per_hour=220.0,
+        format_fit_score=1.0,
+    )
+
+    accepted, counters = service._filter_candidates([entry], "reels")
+
+    assert accepted == []
+    assert counters["quality"] == 1
+
+
+def test_filter_candidates_rejects_low_story_discovery_reel_even_with_traction():
+    client = _DummyYouTubeClient()
+    client.channel_stats = {
+        "channel-reel": {"subscriber_count": 125000, "video_count": 380},
+    }
+    service = _service(client)
+
+    entry = VideoEntry(
+        title="He Couldn't Play More Than 5 Minutes!!",
+        video_url="https://www.youtube.com/shorts/reel123",
+        thumbnail_url="https://img.youtube.com/vi/reel123/default.jpg",
+        summary="A dramatic short with very little actual tech context.",
+        source="Random Tech Shorts",
+        category="Technology",
+        video_id="reel123",
+        channel_id="channel-reel",
+        channel_role=ChannelRole.EXPLAINER,
+        content_format=ContentFormat.SHORTS,
+        quality_tier=QualityTier.STANDARD,
+        is_short=True,
+        acquisition_lane="search",
+        source_status="discovery",
+        view_count=42000,
+        like_count=3100,
+        comment_count=180,
+        views_per_hour=620.0,
+        format_fit_score=1.0,
+    )
+
+    accepted, counters = service._filter_candidates([entry], "reels")
 
     assert accepted == []
     assert counters["quality"] == 1

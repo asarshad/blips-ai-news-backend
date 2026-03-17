@@ -5,7 +5,7 @@ from typing import Dict, Iterable, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.integrations.youtube_channels import ChannelConfig, ContentFormat, dedupe_channel_configs
+from app.integrations.youtube_channels import ChannelConfig, dedupe_channel_configs
 from app.models.video_source import VideoDiscoveryRun, VideoSourceProfile
 
 
@@ -21,6 +21,19 @@ class VideoSourceProfileRepository:
             .filter(VideoSourceProfile.channel_id == channel_id)
             .first()
         )
+
+    def get_many(self, channel_ids: Iterable[str]) -> Dict[str, VideoSourceProfile]:
+        normalized = [channel_id for channel_id in dict.fromkeys(channel_ids) if channel_id]
+        if not normalized:
+            return {}
+        return {
+            profile.channel_id: profile
+            for profile in (
+                self.db.query(VideoSourceProfile)
+                .filter(VideoSourceProfile.channel_id.in_(normalized))
+                .all()
+            )
+        }
 
     def list_all(self) -> List[VideoSourceProfile]:
         return (
@@ -51,7 +64,7 @@ class VideoSourceProfileRepository:
         profiles: List[VideoSourceProfile] = []
         for config in unique_configs:
             profile = existing_profiles.get(config.channel_id)
-            reel_cap = config.daily_cap if config.content_format != ContentFormat.LONG_FORM else 1
+            reel_cap = config.effective_daily_reel_cap
             if profile is None:
                 profile = VideoSourceProfile(
                     channel_id=config.channel_id,
@@ -65,8 +78,8 @@ class VideoSourceProfileRepository:
                     daily_video_cap=config.daily_cap,
                     daily_reel_cap=reel_cap,
                     allow_curated=True,
-                    allow_search=True,
-                    allow_trending=True,
+                    allow_search=config.allow_search,
+                    allow_trending=config.allow_trending,
                 )
                 self.db.add(profile)
                 existing_profiles[config.channel_id] = profile
@@ -79,6 +92,8 @@ class VideoSourceProfileRepository:
                 profile.curated_seed = True
                 profile.daily_video_cap = config.daily_cap
                 profile.daily_reel_cap = reel_cap
+                profile.allow_search = config.allow_search
+                profile.allow_trending = config.allow_trending
                 if not config.enabled:
                     profile.status = "blocked"
             profiles.append(profile)

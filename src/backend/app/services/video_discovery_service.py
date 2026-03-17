@@ -20,8 +20,9 @@ from app.ingestion.language_filter import detect_language, is_non_english
 from app.integrations.youtube_channels import ChannelRole
 from app.integrations.youtube_client import VideoEntry, YouTubeClient
 from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.video_source import VideoSourceProfile
 from app.repositories.video_source_repo import VideoSourceProfileRepository
-from app.services.promotion_service import compute_clickbait_penalty
+from app.services.promotion_service import compute_clickbait_penalty, compute_story_keyword_signal
 from app.services.video_source_service import bootstrap_video_source_profiles
 
 _ALLOWED_CATEGORIES = {
@@ -110,6 +111,54 @@ _TECH_CHANNEL_HINTS = (
     "startup",
     "venture",
 )
+_ENTRY_TECH_KEYWORDS = (
+    "ai",
+    "android",
+    "apple",
+    "app",
+    "api",
+    "camera",
+    "chatgpt",
+    "chip",
+    "claude",
+    "cloud",
+    "code",
+    "copilot",
+    "developer",
+    "device",
+    "galaxy",
+    "gemini",
+    "github",
+    "google",
+    "gpu",
+    "hardware",
+    "iphone",
+    "linux",
+    "mac",
+    "openai",
+    "phone",
+    "pixel",
+    "privacy",
+    "python",
+    "review",
+    "security",
+    "software",
+    "update",
+)
+_ENTRY_OFF_TOPIC_KEYWORDS = (
+    "challenge",
+    "family",
+    "giveaway",
+    "manager",
+    "podcast",
+    "prank",
+    "reaction",
+    "skate park",
+    "splashdown",
+    "travel",
+    "viral",
+    "vlog",
+)
 
 
 class VideoDiscoveryService:
@@ -165,28 +214,29 @@ class VideoDiscoveryService:
                     surface,
                 )
 
-        for region in self._select_trending_regions(remaining_needed):
-            candidates = self.youtube_client.fetch_trending_candidates(
-                region_code=region,
-                max_results=10 if surface == "reels" else 20,
-                surface=surface,
-            )
-            accepted, counters = self._filter_candidates(candidates, surface)
-            self.repo.record_run(
-                lane="trending",
-                surface=surface,
-                query_label="most-popular-tech",
-                region=region,
-                candidate_count=len(candidates),
-                duplicate_rejections=counters["duplicate"],
-                clickbait_rejections=counters["clickbait"],
-                filtered_non_english=counters["non_english"],
-                filtered_live=counters["live"],
-                filtered_off_topic=counters["off_topic"],
-                filtered_format=counters["format"],
-            )
-            for entry in accepted:
-                unique.setdefault(entry.video_id, entry)
+        if self._trending_enabled(surface):
+            for region in self._select_trending_regions(remaining_needed):
+                candidates = self.youtube_client.fetch_trending_candidates(
+                    region_code=region,
+                    max_results=10 if surface == "reels" else 20,
+                    surface=surface,
+                )
+                accepted, counters = self._filter_candidates(candidates, surface)
+                self.repo.record_run(
+                    lane="trending",
+                    surface=surface,
+                    query_label="most-popular-tech",
+                    region=region,
+                    candidate_count=len(candidates),
+                    duplicate_rejections=counters["duplicate"],
+                    clickbait_rejections=counters["clickbait"],
+                    filtered_non_english=counters["non_english"],
+                    filtered_live=counters["live"],
+                    filtered_off_topic=counters["off_topic"],
+                    filtered_format=counters["format"],
+                )
+                for entry in accepted:
+                    unique.setdefault(entry.video_id, entry)
 
         self.db.commit()
         return list(unique.values())
@@ -401,6 +451,15 @@ class VideoDiscoveryService:
             return ordered[:2]
         return ordered[:1]
 
+    def _trending_enabled(self, surface: str) -> bool:
+        env_name = (
+            "YOUTUBE_REEL_TRENDING_ENABLED"
+            if surface == "reels"
+            else "YOUTUBE_VIDEO_TRENDING_ENABLED"
+        )
+        default = "0" if surface == "reels" else "1"
+        return os.getenv(env_name, default).strip().lower() not in {"0", "false", "no", "off"}
+
     def _filter_candidates(
         self, candidates: List[VideoEntry], surface: str
     ) -> tuple[List[VideoEntry], Counter]:
@@ -411,9 +470,13 @@ class VideoDiscoveryService:
         channel_stats = self.youtube_client.fetch_channel_stats(
             [entry.channel_id for entry in candidates if entry.channel_id]
         )
+        profiles = self.repo.get_many(
+            [entry.channel_id for entry in candidates if entry.channel_id]
+        )
 
         for entry in candidates:
             stats = channel_stats.get(entry.channel_id or "", {})
+            profile = profiles.get(entry.channel_id or "")
             entry.channel_subscriber_count = self._stat_as_int(stats.get("subscriber_count"))
             entry.channel_video_count = self._stat_as_int(stats.get("video_count"))
             if not entry.video_id or entry.video_id in seen_ids:
@@ -440,7 +503,10 @@ class VideoDiscoveryService:
             if surface == "videos" and entry.is_short:
                 counters["format"] += 1
                 continue
-            if not self._passes_discovery_quality(entry):
+            if not self._profile_allows_entry(profile, entry=entry, surface=surface):
+                counters["quality"] += 1
+                continue
+            if not self._passes_discovery_quality(entry, surface=surface, profile=profile):
                 counters["quality"] += 1
                 continue
 
@@ -472,7 +538,34 @@ class VideoDiscoveryService:
         status = (entry.live_broadcast_content or "").lower()
         return status in {"live", "upcoming"}
 
-    def _passes_discovery_quality(self, entry: VideoEntry) -> bool:
+    def _profile_allows_entry(
+        self,
+        profile: VideoSourceProfile | None,
+        *,
+        entry: VideoEntry,
+        surface: str,
+    ) -> bool:
+        if profile is None:
+            return True
+        if not profile.enabled or profile.status == "blocked":
+            return False
+
+        lane = (entry.acquisition_lane or "").strip().lower()
+        if lane == "search" and not profile.allow_search:
+            return False
+        if lane == "trending" and not profile.allow_trending:
+            return False
+        if surface == "reels" and int(profile.daily_reel_cap or 0) <= 0:
+            return False
+        return True
+
+    def _passes_discovery_quality(
+        self,
+        entry: VideoEntry,
+        *,
+        surface: str,
+        profile: VideoSourceProfile | None = None,
+    ) -> bool:
         if entry.acquisition_lane == "curated" or entry.source_status in {"core", "rotation"}:
             return True
 
@@ -503,11 +596,30 @@ class VideoDiscoveryService:
             and entry.query_label.startswith("story-")
             and subscribers >= _DISCOVERY_STORY_MIN_SUBSCRIBERS
         )
+        story_signal = compute_story_keyword_signal(entry.title, entry.summary or "")
+        tech_signal = self._entry_tech_signal(entry)
         trusted_channel = (
             entry.channel_role == ChannelRole.OFFICIAL
             or self._channel_name_looks_tech(entry.source)
             or subscribers >= _DISCOVERY_HIGH_AUTHORITY_SUBSCRIBERS
         )
+
+        if surface == "reels":
+            if not trusted_channel:
+                return False
+            if tech_signal < 0.35 and story_signal < 0.18:
+                return False
+            if entry.channel_role == ChannelRole.OFFICIAL:
+                return tech_signal >= 0.40 or (
+                    story_led and (basic_traction or strong_engagement) and story_signal >= 0.18
+                )
+            if strong_channel and strong_video and story_signal >= 0.18 and tech_signal >= 0.30:
+                return True
+            if strong_video and strong_engagement and (story_signal >= 0.18 or tech_signal >= 0.52):
+                return True
+            if story_led and trusted_channel and (basic_traction or strong_engagement):
+                return tech_signal >= 0.30
+            return False
 
         if strong_channel and trusted_channel and strong_video:
             return True
@@ -515,6 +627,7 @@ class VideoDiscoveryService:
             entry.acquisition_lane == "trending"
             and trusted_channel
             and (strong_video or basic_traction)
+            and (story_signal >= 0.18 or tech_signal >= 0.30)
         ):
             return True
         if story_led and trusted_channel and (basic_traction or strong_engagement):
@@ -530,6 +643,26 @@ class VideoDiscoveryService:
         if not text:
             return False
         return any(token in text for token in _TECH_CHANNEL_HINTS)
+
+    def _entry_tech_signal(self, entry: VideoEntry) -> float:
+        text = " ".join([entry.title or "", entry.summary or "", entry.source or ""]).lower()
+        if not text:
+            return 0.0
+
+        keyword_hits = sum(1 for token in _ENTRY_TECH_KEYWORDS if token in text)
+        off_topic_hits = sum(1 for token in _ENTRY_OFF_TOPIC_KEYWORDS if token in text)
+
+        if entry.channel_role in {ChannelRole.AI, ChannelRole.ENGINEER}:
+            base = 0.20
+        elif entry.channel_role == ChannelRole.OFFICIAL:
+            base = 0.18
+        elif entry.channel_role == ChannelRole.NEWS:
+            base = 0.12
+        else:
+            base = 0.08
+
+        score = base + min(keyword_hits, 6) * 0.10 - min(off_topic_hits, 3) * 0.18
+        return round(min(max(score, 0.0), 1.0), 4)
 
     def _stat_as_int(self, value: object) -> int | None:
         try:
