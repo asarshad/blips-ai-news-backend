@@ -80,6 +80,7 @@ def repair_video_source_metadata(
     matched = 0
     updated = 0
     unresolved = 0
+    profiles_upserted = 0
 
     for item in items:
         scanned += 1
@@ -119,7 +120,54 @@ def repair_video_source_metadata(
         if changed:
             updated += 1
 
-    if updated:
+    profile_seed_items = (
+        db.query(ContentItem)
+        .filter(
+            ContentItem.type.in_([ContentType.VIDEO, ContentType.REEL]),
+            ContentItem.published_at >= cutoff,
+            ContentItem.channel_id.isnot(None),
+        )
+        .order_by(ContentItem.published_at.desc())
+        .all()
+    )
+
+    registry_configs: Dict[str, ChannelConfig] = {}
+    discovery_channels: Dict[str, Dict[str, str]] = {}
+    for item in profile_seed_items:
+        if not any(
+            _looks_like_youtube_url(candidate)
+            for candidate in (item.source_url, item.video_url, item.canonical_url)
+        ):
+            continue
+
+        lane = _infer_lane(item)
+        if lane not in {"curated", "search", "trending"}:
+            continue
+
+        channel_id = (item.channel_id or "").strip()
+        if not channel_id:
+            continue
+
+        channel_config = get_channel_by_id(channel_id) or get_channel_by_name(item.source or "")
+        if channel_config is not None:
+            registry_configs[channel_config.channel_id] = channel_config
+            continue
+
+        discovery_channels[channel_id] = {
+            "channel_id": channel_id,
+            "channel_name": (item.source or "YouTube").strip() or "YouTube",
+            "role": "explainer",
+            "content_format": "mixed" if item.type == ContentType.REEL else "long_form",
+            "quality_tier": "standard",
+        }
+
+    repo = VideoSourceProfileRepository(db)
+    if registry_configs:
+        profiles_upserted += len(repo.upsert_from_registry(registry_configs.values()))
+    if discovery_channels:
+        profiles_upserted += len(repo.upsert_discovered_channels(discovery_channels.values()))
+
+    if updated or profiles_upserted:
         db.commit()
 
     return {
@@ -127,6 +175,7 @@ def repair_video_source_metadata(
         "matched": matched,
         "updated": updated,
         "unresolved": unresolved,
+        "profiles_upserted": profiles_upserted,
         "lookback_days": lookback_days or _metadata_lookback_days(),
     }
 
@@ -159,7 +208,9 @@ def _probation_demotion_days() -> int:
 def refresh_video_source_health(db: Session, hours_back: int = 24 * 7) -> List[VideoSourceProfile]:
     """Update rolling 7-day health stats and status for video source profiles."""
     repair_video_source_metadata(db)
-    profiles = bootstrap_video_source_profiles(db)
+    bootstrap_video_source_profiles(db)
+    repo = VideoSourceProfileRepository(db)
+    profiles = repo.list_all()
     cutoff = datetime.utcnow() - timedelta(hours=hours_back)
 
     promoted_total = (

@@ -43,3 +43,36 @@ def test_upsert_from_registry_dedupes_duplicate_channel_ids():
     assert rows[0].channel_name == "Primary Config"
     assert rows[0].content_format == ContentFormat.MIXED.value
     assert rows[0].status == "core"
+
+
+def test_upsert_from_registry_respects_explicit_reel_and_discovery_controls():
+    engine = create_engine("sqlite:///:memory:")
+    VideoSourceProfile.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    repo = VideoSourceProfileRepository(db)
+    repo.upsert_from_registry(
+        [
+            ChannelConfig(
+                channel_id="channel-2",
+                name="Controlled Channel",
+                role=ChannelRole.OFFICIAL,
+                content_format=ContentFormat.LONG_FORM,
+                daily_cap=2,
+                daily_reel_cap=0,
+                allow_reels=False,
+                allow_search=False,
+                allow_trending=False,
+                quality_tier=QualityTier.STANDARD,
+                enabled=True,
+            )
+        ]
+    )
+    db.commit()
+
+    row = db.get(VideoSourceProfile, "channel-2")
+    assert row is not None
+    assert row.daily_reel_cap == 0
+    assert row.allow_search is False
+    assert row.allow_trending is False

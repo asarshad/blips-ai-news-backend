@@ -771,10 +771,10 @@ def ui_dashboard(
         .all()
     )
     sig_counts = {r[0].value: r[1] for r in signal_by_status}
-    sig_ingested = sig_counts.get("INGESTED", 0)
-    sig_duplicate = sig_counts.get("DUPLICATE", 0)
-    sig_rejected = sig_counts.get("REJECTED", 0)
-    sig_pending = sig_counts.get("PENDING", 0)
+    sig_ingested = sig_counts.get("ingested", sig_counts.get("INGESTED", 0))
+    sig_duplicate = sig_counts.get("duplicate", sig_counts.get("DUPLICATE", 0))
+    sig_rejected = sig_counts.get("rejected", sig_counts.get("REJECTED", 0))
+    sig_pending = sig_counts.get("pending", sig_counts.get("PENDING", 0))
 
     # Top sources for selected day (promoted)
     source_rows = (

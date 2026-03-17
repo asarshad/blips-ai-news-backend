@@ -58,6 +58,7 @@ def test_bootstrap_video_source_profiles_handles_duplicate_channel_ids():
 def test_repair_video_source_metadata_backfills_curated_fields():
     engine = create_engine("sqlite:///:memory:")
     ContentItem.__table__.create(bind=engine)
+    VideoSourceProfile.__table__.create(bind=engine)
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
@@ -87,6 +88,7 @@ def test_repair_video_source_metadata_backfills_curated_fields():
 def test_repair_video_source_metadata_leaves_unmatched_rows_unchanged():
     engine = create_engine("sqlite:///:memory:")
     ContentItem.__table__.create(bind=engine)
+    VideoSourceProfile.__table__.create(bind=engine)
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
@@ -112,3 +114,39 @@ def test_repair_video_source_metadata_leaves_unmatched_rows_unchanged():
     assert repaired.channel_id is None
     assert repaired.acquisition_lane is None
     assert repaired.source_status is None
+
+
+def test_repair_video_source_metadata_upserts_discovery_profiles_from_recent_items():
+    engine = create_engine("sqlite:///:memory:")
+    ContentItem.__table__.create(bind=engine)
+    VideoSourceProfile.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.REEL,
+        source="Discovery Shorts Lab",
+        source_url="https://www.youtube.com/shorts/xyz98765432",
+        canonical_url="https://www.youtube.com/shorts/xyz98765432",
+        video_url="https://www.youtube.com/shorts/xyz98765432",
+        channel_id="channel-discovery-1",
+        acquisition_lane="search",
+        source_status="discovery",
+        published_at=datetime(2026, 3, 13, 9, 0, 0),
+        title="Pixel privacy shortcut",
+        summary="A quick Pixel privacy shortcut demo.",
+        curation_status=ContentStatus.PROMOTED,
+        created_at=datetime(2026, 3, 13, 9, 5, 0),
+        updated_at=datetime(2026, 3, 13, 9, 5, 0),
+    )
+    db.add(item)
+    db.commit()
+
+    result = repair_video_source_metadata(db, lookback_days=14)
+    profile = db.get(VideoSourceProfile, "channel-discovery-1")
+
+    assert result["profiles_upserted"] == 1
+    assert profile is not None
+    assert profile.channel_name == "Discovery Shorts Lab"
+    assert profile.status == "discovery"
+    assert profile.daily_reel_cap == 1

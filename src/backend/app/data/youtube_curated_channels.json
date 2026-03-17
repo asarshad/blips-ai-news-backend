@@ -317,6 +317,7 @@
     "role": "news",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 1,
     "quality_tier": "premium"
   },
   {
@@ -325,6 +326,7 @@
     "role": "news",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 1,
     "quality_tier": "standard"
   },
   {
@@ -685,6 +687,7 @@
     "role": "official",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 2,
     "quality_tier": "premium"
   },
   {
@@ -701,6 +704,7 @@
     "role": "official",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 1,
     "quality_tier": "premium"
   },
   {
@@ -773,6 +777,7 @@
     "role": "official",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 2,
     "quality_tier": "standard"
   },
   {
@@ -837,14 +842,17 @@
     "role": "official",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 1,
     "quality_tier": "standard"
   },
   {
     "channel_id": "UCuVQmkiETvqmLviDcBtQw4A",
     "name": "Nothing Technology",
     "role": "official",
-    "content_format": "mixed",
+    "content_format": "long_form",
     "daily_cap": 2,
+    "daily_reel_cap": 0,
+    "allow_reels": false,
     "quality_tier": "standard"
   },
   {
@@ -883,8 +891,10 @@
     "channel_id": "UCsNGtpqGsyw0U6qEG-WHadA",
     "name": "DJI",
     "role": "official",
-    "content_format": "mixed",
+    "content_format": "long_form",
     "daily_cap": 2,
+    "daily_reel_cap": 0,
+    "allow_reels": false,
     "quality_tier": "standard"
   },
   {
