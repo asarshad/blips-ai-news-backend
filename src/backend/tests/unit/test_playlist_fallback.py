@@ -171,6 +171,25 @@ def test_format_item_includes_conversation_starters():
     }
 
 
+def test_format_item_uses_effective_reel_type_for_explicit_shorts_video():
+    service = PlaylistService(
+        content_repo=MagicMock(),
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=MagicMock(),
+        redis_client=None,
+    )
+
+    shorts_item = _item(8)
+    shorts_item.type = ContentType.VIDEO
+    shorts_item.source_url = "https://www.youtube.com/shorts/VvGaDPViMKY"
+    shorts_item.video_url = "https://www.youtube.com/shorts/VvGaDPViMKY"
+
+    formatted = service._format_item(shorts_item)
+
+    assert formatted["type"] == ContentType.REEL.value
+
+
 def test_get_playlist_discards_stale_cached_snapshot_missing_conversation_starters():
     content_repo = MagicMock()
     content_repo.get_items_for_playlist.return_value = [_item(10)]
@@ -203,3 +222,69 @@ def test_get_playlist_discards_stale_cached_snapshot_missing_conversation_starte
     assert result["items"][0]["id"] == 10
     assert result["items"][0]["conversation_starters"]["starters"] == ["Question for 10?"]
     assert redis.setex.called
+
+
+def test_get_playlist_discards_stale_video_cache_containing_shorts_url():
+    content_repo = MagicMock()
+    content_repo.get_items_for_playlist.return_value = [_item(11)]
+
+    personalization = MagicMock()
+    personalization.compute_personalization_score.return_value = 0.1
+
+    redis = MagicMock()
+    redis.get.return_value = json.dumps(
+        [
+            {
+                "id": 17171,
+                "type": "VIDEO",
+                "title": "Leaked reel",
+                "source_url": "https://www.youtube.com/shorts/VvGaDPViMKY",
+                "video_url": "https://www.youtube.com/shorts/VvGaDPViMKY",
+                "conversation_starters": {
+                    "starters": ["Cached question?"],
+                    "fallback": ["Cached fallback?"],
+                },
+            }
+        ]
+    )
+
+    service = PlaylistService(
+        content_repo=content_repo,
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=personalization,
+        ranking_service=_RankingStub(),
+        redis_client=redis,
+    )
+
+    result = service.get_playlist("device-5", ContentType.VIDEO, size=20)
+
+    assert result["items"][0]["id"] == 11
+    assert redis.setex.called
+
+
+def test_invalidate_user_cache_clears_legacy_and_video_reel_namespaces():
+    redis = MagicMock()
+    redis.keys.side_effect = [
+        ["playlist:abc123:ARTICLE"],
+        ["playlist:session:abc123:ARTICLE:abcd1234"],
+        ["playlist:video-reel-v2:abc123:VIDEO"],
+        ["playlist:video-reel-v2:session:abc123:VIDEO:efgh5678"],
+    ]
+
+    service = PlaylistService(
+        content_repo=MagicMock(),
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=MagicMock(),
+        redis_client=redis,
+    )
+
+    service.invalidate_user_cache("device-6")
+
+    redis.delete.assert_called_once_with(
+        "playlist:abc123:ARTICLE",
+        "playlist:session:abc123:ARTICLE:abcd1234",
+        "playlist:video-reel-v2:abc123:VIDEO",
+        "playlist:video-reel-v2:session:abc123:VIDEO:efgh5678",
+    )
