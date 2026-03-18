@@ -362,6 +362,16 @@ def _source_status_tone(status: Optional[str]) -> str:
     }.get(normalized, "gray")
 
 
+def _lane_metric_sort_key(row: dict) -> tuple[int, float, int]:
+    promotion_rate = row.get("promotion_rate")
+    normalized_rate = float(promotion_rate) if isinstance(promotion_rate, (int, float)) else -1.0
+    return (
+        int(row.get("promoted") or 0),
+        normalized_rate,
+        int(row.get("candidates") or 0),
+    )
+
+
 def _feed_channel(item: dict) -> str:
     return str(item.get("channel_id") or item.get("source") or "unknown")
 
@@ -1024,7 +1034,7 @@ def ui_dashboard(
     for surface_key in ("videos", "reels"):
         ranked_lanes = sorted(
             video_lanes["surfaces"].get(surface_key, []),
-            key=lambda row: (row["promoted"], row["promotion_rate"], row["candidates"]),
+            key=_lane_metric_sort_key,
             reverse=True,
         )
         for row in ranked_lanes[:3]:
@@ -1386,10 +1396,8 @@ def ui_video_lanes(
         return sorted(
             payload["surfaces"].get(surface, []),
             key=lambda row: (
-                int(int(row["candidates"]) > 0),
-                row["promoted"],
-                row["promotion_rate"] if row["promotion_rate"] is not None else -1,
-                row["candidates"],
+                int(int(row.get("candidates") or 0) > 0),
+                *_lane_metric_sort_key(row),
             ),
             reverse=True,
         )
