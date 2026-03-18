@@ -258,6 +258,12 @@ projects:
                 value: "0"
               - key: YOUTUBE_REEL_TRENDING_ENABLED
                 value: "0"
+              - key: YT_CHANNEL_BOOTSTRAP_ENABLED
+                value: "true"
+              - key: YT_BOOTSTRAP_MAX_PROFILE_AGE_DAYS
+                value: "2"
+              - key: YT_BOOTSTRAP_MAX_ROWS
+                value: "32"
               - key: PREFERENCE_DECAY_FACTOR
                 value: "0.95"
               - key: DB_POOL_SIZE

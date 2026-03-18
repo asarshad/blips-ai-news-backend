@@ -24,6 +24,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.services.video_content_policy import apply_content_policy
+from app.video_age_policy import build_surface_age_filters, make_default_policy
 from app.video_surface_rules import surface_content_filter
 
 logger = get_logger(__name__)
@@ -206,13 +207,36 @@ def compute_surface_health(
     )
     scoped_query = apply_content_policy(db.query(ContentItem), content_type=content_type)
 
+    if surface in (Surface.VIDEOS, Surface.REELS):
+        default_policy = make_default_policy(
+            fresh_hours=cfg["fresh_hours"],
+            backfill_hours=cfg["backfill_hours"],
+            evergreen_days=cfg["evergreen_days"],
+        )
+        age_filters = build_surface_age_filters(now=now, default_policy=default_policy)
+        fresh_window_filter = age_filters.fresh
+        backfill_window_filter = age_filters.backfill
+        evergreen_tier_filter = age_filters.evergreen_tier
+        reservoir_filter = age_filters.reservoir
+    else:
+        fresh_window_filter = ContentItem.published_at >= fresh_cutoff
+        backfill_window_filter = and_(
+            ContentItem.created_at >= backfill_cutoff,
+            ContentItem.published_at < fresh_cutoff,
+        )
+        evergreen_tier_filter = and_(
+            ContentItem.published_at < fresh_cutoff,
+            ContentItem.published_at >= evergreen_cutoff,
+        )
+        reservoir_filter = ContentItem.published_at >= evergreen_cutoff
+
     # Tier A: published_at within fresh window
     tier_a_count = (
         apply_content_policy(
             db.query(func.count(ContentItem.id)).select_from(ContentItem),
             content_type=content_type,
         )
-        .filter(base_filter, ContentItem.published_at >= fresh_cutoff)
+        .filter(base_filter, fresh_window_filter)
         .scalar()
         or 0
     )
@@ -223,11 +247,7 @@ def compute_surface_health(
             db.query(func.count(ContentItem.id)).select_from(ContentItem),
             content_type=content_type,
         )
-        .filter(
-            base_filter,
-            ContentItem.created_at >= backfill_cutoff,
-            ContentItem.published_at < fresh_cutoff,
-        )
+        .filter(base_filter, backfill_window_filter)
         .scalar()
         or 0
     )
@@ -239,12 +259,7 @@ def compute_surface_health(
             db.query(func.count(ContentItem.id)).select_from(ContentItem),
             content_type=content_type,
         )
-        .filter(
-            base_filter,
-            ContentItem.published_at < fresh_cutoff,
-            ContentItem.published_at >= evergreen_cutoff,
-            ContentItem.global_score >= 0.3,
-        )
+        .filter(base_filter, evergreen_tier_filter, ContentItem.global_score >= 0.3)
         .scalar()
         or 0
     )
@@ -271,7 +286,7 @@ def compute_surface_health(
             db.query(func.count(ContentItem.id)).select_from(ContentItem),
             content_type=content_type,
         )
-        .filter(base_filter, ContentItem.published_at >= evergreen_cutoff)
+        .filter(base_filter, reservoir_filter)
         .scalar()
         or 0
     )
@@ -282,7 +297,7 @@ def compute_surface_health(
             db.query(func.max(ContentItem.published_at)).select_from(ContentItem),
             content_type=content_type,
         )
-        .filter(base_filter)
+        .filter(base_filter, reservoir_filter)
         .scalar()
     )
     newest_age = int((now - newest).total_seconds()) if newest else None
@@ -293,7 +308,7 @@ def compute_surface_health(
             db.query(func.min(ContentItem.published_at)).select_from(ContentItem),
             content_type=content_type,
         )
-        .filter(base_filter, ContentItem.published_at >= fresh_cutoff)
+        .filter(base_filter, fresh_window_filter)
         .scalar()
     )
     oldest_tier_a_age = int((now - oldest_tier_a).total_seconds()) if oldest_tier_a else None
@@ -301,7 +316,7 @@ def compute_surface_health(
     # Source distribution (for reservoir content)
     source_dist_rows = (
         scoped_query.with_entities(ContentItem.source, func.count(ContentItem.id))
-        .filter(base_filter, ContentItem.published_at >= evergreen_cutoff)
+        .filter(base_filter, reservoir_filter)
         .group_by(ContentItem.source)
         .all()
     )

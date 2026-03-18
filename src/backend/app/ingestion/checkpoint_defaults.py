@@ -17,6 +17,8 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.services.video_content_policy import apply_content_policy
+from app.video_age_policy import build_surface_age_filters, make_default_policy
+from app.video_surface_rules import surface_content_filter
 
 logger = get_logger(__name__)
 
@@ -63,12 +65,49 @@ def parse_target_overrides() -> Dict[str, int]:
 
 def _fresh_promoted_count(db, content_type: ContentType, *, hours: int) -> int:
     cutoff = datetime.utcnow() - timedelta(hours=hours)
-    query = db.query(ContentItem.id).filter(
-        ContentItem.type == content_type,
+    if content_type == ContentType.VIDEO:
+        content_filter = surface_content_filter("videos")
+    elif content_type == ContentType.REEL:
+        content_filter = surface_content_filter("reels")
+    else:
+        content_filter = ContentItem.type == content_type
+
+    filters = [
+        content_filter,
         ContentItem.curation_status == ContentStatus.PROMOTED,
         ContentItem.is_suppressed.is_(False),
-        ContentItem.published_at >= cutoff,
-    )
+    ]
+
+    if content_type in (ContentType.VIDEO, ContentType.REEL):
+        surface_cfg = (
+            {
+                "fresh_hours": settings.VIDEOS_FRESH_PUBLISHED_HOURS,
+                "backfill_hours": settings.VIDEOS_BACKFILL_CREATED_HOURS,
+                "evergreen_days": settings.VIDEOS_EVERGREEN_MAX_DAYS,
+            }
+            if content_type == ContentType.VIDEO
+            else {
+                "fresh_hours": settings.REELS_FRESH_PUBLISHED_HOURS,
+                "backfill_hours": settings.REELS_BACKFILL_CREATED_HOURS,
+                "evergreen_days": settings.REELS_EVERGREEN_MAX_DAYS,
+            }
+        )
+        if hours == surface_cfg["fresh_hours"]:
+            age_filters = build_surface_age_filters(
+                now=datetime.utcnow(),
+                default_policy=make_default_policy(
+                    fresh_hours=surface_cfg["fresh_hours"],
+                    backfill_hours=surface_cfg["backfill_hours"],
+                    evergreen_days=surface_cfg["evergreen_days"],
+                ),
+            )
+            filters.append(age_filters.fresh)
+        else:
+            filters.append(ContentItem.published_at >= cutoff)
+    else:
+        filters.append(ContentItem.published_at >= cutoff)
+
+    query = db.query(ContentItem.id).filter(*filters)
     query = apply_content_policy(query, content_type=content_type)
     count = query.count()
     return int(count or 0)

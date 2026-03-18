@@ -31,6 +31,7 @@ from app.services.diversity_mixer import enforce_channel_caps, mix_feed
 from app.services.inventory_service import FreshnessTier, Surface, _get_surface_config
 from app.services.video_content_policy import apply_content_policy
 from app.services.video_hybrid_rerank import rerank_video_candidates
+from app.video_age_policy import build_surface_age_filters, make_default_policy
 from app.video_surface_rules import effective_content_type, surface_content_filter
 
 logger = get_logger(__name__)
@@ -198,6 +199,27 @@ def get_tiered_feed(
             ),
         )
 
+    if surface in (Surface.VIDEOS, Surface.REELS):
+        default_policy = make_default_policy(
+            fresh_hours=cfg["fresh_hours"],
+            backfill_hours=cfg["backfill_hours"],
+            evergreen_days=cfg["evergreen_days"],
+        )
+        age_filters = build_surface_age_filters(now=now, default_policy=default_policy)
+        fresh_window_filter = age_filters.fresh
+        backfill_window_filter = age_filters.backfill
+        evergreen_tier_filter = age_filters.evergreen_tier
+    else:
+        fresh_window_filter = ContentItem.published_at >= fresh_cutoff
+        backfill_window_filter = and_(
+            ContentItem.created_at >= backfill_cutoff,
+            ContentItem.published_at < fresh_cutoff,
+        )
+        evergreen_tier_filter = and_(
+            ContentItem.published_at < fresh_cutoff,
+            ContentItem.published_at >= evergreen_cutoff,
+        )
+
     results: List[TieredItem] = []
     seen_ids = set()
 
@@ -214,13 +236,13 @@ def get_tiered_feed(
             db.query(ContentItem).filter(base_filter),
             content_type=content_type,
         )
-        .filter(ContentItem.published_at >= fresh_cutoff)
+        .filter(fresh_window_filter)
         .count()
     )
     tier_a_query = apply_content_policy(
         db.query(ContentItem).filter(base_filter),
         content_type=content_type,
-    ).filter(ContentItem.published_at >= fresh_cutoff)
+    ).filter(fresh_window_filter)
     if surface in (Surface.VIDEOS, Surface.REELS):
         tier_a_query = tier_a_query.order_by(
             desc(ContentItem.published_at),
@@ -250,10 +272,7 @@ def get_tiered_feed(
                 db.query(ContentItem).filter(base_filter),
                 content_type=content_type,
             )
-            .filter(
-                ContentItem.created_at >= backfill_cutoff,
-                ContentItem.published_at < fresh_cutoff,
-            )
+            .filter(backfill_window_filter)
             .order_by(
                 desc(ContentItem.promotion_score),
                 desc(ContentItem.global_score),
@@ -282,8 +301,7 @@ def get_tiered_feed(
                 content_type=content_type,
             )
             .filter(
-                ContentItem.published_at < fresh_cutoff,
-                ContentItem.published_at >= evergreen_cutoff,
+                evergreen_tier_filter,
                 ContentItem.global_score >= 0.3,  # Quality threshold
             )
             .order_by(

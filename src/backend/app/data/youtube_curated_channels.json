@@ -919,7 +919,8 @@
     "role": "shorts",
     "content_format": "shorts",
     "daily_cap": 2,
-    "quality_tier": "premium"
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UCZa18YV7qayTh-MRIrBhDpA",
@@ -927,7 +928,8 @@
     "role": "shorts",
     "content_format": "shorts",
     "daily_cap": 2,
-    "quality_tier": "premium"
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UCCDU1fsmgvWljcW2aodfJsA",
@@ -935,7 +937,8 @@
     "role": "news",
     "content_format": "long_form",
     "daily_cap": 1,
-    "quality_tier": "premium"
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UChqUTb7kYRX8-EiaN3XFrSQ",
@@ -945,7 +948,8 @@
     "daily_cap": 2,
     "daily_reel_cap": 1,
     "allow_reels": true,
-    "quality_tier": "premium"
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UCoKqUtcUtf8QPb0GWxe5e7Q",
@@ -953,7 +957,8 @@
     "role": "news",
     "content_format": "long_form",
     "daily_cap": 2,
-    "quality_tier": "premium"
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UChIs72whgZI9w6d6FhwGGHA",
@@ -961,7 +966,8 @@
     "role": "explainer",
     "content_format": "long_form",
     "daily_cap": 1,
-    "quality_tier": "premium"
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UC2Rzju32yQPkQ7oIhmeuLwg",
@@ -969,7 +975,8 @@
     "role": "explainer",
     "content_format": "long_form",
     "daily_cap": 1,
-    "quality_tier": "premium"
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UCv6J_jJa8GJqFwQNgNrMuww",
@@ -977,7 +984,8 @@
     "role": "engineer",
     "content_format": "long_form",
     "daily_cap": 1,
-    "quality_tier": "premium"
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UCf_KhBXw5TIV0A7butjgFhg",
@@ -985,7 +993,8 @@
     "role": "ai",
     "content_format": "long_form",
     "daily_cap": 1,
-    "quality_tier": "premium"
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UC1LpsuAUaKoMzzJSEt5WImw",
@@ -993,7 +1002,8 @@
     "role": "explainer",
     "content_format": "long_form",
     "daily_cap": 1,
-    "quality_tier": "premium"
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UCrDwWp7EBBv4NwvScIpBDOA",
@@ -1003,7 +1013,8 @@
     "daily_cap": 1,
     "daily_reel_cap": 1,
     "allow_reels": true,
-    "quality_tier": "premium"
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UCcIXc5mJsHVYTZR1maL5l9w",
@@ -1011,7 +1022,8 @@
     "role": "ai",
     "content_format": "long_form",
     "daily_cap": 1,
-    "quality_tier": "premium"
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UCbfYPyITQ-7l4upoX8nvctg",
@@ -1019,7 +1031,8 @@
     "role": "ai",
     "content_format": "long_form",
     "daily_cap": 1,
-    "quality_tier": "premium"
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UCPbwhExawYrn9xxI21TFfyw",
@@ -1027,7 +1040,11 @@
     "role": "engineer",
     "content_format": "long_form",
     "daily_cap": 1,
-    "quality_tier": "premium"
+    "fresh_published_hours": 72,
+    "backfill_created_hours": 24,
+    "evergreen_max_days": 21,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UCxBcwypKK-W3GHd_RZ9FZrQ",
@@ -1035,7 +1052,11 @@
     "role": "ai",
     "content_format": "long_form",
     "daily_cap": 1,
-    "quality_tier": "premium"
+    "fresh_published_hours": 72,
+    "backfill_created_hours": 24,
+    "evergreen_max_days": 21,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UCCd3-JX7e8uGZx00i5646jg",
@@ -1043,7 +1064,11 @@
     "role": "news",
     "content_format": "long_form",
     "daily_cap": 2,
-    "quality_tier": "premium"
+    "fresh_published_hours": 48,
+    "backfill_created_hours": 24,
+    "evergreen_max_days": 14,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UC9cn0TuPq4dnbTY-CBsm8XA",
@@ -1051,7 +1076,11 @@
     "role": "news",
     "content_format": "long_form",
     "daily_cap": 1,
-    "quality_tier": "premium"
+    "fresh_published_hours": 72,
+    "backfill_created_hours": 24,
+    "evergreen_max_days": 21,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UCXl4i9dYBrFOabk0xGmbkRA",
@@ -1059,7 +1088,11 @@
     "role": "ai",
     "content_format": "long_form",
     "daily_cap": 1,
-    "quality_tier": "premium"
+    "fresh_published_hours": 72,
+    "backfill_created_hours": 24,
+    "evergreen_max_days": 21,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UCFLFc8Lpbwt4jPtY1_Ai5yA",
@@ -1067,7 +1100,11 @@
     "role": "news",
     "content_format": "long_form",
     "daily_cap": 1,
-    "quality_tier": "premium"
+    "fresh_published_hours": 72,
+    "backfill_created_hours": 24,
+    "evergreen_max_days": 21,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
   },
   {
     "channel_id": "UCI8iQa1hv7oV_Z8D35vVuSg",

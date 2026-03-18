@@ -255,6 +255,28 @@ def test_fresh_promoted_count_applies_curated_only_policy(monkeypatch):
     assert seen["content_type"] == ContentType.VIDEO
 
 
+def test_fresh_promoted_count_uses_surface_age_filters_for_video_fresh_window(monkeypatch):
+    db = _FakeDb([object(), object()])
+    seen = {"age_filters": 0}
+
+    def _fake_age_filters(*, now, default_policy):
+        seen["age_filters"] += 1
+        seen["fresh_hours"] = default_policy.fresh_hours
+        return SimpleNamespace(fresh=object())
+
+    monkeypatch.setattr(checkpoint_defaults, "build_surface_age_filters", _fake_age_filters)
+
+    count = checkpoint_defaults._fresh_promoted_count(
+        db,
+        ContentType.VIDEO,
+        hours=checkpoint_defaults.settings.VIDEOS_FRESH_PUBLISHED_HOURS,
+    )
+
+    assert count == 2
+    assert seen["age_filters"] == 1
+    assert seen["fresh_hours"] == checkpoint_defaults.settings.VIDEOS_FRESH_PUBLISHED_HOURS
+
+
 def test_should_fill_surface_when_recent_video_refresh_is_stale(monkeypatch):
     counts = {
         (ContentType.VIDEO, 168): 79,

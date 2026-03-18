@@ -2,6 +2,7 @@ from app.integrations.youtube_channels import (
     CHANNEL_REGISTRY,
     ContentFormat,
     dedupe_channel_configs,
+    get_bootstrap_channels,
     get_channel_by_id,
     get_channel_by_name,
     get_enabled_channels,
@@ -42,6 +43,28 @@ def test_curated_registry_scales_to_trusted_roster():
     assert hardware_unboxed.name == "Hardware Unboxed"
     assert hardware_unboxed.ingestion_stream.value == "primary"
     assert google_for_developers.name == "Google for Developers"
+
+
+def test_bootstrap_channels_and_age_overrides_cover_new_long_form_sources():
+    bootstrap_names = {channel.name for channel in get_bootstrap_channels()}
+
+    assert "Ars Technica" in bootstrap_names
+    assert "Dwarkesh Podcast" in bootstrap_names
+    assert "MKBHD Shorts" in bootstrap_names
+
+    dwarkesh = get_channel_by_name("Dwarkesh Podcast")
+    dtns = get_channel_by_name("Daily Tech News Show")
+
+    assert dwarkesh is not None
+    assert dwarkesh.fresh_published_hours == 72
+    assert dwarkesh.backfill_created_hours == 24
+    assert dwarkesh.evergreen_max_days == 21
+    assert dwarkesh.has_age_overrides is True
+
+    assert dtns is not None
+    assert dtns.fresh_published_hours == 48
+    assert dtns.backfill_created_hours == 24
+    assert dtns.evergreen_max_days == 14
 
 
 def test_corrected_channel_ids_resolve_expected_channels():

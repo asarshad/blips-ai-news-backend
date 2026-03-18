@@ -356,9 +356,10 @@ def process_progress_row_batch(
             )
 
             want_reel = progress.source_type == "youtube_reel"
-            lookback_cutoff = datetime.utcnow() - timedelta(
-                hours=settings.YT_CURATED_LOOKBACK_HOURS
+            lookback_hours = int(
+                getattr(cfg, "fresh_published_hours", None) or settings.YT_CURATED_LOOKBACK_HOURS
             )
+            lookback_cutoff = datetime.utcnow() - timedelta(hours=lookback_hours)
 
             remaining = max(0, int(progress.target) - int(progress.items_ingested))
 
