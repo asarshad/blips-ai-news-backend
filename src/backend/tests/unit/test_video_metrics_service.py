@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from sqlalchemy import create_engine
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import sessionmaker
+
+from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.video_source import VideoDiscoveryRun
 from app.services import video_metrics_service as metrics_service
 from app.services.inventory_service import SourceDistribution, Surface, SurfaceHealth, TierCounts
 from app.services.video_metrics_service import (
@@ -9,8 +16,14 @@ from app.services.video_metrics_service import (
     _inventory_state,
     _surface_floor,
     _surface_window_hours,
+    compute_video_lane_metrics,
     compute_video_supply_metrics,
 )
+
+
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
+    return "TEXT"
 
 
 def test_surface_floors_match_launch_gates():
@@ -146,3 +159,92 @@ def test_compute_video_supply_metrics_merges_recent_refresh_health(monkeypatch):
         "Recent refresh below minimum: 3 < 12 in last 24h"
     ]
     assert payload["surfaces"]["reels"]["inventory_state"] == "needs_refresh"
+
+
+def test_compute_video_lane_metrics_supports_query_breakdown():
+    engine = create_engine("sqlite:///:memory:")
+    ContentItem.__table__.create(bind=engine)
+    VideoDiscoveryRun.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+    now = datetime.utcnow()
+
+    db.add_all(
+        [
+            VideoDiscoveryRun(
+                lane="search",
+                surface="videos",
+                query_label="ai-models",
+                candidate_count=20,
+                duplicate_rejections=1,
+                clickbait_rejections=2,
+                filtered_non_english=3,
+                filtered_live=1,
+                filtered_off_topic=2,
+                filtered_format=1,
+                run_started_at=now - timedelta(hours=1),
+            ),
+            ContentItem(
+                type=ContentType.VIDEO,
+                source="YouTube",
+                source_url="https://youtube.com/watch?v=abc123",
+                title="OpenAI Gemini Claude update",
+                dedupe_key="yt:abc123",
+                simhash="abc123",
+                curation_status=ContentStatus.PROMOTED,
+                discovered_via="yt_search:ai-models",
+                acquisition_lane="search",
+                channel_id="channel-1",
+                published_at=now - timedelta(hours=2),
+                created_at=now - timedelta(hours=1),
+                is_suppressed=False,
+            ),
+        ]
+    )
+    db.commit()
+
+    payload = compute_video_lane_metrics(db, hours=24, breakdown="query")
+
+    row = payload["surfaces"]["videos"][0]
+    assert payload["breakdown"] == "query"
+    assert row["query_label"] == "ai-models"
+    assert row["candidates"] == 20
+    assert row["promoted"] == 1
+    assert row["filtered_non_english"] == 3
+    assert row["filtered_off_topic"] == 2
+
+
+def test_compute_video_lane_metrics_query_breakdown_uses_blank_rate_without_candidates():
+    engine = create_engine("sqlite:///:memory:")
+    ContentItem.__table__.create(bind=engine)
+    VideoDiscoveryRun.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+    now = datetime.utcnow()
+
+    db.add(
+        ContentItem(
+            type=ContentType.VIDEO,
+            source="YouTube",
+            source_url="https://youtube.com/watch?v=legacy123",
+            title="Legacy search promotion",
+            dedupe_key="yt:legacy123",
+            simhash="legacy123",
+            curation_status=ContentStatus.PROMOTED,
+            discovered_via="yt_search:ai-models",
+            acquisition_lane="search",
+            channel_id="channel-1",
+            published_at=now - timedelta(hours=2),
+            created_at=now - timedelta(hours=1),
+            is_suppressed=False,
+        )
+    )
+    db.commit()
+
+    payload = compute_video_lane_metrics(db, hours=24, breakdown="query")
+
+    row = payload["surfaces"]["videos"][0]
+    assert row["query_label"] == "ai-models"
+    assert row["candidates"] == 0
+    assert row["promoted"] == 1
+    assert row["promotion_rate"] is None

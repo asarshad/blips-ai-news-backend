@@ -17,6 +17,7 @@ from app.models.video_source import VideoDiscoveryRun, VideoSourceProfile
 from app.services.inventory_service import Surface, SurfaceHealth, compute_surface_health
 from app.services.video_baseline_service import load_baseline_snapshot, numeric_delta
 from app.services.video_content_policy import apply_content_policy
+from app.services.video_discovery_provenance import query_label_from_discovered_via
 from app.services.video_source_service import refresh_video_source_health
 
 
@@ -61,6 +62,12 @@ def _comparison_window(
 
 def _channel_key(item: ContentItem) -> str:
     return item.channel_id or item.source or "unknown"
+
+
+def _promotion_rate(promoted_count: int, candidate_count: int) -> float | None:
+    if candidate_count <= 0:
+        return None
+    return round(promoted_count / candidate_count * 100, 2)
 
 
 def _profile_lookup(db: Session) -> Dict[str, VideoSourceProfile]:
@@ -378,9 +385,16 @@ def compute_video_supply_metrics(
     }
 
 
-def compute_video_lane_metrics(db: Session, hours: int = 24) -> Dict[str, Any]:
+def compute_video_lane_metrics(
+    db: Session,
+    hours: int = 24,
+    *,
+    breakdown: str | None = None,
+) -> Dict[str, Any]:
     """Aggregate discovery lane candidate and promoted performance."""
     cutoff = datetime.utcnow() - timedelta(hours=hours)
+    breakdown = (breakdown or "").strip().lower() or None
+    use_query_breakdown = breakdown == "query"
 
     run_rows = db.query(VideoDiscoveryRun).filter(VideoDiscoveryRun.run_started_at >= cutoff).all()
     lane_metrics: Dict[tuple[str, str], Dict[str, Any]] = defaultdict(
@@ -396,7 +410,8 @@ def compute_video_lane_metrics(db: Session, hours: int = 24) -> Dict[str, Any]:
     )
 
     for run in run_rows:
-        key = (run.surface, run.lane)
+        label = run.query_label or run.lane or "unknown"
+        key = (run.surface, label if use_query_breakdown else (run.lane or "unknown"))
         lane_metrics[key]["candidates"] += run.candidate_count
         lane_metrics[key]["duplicate_rejections"] += run.duplicate_rejections
         lane_metrics[key]["clickbait_rejections"] += run.clickbait_rejections
@@ -419,46 +434,68 @@ def compute_video_lane_metrics(db: Session, hours: int = 24) -> Dict[str, Any]:
     promoted_by_lane: Dict[tuple[str, str], List[ContentItem]] = defaultdict(list)
     for item in promoted_rows:
         surface = "reels" if item.type == ContentType.REEL else "videos"
-        promoted_by_lane[(surface, item.acquisition_lane or "unknown")].append(item)
+        label = (
+            query_label_from_discovered_via(
+                item.discovered_via,
+                acquisition_lane=item.acquisition_lane,
+            )
+            if use_query_breakdown
+            else (item.acquisition_lane or "unknown")
+        )
+        if label is None:
+            continue
+        promoted_by_lane[(surface, label)].append(item)
 
     lanes: Dict[str, List[Dict[str, Any]]] = {"videos": [], "reels": []}
+    label_key = "query_label" if use_query_breakdown else "lane"
     for surface in ("videos", "reels"):
-        lane_names = {lane for lane_surface, lane in lane_metrics if lane_surface == surface}
-        lane_names.update(
-            lane for lane_surface, lane in promoted_by_lane if lane_surface == surface
-        )
-        for lane in sorted(lane_names):
-            current = lane_metrics[(surface, lane)]
-            promoted = promoted_by_lane[(surface, lane)]
+        labels = {lane for lane_surface, lane in lane_metrics if lane_surface == surface}
+        labels.update(lane for lane_surface, lane in promoted_by_lane if lane_surface == surface)
+        for label in sorted(labels):
+            current = lane_metrics[(surface, label)]
+            promoted = promoted_by_lane[(surface, label)]
             ages = [
                 round((now - item.published_at).total_seconds() / 3600, 2)
                 for item in promoted
                 if item.published_at
             ]
-            lanes[surface].append(
-                {
-                    "lane": lane,
-                    "candidates": current["candidates"],
-                    "promoted": len(promoted),
-                    "promotion_rate": round(len(promoted) / max(current["candidates"], 1) * 100, 2),
-                    "median_promoted_age": round(median(ages), 2) if ages else None,
-                    "distinct_promoted_channels": len({_channel_key(item) for item in promoted}),
-                    "duplicate_rejection_rate": round(
-                        current["duplicate_rejections"] / max(current["candidates"], 1) * 100,
-                        2,
-                    ),
-                    "clickbait_rejection_rate": round(
-                        current["clickbait_rejections"] / max(current["candidates"], 1) * 100,
-                        2,
-                    ),
-                }
-            )
+            candidate_count = current["candidates"]
+            promotion_rate = _promotion_rate(len(promoted), candidate_count)
+            row = {
+                label_key: label,
+                "candidates": candidate_count,
+                "promoted": len(promoted),
+                "promotion_rate": promotion_rate,
+                "median_promoted_age": round(median(ages), 2) if ages else None,
+                "distinct_promoted_channels": len({_channel_key(item) for item in promoted}),
+                "duplicate_rejection_rate": round(
+                    current["duplicate_rejections"] / max(candidate_count, 1) * 100,
+                    2,
+                ),
+                "clickbait_rejection_rate": round(
+                    current["clickbait_rejections"] / max(candidate_count, 1) * 100,
+                    2,
+                ),
+            }
+            if use_query_breakdown:
+                row.update(
+                    {
+                        "filtered_non_english": current["filtered_non_english"],
+                        "filtered_live": current["filtered_live"],
+                        "filtered_off_topic": current["filtered_off_topic"],
+                        "filtered_format": current["filtered_format"],
+                    }
+                )
+            lanes[surface].append(row)
 
-    return {
+    payload = {
         "as_of": now.isoformat(),
         "window_hours": hours,
         "surfaces": lanes,
     }
+    if use_query_breakdown:
+        payload["breakdown"] = "query"
+    return payload
 
 
 def compute_video_source_metrics(db: Session) -> Dict[str, Any]:

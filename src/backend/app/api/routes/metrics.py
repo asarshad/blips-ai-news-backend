@@ -572,11 +572,16 @@ def get_video_supply_metrics(
 @router.get("/video-lanes", dependencies=[Depends(require_admin_key)])
 def get_video_lane_metrics(
     hours: int = Query(24, ge=1, le=24 * 14, description="Look-back window in hours"),
+    breakdown: str | None = Query(
+        None,
+        pattern="^(query)?$",
+        description="Optional additive breakdown. Use 'query' for per-query metrics.",
+    ),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Get discovery-lane candidate, rejection, and promotion metrics."""
     try:
-        return compute_video_lane_metrics(db, hours=hours)
+        return compute_video_lane_metrics(db, hours=hours, breakdown=breakdown)
     except Exception as exc:
         logger.error("Error getting video lane metrics: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc)) from exc

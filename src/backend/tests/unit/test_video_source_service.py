@@ -150,3 +150,40 @@ def test_repair_video_source_metadata_upserts_discovery_profiles_from_recent_ite
     assert profile.channel_name == "Discovery Shorts Lab"
     assert profile.status == "discovery"
     assert profile.daily_reel_cap == 1
+
+
+def test_repair_video_source_metadata_understands_query_tagged_search_provenance():
+    engine = create_engine("sqlite:///:memory:")
+    ContentItem.__table__.create(bind=engine)
+    VideoSourceProfile.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.VIDEO,
+        source="Discovery Query Lab",
+        source_url="https://www.youtube.com/watch?v=query123",
+        canonical_url="https://www.youtube.com/watch?v=query123",
+        video_url="https://www.youtube.com/watch?v=query123",
+        channel_id="channel-discovery-query",
+        discovered_via="yt_search:ai-models",
+        source_status="discovery",
+        published_at=datetime(2026, 3, 13, 9, 0, 0),
+        title="Claude 4 agent update",
+        summary="A discovery item tagged with a query-specific provenance label.",
+        curation_status=ContentStatus.PROMOTED,
+        created_at=datetime(2026, 3, 13, 9, 5, 0),
+        updated_at=datetime(2026, 3, 13, 9, 5, 0),
+    )
+    db.add(item)
+    db.commit()
+
+    result = repair_video_source_metadata(db, lookback_days=14)
+    repaired = db.get(ContentItem, item.id)
+    profile = db.get(VideoSourceProfile, "channel-discovery-query")
+
+    assert result["updated"] == 1
+    assert result["profiles_upserted"] == 1
+    assert repaired.acquisition_lane == "search"
+    assert profile is not None
+    assert profile.status == "discovery"

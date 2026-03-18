@@ -6531,6 +6531,16 @@
           },
           {
             "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "default": "lane",
+              "title": "View",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "key",
             "required": false,
             "schema": {
@@ -7765,6 +7775,25 @@
               "minimum": 1,
               "title": "Hours",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Optional additive breakdown. Use 'query' for per-query metrics.",
+            "in": "query",
+            "name": "breakdown",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(query)?$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional additive breakdown. Use 'query' for per-query metrics.",
+              "title": "Breakdown"
             }
           },
           {

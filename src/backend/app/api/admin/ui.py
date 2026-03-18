@@ -1361,19 +1361,41 @@ def ui_dashboard(
 @router.get("/video-lanes", response_class=HTMLResponse)
 def ui_video_lanes(
     hours: int = Query(24, ge=1, le=24 * 14),
+    view: str = Query("lane"),
     db: Session = Depends(get_db),
     admin_key: str = Depends(_require_admin_key_or_query),
 ):
     from app.services.video_metrics_service import compute_video_lane_metrics
 
-    payload = compute_video_lane_metrics(db, hours=hours)
+    normalized_view = "query" if view == "query" else "lane"
+    payload = compute_video_lane_metrics(
+        db,
+        hours=hours,
+        breakdown="query" if normalized_view == "query" else None,
+    )
+    label_key = "query_label" if normalized_view == "query" else "lane"
+    label_title = "Query" if normalized_view == "query" else "Lane"
+    count_label = "queries" if normalized_view == "query" else "lanes"
+    description = (
+        "Compare weighted search queries over a rolling window and see which ones are actually producing promotable inventory."
+        if normalized_view == "query"
+        else "Compare search, trending, and curated lanes over a rolling window and see which ones are actually producing promotable inventory."
+    )
 
     def _surface_rows(surface: str) -> list[dict]:
         return sorted(
             payload["surfaces"].get(surface, []),
-            key=lambda row: (row["promoted"], row["promotion_rate"], row["candidates"]),
+            key=lambda row: (
+                int(int(row["candidates"]) > 0),
+                row["promoted"],
+                row["promotion_rate"] if row["promotion_rate"] is not None else -1,
+                row["candidates"],
+            ),
             reverse=True,
         )
+
+    def _format_rate(value: object) -> str:
+        return "—" if value is None else f"{value}%"
 
     def _surface_summary(surface: str) -> dict:
         rows = _surface_rows(surface)
@@ -1385,7 +1407,7 @@ def ui_video_lanes(
             "candidates": candidates,
             "promoted": promoted,
             "lane_count": len(rows),
-            "promotion_rate": round(promoted / max(candidates, 1) * 100, 2) if rows else 0,
+            "promotion_rate": round(promoted / candidates * 100, 2) if candidates > 0 else None,
             "best": best,
         }
 
@@ -1394,9 +1416,9 @@ def ui_video_lanes(
         <div class="rounded-[1.5rem] border border-slate-200 bg-white/80 p-4">
           <div class="flex items-start justify-between gap-3">
             <div>
-              <div class="panel-kicker">{_esc(row["lane"])}</div>
+              <div class="panel-kicker">{_esc(row.get(label_key, "—"))}</div>
               <div class="mt-2 text-xl font-semibold tracking-tight text-slate-950">{row["promoted"]}/{row["candidates"]}</div>
-              <div class="mt-1 text-sm text-slate-500">promotion rate {row["promotion_rate"]}%</div>
+              <div class="mt-1 text-sm text-slate-500">promotion rate {_format_rate(row["promotion_rate"])}</div>
             </div>
             {_badge(f"{row['distinct_promoted_channels']} channels", tone)}
           </div>
@@ -1413,10 +1435,10 @@ def ui_video_lanes(
         return "".join(
             f"""
             <tr class="border-b border-slate-200/80 last:border-0 hover:bg-slate-50/70">
-              <td class="px-3 py-3 text-sm font-medium text-slate-800">{_esc(row["lane"])}</td>
+              <td class="px-3 py-3 text-sm font-medium text-slate-800">{_esc(row.get(label_key, "—"))}</td>
               <td class="px-3 py-3 text-right text-sm">{row["candidates"]}</td>
               <td class="px-3 py-3 text-right text-sm">{row["promoted"]}</td>
-              <td class="px-3 py-3 text-right text-sm">{row["promotion_rate"]}%</td>
+              <td class="px-3 py-3 text-right text-sm">{_format_rate(row["promotion_rate"])}</td>
               <td class="px-3 py-3 text-right text-sm">{row["median_promoted_age"] or "—"}h</td>
               <td class="px-3 py-3 text-right text-sm">{row["distinct_promoted_channels"]}</td>
               <td class="px-3 py-3 text-right text-sm">{row["duplicate_rejection_rate"]}% / {row["clickbait_rejection_rate"]}%</td>
@@ -1427,9 +1449,13 @@ def ui_video_lanes(
     def _surface_panel(label: str, surface: str, tone: str) -> str:
         summary = _surface_summary(surface)
         best = summary["best"]
-        best_text = f"{best['lane']} · {best['promotion_rate']}%" if best else "No lane data"
+        best_text = (
+            f"{best.get(label_key, '—')} · {_format_rate(best['promotion_rate'])}"
+            if best
+            else f"No {normalized_view} data"
+        )
         cards = "".join(_lane_card(row, tone) for row in summary["rows"]) or (
-            '<div class="rounded-[1.5rem] border border-dashed border-slate-300 bg-white/70 p-5 text-sm text-slate-500">No lane data in this window.</div>'
+            f'<div class="rounded-[1.5rem] border border-dashed border-slate-300 bg-white/70 p-5 text-sm text-slate-500">No {normalized_view} data in this window.</div>'
         )
         return _panel(
             label,
@@ -1437,15 +1463,15 @@ def ui_video_lanes(
             <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {_mini_metric("Candidates", str(summary["candidates"]), f"in the last {hours} hours", "slate")}
               {_mini_metric("Promoted", str(summary["promoted"]), "made it through scoring", tone)}
-              {_mini_metric("Overall rate", f"{summary['promotion_rate']}%", "weighted by candidates", "green" if summary["promotion_rate"] >= 25 else "yellow")}
-              {_mini_metric("Active lanes", str(summary["lane_count"]), best_text, tone)}
+              {_mini_metric("Overall rate", _format_rate(summary["promotion_rate"]), "weighted by candidates", "green" if (summary["promotion_rate"] or 0) >= 25 else "yellow")}
+              {_mini_metric(f"Active {count_label}", str(summary["lane_count"]), best_text, tone)}
             </div>
             <div class="mt-5 grid gap-3 md:hidden">{cards}</div>
             <div class="table-shell mt-5 hidden md:block">
               <table class="min-w-full overflow-hidden rounded-[1.5rem] bg-white/80">
                 <thead class="bg-slate-50/90">
                   <tr class="text-xs uppercase tracking-[0.16em] text-slate-500">
-                    <th class="px-3 py-3 text-left">Lane</th>
+                    <th class="px-3 py-3 text-left">{label_title}</th>
                     <th class="px-3 py-3 text-right">Candidates</th>
                     <th class="px-3 py-3 text-right">Promoted</th>
                     <th class="px-3 py-3 text-right">Rate</th>
@@ -1458,7 +1484,7 @@ def ui_video_lanes(
               </table>
             </div>
             """,
-            subtitle=f"Per-lane conversion and rejection quality for the last {hours} hours.",
+            subtitle=f"Per-{label_title.lower()} conversion and rejection quality for the last {hours} hours.",
             tone=tone,
         )
 
@@ -1470,21 +1496,27 @@ def ui_video_lanes(
       <div class="max-w-3xl">
         <p class="panel-kicker">Video Discovery Lanes</p>
         <h1 class="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Lane conversion and rejection quality</h1>
-        <p class="mt-3 text-sm leading-7 text-slate-600">Compare search, trending, and curated lanes over a rolling window and see which ones are actually producing promotable inventory.</p>
+        <p class="mt-3 text-sm leading-7 text-slate-600">{description}</p>
       </div>
       <form method="get" class="glass-panel flex flex-wrap items-center gap-2 rounded-[1.6rem] p-4">
         <input type="hidden" name="key" value="{admin_key}">
         <label class="text-sm font-medium text-slate-600">Window (hours)</label>
         <input type="number" min="1" max="{24 * 14}" name="hours" value="{hours}" class="w-28 rounded-full border border-slate-300 px-4 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500">
+        <input type="hidden" name="view" value="{normalized_view}">
         <button class="inline-flex items-center rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">Apply</button>
       </form>
     </section>
 
+    <div class="mb-6 inline-flex rounded-full border border-slate-200 bg-white/80 p-1">
+      <a href="/api/v1/admin/ui/video-lanes?key={admin_key}&hours={hours}&view=lane" class="rounded-full px-4 py-2 text-sm font-medium {"bg-slate-950 text-white" if normalized_view == "lane" else "text-slate-600 hover:text-slate-900"}">Lane view</a>
+      <a href="/api/v1/admin/ui/video-lanes?key={admin_key}&hours={hours}&view=query" class="rounded-full px-4 py-2 text-sm font-medium {"bg-slate-950 text-white" if normalized_view == "query" else "text-slate-600 hover:text-slate-900"}">Query view</a>
+    </div>
+
     <div class="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      {_stat_card("Video candidates", str(video_summary["candidates"]), f"{video_summary['lane_count']} lanes in the last {hours}h", "blue")}
-      {_stat_card("Video promoted", str(video_summary["promoted"]), f"weighted rate {video_summary['promotion_rate']}%", "green")}
-      {_stat_card("Reel candidates", str(reels_summary["candidates"]), f"{reels_summary['lane_count']} lanes in the last {hours}h", "purple")}
-      {_stat_card("Reel promoted", str(reels_summary["promoted"]), f"weighted rate {reels_summary['promotion_rate']}%", "green")}
+      {_stat_card("Video candidates", str(video_summary["candidates"]), f"{video_summary['lane_count']} {count_label} in the last {hours}h", "blue")}
+      {_stat_card("Video promoted", str(video_summary["promoted"]), f"weighted rate {_format_rate(video_summary['promotion_rate'])}", "green")}
+      {_stat_card("Reel candidates", str(reels_summary["candidates"]), f"{reels_summary['lane_count']} {count_label} in the last {hours}h", "purple")}
+      {_stat_card("Reel promoted", str(reels_summary["promoted"]), f"weighted rate {_format_rate(reels_summary['promotion_rate'])}", "green")}
     </div>
 
     <div class="grid gap-6 xl:grid-cols-2">

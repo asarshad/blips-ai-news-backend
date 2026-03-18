@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 
+from app.config.video_discovery import DiscoveryQueryPack
 from app.integrations.youtube_channels import ChannelRole, ContentFormat, QualityTier
 from app.integrations.youtube_client import VideoEntry
 from app.services import video_discovery_service as discovery_module
@@ -55,9 +58,47 @@ class _DummyYouTubeClient:
         return {channel_id: self.channel_stats.get(channel_id, {}) for channel_id in channel_ids}
 
 
-def _service(client: _DummyYouTubeClient) -> VideoDiscoveryService:
+class _InMemoryStateStore:
+    def __init__(self, *, available: bool = True):
+        self.available = available
+        self._values: dict[str, str] = {}
+
+    def is_available(self) -> bool:
+        return self.available
+
+    def get_json(self, key: str):
+        if not self.available or key not in self._values:
+            return None
+        return json.loads(self._values[key])
+
+    def set_json(self, key: str, value: dict):
+        if self.available:
+            self._values[key] = json.dumps(value)
+
+    def get_text(self, key: str):
+        if not self.available:
+            return None
+        return self._values.get(key)
+
+    def set_text(self, key: str, value: str):
+        if self.available:
+            self._values[key] = value
+
+    def incr(self, key: str):
+        if not self.available:
+            return None
+        next_value = int(self._values.get(key, "0")) + 1
+        self._values[key] = str(next_value)
+        return next_value
+
+
+def _service(
+    client: _DummyYouTubeClient,
+    *,
+    state_store: _InMemoryStateStore | None = None,
+) -> VideoDiscoveryService:
     db = SimpleNamespace(commit=lambda: None)
-    service = VideoDiscoveryService(db, client)
+    service = VideoDiscoveryService(db, client, state_store=state_store or _InMemoryStateStore())
     service.repo = SimpleNamespace(
         get_many=lambda _channel_ids: {},
         record_run=lambda **_kwargs: None,
@@ -79,7 +120,7 @@ def test_discover_skips_all_work_when_surface_has_no_remaining_inventory(monkeyp
     assert client.quota_budget.window_calls == []
 
 
-def test_discover_uses_trending_only_when_deficit_is_below_search_threshold(monkeypatch):
+def test_discover_videos_skip_trending_by_default(monkeypatch):
     monkeypatch.setattr(discovery_module, "bootstrap_video_source_profiles", lambda _db: None)
     client = _DummyYouTubeClient()
     service = _service(client)
@@ -87,14 +128,26 @@ def test_discover_uses_trending_only_when_deficit_is_below_search_threshold(monk
     entries = service.discover("videos", remaining_needed=5)
 
     assert entries == []
+    assert len(client.search_calls) == 1
+    assert client.trending_calls == []
+    assert client.quota_budget.window_calls == ["videos"]
+
+
+def test_discover_does_not_consume_search_window_when_no_plan_exists(monkeypatch):
+    monkeypatch.setattr(discovery_module, "bootstrap_video_source_profiles", lambda _db: None)
+    client = _DummyYouTubeClient()
+    service = _service(client)
+    monkeypatch.setattr(service, "_build_search_plan", lambda *_args, **_kwargs: [])
+
+    entries = service.discover("videos", remaining_needed=5)
+
+    assert entries == []
     assert client.search_calls == []
-    assert client.trending_calls == [("US", 20, "videos")]
     assert client.quota_budget.window_calls == []
 
 
-def test_discover_search_is_cooldown_gated_but_trending_still_runs(monkeypatch):
+def test_discover_search_is_cooldown_gated_when_trending_disabled(monkeypatch):
     monkeypatch.setattr(discovery_module, "bootstrap_video_source_profiles", lambda _db: None)
-    monkeypatch.setenv("YOUTUBE_REEL_TRENDING_ENABLED", "1")
     client = _DummyYouTubeClient(begin_window=False)
     service = _service(client)
 
@@ -103,12 +156,7 @@ def test_discover_search_is_cooldown_gated_but_trending_still_runs(monkeypatch):
     assert entries == []
     assert client.search_calls == []
     assert client.quota_budget.window_calls == ["reels"]
-    assert client.trending_calls == [
-        ("US", 10, "reels"),
-        ("GB", 10, "reels"),
-        ("CA", 10, "reels"),
-        ("IN", 10, "reels"),
-    ]
+    assert client.trending_calls == []
 
 
 def test_discover_reels_skips_trending_by_default(monkeypatch):
@@ -133,16 +181,10 @@ def test_discover_runs_small_search_plan_when_deficit_is_high(monkeypatch):
 
     assert entries == []
     assert client.quota_budget.window_calls == ["videos"]
-    assert [(call[1], call[3], call[4]) for call in client.search_calls] == [
-        ("US", "videos", "viewCount"),
-        ("US", "videos", "viewCount"),
-    ]
-    assert client.trending_calls == [
-        ("US", 20, "videos"),
-        ("GB", 20, "videos"),
-        ("CA", 20, "videos"),
-        ("IN", 20, "videos"),
-    ]
+    assert len(client.search_calls) == 1
+    assert client.search_calls[0][1] in {"US", "GB", "CA", "IN"}
+    assert client.search_calls[0][3] == "videos"
+    assert client.trending_calls == []
 
 
 def test_discover_uses_expanded_search_result_pages(monkeypatch):
@@ -154,7 +196,149 @@ def test_discover_uses_expanded_search_result_pages(monkeypatch):
 
     assert client.search_calls
     assert all(call[2] == 25 for call in client.search_calls)
-    assert all(call[4] == "viewCount" for call in client.search_calls)
+    assert all(call[4] in {"relevance", "viewCount"} for call in client.search_calls)
+
+
+def test_build_search_plan_prefers_story_every_third_window(monkeypatch):
+    monkeypatch.setattr(discovery_module, "bootstrap_video_source_profiles", lambda _db: None)
+    monkeypatch.setattr(
+        discovery_module,
+        "get_query_packs",
+        lambda surface: [
+            DiscoveryQueryPack("static-pack", "OpenAI update", "ai", surface, 25, "date", 1)
+        ],
+    )
+    client = _DummyYouTubeClient(begin_window=True)
+    state_store = _InMemoryStateStore()
+    service = _service(client, state_store=state_store)
+    monkeypatch.setattr(
+        service,
+        "_build_story_query_packs",
+        lambda surface: [
+            DiscoveryQueryPack(
+                "story-openai", "OpenAI launch update", "ai", surface, 25, "relevance"
+            )
+        ],
+    )
+
+    labels = []
+    for _ in range(3):
+        step = service._build_search_plan("videos", 10)[0]
+        labels.append(step.pack.label)
+        service._record_search_execution("videos", step)
+
+    assert labels == ["static-pack", "static-pack", "story-openai"]
+
+
+def test_build_search_plan_weighted_rotation_prefers_high_priority_without_repeating(monkeypatch):
+    monkeypatch.setattr(discovery_module, "bootstrap_video_source_profiles", lambda _db: None)
+    monkeypatch.setattr(
+        discovery_module,
+        "get_query_packs",
+        lambda surface: [
+            DiscoveryQueryPack("priority-one", "OpenAI update", "ai", surface, 25, "date", 1),
+            DiscoveryQueryPack(
+                "priority-two", "Kubernetes release", "cloud", surface, 25, "relevance", 2
+            ),
+            DiscoveryQueryPack(
+                "priority-four", "privacy update", "security", surface, 25, "relevance", 4
+            ),
+        ],
+    )
+    client = _DummyYouTubeClient(begin_window=True)
+    state_store = _InMemoryStateStore()
+    service = _service(client, state_store=state_store)
+    monkeypatch.setattr(service, "_build_story_query_packs", lambda _surface: [])
+
+    labels = []
+    for _ in range(12):
+        step = service._build_search_plan("videos", 10)[0]
+        labels.append(step.pack.label)
+        service._record_search_execution("videos", step)
+
+    assert labels.count("priority-one") > labels.count("priority-two")
+    assert labels.count("priority-two") >= labels.count("priority-four")
+    assert all(left != right for left, right in zip(labels, labels[1:], strict=False))
+
+
+def test_build_search_plan_starvation_preempts_weighted_selection(monkeypatch):
+    monkeypatch.setattr(discovery_module, "bootstrap_video_source_profiles", lambda _db: None)
+    monkeypatch.setattr(
+        discovery_module,
+        "get_query_packs",
+        lambda surface: [
+            DiscoveryQueryPack("priority-one", "OpenAI update", "ai", surface, 25, "date", 1),
+            DiscoveryQueryPack(
+                "starved-pack", "robotics update", "robotics", surface, 25, "date", 3
+            ),
+        ],
+    )
+    client = _DummyYouTubeClient(begin_window=True)
+    state_store = _InMemoryStateStore()
+    service = _service(client, state_store=state_store)
+    monkeypatch.setattr(service, "_build_story_query_packs", lambda _surface: [])
+    state_store.set_text("youtube:search_last_query:videos", "priority-one")
+    state_store.set_text(
+        "youtube:search_last_run:videos:priority-one",
+        datetime.utcnow().isoformat(),
+    )
+    state_store.set_text(
+        "youtube:search_last_run:videos:starved-pack",
+        (datetime.utcnow() - timedelta(hours=97)).isoformat(),
+    )
+
+    label = service._build_search_plan("videos", 10)[0].pack.label
+
+    assert label == "starved-pack"
+
+
+def test_build_search_plan_has_deterministic_fallback_without_redis(monkeypatch):
+    monkeypatch.setattr(discovery_module, "bootstrap_video_source_profiles", lambda _db: None)
+
+    class _FrozenDatetime(datetime):
+        @classmethod
+        def utcnow(cls):
+            return cls(2026, 3, 17, 12, 0, 0)
+
+    monkeypatch.setattr(discovery_module, "datetime", _FrozenDatetime)
+    monkeypatch.setattr(
+        discovery_module,
+        "get_query_packs",
+        lambda surface: [
+            DiscoveryQueryPack("priority-one", "OpenAI update", "ai", surface, 25, "date", 1),
+            DiscoveryQueryPack(
+                "priority-two", "Kubernetes release", "cloud", surface, 25, "relevance", 2
+            ),
+        ],
+    )
+    client = _DummyYouTubeClient(begin_window=True)
+    service = _service(client, state_store=_InMemoryStateStore(available=False))
+    monkeypatch.setattr(service, "_build_story_query_packs", lambda _surface: [])
+
+    first = service._build_search_plan("videos", 10)
+    second = service._build_search_plan("videos", 10)
+
+    assert first == second
+
+
+def test_discover_commits_query_and_region_state_only_after_success(monkeypatch):
+    monkeypatch.setattr(discovery_module, "bootstrap_video_source_profiles", lambda _db: None)
+
+    class _FailingYouTubeClient(_DummyYouTubeClient):
+        def fetch_search_candidates(self, *args, **kwargs):
+            raise RuntimeError("search failed")
+
+    client = _FailingYouTubeClient(begin_window=True)
+    state_store = _InMemoryStateStore()
+    service = _service(client, state_store=state_store)
+    monkeypatch.setattr(service, "_build_story_query_packs", lambda _surface: [])
+
+    with pytest.raises(RuntimeError, match="search failed"):
+        service.discover("videos", remaining_needed=5)
+
+    assert state_store.get_text("youtube:search_last_query:videos") is None
+    assert state_store.get_text("youtube:search_region_cursor:videos") is None
+    assert state_store.get_text("youtube:search_last_run:videos:ai-models") is None
 
 
 def test_filter_candidates_rejects_low_trust_discovery_channels():

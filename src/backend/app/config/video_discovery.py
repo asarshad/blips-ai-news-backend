@@ -1,9 +1,12 @@
 """Static YouTube discovery query packs for videos and reels."""
 
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import List
+
+from app.config.search_query_registry import get_search_query_registry, iter_runtime_registry_rows
 
 DISCOVERY_REGIONS = ("US", "CA", "GB", "IN")
 
@@ -18,90 +21,34 @@ class DiscoveryQueryPack:
     surface: str
     max_results: int = 25
     order: str = "relevance"
+    priority: int = 3
 
 
-VIDEO_QUERY_PACKS: List[DiscoveryQueryPack] = [
-    DiscoveryQueryPack("news-tech", "technology news", "news", "videos", 25, "viewCount"),
-    DiscoveryQueryPack("news-ai", "AI update", "ai", "videos", 25, "viewCount"),
-    DiscoveryQueryPack(
-        "explainer-mobile",
-        "smartphone hands on review",
-        "mobile/hardware",
-        "videos",
-        25,
-        "viewCount",
-    ),
-    DiscoveryQueryPack(
-        "explainer-hardware",
-        "laptop review benchmark",
-        "mobile/hardware",
-        "videos",
-        25,
-        "viewCount",
-    ),
-    DiscoveryQueryPack(
-        "engineer-dev", "developer tooling release", "engineer/dev", "videos", 25, "relevance"
-    ),
-    DiscoveryQueryPack(
-        "security-privacy",
-        "cybersecurity privacy update",
-        "security/privacy",
-        "videos",
-        25,
-        "relevance",
-    ),
-    DiscoveryQueryPack(
-        "industry-business",
-        "tech industry analysis",
-        "business/industry",
-        "videos",
-        25,
-        "relevance",
-    ),
-]
-
-REEL_QUERY_PACKS: List[DiscoveryQueryPack] = [
-    DiscoveryQueryPack("reels-tech-news", "technology shorts", "news", "reels", 25, "viewCount"),
-    DiscoveryQueryPack("reels-ai", "AI update shorts", "ai", "reels", 25, "viewCount"),
-    DiscoveryQueryPack(
-        "reels-gadgets",
-        "smartphone hands on shorts",
-        "mobile/hardware",
-        "reels",
-        25,
-        "viewCount",
-    ),
-    DiscoveryQueryPack(
-        "reels-security", "privacy update shorts", "security/privacy", "reels", 25, "viewCount"
-    ),
-    DiscoveryQueryPack(
-        "reels-dev", "developer tips shorts", "engineer/dev", "reels", 25, "viewCount"
-    ),
-    DiscoveryQueryPack("reels-apps", "best apps tips shorts", "news", "reels", 25, "viewCount"),
-    DiscoveryQueryPack(
-        "reels-hardware-unbox",
-        "unboxing tech gadget shorts",
-        "mobile/hardware",
-        "reels",
-        25,
-        "viewCount",
-    ),
-    DiscoveryQueryPack(
-        "reels-coding-tips",
-        "coding programming tips shorts",
-        "engineer/dev",
-        "reels",
-        25,
-        "viewCount",
-    ),
-]
-
-
-def get_query_packs(surface: str) -> List[DiscoveryQueryPack]:
+def get_query_packs(surface: str) -> list[DiscoveryQueryPack]:
     """Return the configured query packs for a given surface."""
-    if surface == "reels":
-        return REEL_QUERY_PACKS
-    return VIDEO_QUERY_PACKS
+
+    packs: list[DiscoveryQueryPack] = []
+    for row in iter_runtime_registry_rows(surface, mode="always_on"):
+        query = row.query_for(surface)
+        if not query:
+            continue
+        packs.append(
+            DiscoveryQueryPack(
+                label=row.id,
+                query=query,
+                category=row.category,
+                surface=surface,
+                max_results=25,
+                order=row.order,
+                priority=row.priority,
+            )
+        )
+    return packs
+
+
+# Validate the YAML-backed runtime registry during module import so bad config
+# fails fast on boot instead of during the first live discovery window.
+get_search_query_registry()
 
 
 def discovery_cutoff(surface: str) -> datetime:

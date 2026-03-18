@@ -20,6 +20,7 @@ from app.models.content import ContentItem, ContentStatus, ContentType, EventTyp
 from app.models.video_source import VideoSourceProfile
 from app.repositories.video_source_repo import VideoSourceProfileRepository
 from app.services.promotion_service import compute_clickbait_penalty
+from app.services.video_discovery_provenance import lane_from_discovered_via
 
 
 def bootstrap_video_source_profiles(
@@ -45,12 +46,7 @@ def _infer_lane(item: ContentItem) -> str | None:
     if item.acquisition_lane:
         return item.acquisition_lane
 
-    discovered_via = (item.discovered_via or "").strip().lower()
-    if discovered_via.startswith("yt_"):
-        lane = discovered_via.removeprefix("yt_")
-        if lane in {"curated", "search", "trending"}:
-            return lane
-    return None
+    return lane_from_discovered_via(item.discovered_via)
 
 
 def repair_video_source_metadata(
