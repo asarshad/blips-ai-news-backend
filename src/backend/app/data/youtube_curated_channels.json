@@ -221,7 +221,8 @@
     "role": "explainer",
     "content_format": "long_form",
     "daily_cap": 1,
-    "quality_tier": "supplemental"
+    "quality_tier": "supplemental",
+    "ingestion_stream": "expansion"
   },
   {
     "channel_id": "UCkRqiP0w6FZElpzZjGpbL2g",
@@ -229,7 +230,8 @@
     "role": "explainer",
     "content_format": "long_form",
     "daily_cap": 1,
-    "quality_tier": "standard"
+    "quality_tier": "supplemental",
+    "ingestion_stream": "expansion"
   },
   {
     "channel_id": "UCtZO3K2p8mqFwiKWb9k7fXA",
@@ -293,6 +295,8 @@
     "role": "news",
     "content_format": "long_form",
     "daily_cap": 2,
+    "daily_reel_cap": 1,
+    "allow_reels": true,
     "quality_tier": "premium"
   },
   {
@@ -663,6 +667,8 @@
     "role": "ai",
     "content_format": "long_form",
     "daily_cap": 1,
+    "daily_reel_cap": 1,
+    "allow_reels": true,
     "quality_tier": "standard"
   },
   {
@@ -683,7 +689,7 @@
   },
   {
     "channel_id": "UC_x5XG1OV2P6uZZ5FSM9Ttw",
-    "name": "Google Developers",
+    "name": "Google for Developers",
     "role": "official",
     "content_format": "mixed",
     "daily_cap": 2,
@@ -851,8 +857,8 @@
     "role": "official",
     "content_format": "long_form",
     "daily_cap": 2,
-    "daily_reel_cap": 0,
-    "allow_reels": false,
+    "daily_reel_cap": 1,
+    "allow_reels": true,
     "quality_tier": "standard"
   },
   {
@@ -903,6 +909,262 @@
     "role": "official",
     "content_format": "long_form",
     "daily_cap": 1,
+    "daily_reel_cap": 1,
+    "allow_reels": true,
     "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UC1DoqbBY6dl8CEMVV9SK2FA",
+    "name": "MKBHD Shorts",
+    "role": "shorts",
+    "content_format": "shorts",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCZa18YV7qayTh-MRIrBhDpA",
+    "name": "Dwarkesh Clips",
+    "role": "shorts",
+    "content_format": "shorts",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCCDU1fsmgvWljcW2aodfJsA",
+    "name": "Ars Technica",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UChqUTb7kYRX8-EiaN3XFrSQ",
+    "name": "Reuters",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 2,
+    "daily_reel_cap": 1,
+    "allow_reels": true,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCoKqUtcUtf8QPb0GWxe5e7Q",
+    "name": "The Information",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UChIs72whgZI9w6d6FhwGGHA",
+    "name": "Gamers Nexus",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UC2Rzju32yQPkQ7oIhmeuLwg",
+    "name": "Jarrod'sTech",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCv6J_jJa8GJqFwQNgNrMuww",
+    "name": "ServeTheHome",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCf_KhBXw5TIV0A7butjgFhg",
+    "name": "SemiAnalysis",
+    "role": "ai",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UC1LpsuAUaKoMzzJSEt5WImw",
+    "name": "Asianometry",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCrDwWp7EBBv4NwvScIpBDOA",
+    "name": "Anthropic",
+    "role": "official",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "daily_reel_cap": 1,
+    "allow_reels": true,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCcIXc5mJsHVYTZR1maL5l9w",
+    "name": "DeepLearningAI",
+    "role": "ai",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCbfYPyITQ-7l4upoX8nvctg",
+    "name": "Two Minute Papers",
+    "role": "ai",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCPbwhExawYrn9xxI21TFfyw",
+    "name": "The Pragmatic Engineer",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCxBcwypKK-W3GHd_RZ9FZrQ",
+    "name": "Latent Space",
+    "role": "ai",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCCd3-JX7e8uGZx00i5646jg",
+    "name": "Daily Tech News Show",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 2,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UC9cn0TuPq4dnbTY-CBsm8XA",
+    "name": "a16z",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCXl4i9dYBrFOabk0xGmbkRA",
+    "name": "Dwarkesh Podcast",
+    "role": "ai",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCFLFc8Lpbwt4jPtY1_Ai5yA",
+    "name": "WAN Show",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium"
+  },
+  {
+    "channel_id": "UCI8iQa1hv7oV_Z8D35vVuSg",
+    "name": "Hardware Unboxed",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard"
+  },
+  {
+    "channel_id": "UC9PBzalIcEQCsiIkq36PyUA",
+    "name": "Digital Foundry",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "supplemental",
+    "ingestion_stream": "expansion",
+    "notes": "Expansion stream: activated only when video inventory needs fill."
+  },
+  {
+    "channel_id": "UC_RovKmk0OCbuZjA8f08opw",
+    "name": "Futurepedia",
+    "role": "ai",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "supplemental",
+    "ingestion_stream": "expansion",
+    "notes": "Expansion stream: activated only when video inventory needs fill."
+  },
+  {
+    "channel_id": "UCUUNkL6Wke6i0P6funa7wdQ",
+    "name": "AppleInsider",
+    "role": "news",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "supplemental",
+    "ingestion_stream": "expansion",
+    "notes": "Expansion stream: activated only when video inventory needs fill."
+  },
+  {
+    "channel_id": "UCpZy-Hfqcxf-R7nQzlv9Bvw",
+    "name": "Brandon Butch",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "supplemental",
+    "ingestion_stream": "expansion",
+    "notes": "Expansion stream: activated only when video inventory needs fill."
+  },
+  {
+    "channel_id": "UCzmwnZ_ZElg6kuE6e5QS4pg",
+    "name": "Brian Tong",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "supplemental",
+    "ingestion_stream": "expansion",
+    "notes": "Expansion stream: activated only when video inventory needs fill."
+  },
+  {
+    "channel_id": "UCNQbF87QPV685oFnHxb0zPg",
+    "name": "Tasia Custode",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "supplemental",
+    "ingestion_stream": "expansion",
+    "notes": "Expansion stream: activated only when video inventory needs fill."
+  },
+  {
+    "channel_id": "UCgHj7p79mwLmlg01mgAGzVg",
+    "name": "iDeviceHelp",
+    "role": "explainer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "supplemental",
+    "ingestion_stream": "expansion",
+    "notes": "Expansion stream: activated only when video inventory needs fill."
+  },
+  {
+    "channel_id": "UCvpfclapgcuJo0M_x65pfRw",
+    "name": "Beebom",
+    "role": "explainer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "supplemental",
+    "ingestion_stream": "expansion",
+    "notes": "Expansion stream: activated only when video or reel inventory needs fill."
+  },
+  {
+    "channel_id": "UCTBk0DlyNeAZPMKCrEefNQA",
+    "name": "Cyberdude",
+    "role": "engineer",
+    "content_format": "mixed",
+    "daily_cap": 2,
+    "quality_tier": "supplemental",
+    "ingestion_stream": "expansion",
+    "notes": "Expansion stream: activated only when video or reel inventory needs fill."
   }
 ]

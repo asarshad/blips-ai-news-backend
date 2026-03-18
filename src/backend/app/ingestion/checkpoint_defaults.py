@@ -114,11 +114,75 @@ def _should_fill_surface(db, content_type: ContentType) -> bool:
     return fresh_count < settings.MIN_FRESH_REELS or recent_count < refresh_min
 
 
+def _mixed_targets(cfg) -> tuple[int, int]:
+    """Resolve legacy mixed-channel targets into separate video/reel rows."""
+    daily_reel_cap = getattr(cfg, "daily_reel_cap", None)
+    reels_enabled = getattr(cfg, "reels_enabled", False)
+
+    if daily_reel_cap is not None:
+        video_target = max(0, int(cfg.daily_cap))
+        reel_target = max(0, int(getattr(cfg, "effective_daily_reel_cap", 0)))
+        return video_target, reel_target
+
+    if not reels_enabled:
+        return max(0, int(cfg.daily_cap)), 0
+
+    video_target = max(1, int(cfg.daily_cap) // 2)
+    reel_target = max(0, int(cfg.daily_cap) - video_target)
+    return video_target, reel_target
+
+
+def _append_youtube_defaults(
+    defaults: List[FeedDefault],
+    *,
+    configs,
+    overrides: Dict[str, int],
+    include_video: bool,
+    include_reel: bool,
+) -> None:
+    """Append YouTube defaults for the selected surfaces."""
+    from app.integrations.youtube_channels import ContentFormat
+
+    for cfg in configs:
+        if cfg.content_format == ContentFormat.LONG_FORM:
+            if include_video:
+                key = f"youtube_video:{cfg.name}"
+                target = int(overrides.get(key, cfg.daily_cap))
+                defaults.append(FeedDefault("youtube_video", cfg.name, max(0, target)))
+
+            if include_reel and getattr(cfg, "reels_enabled", False):
+                reel_cap = max(0, int(getattr(cfg, "effective_daily_reel_cap", 0)))
+                if reel_cap > 0:
+                    key = f"youtube_reel:{cfg.name}"
+                    target = int(overrides.get(key, reel_cap))
+                    defaults.append(FeedDefault("youtube_reel", cfg.name, max(0, target)))
+            continue
+
+        if cfg.content_format == ContentFormat.SHORTS:
+            if not include_reel:
+                continue
+            key = f"youtube_reel:{cfg.name}"
+            target = int(overrides.get(key, cfg.daily_cap))
+            defaults.append(FeedDefault("youtube_reel", cfg.name, max(0, target)))
+            continue
+
+        video_target, reel_target = _mixed_targets(cfg)
+        key_v = f"youtube_video:{cfg.name}"
+        key_r = f"youtube_reel:{cfg.name}"
+        video_target = int(overrides.get(key_v, video_target))
+        reel_target = int(overrides.get(key_r, reel_target))
+
+        if include_video and video_target > 0:
+            defaults.append(FeedDefault("youtube_video", cfg.name, max(0, video_target)))
+        if include_reel and reel_target > 0:
+            defaults.append(FeedDefault("youtube_reel", cfg.name, max(0, reel_target)))
+
+
 def build_defaults(*, db=None, day_utc: date | None = None) -> List[FeedDefault]:
     """Build per-feed daily targets from configured RSS feeds + YouTube channels."""
 
     from app.integrations.rss_client import RSSClient
-    from app.integrations.youtube_channels import ContentFormat
+    from app.integrations.youtube_channels import IngestionStream
     from app.integrations.youtube_client import YouTubeClient
 
     overrides = parse_target_overrides()
@@ -132,31 +196,37 @@ def build_defaults(*, db=None, day_utc: date | None = None) -> List[FeedDefault]
         target = int(overrides.get(key, cfg.daily_cap))
         defaults.append(FeedDefault("rss", cfg.name, max(0, target)))
 
-    # YouTube: split per channel into video vs reel targets based on format.
-    # YouTube rows are always created (no freshness gating); they are reopened
-    # each scheduler cycle for continuous ingestion.
+    # YouTube: primary stream is always created for continuous ingestion.
+    # Expansion stream is only activated when a surface needs fill.
     yt_client = YouTubeClient()
-    for cfg in yt_client.channel_configs:
-        if cfg.content_format == ContentFormat.LONG_FORM:
-            key = f"youtube_video:{cfg.name}"
-            target = int(overrides.get(key, cfg.daily_cap))
-            defaults.append(FeedDefault("youtube_video", cfg.name, max(0, target)))
-        elif cfg.content_format == ContentFormat.SHORTS:
-            key = f"youtube_reel:{cfg.name}"
-            target = int(overrides.get(key, cfg.daily_cap))
-            defaults.append(FeedDefault("youtube_reel", cfg.name, max(0, target)))
-        else:
-            # MIXED: split daily_cap across video and reels
-            video_target = max(1, int(cfg.daily_cap) // 2)
-            reel_target = max(0, int(cfg.daily_cap) - video_target)
+    primary_configs = [
+        cfg
+        for cfg in yt_client.channel_configs
+        if getattr(cfg, "ingestion_stream", IngestionStream.PRIMARY) != IngestionStream.EXPANSION
+    ]
+    expansion_configs = [
+        cfg
+        for cfg in yt_client.channel_configs
+        if getattr(cfg, "ingestion_stream", IngestionStream.PRIMARY) == IngestionStream.EXPANSION
+    ]
 
-            key_v = f"youtube_video:{cfg.name}"
-            key_r = f"youtube_reel:{cfg.name}"
-            video_target = int(overrides.get(key_v, video_target))
-            reel_target = int(overrides.get(key_r, reel_target))
+    _append_youtube_defaults(
+        defaults,
+        configs=primary_configs,
+        overrides=overrides,
+        include_video=True,
+        include_reel=True,
+    )
 
-            defaults.append(FeedDefault("youtube_video", cfg.name, max(0, video_target)))
-            if reel_target > 0:
-                defaults.append(FeedDefault("youtube_reel", cfg.name, max(0, reel_target)))
+    if expansion_configs:
+        need_video_fill = _should_fill_surface(db, ContentType.VIDEO)
+        need_reel_fill = _should_fill_surface(db, ContentType.REEL)
+        _append_youtube_defaults(
+            defaults,
+            configs=expansion_configs,
+            overrides=overrides,
+            include_video=need_video_fill,
+            include_reel=need_reel_fill,
+        )
 
     return [d for d in defaults if d.target > 0]
