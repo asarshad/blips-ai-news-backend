@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.repositories.base import BaseRepository
+from app.services.video_surface_rules import surface_content_filter
 
 # Items with language=NULL are legacy rows inserted before language detection
 # was added. Treat them as English to avoid breaking the feed for existing data.
@@ -279,8 +280,14 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         """
         cutoff = datetime.utcnow() - timedelta(hours=hours_back)
 
+        type_filter = ContentItem.type == content_type
+        if content_type == ContentType.VIDEO:
+            type_filter = surface_content_filter("videos")
+        elif content_type == ContentType.REEL:
+            type_filter = surface_content_filter("reels")
+
         query = self.db.query(ContentItem).filter(
-            ContentItem.type == content_type,
+            type_filter,
             ContentItem.published_at >= cutoff,
             ContentItem.is_suppressed.is_(False),
             ContentItem.curation_status == ContentStatus.PROMOTED,

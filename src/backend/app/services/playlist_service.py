@@ -27,6 +27,7 @@ from app.repositories.content_repo import ContentItemRepository
 from app.repositories.user_repo import UserPreferenceRepository, UserProfileRepository
 from app.services.multi_factor_ranking_service import MultiFactorRankingService
 from app.services.personalization_service import PersonalizationService
+from app.services.video_surface_rules import effective_content_type, has_explicit_shorts_url
 
 logger = get_logger(__name__)
 
@@ -55,6 +56,7 @@ PREFER_CANONICAL_WEIGHT = 0.7  # 70% canonical, 30% fresh
 # Cache configuration
 PLAYLIST_CACHE_TTL_SECONDS = 300  # 5 minutes
 PLAYLIST_CACHE_PREFIX = "playlist:"
+VIDEO_REEL_PLAYLIST_CACHE_PREFIX = "playlist:video-reel-v2:"
 SESSION_SNAPSHOT_TTL_SECONDS = 3600  # 1 hour for session snapshots
 
 
@@ -125,9 +127,9 @@ class PlaylistService:
         playlist = None
         if self.redis:
             playlist = self._get_from_cache(cache_key)
-            if playlist and not self._is_cache_compatible(playlist):
+            if playlist and not self._is_cache_compatible(playlist, content_type):
                 logger.info(
-                    "Discarding stale session playlist cache for %s; missing conversation starters",
+                    "Discarding stale session playlist cache for %s; incompatible payload",
                     content_type.value,
                 )
                 playlist = None
@@ -281,12 +283,12 @@ class PlaylistService:
         if self.redis:
             cache_key = self._get_cache_key(device_id, content_type)
             cached = self._get_from_cache(cache_key)
-            if cached and self._is_cache_compatible(cached):
+            if cached and self._is_cache_compatible(cached, content_type):
                 logger.info("Serving cached fallback playlist for %s", content_type.value)
                 return cached
             if cached:
                 logger.info(
-                    "Discarding stale fallback playlist cache for %s; missing conversation starters",
+                    "Discarding stale fallback playlist cache for %s; incompatible payload",
                     content_type.value,
                 )
 
@@ -465,9 +467,10 @@ class PlaylistService:
 
     def _format_item(self, item: ContentItem) -> Dict:
         """Format content item for API response."""
+        item_type = effective_content_type(item)
         return {
             "id": item.id,
-            "type": item.type.value,
+            "type": item_type.value,
             "source": item.source,
             "source_url": item.source_url,
             "title": item.title,
@@ -484,11 +487,30 @@ class PlaylistService:
             "conversation_starters": item.conversation_starters,
         }
 
-    def _is_cache_compatible(self, playlist: List[Dict]) -> bool:
-        """Reject cached playlist snapshots created before starter payloads were included."""
+    def _is_cache_compatible(self, playlist: List[Dict], content_type: ContentType) -> bool:
+        """Reject cached playlist snapshots whose payload no longer matches serving rules."""
         if not playlist:
             return True
-        return all("conversation_starters" in item for item in playlist)
+
+        expected_type = content_type.value
+        for item in playlist:
+            if "conversation_starters" not in item:
+                return False
+
+            item_type = str(item.get("type") or "").upper()
+            url = str(item.get("video_url") or item.get("source_url") or "")
+            has_shorts_url = has_explicit_shorts_url(url)
+
+            if content_type == ContentType.VIDEO:
+                if item_type != ContentType.VIDEO.value or has_shorts_url:
+                    return False
+            elif content_type == ContentType.REEL:
+                if item_type != ContentType.REEL.value:
+                    return False
+            elif item_type != expected_type:
+                return False
+
+        return True
 
     def _paginate(self, items: List[Dict], offset: int, size: int) -> List[Dict]:
         """Paginate playlist items."""
@@ -500,14 +522,23 @@ class PlaylistService:
         """Generate cache key for playlist."""
         # Use hash of device_id for privacy
         device_hash = hashlib.md5(device_id.encode()).hexdigest()[:12]
-        return f"{PLAYLIST_CACHE_PREFIX}{device_hash}:{content_type.value}"
+        return f"{self._cache_prefix(content_type)}{device_hash}:{content_type.value}"
 
     def _get_session_cache_key(
         self, device_id: str, content_type: ContentType, session_id: str
     ) -> str:
         """Generate cache key for session snapshot."""
         device_hash = hashlib.md5(device_id.encode()).hexdigest()[:12]
-        return f"{PLAYLIST_CACHE_PREFIX}session:{device_hash}:{content_type.value}:{session_id}"
+        return (
+            f"{self._cache_prefix(content_type)}session:"
+            f"{device_hash}:{content_type.value}:{session_id}"
+        )
+
+    def _cache_prefix(self, content_type: ContentType) -> str:
+        """Use a versioned cache namespace for video/reel playlists after surface-rule fix."""
+        if content_type in (ContentType.VIDEO, ContentType.REEL):
+            return VIDEO_REEL_PLAYLIST_CACHE_PREFIX
+        return PLAYLIST_CACHE_PREFIX
 
     def _get_from_cache(self, key: str) -> Optional[List[Dict]]:
         """Get playlist from Redis cache."""
@@ -539,13 +570,15 @@ class PlaylistService:
             return
 
         device_hash = hashlib.md5(device_id.encode()).hexdigest()[:12]
-        pattern = f"{PLAYLIST_CACHE_PREFIX}{device_hash}:*"
-
         try:
-            keys = self.redis.keys(pattern)
+            keys = []
+            for prefix in (PLAYLIST_CACHE_PREFIX, VIDEO_REEL_PLAYLIST_CACHE_PREFIX):
+                keys.extend(self.redis.keys(f"{prefix}{device_hash}:*"))
+                keys.extend(self.redis.keys(f"{prefix}session:{device_hash}:*"))
             if keys:
-                self.redis.delete(*keys)
-                logger.debug(f"Invalidated {len(keys)} playlist caches for user")
+                deduped = list(dict.fromkeys(keys))
+                self.redis.delete(*deduped)
+                logger.debug(f"Invalidated {len(deduped)} playlist caches for user")
         except Exception as e:
             logger.warning(f"Cache invalidation error: {e}")
 
