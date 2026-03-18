@@ -244,10 +244,12 @@ projects:
                 value: "true"
               - key: INGEST_CATCHUP_MAX_SECONDS
                 value: "1800"
+              - key: DAILY_TARGET_ARTICLES
+                value: "200"
               - key: YOUTUBE_VIDEO_SEARCH_MIN_INTERVAL_MINUTES
-                value: "120"
-              - key: YOUTUBE_REEL_SEARCH_MIN_INTERVAL_MINUTES
                 value: "90"
+              - key: YOUTUBE_REEL_SEARCH_MIN_INTERVAL_MINUTES
+                value: "60"
               - key: YOUTUBE_SEARCH_MIN_VIDEO_DEFICIT
                 value: "1"
               - key: YOUTUBE_SEARCH_MIN_REEL_DEFICIT
