@@ -5,6 +5,8 @@ from app.integrations.youtube_channels import (
     get_channel_by_id,
     get_channel_by_name,
     get_enabled_channels,
+    get_expansion_channels,
+    get_primary_channels,
 )
 
 
@@ -15,7 +17,11 @@ def test_enabled_channels_are_unique_by_channel_id():
 
 def test_curated_registry_scales_to_trusted_roster():
     enabled = get_enabled_channels()
+    primary = get_primary_channels()
+    expansion = get_expansion_channels()
     assert len(enabled) >= 100
+    assert len(primary) >= 100
+    assert len(expansion) >= 8
     assert (
         len([channel for channel in enabled if channel.content_format == ContentFormat.SHORTS]) >= 3
     )
@@ -25,8 +31,17 @@ def test_curated_registry_scales_to_trusted_roster():
 
     unique = {channel.channel_id: channel for channel in dedupe_channel_configs(CHANNEL_REGISTRY)}
     mkbhd = unique["UCBJycsmduvYEL83R_U4JriQ"]
+    digital_foundry = unique["UC9PBzalIcEQCsiIkq36PyUA"]
+    hardware_unboxed = unique["UCI8iQa1hv7oV_Z8D35vVuSg"]
+    google_for_developers = unique["UC_x5XG1OV2P6uZZ5FSM9Ttw"]
     assert mkbhd.name == "Marques Brownlee (MKBHD)"
     assert mkbhd.content_format == ContentFormat.MIXED
+    assert digital_foundry.name == "Digital Foundry"
+    assert digital_foundry.content_format == ContentFormat.LONG_FORM
+    assert digital_foundry.ingestion_stream.value == "expansion"
+    assert hardware_unboxed.name == "Hardware Unboxed"
+    assert hardware_unboxed.ingestion_stream.value == "primary"
+    assert google_for_developers.name == "Google for Developers"
 
 
 def test_corrected_channel_ids_resolve_expected_channels():

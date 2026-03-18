@@ -42,6 +42,13 @@ class QualityTier(str, Enum):
     SUPPLEMENTAL = "supplemental"
 
 
+class IngestionStream(str, Enum):
+    """Stream grouping for primary vs fill-only curated channels."""
+
+    PRIMARY = "primary"
+    EXPANSION = "expansion"
+
+
 @dataclass(frozen=True)
 class ChannelConfig:
     """Configuration for a single curated YouTube channel."""
@@ -56,6 +63,7 @@ class ChannelConfig:
     allow_search: bool = True
     allow_trending: bool = True
     quality_tier: QualityTier = QualityTier.STANDARD
+    ingestion_stream: IngestionStream = IngestionStream.PRIMARY
     enabled: bool = True
     notes: str = ""
 
@@ -111,6 +119,7 @@ def _load_channel_registry() -> List[ChannelConfig]:
                 allow_search=bool(entry.get("allow_search", True)),
                 allow_trending=bool(entry.get("allow_trending", True)),
                 quality_tier=QualityTier(entry.get("quality_tier", "standard")),
+                ingestion_stream=IngestionStream(entry.get("ingestion_stream", "primary")),
                 enabled=bool(entry.get("enabled", True)),
                 notes=str(entry.get("notes", "")),
             )
@@ -129,7 +138,7 @@ def _normalize_channel_name(name: str) -> str:
     return re.sub(r"\s+", " ", normalized)
 
 
-def _channel_config_priority(config: ChannelConfig) -> tuple[int, int, int]:
+def _channel_config_priority(config: ChannelConfig) -> tuple[int, int, int, int]:
     """Prefer enabled, non-shorts, mixed-capable configs for duplicate IDs."""
     format_rank = {
         ContentFormat.MIXED: 2,
@@ -138,7 +147,8 @@ def _channel_config_priority(config: ChannelConfig) -> tuple[int, int, int]:
     }[config.content_format]
     role_rank = 0 if config.role == ChannelRole.SHORTS else 1
     enabled_rank = 1 if config.enabled else 0
-    return (enabled_rank, role_rank, format_rank)
+    stream_rank = 1 if config.ingestion_stream == IngestionStream.PRIMARY else 0
+    return (enabled_rank, stream_rank, role_rank, format_rank)
 
 
 def dedupe_channel_configs(configs: Iterable[ChannelConfig]) -> List[ChannelConfig]:
@@ -151,9 +161,24 @@ def dedupe_channel_configs(configs: Iterable[ChannelConfig]) -> List[ChannelConf
     return list(unique.values())
 
 
-def get_enabled_channels() -> List[ChannelConfig]:
-    """Get the enabled curated channels."""
-    return [channel for channel in dedupe_channel_configs(CHANNEL_REGISTRY) if channel.enabled]
+def get_enabled_channels(
+    *, ingestion_stream: Optional[IngestionStream] = None
+) -> List[ChannelConfig]:
+    """Get enabled curated channels, optionally filtered by stream."""
+    enabled = [channel for channel in dedupe_channel_configs(CHANNEL_REGISTRY) if channel.enabled]
+    if ingestion_stream is None:
+        return enabled
+    return [channel for channel in enabled if channel.ingestion_stream == ingestion_stream]
+
+
+def get_primary_channels() -> List[ChannelConfig]:
+    """Get enabled always-on curated channels."""
+    return get_enabled_channels(ingestion_stream=IngestionStream.PRIMARY)
+
+
+def get_expansion_channels() -> List[ChannelConfig]:
+    """Get enabled fill-only curated channels."""
+    return get_enabled_channels(ingestion_stream=IngestionStream.EXPANSION)
 
 
 def get_channels_by_role(role: ChannelRole) -> List[ChannelConfig]:
@@ -248,12 +273,16 @@ def get_quality_weight_modifier(tier: QualityTier) -> float:
 def get_channel_stats() -> Dict[str, object]:
     """Summarise the current curated channel registry."""
     enabled = get_enabled_channels()
+    primary = get_primary_channels()
+    expansion = get_expansion_channels()
     role_counts = {role.value: len(get_channels_by_role(role)) for role in ChannelRole}
     total_daily_cap = sum(channel.daily_cap for channel in enabled)
     long_form_cap = sum(channel.daily_cap for channel in get_long_form_channels())
     shorts_cap = sum(channel.effective_daily_reel_cap for channel in get_shorts_channels())
     return {
         "total_channels": len(enabled),
+        "primary_channels": len(primary),
+        "expansion_channels": len(expansion),
         "total_daily_cap": total_daily_cap,
         "long_form_daily_cap": long_form_cap,
         "shorts_daily_cap": shorts_cap,

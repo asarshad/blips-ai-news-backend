@@ -17,11 +17,35 @@ class _ContentFormat(str, Enum):
     MIXED = "mixed"
 
 
+class _IngestionStream(str, Enum):
+    PRIMARY = "primary"
+    EXPANSION = "expansion"
+
+
 @dataclass
 class _Channel:
     name: str
     content_format: _ContentFormat
     daily_cap: int
+    ingestion_stream: _IngestionStream = _IngestionStream.PRIMARY
+    daily_reel_cap: int | None = None
+    allow_reels: bool | None = None
+
+    @property
+    def reels_enabled(self) -> bool:
+        if self.allow_reels is not None:
+            return self.allow_reels
+        return self.content_format in (_ContentFormat.SHORTS, _ContentFormat.MIXED)
+
+    @property
+    def effective_daily_reel_cap(self) -> int:
+        if not self.reels_enabled:
+            return 0
+        if self.daily_reel_cap is not None:
+            return max(0, int(self.daily_reel_cap))
+        if self.content_format == _ContentFormat.LONG_FORM:
+            return 1
+        return self.daily_cap
 
 
 class _FakeQuery:
@@ -55,6 +79,7 @@ def _install_fake_integrations(monkeypatch, *, channels, rss_feeds=None):
 
     yt_channels_mod = ModuleType("app.integrations.youtube_channels")
     yt_channels_mod.ContentFormat = _ContentFormat  # type: ignore[attr-defined]
+    yt_channels_mod.IngestionStream = _IngestionStream  # type: ignore[attr-defined]
 
     yt_client_mod = ModuleType("app.integrations.youtube_client")
     yt_client_mod.YouTubeClient = lambda: SimpleNamespace(channel_configs=channels)  # type: ignore[attr-defined]
@@ -115,6 +140,103 @@ def test_build_defaults_always_creates_youtube_rows_regardless_of_inventory(monk
     assert "rss" in source_types
     assert "youtube_video" in source_types
     assert "youtube_reel" in source_types
+
+
+def test_build_defaults_only_activates_expansion_stream_when_surface_needs_fill(monkeypatch):
+    channels = [
+        _Channel("Core Video Feed", _ContentFormat.LONG_FORM, 1),
+        _Channel(
+            "Expansion Video Feed",
+            _ContentFormat.LONG_FORM,
+            1,
+            ingestion_stream=_IngestionStream.EXPANSION,
+        ),
+        _Channel(
+            "Expansion Mixed Feed",
+            _ContentFormat.MIXED,
+            2,
+            ingestion_stream=_IngestionStream.EXPANSION,
+        ),
+    ]
+    _install_fake_integrations(monkeypatch, channels=channels)
+    monkeypatch.delenv("INGESTION_TARGET_DEFAULTS", raising=False)
+    monkeypatch.setattr(
+        checkpoint_defaults,
+        "_should_fill_surface",
+        lambda _db, content_type: content_type == ContentType.REEL,
+    )
+
+    defaults = build_defaults(db=object(), day_utc=date(2026, 3, 9))
+    targets = {(d.source_type, d.feed_name): d.target for d in defaults}
+
+    assert ("youtube_video", "Expansion Video Feed") not in targets
+    assert ("youtube_video", "Expansion Mixed Feed") not in targets
+    assert targets[("youtube_video", "Core Video Feed")] == 1
+    assert targets[("youtube_reel", "Expansion Mixed Feed")] == 1
+
+
+def test_build_defaults_includes_expansion_video_stream_when_video_surface_needs_fill(monkeypatch):
+    channels = [
+        _Channel("Core Video Feed", _ContentFormat.LONG_FORM, 1),
+        _Channel(
+            "Expansion Video Feed",
+            _ContentFormat.LONG_FORM,
+            1,
+            ingestion_stream=_IngestionStream.EXPANSION,
+        ),
+    ]
+    _install_fake_integrations(monkeypatch, channels=channels)
+    monkeypatch.delenv("INGESTION_TARGET_DEFAULTS", raising=False)
+    monkeypatch.setattr(
+        checkpoint_defaults,
+        "_should_fill_surface",
+        lambda _db, _content_type: True,
+    )
+
+    defaults = build_defaults(db=object(), day_utc=date(2026, 3, 9))
+    targets = {(d.source_type, d.feed_name): d.target for d in defaults}
+
+    assert targets[("youtube_video", "Core Video Feed")] == 1
+    assert targets[("youtube_video", "Expansion Video Feed")] == 1
+
+
+def test_build_defaults_allows_long_form_channels_to_feed_reels_when_enabled(monkeypatch):
+    channels = [
+        _Channel(
+            "OpenAI",
+            _ContentFormat.LONG_FORM,
+            1,
+            allow_reels=True,
+            daily_reel_cap=1,
+        ),
+    ]
+    _install_fake_integrations(monkeypatch, channels=channels)
+    monkeypatch.delenv("INGESTION_TARGET_DEFAULTS", raising=False)
+
+    defaults = build_defaults(day_utc=date(2026, 3, 9))
+    targets = {(d.source_type, d.feed_name): d.target for d in defaults}
+
+    assert targets[("youtube_video", "OpenAI")] == 1
+    assert targets[("youtube_reel", "OpenAI")] == 1
+
+
+def test_build_defaults_respects_explicit_mixed_reel_cap(monkeypatch):
+    channels = [
+        _Channel(
+            "Samsung",
+            _ContentFormat.MIXED,
+            2,
+            daily_reel_cap=1,
+        ),
+    ]
+    _install_fake_integrations(monkeypatch, channels=channels)
+    monkeypatch.delenv("INGESTION_TARGET_DEFAULTS", raising=False)
+
+    defaults = build_defaults(day_utc=date(2026, 3, 9))
+    targets = {(d.source_type, d.feed_name): d.target for d in defaults}
+
+    assert targets[("youtube_video", "Samsung")] == 2
+    assert targets[("youtube_reel", "Samsung")] == 1
 
 
 def test_fresh_promoted_count_applies_curated_only_policy(monkeypatch):
