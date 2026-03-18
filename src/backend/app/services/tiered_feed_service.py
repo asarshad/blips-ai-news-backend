@@ -31,7 +31,7 @@ from app.services.diversity_mixer import enforce_channel_caps, mix_feed
 from app.services.inventory_service import FreshnessTier, Surface, _get_surface_config
 from app.services.video_content_policy import apply_content_policy
 from app.services.video_hybrid_rerank import rerank_video_candidates
-from app.services.video_surface_rules import effective_content_type, surface_content_filter
+from app.video_surface_rules import effective_content_type, surface_content_filter
 
 logger = get_logger(__name__)
 
