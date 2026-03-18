@@ -257,6 +257,40 @@ class TestReopenYoutubeRows:
         assert reel_row.target == 6
 
 
+class TestPrimeYoutubeRows:
+    def test_prime_youtube_row_resets_cursor_and_raises_target(self):
+        row = _make_progress(
+            source_type="youtube_video",
+            target=1,
+            items_ingested=0,
+            items_attempted=9,
+            status="failed",
+            retry_count=3,
+            retry_at=datetime(2026, 6, 1, 12, 0),
+            last_error="Temporary failure",
+            last_item_cursor="cursor_abc",
+        )
+
+        db = MagicMock()
+        db.query.return_value = _FakeQuery([row])
+        repo = IngestionProgressRepository(db)
+
+        primed = repo.prime_youtube_rows(
+            day_utc=date(2026, 6, 1),
+            rows=[("youtube_video", "TestChannel", 3)],
+        )
+
+        assert primed == [1]
+        assert row.target == 3
+        assert row.status == "running"
+        assert row.items_attempted == 0
+        assert row.retry_count == 0
+        assert row.retry_at is None
+        assert row.last_error is None
+        assert row.last_item_cursor is None
+        db.commit.assert_called_once()
+
+
 # ---------------------------------------------------------------------------
 # Budget multiplier test
 # ---------------------------------------------------------------------------
@@ -292,11 +326,15 @@ def test_checkpointed_ingestion_uses_high_budget_for_youtube(monkeypatch):
         def reopen_youtube_rows(self, **_kw):
             return 0
 
+        def prime_youtube_rows(self, **_kw):
+            return []
+
         def list_incomplete(self, **_kw):
             return []
 
     monkeypatch.setattr(checkpointing, "IngestionBudgetRepository", FakeBudgetRepo)
     monkeypatch.setattr(checkpointing, "IngestionProgressRepository", FakeProgressRepo)
+    monkeypatch.setattr(checkpointing, "_prime_bootstrap_youtube_rows", lambda **_kw: [])
 
     # Provide minimal defaults: 1 rss, 1 video, 1 reel channel
     from app.ingestion.checkpoint_defaults import FeedDefault

@@ -217,6 +217,48 @@ class IngestionProgressRepository:
             self.db.commit()
         return reopened
 
+    def prime_youtube_rows(
+        self,
+        *,
+        day_utc: date,
+        rows: Iterable[Tuple[str, str, int]],
+    ) -> List[int]:
+        """Reset selected YouTube rows for a bounded bootstrap/backfill pass.
+
+        The row cursor is cleared so the next batch starts from the newest entries.
+        Existing ``items_ingested`` is preserved; the target is only raised when the
+        bootstrap target is larger than the current row target.
+        """
+        primed_ids: List[int] = []
+        now = datetime.utcnow()
+        for source_type, feed_name, bootstrap_target in rows:
+            if source_type == "rss":
+                continue
+            row = (
+                self.db.query(IngestionProgress)
+                .filter(
+                    IngestionProgress.day_utc == day_utc,
+                    IngestionProgress.source_type == source_type,
+                    IngestionProgress.feed_name == feed_name,
+                )
+                .with_for_update(skip_locked=True)
+                .one_or_none()
+            )
+            if row is None:
+                continue
+            row.target = max(int(row.target or 0), int(bootstrap_target or 0))
+            row.status = "running"
+            row.items_attempted = 0
+            row.retry_count = 0
+            row.retry_at = None
+            row.last_error = None
+            row.last_item_cursor = None
+            row.updated_at = now
+            primed_ids.append(int(row.id))
+        if primed_ids:
+            self.db.commit()
+        return primed_ids
+
     def mark_failed(self, row_id: int, error: str) -> None:
         row = self.db.query(IngestionProgress).filter(IngestionProgress.id == row_id).one()
         row.status = "failed"

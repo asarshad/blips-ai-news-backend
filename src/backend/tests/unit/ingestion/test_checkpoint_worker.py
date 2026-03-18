@@ -448,3 +448,89 @@ def test_worker_treats_short_duration_long_form_entry_as_reel(monkeypatch):
     assert result["inserted"] == 1
     assert len(captured_values) == 1
     assert captured_values[0]["type"] == checkpoint_worker.ContentType.REEL
+
+
+def test_worker_uses_channel_specific_lookback_for_long_form_sources(monkeypatch):
+    progress = _Progress(
+        id=1,
+        day_utc=None,
+        source_type="youtube_video",
+        feed_name="Podcast Channel",
+        target=1,
+        items_ingested=0,
+        items_attempted=0,
+        status="running",
+    )
+    session = _FakeSession(progress)
+
+    class _OldEntry:
+        video_id = "podcastold123"
+        video_url = "https://www.youtube.com/watch?v=podcastold123"
+        title = "Five day old episode"
+        summary = "Still inside the global lookback, outside the channel override."
+        source = "Podcast Channel"
+        channel_id = "podcast-1"
+        is_short = False
+        published_at = datetime.utcnow() - timedelta(days=5)
+        acquisition_lane = "curated"
+        source_status = "core"
+        duration_seconds = 3600
+        view_count = 1000
+        like_count = 10
+        comment_count = 1
+        views_per_hour = 10.0
+        format_fit_score = 0.7
+        thumbnail_url = "https://img.youtube.com/vi/podcastold123/hqdefault.jpg"
+        default_language = "en"
+
+    class _FakeYouTubeClient:
+        def __init__(self):
+            self.channel_configs = [
+                SimpleNamespace(
+                    name="Podcast Channel",
+                    content_format=SimpleNamespace(value="long_form"),
+                    enabled=True,
+                    fresh_published_hours=72,
+                )
+            ]
+
+        def _fetch_channel_with_config(self, _config, max_videos):  # noqa: ARG002
+            return [_OldEntry()]
+
+    pkg = ModuleType("app.integrations")
+    pkg.__path__ = []
+    rss_mod = ModuleType("app.integrations.rss_client")
+    rss_mod.RSSClient = lambda: _FakeRSSClient([])  # type: ignore[attr-defined]
+    yt_mod = ModuleType("app.integrations.youtube_client")
+    yt_mod.YouTubeClient = _FakeYouTubeClient  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "app.integrations", pkg)
+    monkeypatch.setitem(sys.modules, "app.integrations.rss_client", rss_mod)
+    monkeypatch.setitem(sys.modules, "app.integrations.youtube_client", yt_mod)
+    monkeypatch.setattr("app.db.base.SessionLocal", lambda: session)
+    monkeypatch.setattr(checkpoint_worker, "IngestionBudgetRepository", _FakeBudgetRepo)
+    monkeypatch.setattr(checkpoint_worker, "claim_lease", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(checkpoint_worker, "release_lease", lambda *_args, **_kwargs: True)
+
+    captured_values = []
+
+    def _capture_insert(_db, *, values):
+        captured_values.extend(values)
+        return len(values)
+
+    monkeypatch.setattr(checkpoint_worker, "_insert_content_items_postgres", _capture_insert)
+
+    result = checkpoint_worker.process_progress_row_batch(
+        row_id=1,
+        day_utc=datetime.utcnow().date(),
+        redis_client=object(),
+        owner_token="t",
+        ttl_ms=1000,
+        batch_size=1,
+        retry_base_seconds=1,
+        retry_max_seconds=10,
+    )
+
+    assert result["status"] == "ok"
+    assert result["inserted"] == 0
+    assert captured_values == []

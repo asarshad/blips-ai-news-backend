@@ -11,6 +11,7 @@ Implementation details live in smaller modules:
 import os
 import signal
 import threading
+from datetime import datetime, timedelta
 from typing import Dict, List
 
 from sqlalchemy.orm import Session
@@ -27,10 +28,119 @@ from app.ingestion.time import get_ingestion_day
 from app.models.content import ContentType
 from app.repositories.ingestion_budget_repo import IngestionBudgetRepository
 from app.repositories.ingestion_progress_repo import IngestionProgressRepository
+from app.repositories.video_source_repo import VideoSourceProfileRepository
+from app.services.inventory_service import invalidate_health_cache
+from app.services.tiered_feed_service import invalidate_tiered_feed_cache
 
 logger = get_logger(__name__)
 
 STOP_EVENT = threading.Event()
+
+
+def _bootstrap_target(source_type: str, *, daily_cap: int, reel_cap: int) -> int:
+    if source_type == "youtube_reel":
+        floor = int(os.getenv("YT_BOOTSTRAP_REEL_TARGET_MIN", "2"))
+        return max(floor, int(reel_cap or 0))
+    floor = int(os.getenv("YT_BOOTSTRAP_VIDEO_TARGET_MIN", "3"))
+    return max(floor, int(daily_cap or 0))
+
+
+def _prime_bootstrap_youtube_rows(
+    *,
+    db: Session,
+    repo: IngestionProgressRepository,
+    day_utc,
+    process_batch,
+    default_batch_size: int,
+) -> List[Dict[str, object]]:
+    """Force a one-time latest-first pass for newly added curated channels."""
+    if os.getenv("YT_CHANNEL_BOOTSTRAP_ENABLED", "true").lower() not in ("true", "1", "yes", "on"):
+        return []
+
+    from app.integrations.youtube_channels import get_bootstrap_channels
+
+    configs = [cfg for cfg in get_bootstrap_channels() if cfg.enabled]
+    if not configs:
+        return []
+
+    now = datetime.utcnow()
+    max_profile_age_days = int(os.getenv("YT_BOOTSTRAP_MAX_PROFILE_AGE_DAYS", "2"))
+    max_rows = int(os.getenv("YT_BOOTSTRAP_MAX_ROWS", "32"))
+    batch_size = max(default_batch_size, int(os.getenv("YT_BOOTSTRAP_BATCH_SIZE", "10")))
+
+    profile_repo = VideoSourceProfileRepository(db)
+    profiles = {
+        profile.channel_id: profile for profile in profile_repo.upsert_from_registry(configs)
+    }
+
+    bootstrap_rows = []
+    for cfg in configs:
+        profile = profiles.get(cfg.channel_id)
+        if profile is not None and profile.created_at < now - timedelta(days=max_profile_age_days):
+            continue
+
+        video_row = repo.get(day_utc=day_utc, source_type="youtube_video", feed_name=cfg.name)
+        if (
+            video_row is not None
+            and int(video_row.items_ingested or 0) == 0
+            and not video_row.last_item_cursor
+        ):
+            bootstrap_rows.append(
+                (
+                    "youtube_video",
+                    cfg.name,
+                    _bootstrap_target(
+                        "youtube_video",
+                        daily_cap=cfg.daily_cap,
+                        reel_cap=cfg.effective_daily_reel_cap,
+                    ),
+                )
+            )
+
+        if cfg.effective_daily_reel_cap <= 0:
+            continue
+        reel_row = repo.get(day_utc=day_utc, source_type="youtube_reel", feed_name=cfg.name)
+        if (
+            reel_row is not None
+            and int(reel_row.items_ingested or 0) == 0
+            and not reel_row.last_item_cursor
+        ):
+            bootstrap_rows.append(
+                (
+                    "youtube_reel",
+                    cfg.name,
+                    _bootstrap_target(
+                        "youtube_reel",
+                        daily_cap=cfg.daily_cap,
+                        reel_cap=cfg.effective_daily_reel_cap,
+                    ),
+                )
+            )
+
+    if not bootstrap_rows:
+        return []
+
+    primed_ids = repo.prime_youtube_rows(day_utc=day_utc, rows=bootstrap_rows)
+    if not primed_ids:
+        return []
+
+    results: List[Dict[str, object]] = []
+    for row_id in primed_ids[:max_rows]:
+        results.append(process_batch(int(row_id), batch_size))
+
+    inserted = sum(int(result.get("inserted", 0) or 0) for result in results)
+    attempted = sum(int(result.get("attempted", 0) or 0) for result in results)
+    logger.info(
+        "Bootstrap processed %s YouTube rows for %s (attempted=%s inserted=%s)",
+        min(len(primed_ids), max_rows),
+        day_utc.isoformat(),
+        attempted,
+        inserted,
+    )
+    if inserted > 0:
+        invalidate_health_cache()
+        invalidate_tiered_feed_cache()
+    return results
 
 
 def install_signal_handlers() -> None:
@@ -115,6 +225,14 @@ def run_checkpointed_ingestion(
             retry_base_seconds=retry_base_seconds,
             retry_max_seconds=retry_max_seconds,
         )
+
+    _prime_bootstrap_youtube_rows(
+        db=db,
+        repo=repo,
+        day_utc=day,
+        process_batch=_process_batch,
+        default_batch_size=batch_size,
+    )
 
     if max_workers <= 1:
         return _run_checkpoint_loop(

@@ -62,6 +62,10 @@ class ChannelConfig:
     allow_reels: Optional[bool] = None
     allow_search: bool = True
     allow_trending: bool = True
+    fresh_published_hours: Optional[int] = None
+    backfill_created_hours: Optional[int] = None
+    evergreen_max_days: Optional[int] = None
+    bootstrap_on_add: bool = False
     quality_tier: QualityTier = QualityTier.STANDARD
     ingestion_stream: IngestionStream = IngestionStream.PRIMARY
     enabled: bool = True
@@ -89,6 +93,18 @@ class ChannelConfig:
         if self.content_format == ContentFormat.LONG_FORM:
             return 1
         return self.daily_cap
+
+    @property
+    def has_age_overrides(self) -> bool:
+        """Whether this channel uses custom feed age windows."""
+        return any(
+            value is not None
+            for value in (
+                self.fresh_published_hours,
+                self.backfill_created_hours,
+                self.evergreen_max_days,
+            )
+        )
 
 
 _DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "youtube_curated_channels.json"
@@ -118,6 +134,22 @@ def _load_channel_registry() -> List[ChannelConfig]:
                 ),
                 allow_search=bool(entry.get("allow_search", True)),
                 allow_trending=bool(entry.get("allow_trending", True)),
+                fresh_published_hours=(
+                    max(1, int(entry["fresh_published_hours"]))
+                    if entry.get("fresh_published_hours") is not None
+                    else None
+                ),
+                backfill_created_hours=(
+                    max(0, int(entry["backfill_created_hours"]))
+                    if entry.get("backfill_created_hours") is not None
+                    else None
+                ),
+                evergreen_max_days=(
+                    max(1, int(entry["evergreen_max_days"]))
+                    if entry.get("evergreen_max_days") is not None
+                    else None
+                ),
+                bootstrap_on_add=bool(entry.get("bootstrap_on_add", False)),
                 quality_tier=QualityTier(entry.get("quality_tier", "standard")),
                 ingestion_stream=IngestionStream(entry.get("ingestion_stream", "primary")),
                 enabled=bool(entry.get("enabled", True)),
@@ -179,6 +211,11 @@ def get_primary_channels() -> List[ChannelConfig]:
 def get_expansion_channels() -> List[ChannelConfig]:
     """Get enabled fill-only curated channels."""
     return get_enabled_channels(ingestion_stream=IngestionStream.EXPANSION)
+
+
+def get_bootstrap_channels() -> List[ChannelConfig]:
+    """Get curated channels that should receive a one-time bootstrap pass."""
+    return [channel for channel in get_enabled_channels() if channel.bootstrap_on_add]
 
 
 def get_channels_by_role(role: ChannelRole) -> List[ChannelConfig]:
