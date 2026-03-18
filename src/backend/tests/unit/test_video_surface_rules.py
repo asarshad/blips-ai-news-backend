@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.repositories.content_repo import ContentItemRepository
-from app.services.video_surface_rules import effective_content_type, surface_content_filter
+from app.video_surface_rules import effective_content_type, surface_content_filter
 
 
 @compiles(JSONB, "sqlite")

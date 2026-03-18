@@ -27,7 +27,7 @@ from app.repositories.content_repo import ContentItemRepository
 from app.repositories.user_repo import UserPreferenceRepository, UserProfileRepository
 from app.services.multi_factor_ranking_service import MultiFactorRankingService
 from app.services.personalization_service import PersonalizationService
-from app.services.video_surface_rules import effective_content_type, has_explicit_shorts_url
+from app.video_surface_rules import effective_content_type, has_explicit_shorts_url
 
 logger = get_logger(__name__)
 

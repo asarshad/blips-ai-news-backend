@@ -24,7 +24,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.services.video_content_policy import apply_content_policy
-from app.services.video_surface_rules import surface_content_filter
+from app.video_surface_rules import surface_content_filter
 
 logger = get_logger(__name__)
 

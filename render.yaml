@@ -34,7 +34,7 @@ projects:
             name: blips-dev-api
             runtime: python
             plan: free
-            autoDeployTrigger: checksPass
+            autoDeployTrigger: commit
             region: oregon
             rootDir: src/backend
             buildCommand: pip install -r requirements.txt && alembic upgrade head
@@ -121,7 +121,7 @@ projects:
             name: blips-api
             runtime: python
             plan: starter
-            autoDeployTrigger: checksPass
+            autoDeployTrigger: commit
             region: oregon
             rootDir: src/backend
             buildCommand: pip install -r requirements.txt && alembic upgrade head
@@ -193,7 +193,7 @@ projects:
             name: blips-worker
             runtime: python
             plan: starter
-            autoDeployTrigger: checksPass
+            autoDeployTrigger: commit
             region: oregon
             rootDir: src/backend
             buildCommand: pip install -r requirements.txt
