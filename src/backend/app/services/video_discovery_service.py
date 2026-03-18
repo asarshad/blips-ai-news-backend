@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, List
 
@@ -23,6 +24,8 @@ from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.video_source import VideoSourceProfile
 from app.repositories.video_source_repo import VideoSourceProfileRepository
 from app.services.promotion_service import compute_clickbait_penalty, compute_story_keyword_signal
+from app.services.video_discovery_provenance import TRENDING_QUERY_LABEL
+from app.services.video_discovery_state import DiscoveryPlannerStateStore
 from app.services.video_source_service import bootstrap_video_source_profiles
 
 _ALLOWED_CATEGORIES = {
@@ -159,15 +162,32 @@ _ENTRY_OFF_TOPIC_KEYWORDS = (
     "viral",
     "vlog",
 )
+_PRIORITY_WEIGHTS = {1: 5, 2: 3, 3: 2, 4: 1}
+
+
+@dataclass(frozen=True)
+class SearchPlanStep:
+    """A single scheduled search step plus the planner context needed to commit it."""
+
+    pack: DiscoveryQueryPack
+    region: str
+    uses_story_pack: bool
+    static_packs: tuple[DiscoveryQueryPack, ...]
 
 
 class VideoDiscoveryService:
     """Searches and filters discovery candidates for videos and reels."""
 
-    def __init__(self, db: Session, youtube_client: YouTubeClient | None = None) -> None:
+    def __init__(
+        self,
+        db: Session,
+        youtube_client: YouTubeClient | None = None,
+        state_store: DiscoveryPlannerStateStore | None = None,
+    ) -> None:
         self.db = db
         self.youtube_client = youtube_client or YouTubeClient()
         self.repo = VideoSourceProfileRepository(db)
+        self.state_store = state_store or DiscoveryPlannerStateStore()
 
     def discover(self, surface: str, *, remaining_needed: int | None = None) -> List[VideoEntry]:
         """Return unique hydrated candidates for the requested surface."""
@@ -179,10 +199,13 @@ class VideoDiscoveryService:
         unique: Dict[str, VideoEntry] = {}
         cutoff = discovery_cutoff(surface)
 
-        search_plan = self._build_search_plan(surface, remaining_needed)
-        if search_plan:
-            if self.youtube_client.quota_budget.begin_search_window(surface):
-                for pack, region in search_plan:
+        deficit = remaining_needed if remaining_needed is not None else 999
+        if deficit >= self._min_search_deficit(surface):
+            search_plan = self._build_search_plan(surface, remaining_needed)
+            if search_plan and self.youtube_client.quota_budget.begin_search_window(surface):
+                for step in search_plan:
+                    pack = step.pack
+                    region = step.region
                     candidates = self.youtube_client.fetch_search_candidates(
                         pack.query,
                         region_code=region,
@@ -192,6 +215,7 @@ class VideoDiscoveryService:
                         query_label=pack.label,
                         published_after=cutoff,
                     )
+                    self._record_search_execution(surface, step)
                     accepted, counters = self._filter_candidates(candidates, surface)
                     self.repo.record_run(
                         lane="search",
@@ -208,9 +232,14 @@ class VideoDiscoveryService:
                     )
                     for entry in accepted:
                         unique.setdefault(entry.video_id, entry)
-            else:
+            elif search_plan:
                 logger.info(
                     "[video_discovery] Skipping %s search: cooldown active or quota lockout",
+                    surface,
+                )
+            else:
+                logger.info(
+                    "[video_discovery] Skipping %s search: no eligible search plan",
                     surface,
                 )
 
@@ -225,7 +254,7 @@ class VideoDiscoveryService:
                 self.repo.record_run(
                     lane="trending",
                     surface=surface,
-                    query_label="most-popular-tech",
+                    query_label=TRENDING_QUERY_LABEL,
                     region=region,
                     candidate_count=len(candidates),
                     duplicate_rejections=counters["duplicate"],
@@ -243,37 +272,45 @@ class VideoDiscoveryService:
 
     def _build_search_plan(
         self, surface: str, remaining_needed: int | None
-    ) -> List[tuple[DiscoveryQueryPack, str]]:
-        """Choose a small set of high-value search calls based on the current deficit."""
+    ) -> List[SearchPlanStep]:
+        """Choose the single best search call for the current eligible window."""
         deficit = remaining_needed if remaining_needed is not None else 999
         min_deficit = self._min_search_deficit(surface)
         if deficit < min_deficit:
             return []
 
-        packs = self._prioritized_query_packs(surface)
-        if not packs:
+        story_packs = self._build_story_query_packs(surface)
+        static_packs = self._static_query_packs(surface)
+        if not story_packs and not static_packs:
             return []
 
-        pack_limit = min(len(packs), 4)
-        region_limit = min(
-            len(self._ordered_regions()), 2 if deficit >= (18 if surface == "videos" else 12) else 1
-        )
-        max_calls = self._max_search_calls(surface, deficit)
+        uses_story_pack = False
+        if self._should_use_story_pack(surface, story_packs):
+            pack = story_packs[0]
+            uses_story_pack = True
+        else:
+            pack = self._select_static_pack(surface, static_packs)
+            if pack is None and story_packs:
+                pack = story_packs[0]
+                uses_story_pack = True
 
-        selected_packs = packs[:pack_limit]
-        selected_regions = self._ordered_regions()[:region_limit]
-        plan: List[tuple[DiscoveryQueryPack, str]] = []
-        for call_index in range(max_calls):
-            pack = selected_packs[call_index % len(selected_packs)]
-            region = selected_regions[(call_index // len(selected_packs)) % len(selected_regions)]
-            plan.append((pack, region))
-        return plan
+        if pack is None:
+            return []
 
-    def _prioritized_query_packs(self, surface: str) -> List[DiscoveryQueryPack]:
+        return [
+            SearchPlanStep(
+                pack=pack,
+                region=self._peek_region(surface),
+                uses_story_pack=uses_story_pack,
+                static_packs=tuple(static_packs),
+            )
+        ]
+
+    def _static_query_packs(self, surface: str) -> List[DiscoveryQueryPack]:
         packs: List[DiscoveryQueryPack] = []
         seen_queries: set[str] = set()
 
-        for pack in self._build_story_query_packs(surface) + get_query_packs(surface):
+        for pack in get_query_packs(surface):
             normalized = pack.query.strip().lower()
             if not normalized or normalized in seen_queries:
                 continue
@@ -281,6 +318,203 @@ class VideoDiscoveryService:
             seen_queries.add(normalized)
 
         return packs
+
+    def _should_use_story_pack(
+        self,
+        surface: str,
+        story_packs: List[DiscoveryQueryPack],
+    ) -> bool:
+        if not story_packs:
+            return False
+        if self.state_store.is_available():
+            key = f"youtube:story_window_counter:{surface}"
+            payload = self.state_store.get_text(key)
+            try:
+                counter = int(payload or "0")
+            except ValueError:
+                counter = 0
+            return (counter + 1) % 3 == 0
+        return (self._fallback_window_index(surface) + 1) % 3 == 0
+
+    def _select_static_pack(
+        self,
+        surface: str,
+        packs: List[DiscoveryQueryPack],
+    ) -> DiscoveryQueryPack | None:
+        if not packs:
+            return None
+
+        last_query = self.state_store.get_text(f"youtube:search_last_query:{surface}")
+        starved = self._starved_static_packs(surface, packs)
+        if starved:
+            choice = self._choose_with_repetition_guard(
+                sorted(
+                    starved,
+                    key=lambda pack: (
+                        self._last_run_at(surface, pack.label) or datetime.min,
+                        pack.priority,
+                        pack.label,
+                    ),
+                ),
+                last_query=last_query,
+            )
+            if choice is not None:
+                return choice
+
+        if not self.state_store.is_available():
+            return self._fallback_static_choice(surface, packs)
+
+        state_key = f"youtube:search_weight_state:{surface}"
+        current_weights = self.state_store.get_json(state_key) or {}
+        scored: list[tuple[int, int, str, DiscoveryQueryPack]] = []
+
+        for pack in packs:
+            current = int(current_weights.get(pack.label, 0))
+            current += _PRIORITY_WEIGHTS.get(pack.priority, 1)
+            scored.append((current, _PRIORITY_WEIGHTS.get(pack.priority, 1), pack.label, pack))
+
+        scored.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
+        choice = self._choose_with_repetition_guard(
+            [row[3] for row in scored],
+            last_query=last_query,
+        )
+        return choice
+
+    def _choose_with_repetition_guard(
+        self,
+        ordered_packs: List[DiscoveryQueryPack],
+        *,
+        last_query: str | None,
+    ) -> DiscoveryQueryPack | None:
+        if not ordered_packs:
+            return None
+        if len(ordered_packs) == 1:
+            return ordered_packs[0]
+        for pack in ordered_packs:
+            if pack.label != (last_query or "").strip():
+                return pack
+        return ordered_packs[0]
+
+    def _record_static_selection(
+        self,
+        surface: str,
+        pack: DiscoveryQueryPack,
+        packs: tuple[DiscoveryQueryPack, ...],
+    ) -> None:
+        if self.state_store.is_available():
+            state_key = f"youtube:search_weight_state:{surface}"
+            current_weights = self.state_store.get_json(state_key) or {}
+            total_weight = sum(_PRIORITY_WEIGHTS.get(item.priority, 1) for item in packs)
+            next_weights: dict[str, int] = {}
+            for item in packs:
+                current = int(current_weights.get(item.label, 0))
+                current += _PRIORITY_WEIGHTS.get(item.priority, 1)
+                next_weights[item.label] = current
+            next_weights[pack.label] = next_weights.get(pack.label, 0) - total_weight
+            self.state_store.set_json(state_key, next_weights)
+        self.state_store.set_text(f"youtube:search_last_query:{surface}", pack.label)
+        self.state_store.set_text(
+            f"youtube:search_last_run:{surface}:{pack.label}",
+            datetime.utcnow().isoformat(),
+        )
+
+    def _record_search_execution(self, surface: str, step: SearchPlanStep) -> None:
+        self._record_story_window(surface)
+        self._record_region_execution(surface, step.region)
+        if not step.uses_story_pack:
+            self._record_static_selection(surface, step.pack, step.static_packs)
+
+    def _record_story_window(self, surface: str) -> None:
+        if self.state_store.is_available():
+            self.state_store.incr(f"youtube:story_window_counter:{surface}")
+
+    def _starved_static_packs(
+        self,
+        surface: str,
+        packs: List[DiscoveryQueryPack],
+    ) -> List[DiscoveryQueryPack]:
+        if not self.state_store.is_available():
+            return []
+
+        threshold = datetime.utcnow() - timedelta(hours=96)
+        starved: list[DiscoveryQueryPack] = []
+        for pack in packs:
+            last_run = self._last_run_at(surface, pack.label)
+            if last_run is None or last_run <= threshold:
+                starved.append(pack)
+        return starved
+
+    def _last_run_at(self, surface: str, query_label: str) -> datetime | None:
+        payload = self.state_store.get_text(f"youtube:search_last_run:{surface}:{query_label}")
+        if not payload:
+            return None
+        try:
+            return datetime.fromisoformat(payload)
+        except ValueError:
+            return None
+
+    def _fallback_static_choice(
+        self,
+        surface: str,
+        packs: List[DiscoveryQueryPack],
+    ) -> DiscoveryQueryPack:
+        ordered = sorted(packs, key=lambda pack: (pack.priority, pack.label))
+        weighted_cycle: List[DiscoveryQueryPack] = []
+        for pack in ordered:
+            weighted_cycle.extend([pack] * _PRIORITY_WEIGHTS.get(pack.priority, 1))
+
+        window_index = self._fallback_window_index(surface)
+        choice = weighted_cycle[window_index % len(weighted_cycle)]
+        if len({pack.label for pack in packs}) <= 1:
+            return choice
+
+        previous = weighted_cycle[(window_index - 1) % len(weighted_cycle)]
+        if previous.label != choice.label:
+            return choice
+
+        for offset in range(1, len(weighted_cycle)):
+            candidate = weighted_cycle[(window_index + offset) % len(weighted_cycle)]
+            if candidate.label != previous.label:
+                return candidate
+        return choice
+
+    def _peek_region(self, surface: str) -> str:
+        ordered = self._ordered_regions()
+        if not ordered:
+            return "US"
+
+        key = f"youtube:search_region_cursor:{surface}"
+        current = self.state_store.get_text(key)
+        if current is not None:
+            try:
+                index = int(current)
+            except ValueError:
+                index = 0
+            return ordered[index % len(ordered)]
+
+        fallback_index = self._fallback_window_index(surface)
+        region_index = fallback_index % len(ordered)
+        return ordered[region_index]
+
+    def _record_region_execution(self, surface: str, region: str) -> None:
+        if not self.state_store.is_available():
+            return
+        ordered = self._ordered_regions()
+        if not ordered:
+            return
+        try:
+            index = ordered.index(region)
+        except ValueError:
+            index = 0
+        self.state_store.set_text(
+            f"youtube:search_region_cursor:{surface}",
+            str((index + 1) % len(ordered)),
+        )
+
+    def _fallback_window_index(self, surface: str) -> int:
+        interval = max(1, self._surface_search_interval_minutes(surface))
+        now = datetime.utcnow()
+        return int(now.timestamp() // (interval * 60)) + (0 if surface == "videos" else 1)
 
     def _build_story_query_packs(self, surface: str) -> List[DiscoveryQueryPack]:
         if not hasattr(self.db, "query"):
@@ -407,18 +641,14 @@ class VideoDiscoveryService:
         suffix = suffix_by_category.get(category, suffix_by_category["news"])
         return f"{entity} {suffix}".strip()
 
-    def _max_search_calls(self, surface: str, deficit: int) -> int:
-        if surface == "reels":
-            if deficit >= 16:
-                return 3
-            if deficit >= 9:
-                return 2
-            return 1
-        if deficit >= 21:
-            return 3
-        if deficit >= 11:
-            return 2
-        return 1
+    def _surface_search_interval_minutes(self, surface: str) -> int:
+        shared_default = os.getenv("YOUTUBE_SEARCH_MIN_INTERVAL_MINUTES", "180")
+        env_name = (
+            "YOUTUBE_REEL_SEARCH_MIN_INTERVAL_MINUTES"
+            if surface == "reels"
+            else "YOUTUBE_VIDEO_SEARCH_MIN_INTERVAL_MINUTES"
+        )
+        return max(1, int(os.getenv(env_name, shared_default)))
 
     def _min_search_deficit(self, surface: str) -> int:
         env_name = (
@@ -426,7 +656,7 @@ class VideoDiscoveryService:
             if surface == "reels"
             else "YOUTUBE_SEARCH_MIN_VIDEO_DEFICIT"
         )
-        default = "4" if surface == "reels" else "6"
+        default = "1"
         return max(1, int(os.getenv(env_name, default)))
 
     def _ordered_regions(self) -> List[str]:
@@ -457,7 +687,7 @@ class VideoDiscoveryService:
             if surface == "reels"
             else "YOUTUBE_VIDEO_TRENDING_ENABLED"
         )
-        default = "0" if surface == "reels" else "1"
+        default = "0"
         return os.getenv(env_name, default).strip().lower() not in {"0", "false", "no", "off"}
 
     def _filter_candidates(

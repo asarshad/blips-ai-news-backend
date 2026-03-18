@@ -43,6 +43,7 @@ from app.models.content import ContentItem, ContentStatus, ContentType
 from app.ranking.quality import compute_source_weight
 from app.ranking.service import ScoringService
 from app.repositories.content_repo import ContentItemRepository
+from app.services.video_discovery_provenance import build_discovered_via
 
 logger = get_logger(__name__)
 
@@ -490,7 +491,10 @@ class IngestionPipeline:
             conversation_starters=inline_starters,
             language=detected_lang or "en",
             curation_status=review_queue_target_status(),
-            discovered_via=f"yt_{getattr(entry, 'acquisition_lane', 'curated')}",
+            discovered_via=build_discovered_via(
+                getattr(entry, "acquisition_lane", "curated"),
+                getattr(entry, "query_label", None),
+            ),
             acquisition_lane=getattr(entry, "acquisition_lane", "curated"),
             source_status=getattr(entry, "source_status", None),
             view_count_snapshot=getattr(entry, "view_count", None),

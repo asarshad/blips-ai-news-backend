@@ -234,6 +234,12 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting up application")
 
+    # Fail fast on malformed discovery registry config instead of waiting for
+    # the first discovery window to touch it.
+    from app.config.search_query_registry import get_search_query_registry
+
+    get_search_query_registry()
+
     # Best-effort signal handling for graceful ingestion shutdown.
     try:
         from app.ingestion.checkpointing import install_signal_handlers

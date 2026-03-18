@@ -1,0 +1,177 @@
+queries:
+  - id: ai-models
+    category: AI & Machine Learning
+    concept: Frontier AI model updates
+    surfaces: [videos]
+    mode: always_on
+    youtube_fit: high
+    priority: 1
+    video_query: OpenAI Gemini Claude update
+    reel_query:
+    order: date
+    enabled: true
+  - id: chip-launches
+    category: Semiconductors & Chips
+    concept: Chip launches and silicon announcements
+    surfaces: [videos]
+    mode: always_on
+    youtube_fit: high
+    priority: 2
+    video_query: NVIDIA AMD Intel announcement
+    reel_query:
+    order: date
+    enabled: true
+  - id: cloud-platform
+    category: Cloud & Infrastructure
+    concept: Cloud platform and infrastructure releases
+    surfaces: [videos]
+    mode: always_on
+    youtube_fit: medium
+    priority: 3
+    video_query: Kubernetes Docker platform update
+    reel_query:
+    order: relevance
+    enabled: true
+  - id: security-privacy
+    category: Cybersecurity
+    concept: Security and privacy updates
+    surfaces: [videos]
+    mode: always_on
+    youtube_fit: medium
+    priority: 3
+    video_query: cybersecurity breach privacy update
+    reel_query:
+    order: relevance
+    enabled: true
+  - id: dev-tools
+    category: Software Development & Dev Tools
+    concept: Developer tooling releases
+    surfaces: [videos]
+    mode: always_on
+    youtube_fit: high
+    priority: 2
+    video_query: developer tooling release
+    reel_query:
+    order: relevance
+    enabled: true
+  - id: consumer-devices
+    category: Consumer Tech
+    concept: Consumer device hands-on coverage
+    surfaces: [videos]
+    mode: always_on
+    youtube_fit: high
+    priority: 1
+    video_query: iPhone Pixel Galaxy hands on review
+    reel_query:
+    order: viewCount
+    enabled: true
+  - id: robotics
+    category: Robotics & Automation
+    concept: Robotics and automation updates
+    surfaces: [videos]
+    mode: always_on
+    youtube_fit: high
+    priority: 2
+    video_query: robotics autonomous tech update
+    reel_query:
+    order: date
+    enabled: true
+  - id: launch-highlights
+    category: Product Launches & Events
+    concept: Product launch and keynote coverage
+    surfaces: [videos]
+    mode: always_on
+    youtube_fit: high
+    priority: 1
+    video_query: technology launch keynote highlights
+    reel_query:
+    order: date
+    enabled: true
+  - id: big-tech-updates
+    category: Big Tech Company Tracking
+    concept: Big Tech platform updates
+    surfaces: [videos]
+    mode: always_on
+    youtube_fit: high
+    priority: 1
+    video_query: Apple Google Microsoft Meta update
+    reel_query:
+    order: date
+    enabled: true
+  - id: ai-shorts
+    category: AI & Machine Learning
+    concept: Frontier AI short-form coverage
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: high
+    priority: 1
+    video_query:
+    reel_query: OpenAI Gemini Claude shorts
+    order: viewCount
+    enabled: true
+  - id: chip-shorts
+    category: Semiconductors & Chips
+    concept: Chip highlights in short-form
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: high
+    priority: 2
+    video_query:
+    reel_query: NVIDIA AMD Intel shorts
+    order: viewCount
+    enabled: true
+  - id: device-shorts
+    category: Consumer Tech
+    concept: Consumer device hands-on shorts
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: high
+    priority: 1
+    video_query:
+    reel_query: iPhone Pixel Galaxy hands on shorts
+    order: viewCount
+    enabled: true
+  - id: dev-shorts
+    category: Software Development & Dev Tools
+    concept: Developer tips in short-form
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: medium
+    priority: 2
+    video_query:
+    reel_query: developer tips shorts
+    order: relevance
+    enabled: true
+  - id: robotics-shorts
+    category: Robotics & Automation
+    concept: Robotics short-form demos
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: high
+    priority: 2
+    video_query:
+    reel_query: robotics demo shorts
+    order: viewCount
+    enabled: true
+  - id: keynote-shorts
+    category: Product Launches & Events
+    concept: Keynote highlight shorts
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: high
+    priority: 1
+    video_query:
+    reel_query: keynote highlights shorts
+    order: viewCount
+    enabled: true
+  - id: big-tech-shorts
+    category: Big Tech Company Tracking
+    concept: Big Tech short-form updates
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: medium
+    priority: 1
+    video_query:
+    reel_query: Apple Google Microsoft Meta shorts
+    order: viewCount
+    enabled: true
