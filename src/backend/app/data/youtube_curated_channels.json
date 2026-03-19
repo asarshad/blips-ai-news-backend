@@ -295,8 +295,8 @@
     "role": "news",
     "content_format": "long_form",
     "daily_cap": 2,
-    "daily_reel_cap": 1,
-    "allow_reels": true,
+    "daily_reel_cap": 0,
+    "allow_reels": false,
     "quality_tier": "premium"
   },
   {
@@ -946,8 +946,8 @@
     "role": "news",
     "content_format": "long_form",
     "daily_cap": 2,
-    "daily_reel_cap": 1,
-    "allow_reels": true,
+    "daily_reel_cap": 0,
+    "allow_reels": false,
     "quality_tier": "premium",
     "bootstrap_on_add": true
   },

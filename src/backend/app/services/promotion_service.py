@@ -240,6 +240,36 @@ _VIDEO_LEAK_PATTERNS: list[re.Pattern[str]] = [
         r"\bchina\s+summit\b",
     ]
 ]
+_BROAD_NEWS_SOURCE_NAMES = {
+    "reuters",
+    "bloomberg technology",
+    "cnbc television",
+    "the wall street journal",
+}
+_BROAD_NEWS_LEAK_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"^live:",
+        r"\blive\b",
+        r"\bbriefing\b",
+        r"\bcommittee\b",
+        r"\bcongress\b",
+        r"\bhouse\s+oversight\b",
+        r"\bwhite\s+house\b",
+        r"\bpresident\b",
+        r"\bimmigration\b",
+        r"\belection\b",
+        r"\bcampaign\b",
+        r"\bmaga\b",
+        r"\bfed\b",
+        r"\bfomc\b",
+        r"\brates?\b",
+        r"\bhawkish\b",
+        r"\binflation\b",
+        r"\bmarkets?\b",
+        r"\bcrypto\s+world\b",
+    ]
+]
 
 
 def compute_clickbait_penalty(title: str) -> float:
@@ -492,6 +522,22 @@ def _resolve_content_format(
     return None
 
 
+def _is_broad_news_source(
+    item: ContentItem,
+    channel_config: ChannelConfig | None,
+    source_profile: VideoSourceProfile | None,
+) -> bool:
+    if channel_config is not None:
+        source_name = channel_config.name
+    elif source_profile is not None:
+        source_name = source_profile.channel_name
+    else:
+        source_name = getattr(item, "source", None)
+    if not isinstance(source_name, str):
+        return False
+    return source_name.strip().lower() in _BROAD_NEWS_SOURCE_NAMES
+
+
 def compute_editorial_tech_score(
     item: ContentItem,
     *,
@@ -554,8 +600,18 @@ def classify_promotion_block(
     lane = _safe_text(getattr(item, "acquisition_lane", None))
     source_status = _safe_text(getattr(item, "source_status", None))
     title = getattr(item, "title", "") if isinstance(getattr(item, "title", None), str) else ""
+    broad_news_source = _is_broad_news_source(item, channel_config, source_profile)
 
     if content_type == ContentType.REEL:
+        if (
+            broad_news_source
+            and role == ChannelRole.NEWS
+            and content_format == ContentFormat.LONG_FORM
+        ):
+            if any(pattern.search(title) for pattern in _BROAD_NEWS_LEAK_PATTERNS):
+                return "off_topic_broad_news_reel"
+            if story_importance < 0.28 and tech_score < 0.24:
+                return "weak_broad_news_reel"
         if story_importance < 0.08 and tech_score < 0.32:
             return "weak_editorial_reel"
         if lane in {"search", "trending"} and source_status not in {"core", "rotation"}:
@@ -569,8 +625,14 @@ def classify_promotion_block(
         and role == ChannelRole.NEWS
         and content_format == ContentFormat.LONG_FORM
     ):
+        if broad_news_source and any(
+            pattern.search(title) for pattern in _BROAD_NEWS_LEAK_PATTERNS
+        ):
+            return "off_topic_broad_news_video"
         if any(pattern.search(title) for pattern in _VIDEO_LEAK_PATTERNS):
             return "off_topic_news_video"
+        if broad_news_source and story_importance < 0.28 and tech_score < 0.22:
+            return "weak_broad_news_video"
         if story_importance < 0.20 and tech_score < 0.38:
             return "weak_tech_signal_video"
 
@@ -857,7 +919,15 @@ class PromotionService:
             )
             .all()
         )
+        source_profiles = self._get_source_profiles(promoted_items)
         count = 0
+        demote_reasons = {
+            "off_topic_news_video",
+            "off_topic_broad_news_video",
+            "weak_broad_news_video",
+            "off_topic_broad_news_reel",
+            "weak_broad_news_reel",
+        }
         for item in promoted_items:
             item.promotion_score = score_candidate(
                 item,
@@ -874,6 +944,20 @@ class PromotionService:
                 story_topic_counts=story_topic_counts,
                 story_entity_counts=story_entity_counts,
             )
+            source_profile = source_profiles.get(getattr(item, "channel_id", None) or "")
+            channel_config = _channel_config_for_item(item)
+            block_reason = classify_promotion_block(
+                item,
+                content_type,
+                story_topic_counts=story_topic_counts or {},
+                story_entity_counts=story_entity_counts or {},
+                channel_config=channel_config,
+                source_profile=source_profile,
+            )
+            if block_reason:
+                item.promotion_reason = f"{item.promotion_reason}|blocked={block_reason}"
+            if block_reason in demote_reasons:
+                item.curation_status = ContentStatus.CANDIDATE
             count += 1
         return count
 
