@@ -7,7 +7,11 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.repositories.content_repo import ContentItemRepository
-from app.video_surface_rules import effective_content_type, surface_content_filter
+from app.video_surface_rules import (
+    effective_content_type,
+    surface_content_filter,
+    visible_promotion_filter,
+)
 
 
 @compiles(JSONB, "sqlite")
@@ -131,3 +135,73 @@ def test_get_items_for_playlist_respects_video_reel_surface_split():
 
     assert video_titles == {"Regular video"}
     assert reel_titles == {"Explicit Shorts URL", "Native reel"}
+
+
+def test_visible_promotion_filter_excludes_blocked_promoted_items():
+    engine = create_engine("sqlite:///:memory:")
+    ContentItem.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    clean_video = _make_item(
+        item_type=ContentType.VIDEO,
+        source_url="https://www.youtube.com/watch?v=watch123",
+        title="Clean promoted video",
+    )
+    blocked_video = _make_item(
+        item_type=ContentType.VIDEO,
+        source_url="https://www.youtube.com/watch?v=watch456",
+        title="Blocked promoted video",
+    )
+    blocked_video.promotion_reason = (
+        "curated|core|fit=0.55|vph=0.0|story=0.00|blocked=weak_tech_signal_video"
+    )
+
+    db.add_all([clean_video, blocked_video])
+    db.commit()
+
+    visible_titles = {
+        row.title
+        for row in db.query(ContentItem)
+        .filter(surface_content_filter("videos"), visible_promotion_filter())
+        .all()
+    }
+
+    assert visible_titles == {"Clean promoted video"}
+
+
+def test_get_items_for_playlist_excludes_blocked_promoted_items():
+    engine = create_engine("sqlite:///:memory:")
+    ContentItem.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    clean_video = _make_item(
+        item_type=ContentType.VIDEO,
+        source_url="https://www.youtube.com/watch?v=watch123",
+        title="Clean promoted video",
+    )
+    blocked_video = _make_item(
+        item_type=ContentType.VIDEO,
+        source_url="https://www.youtube.com/watch?v=watch456",
+        title="Blocked promoted video",
+    )
+    blocked_video.promotion_reason = (
+        "curated|core|fit=0.55|vph=0.0|story=0.00|blocked=weak_tech_signal_video"
+    )
+
+    db.add_all([clean_video, blocked_video])
+    db.commit()
+
+    repo = ContentItemRepository(db)
+    video_titles = {
+        row.title
+        for row in repo.get_items_for_playlist(
+            content_type=ContentType.VIDEO,
+            hours_back=72,
+            limit=50,
+            ai_processed_only=False,
+        )
+    }
+
+    assert video_titles == {"Clean promoted video"}

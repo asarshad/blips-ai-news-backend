@@ -25,7 +25,7 @@ from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.services.video_content_policy import apply_content_policy
 from app.video_age_policy import build_surface_age_filters, make_default_policy
-from app.video_surface_rules import surface_content_filter
+from app.video_surface_rules import surface_content_filter, visible_promotion_filter
 
 logger = get_logger(__name__)
 
@@ -202,6 +202,7 @@ def compute_surface_health(
     # CANDIDATE stubs are invisible in feeds and must not inflate tier counts.
     base_filter = and_(
         surface_content_filter(surface.value),
+        visible_promotion_filter(),
         ContentItem.is_suppressed.is_(False),
         ContentItem.curation_status == ContentStatus.PROMOTED,
     )

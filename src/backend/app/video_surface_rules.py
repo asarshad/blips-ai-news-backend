@@ -55,3 +55,11 @@ def surface_content_filter(surface_name: str):
         )
 
     return ContentItem.type == ContentType.ARTICLE
+
+
+def visible_promotion_filter():
+    """Exclude promoted items that were later flagged as blocked during rescoring."""
+    return or_(
+        ContentItem.promotion_reason.is_(None),
+        not_(ContentItem.promotion_reason.like("%|blocked=%")),
+    )

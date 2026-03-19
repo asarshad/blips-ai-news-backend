@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.repositories.base import BaseRepository
-from app.video_surface_rules import surface_content_filter
+from app.video_surface_rules import surface_content_filter, visible_promotion_filter
 
 # Items with language=NULL are legacy rows inserted before language detection
 # was added. Treat them as English to avoid breaking the feed for existing data.
@@ -288,6 +288,7 @@ class ContentItemRepository(BaseRepository[ContentItem]):
 
         query = self.db.query(ContentItem).filter(
             type_filter,
+            visible_promotion_filter(),
             ContentItem.published_at >= cutoff,
             ContentItem.is_suppressed.is_(False),
             ContentItem.curation_status == ContentStatus.PROMOTED,

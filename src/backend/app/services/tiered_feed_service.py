@@ -16,28 +16,50 @@ Each item is annotated with:
 Includes Redis caching for performance with short TTL.
 """
 
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import and_, desc, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.content import ContentItem, ContentStatus, ContentType, EventType
+from app.repositories.user_repo import InteractionEventRepository
 from app.services.diversity_mixer import enforce_channel_caps, mix_feed
 from app.services.inventory_service import FreshnessTier, Surface, _get_surface_config
 from app.services.video_content_policy import apply_content_policy
 from app.services.video_hybrid_rerank import rerank_video_candidates
 from app.video_age_policy import build_surface_age_filters, make_default_policy
-from app.video_surface_rules import effective_content_type, surface_content_filter
+from app.video_surface_rules import (
+    effective_content_type,
+    surface_content_filter,
+    visible_promotion_filter,
+)
 
 logger = get_logger(__name__)
 
 # Cache TTL for tiered feed (seconds)
 TIERED_FEED_CACHE_TTL = 45  # 45 seconds - balance freshness vs DB load
+CONSUMED_SUPPRESSION_HOURS = 24
+EXPOSED_DEMOTION_HOURS = 6
+ARTICLE_CONSUMED_EVENTS = {
+    EventType.OPEN_SOURCE,
+    EventType.SHARE,
+    EventType.SAVE,
+    EventType.CHAT_START,
+    EventType.CHAT_MESSAGE,
+}
+VIDEO_CONSUMED_EVENTS = ARTICLE_CONSUMED_EVENTS | {
+    EventType.VIDEO_SAVE,
+    EventType.VIDEO_SHARE,
+    EventType.VIDEO_50PCT,
+    EventType.VIDEO_95PCT,
+}
+VIDEO_EXPOSED_EVENTS = {EventType.VIDEO_IMPRESSION}
 
 
 @dataclass
@@ -70,12 +92,17 @@ def _cache_key(
     offset: int,
     require_ai: bool,
     hybrid_video_rerank: bool,
+    device_id: Optional[str] = None,
 ) -> str:
     """Generate cache key for tiered feed."""
-    return (
+    base_key = (
         f"blips:tiered_feed:{surface.value}:l{limit}:o{offset}:ai{int(require_ai)}:"
         f"hybrid{int(hybrid_video_rerank)}"
     )
+    if not device_id:
+        return base_key
+    device_hash = hashlib.md5(device_id.encode()).hexdigest()[:12]
+    return f"{base_key}:d{device_hash}"
 
 
 def invalidate_tiered_feed_cache(surface: Optional[Surface] = None):
@@ -147,6 +174,7 @@ def get_tiered_feed(
     now: Optional[datetime] = None,
     require_ai_processed: bool = True,
     hybrid_video_rerank: bool = False,
+    device_id: Optional[str] = None,
 ) -> Tuple[List[TieredItem], bool, int]:
     """
     Get a tiered blend of content items for a surface.
@@ -179,6 +207,7 @@ def get_tiered_feed(
     # Base filter
     base_filter = and_(
         surface_content_filter(surface.value),
+        visible_promotion_filter(),
         ContentItem.is_suppressed.is_(False),
         ContentItem.curation_status == ContentStatus.PROMOTED,
     )
@@ -326,6 +355,14 @@ def get_tiered_feed(
     # Apply diversity mixing to the combined candidates
     # =========================================================================
     # Extract raw items for mixing
+    consumed_ids, exposed_ids = _get_recent_feedback_ids(db, device_id, surface)
+    if consumed_ids:
+        results = [tiered for tiered in results if tiered.item.id not in consumed_ids]
+    if exposed_ids:
+        promoted = [tiered for tiered in results if tiered.item.id not in exposed_ids]
+        demoted = [tiered for tiered in results if tiered.item.id in exposed_ids]
+        results = promoted + demoted
+
     raw_items = [t.item for t in results]
 
     if surface == Surface.VIDEOS and hybrid_video_rerank:
@@ -464,6 +501,7 @@ def get_cached_tiered_feed(
     offset: int = 0,
     require_ai_processed: bool = True,
     hybrid_video_rerank: bool = False,
+    device_id: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], bool, FeedResponseMeta]:
     """
     Get tiered feed with Redis caching.
@@ -488,6 +526,7 @@ def get_cached_tiered_feed(
         offset,
         require_ai_processed,
         hybrid_video_rerank,
+        device_id,
     )
     redis_client = _get_redis_client()
     cfg = _get_surface_config(surface)
@@ -531,6 +570,7 @@ def get_cached_tiered_feed(
         offset=offset,
         require_ai_processed=require_ai_processed,
         hybrid_video_rerank=hybrid_video_rerank,
+        device_id=device_id,
     )
 
     items = [tiered_item_to_dict(t) for t in tiered_items]
@@ -572,3 +612,29 @@ def get_cached_tiered_feed(
         remaining_window_count=remaining_window_count,
     )
     return items, has_more, meta
+
+
+def _get_recent_feedback_ids(
+    db: Session,
+    device_id: Optional[str],
+    surface: Surface,
+) -> Tuple[Set[int], Set[int]]:
+    """Return consumed ids and exposed-only ids for device-scoped fresh sessions."""
+    if not device_id:
+        return set(), set()
+
+    interaction_repo = InteractionEventRepository(db)
+    if surface == Surface.ARTICLES:
+        consumed_event_types = ARTICLE_CONSUMED_EVENTS
+        exposed_event_types: Set[EventType] = set()
+    else:
+        consumed_event_types = VIDEO_CONSUMED_EVENTS
+        exposed_event_types = VIDEO_EXPOSED_EVENTS
+
+    return interaction_repo.get_recent_feedback_ids(
+        device_id=device_id,
+        consumed_event_types=consumed_event_types,
+        consumed_hours=CONSUMED_SUPPRESSION_HOURS,
+        exposed_event_types=exposed_event_types,
+        exposed_hours=EXPOSED_DEMOTION_HOURS,
+    )
