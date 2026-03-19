@@ -377,6 +377,58 @@ class TestEditorialGates:
 
         assert reason == "off_topic_news_video"
 
+    def test_classify_promotion_block_rejects_broad_news_live_video(self):
+        item = self._make_item(
+            "LIVE: Halls of Congress as Bondi and Blanche give briefing to House Oversight Committee",
+            summary="Reuters live politics coverage.",
+        )
+        item.acquisition_lane = "curated"
+        item.source_status = "core"
+        item.source = "Reuters"
+
+        reason = classify_promotion_block(
+            item,
+            ContentType.VIDEO,
+            story_topic_counts={},
+            story_entity_counts={},
+            channel_config=ChannelConfig(
+                channel_id="channel-1",
+                name="Reuters",
+                role=ChannelRole.NEWS,
+                content_format=ContentFormat.LONG_FORM,
+                daily_cap=2,
+                quality_tier=QualityTier.PREMIUM,
+            ),
+        )
+
+        assert reason == "off_topic_broad_news_video"
+
+    def test_classify_promotion_block_rejects_broad_news_politics_reel(self):
+        item = self._make_item(
+            "Stratton’s Illinois win signals Democratic shift left on immigration",
+            summary="Reuters politics clip.",
+        )
+        item.acquisition_lane = "curated"
+        item.source_status = "core"
+        item.source = "Reuters"
+
+        reason = classify_promotion_block(
+            item,
+            ContentType.REEL,
+            story_topic_counts={},
+            story_entity_counts={},
+            channel_config=ChannelConfig(
+                channel_id="channel-1",
+                name="Reuters",
+                role=ChannelRole.NEWS,
+                content_format=ContentFormat.LONG_FORM,
+                daily_cap=2,
+                quality_tier=QualityTier.PREMIUM,
+            ),
+        )
+
+        assert reason == "off_topic_broad_news_reel"
+
 
 # ── PromotionService ──────────────────────────────────────────────────────────
 
@@ -568,3 +620,55 @@ class TestPromotionService:
         ]
         assert len(promoted) == 1
         assert result.promoted_count == 1
+
+    def test_rescore_promoted_demotes_blocked_broad_news_video(self):
+        class _Query:
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def all(self):
+                return [item]
+
+        mock_db = MagicMock()
+        mock_db.query.return_value = _Query()
+        svc = PromotionService(mock_db)
+        item = self._make_candidate(
+            id_=99,
+            content_type=ContentType.VIDEO,
+            title="LIVE: California group proposes renaming street after Dolores Huerta",
+        )
+        item.curation_status = ContentStatus.PROMOTED
+        item.source = "Reuters"
+        item.channel_id = "reuters-1"
+
+        with (
+            patch(
+                "app.services.promotion_service.apply_content_policy",
+                side_effect=lambda q, **_kw: q,
+            ),
+            patch.object(svc, "_get_source_profiles", return_value={}),
+            patch(
+                "app.services.promotion_service._channel_config_for_item",
+                return_value=ChannelConfig(
+                    channel_id="reuters-1",
+                    name="Reuters",
+                    role=ChannelRole.NEWS,
+                    content_format=ContentFormat.LONG_FORM,
+                    daily_cap=2,
+                    quality_tier=QualityTier.PREMIUM,
+                ),
+            ),
+        ):
+            rescored = svc._rescore_promoted(
+                ContentType.VIDEO,
+                {},
+                svc._config_for_type(ContentType.VIDEO),
+                promoted_topic_counts={},
+                promoted_channel_counts={},
+                story_topic_counts={},
+                story_entity_counts={},
+            )
+
+        assert rescored == 1
+        assert item.curation_status == ContentStatus.CANDIDATE
+        assert "blocked=off_topic_broad_news_video" in item.promotion_reason
