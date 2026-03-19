@@ -262,9 +262,13 @@ def record_interaction(
     if event_type in (
         EventType.SAVE,
         EventType.SHARE,
+        EventType.OPEN_SOURCE,
         EventType.VIDEO_SAVE,
         EventType.VIDEO_SHARE,
+        EventType.VIDEO_50PCT,
+        EventType.VIDEO_95PCT,
         EventType.CHAT_START,
+        EventType.CHAT_MESSAGE,
         EventType.LESS_FROM_CREATOR,
     ):
         playlist_service.invalidate_user_cache(device_id)

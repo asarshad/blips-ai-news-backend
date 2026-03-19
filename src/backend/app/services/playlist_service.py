@@ -22,9 +22,13 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.models.content import ContentItem, ContentType
+from app.models.content import ContentItem, ContentType, EventType
 from app.repositories.content_repo import ContentItemRepository
-from app.repositories.user_repo import UserPreferenceRepository, UserProfileRepository
+from app.repositories.user_repo import (
+    InteractionEventRepository,
+    UserPreferenceRepository,
+    UserProfileRepository,
+)
 from app.services.multi_factor_ranking_service import MultiFactorRankingService
 from app.services.personalization_service import PersonalizationService
 from app.video_surface_rules import effective_content_type, has_explicit_shorts_url
@@ -52,6 +56,24 @@ MIN_UNIQUE_SOURCES = 3
 MAX_CONTENT_AGE_HOURS = 72  # 3 days
 FALLBACK_CONTENT_AGE_HOURS = 168  # 7 days fallback when no fresh approvals
 PREFER_CANONICAL_WEIGHT = 0.7  # 70% canonical, 30% fresh
+CONSUMED_SUPPRESSION_HOURS = 24
+EXPOSED_DEMOTION_HOURS = 6
+EXPOSED_ONLY_DEMOTION_MULTIPLIER = 0.65
+
+ARTICLE_CONSUMED_EVENTS = {
+    EventType.OPEN_SOURCE,
+    EventType.SHARE,
+    EventType.SAVE,
+    EventType.CHAT_START,
+    EventType.CHAT_MESSAGE,
+}
+VIDEO_CONSUMED_EVENTS = ARTICLE_CONSUMED_EVENTS | {
+    EventType.VIDEO_SAVE,
+    EventType.VIDEO_SHARE,
+    EventType.VIDEO_50PCT,
+    EventType.VIDEO_95PCT,
+}
+VIDEO_EXPOSED_EVENTS = {EventType.VIDEO_IMPRESSION}
 
 # Cache configuration
 PLAYLIST_CACHE_TTL_SECONDS = 300  # 5 minutes
@@ -77,12 +99,14 @@ class PlaylistService:
         profile_repo: UserProfileRepository,
         preference_repo: UserPreferenceRepository,
         personalization_service: PersonalizationService,
+        interaction_repo: Optional[InteractionEventRepository] = None,
         ranking_service: Optional[MultiFactorRankingService] = None,
         redis_client=None,
     ):
         self.content_repo = content_repo
         self.profile_repo = profile_repo
         self.preference_repo = preference_repo
+        self.interaction_repo = interaction_repo
         self.personalization = personalization_service
         self.ranking_service = ranking_service or MultiFactorRankingService()
         self.redis = redis_client
@@ -211,15 +235,23 @@ class PlaylistService:
         self, device_id: str, content_type: ContentType, size: int
     ) -> List[ContentItem]:
         """Generate selected content items (pre-format) for a new playlist."""
+        consumed_ids, exposed_ids = self._get_recent_feedback_ids(device_id, content_type)
+
         # Get candidate items
         candidates = self._get_candidates(content_type)
+        if consumed_ids:
+            candidates = [item for item in candidates if item.id not in consumed_ids]
 
         if not candidates:
             logger.warning(f"No candidates found for {content_type}")
             return []
 
         # Score candidates with personalization
-        scored_candidates = self._score_candidates(device_id, candidates)
+        scored_candidates = self._score_candidates(
+            device_id,
+            candidates,
+            demoted_ids=exposed_ids,
+        )
 
         # Select items with diversity constraints
         selected = self._select_diverse_items(scored_candidates, size)
@@ -271,10 +303,16 @@ class PlaylistService:
         if not fallback_candidates:
             return selected_items
 
+        consumed_ids, exposed_ids = self._get_recent_feedback_ids(device_id, content_type)
         selected_ids = {item.id for item in selected_items}
         scored = self._score_candidates(
             device_id,
-            [item for item in fallback_candidates if item.id not in selected_ids],
+            [
+                item
+                for item in fallback_candidates
+                if item.id not in selected_ids and item.id not in consumed_ids
+            ],
+            demoted_ids=exposed_ids,
         )
         return self._relaxed_fill_items(selected_items, scored, target_size)
 
@@ -299,7 +337,13 @@ class PlaylistService:
         if not fallback_candidates:
             return []
 
-        scored = self._score_candidates(device_id, fallback_candidates)
+        consumed_ids, exposed_ids = self._get_recent_feedback_ids(device_id, content_type)
+        eligible_candidates = [item for item in fallback_candidates if item.id not in consumed_ids]
+        scored = self._score_candidates(
+            device_id,
+            eligible_candidates,
+            demoted_ids=exposed_ids,
+        )
         selected = self._select_diverse_items(scored, MAX_PLAYLIST_SIZE)
         selected = self._relaxed_fill_items(selected, scored, MAX_PLAYLIST_SIZE)
         logger.info("Serving historical fallback playlist for %s", content_type.value)
@@ -330,22 +374,51 @@ class PlaylistService:
         return unique
 
     def _score_candidates(
-        self, device_id: str, candidates: List[ContentItem]
+        self,
+        device_id: str,
+        candidates: List[ContentItem],
+        *,
+        demoted_ids: Optional[Set[int]] = None,
     ) -> List[Tuple[ContentItem, float]]:
         """Score candidates with multi-factor ranking."""
         scored = []
+        demoted_ids = demoted_ids or set()
 
         for item in candidates:
             personalization = self.personalization.compute_personalization_score(device_id, item)
             final_score = self.ranking_service.score_item(
                 item, personalization_score=personalization
             )
+            if item.id in demoted_ids:
+                final_score *= EXPOSED_ONLY_DEMOTION_MULTIPLIER
             scored.append((item, final_score))
 
         # Sort by score descending
         scored.sort(key=lambda x: x[1], reverse=True)
 
         return scored
+
+    def _get_recent_feedback_ids(
+        self, device_id: str, content_type: ContentType
+    ) -> Tuple[Set[int], Set[int]]:
+        """Return consumed ids and exposed-only ids for fresh-session generation."""
+        if not self.interaction_repo:
+            return set(), set()
+
+        if content_type == ContentType.ARTICLE:
+            consumed_event_types = ARTICLE_CONSUMED_EVENTS
+            exposed_event_types: Set[EventType] = set()
+        else:
+            consumed_event_types = VIDEO_CONSUMED_EVENTS
+            exposed_event_types = VIDEO_EXPOSED_EVENTS
+
+        return self.interaction_repo.get_recent_feedback_ids(
+            device_id=device_id,
+            consumed_event_types=consumed_event_types,
+            consumed_hours=CONSUMED_SUPPRESSION_HOURS,
+            exposed_event_types=exposed_event_types,
+            exposed_hours=EXPOSED_DEMOTION_HOURS,
+        )
 
     def _select_diverse_items(
         self, scored_candidates: List[Tuple[ContentItem, float]], size: int
@@ -631,5 +704,6 @@ def create_playlist_service(db_session, redis_client=None) -> PlaylistService:
         profile_repo=profile_repo,
         preference_repo=preference_repo,
         personalization_service=personalization,
+        interaction_repo=event_repo,
         redis_client=redis_client,
     )
