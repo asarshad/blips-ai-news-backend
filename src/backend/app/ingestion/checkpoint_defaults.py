@@ -18,7 +18,7 @@ from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.services.video_content_policy import apply_content_policy
 from app.video_age_policy import build_surface_age_filters, make_default_policy
-from app.video_surface_rules import surface_content_filter
+from app.video_surface_rules import surface_content_filter, visible_promotion_filter
 
 logger = get_logger(__name__)
 
@@ -74,6 +74,7 @@ def _fresh_promoted_count(db, content_type: ContentType, *, hours: int) -> int:
 
     filters = [
         content_filter,
+        visible_promotion_filter(),
         ContentItem.curation_status == ContentStatus.PROMOTED,
         ContentItem.is_suppressed.is_(False),
     ]
