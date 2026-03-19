@@ -8666,6 +8666,24 @@
               "description": "Cursor returned by the previous page",
               "title": "Cursor"
             }
+          },
+          {
+            "description": "Optional device identifier",
+            "in": "header",
+            "name": "x-device-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional device identifier",
+              "title": "X-Device-Id"
+            }
           }
         ],
         "responses": {
@@ -8733,6 +8751,24 @@
               ],
               "description": "Cursor returned by the previous page",
               "title": "Cursor"
+            }
+          },
+          {
+            "description": "Optional device identifier",
+            "in": "header",
+            "name": "x-device-id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional device identifier",
+              "title": "X-Device-Id"
             }
           }
         ],
