@@ -672,3 +672,55 @@ class TestPromotionService:
         assert rescored == 1
         assert item.curation_status == ContentStatus.CANDIDATE
         assert "blocked=off_topic_broad_news_video" in item.promotion_reason
+
+    def test_rescore_promoted_demotes_weak_tech_signal_video(self):
+        class _Query:
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def all(self):
+                return [item]
+
+        mock_db = MagicMock()
+        mock_db.query.return_value = _Query()
+        svc = PromotionService(mock_db)
+        item = self._make_candidate(
+            id_=100,
+            content_type=ContentType.VIDEO,
+            title="Next generation of tech winners to emerge outside of U.S., says Tekne Capital's Kothari",
+        )
+        item.curation_status = ContentStatus.PROMOTED
+        item.source = "CNBC Television"
+        item.channel_id = "cnbc-1"
+
+        with (
+            patch(
+                "app.services.promotion_service.apply_content_policy",
+                side_effect=lambda q, **_kw: q,
+            ),
+            patch.object(svc, "_get_source_profiles", return_value={}),
+            patch(
+                "app.services.promotion_service._channel_config_for_item",
+                return_value=ChannelConfig(
+                    channel_id="cnbc-1",
+                    name="CNBC Television",
+                    role=ChannelRole.NEWS,
+                    content_format=ContentFormat.LONG_FORM,
+                    daily_cap=2,
+                    quality_tier=QualityTier.PREMIUM,
+                ),
+            ),
+        ):
+            rescored = svc._rescore_promoted(
+                ContentType.VIDEO,
+                {},
+                svc._config_for_type(ContentType.VIDEO),
+                promoted_topic_counts={},
+                promoted_channel_counts={},
+                story_topic_counts={},
+                story_entity_counts={},
+            )
+
+        assert rescored == 1
+        assert item.curation_status == ContentStatus.CANDIDATE
+        assert "blocked=weak_tech_signal_video" in item.promotion_reason

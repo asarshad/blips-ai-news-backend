@@ -925,6 +925,7 @@ class PromotionService:
             "off_topic_news_video",
             "off_topic_broad_news_video",
             "weak_broad_news_video",
+            "weak_tech_signal_video",
             "off_topic_broad_news_reel",
             "weak_broad_news_reel",
         }
