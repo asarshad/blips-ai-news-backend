@@ -5,7 +5,7 @@ Handles user profile management and preference learning.
 """
 
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
@@ -285,6 +285,52 @@ class InteractionEventRepository(BaseRepository[InteractionEvent]):
         )
 
         return [r[0] for r in results]
+
+    def get_recent_feedback_ids(
+        self,
+        device_id: str,
+        *,
+        consumed_event_types: Set[EventType],
+        consumed_hours: int,
+        exposed_event_types: Optional[Set[EventType]] = None,
+        exposed_hours: int = 0,
+    ) -> Tuple[Set[int], Set[int]]:
+        """Return recent consumed and exposed-only content ids for a device."""
+        relevant_event_types = set(consumed_event_types)
+        if exposed_event_types:
+            relevant_event_types.update(exposed_event_types)
+
+        if not relevant_event_types:
+            return set(), set()
+
+        max_hours = max(consumed_hours, exposed_hours)
+        events = self.get_user_events(
+            device_id=device_id,
+            hours_back=max_hours,
+            event_types=list(relevant_event_types),
+        )
+
+        now = datetime.utcnow()
+        consumed_cutoff = now - timedelta(hours=consumed_hours)
+        exposed_cutoff = now - timedelta(hours=exposed_hours)
+
+        consumed_ids: Set[int] = set()
+        exposed_ids: Set[int] = set()
+
+        for event in events:
+            if event.event_type in consumed_event_types and event.created_at >= consumed_cutoff:
+                consumed_ids.add(event.content_item_id)
+                continue
+
+            if (
+                exposed_event_types
+                and event.event_type in exposed_event_types
+                and event.created_at >= exposed_cutoff
+            ):
+                exposed_ids.add(event.content_item_id)
+
+        exposed_ids.difference_update(consumed_ids)
+        return consumed_ids, exposed_ids
 
     def get_engagement_stats(self, content_item_id: int, hours_back: int = 48) -> Dict[str, int]:
         """Get engagement statistics for a content item."""

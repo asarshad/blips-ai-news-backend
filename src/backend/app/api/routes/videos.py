@@ -6,7 +6,7 @@ Includes tiered freshness strategy (A/B/C) and diversity mixing.
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.api.feed_headers import FeedMetadata, compute_feed_version
@@ -79,6 +79,7 @@ def get_recent_videos(
     limit: int = Query(10, ge=1, le=50, description="Number of videos to return"),
     cursor: Optional[str] = Query(None, description="Cursor returned by the previous page"),
     page: Optional[int] = Query(None, ge=1, include_in_schema=False),
+    x_device_id: Optional[str] = Header(None, description="Optional device identifier"),
     response: Response = None,
     db: Session = Depends(get_db),
     flags: FeatureFlags = Depends(get_feature_flags),
@@ -112,6 +113,7 @@ def get_recent_videos(
         offset=offset,
         require_ai_processed=False,
         hybrid_video_rerank=flags.is_enabled("video_hybrid_rerank"),
+        device_id=x_device_id,
     )
 
     # Log tier distribution (from cached results)
@@ -161,6 +163,7 @@ def get_reels(
     limit: int = Query(10, ge=1, le=50, description="Number of reels to return"),
     cursor: Optional[str] = Query(None, description="Cursor returned by the previous page"),
     page: Optional[int] = Query(None, ge=1, include_in_schema=False),
+    x_device_id: Optional[str] = Header(None, description="Optional device identifier"),
     response: Response = None,
     db: Session = Depends(get_db),
     flags: FeatureFlags = Depends(get_feature_flags),
@@ -193,6 +196,7 @@ def get_reels(
         offset=offset,
         require_ai_processed=False,  # Reels don't need AI processing
         hybrid_video_rerank=False,
+        device_id=x_device_id,
     )
 
     # Log tier distribution (from cached results)

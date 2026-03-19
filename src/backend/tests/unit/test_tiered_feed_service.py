@@ -73,3 +73,17 @@ def test_cache_key_separates_hybrid_video_rerank_variants():
     assert base_key != hybrid_key
     assert base_key.endswith("hybrid0")
     assert hybrid_key.endswith("hybrid1")
+
+
+def test_cache_key_includes_device_hash_when_personalized():
+    personalized_key = _cache_key(
+        surface=SimpleNamespace(value="videos"),
+        limit=20,
+        offset=0,
+        require_ai=False,
+        hybrid_video_rerank=False,
+        device_id="device-12345678",
+    )
+
+    assert personalized_key.startswith("blips:tiered_feed:videos:")
+    assert ":d" in personalized_key
