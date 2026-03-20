@@ -912,7 +912,7 @@ def ui_dashboard(
         limit=20,
         offset=0,
         require_ai_processed=False,
-        hybrid_video_rerank=False,
+        hybrid_video_rerank=hybrid_video_rerank,
     )
     reel_page_two, _, reel_meta_two = get_cached_tiered_feed(
         db,
@@ -920,7 +920,7 @@ def ui_dashboard(
         limit=20,
         offset=20,
         require_ai_processed=False,
-        hybrid_video_rerank=False,
+        hybrid_video_rerank=hybrid_video_rerank,
     )
 
     video_window = _summarize_feed_window(

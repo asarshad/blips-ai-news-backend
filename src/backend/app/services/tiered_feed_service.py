@@ -377,8 +377,12 @@ def get_tiered_feed(
     primary_items = [tiered.item for tiered in primary_results]
     demoted_items = [tiered.item for tiered in demoted_results]
 
-    if surface == Surface.VIDEOS and hybrid_video_rerank:
-        primary_items = rerank_video_candidates(primary_items, target_count=target_count)
+    if surface in (Surface.VIDEOS, Surface.REELS) and hybrid_video_rerank:
+        primary_items = rerank_video_candidates(
+            primary_items,
+            target_count=target_count,
+            surface=surface.value,
+        )
 
     # Mix for diversity (this returns a subset in mixed order)
     surface_name = surface.value
@@ -387,8 +391,12 @@ def get_tiered_feed(
     mixed_demoted_items: List[ContentItem] = []
     if len(mixed_primary_items) < target_count and demoted_items:
         remaining = target_count - len(mixed_primary_items)
-        if surface == Surface.VIDEOS and hybrid_video_rerank:
-            demoted_items = rerank_video_candidates(demoted_items, target_count=remaining)
+        if surface in (Surface.VIDEOS, Surface.REELS) and hybrid_video_rerank:
+            demoted_items = rerank_video_candidates(
+                demoted_items,
+                target_count=remaining,
+                surface=surface.value,
+            )
         mixed_demoted_items = mix_feed(
             demoted_items,
             surface=surface_name,

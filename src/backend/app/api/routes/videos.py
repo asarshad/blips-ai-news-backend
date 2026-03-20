@@ -195,7 +195,7 @@ def get_reels(
         limit=limit,
         offset=offset,
         require_ai_processed=False,  # Reels don't need AI processing
-        hybrid_video_rerank=False,
+        hybrid_video_rerank=flags.is_enabled("video_hybrid_rerank"),
         device_id=x_device_id,
     )
 

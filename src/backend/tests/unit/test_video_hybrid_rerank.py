@@ -16,11 +16,13 @@ def _item(
     promotion_score: float,
     global_score: float,
     quality_score: float = 0.7,
+    channel_id: str | None = None,
 ):
     published_at = datetime.now(timezone.utc) - timedelta(hours=hours_old)
     return SimpleNamespace(
         id=item_id,
         source=source,
+        channel_id=channel_id or source.lower().replace(" ", "-"),
         title=title,
         topics=[{"name": "Technology"}],
         entities=[{"name": "Apple"}],
@@ -116,3 +118,45 @@ def test_rerank_limits_single_source_in_shaped_prefix(monkeypatch):
 
     assert first_five_sources.count("Dominant Source") <= 4
     assert any(source.startswith("Alternative") for source in first_five_sources)
+
+
+def test_rerank_reels_penalizes_repeated_creators_more_than_videos(monkeypatch):
+    curated_config = SimpleNamespace(
+        role=ChannelRole.EXPLAINER,
+        quality_tier=QualityTier.PREMIUM,
+    )
+    monkeypatch.setattr(
+        "app.services.video_hybrid_rerank.get_channel_by_name",
+        lambda _name: curated_config,
+    )
+
+    dominant = [
+        _item(
+            item_id=index,
+            source="Dominant Source",
+            channel_id="dominant-channel",
+            title=f"Dominant clip {index}",
+            hours_old=3 + index,
+            promotion_score=0.90 - index * 0.01,
+            global_score=0.90 - index * 0.01,
+        )
+        for index in range(1, 5)
+    ]
+    alternatives = [
+        _item(
+            item_id=100 + index,
+            source=f"Alternative {index}",
+            channel_id=f"alt-{index}",
+            title=f"Alternative clip {index}",
+            hours_old=4 + index,
+            promotion_score=0.20 - index * 0.01,
+            global_score=0.20 - index * 0.01,
+        )
+        for index in range(1, 4)
+    ]
+
+    videos = rerank_video_candidates(dominant + alternatives, target_count=4, surface="videos")
+    reels = rerank_video_candidates(dominant + alternatives, target_count=4, surface="reels")
+
+    assert [item.source for item in videos[:4]].count("Dominant Source") >= 3
+    assert [item.source for item in reels[:4]].count("Dominant Source") <= 2
