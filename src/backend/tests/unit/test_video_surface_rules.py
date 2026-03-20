@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import JSONB
@@ -26,7 +26,7 @@ def _make_item(
     title: str,
     video_url: str | None = None,
 ) -> ContentItem:
-    now = datetime(2026, 3, 16, 18, 0, 0)
+    now = datetime.now(UTC).replace(tzinfo=None)
     return ContentItem(
         type=item_type,
         source="Test Source",
