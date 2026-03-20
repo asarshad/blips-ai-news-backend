@@ -13,7 +13,6 @@ from app.api.routes import (
     inventory,
     metrics,
     preferences,
-    quality,
     session,
     starters,
     usage,
@@ -36,7 +35,6 @@ api_router.include_router(preferences.router, prefix="/users", tags=["preference
 api_router.include_router(admin_routes.router, prefix="/admin", tags=["admin"])
 api_router.include_router(editorial_admin_router, tags=["admin-editorial"])
 api_router.include_router(admin_ui_router, tags=["admin-ui"])
-api_router.include_router(quality.router, prefix="/quality", tags=["quality"])
 api_router.include_router(inventory.router, prefix="/inventory", tags=["inventory"])
 api_router.include_router(metrics.router, tags=["metrics"])
 
