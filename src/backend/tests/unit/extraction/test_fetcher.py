@@ -153,6 +153,51 @@ class TestFetchUrlHappyPath:
         assert isinstance(result.elapsed_ms, float)
         assert result.error is not None  # "All retries exhausted" or similar
 
+    def test_redirect_to_private_host_is_blocked(self):
+        first_response = MagicMock()
+        first_response.status_code = 302
+        first_response.headers = {"Location": "http://127.0.0.1/secret"}
+        first_response.url = "https://example.com/article"
+
+        with patch(
+            "app.extraction.fetcher.socket.getaddrinfo",
+            side_effect=[
+                [(None, None, None, None, ("93.184.216.34", 0))],
+                [(None, None, None, None, ("127.0.0.1", 0))],
+            ],
+        ):
+            with patch("app.extraction.fetcher._get_client") as mock_client:
+                mock_client.return_value.get.return_value = first_response
+                with patch("app.extraction.fetcher._rate_limit_domain"):
+                    result = fetch_url("https://example.com/article")
+
+        assert result.error is not None
+        assert "SSRF" in result.error
+
+    def test_redirect_to_public_host_is_followed(self):
+        redirect_response = MagicMock()
+        redirect_response.status_code = 302
+        redirect_response.headers = {"Location": "https://cdn.example.com/final"}
+        redirect_response.url = "https://example.com/article"
+
+        final_response = self._mock_http_response(200, body=b"<html><body>Redirected</body></html>")
+        final_response.url = "https://cdn.example.com/final"
+
+        with patch(
+            "app.extraction.fetcher.socket.getaddrinfo",
+            side_effect=[
+                [(None, None, None, None, ("93.184.216.34", 0))],
+                [(None, None, None, None, ("93.184.216.35", 0))],
+            ],
+        ):
+            with patch("app.extraction.fetcher._get_client") as mock_client:
+                mock_client.return_value.get.side_effect = [redirect_response, final_response]
+                with patch("app.extraction.fetcher._rate_limit_domain"):
+                    result = fetch_url("https://example.com/article")
+
+        assert result.status_code == 200
+        assert "Redirected" in result.html
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # _rate_limit_domain — lock released before sleeping

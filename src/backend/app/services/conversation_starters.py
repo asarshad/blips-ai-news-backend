@@ -190,9 +190,9 @@ class ConversationStartersService:
 
         except Exception as e:
             logger.error(f"Failed to generate starters for content_id={content_item.id}: {e}")
-            return self._get_default_starters(content_item)
+            return self.get_default_starters(content_item)
 
-    def _get_default_starters(self, content_item: ContentItem) -> Dict[str, List[str]]:
+    def get_default_starters(self, content_item: ContentItem) -> Dict[str, List[str]]:
         """Generate default starters based on content metadata."""
         short_title = (
             content_item.title[:40] + "..." if len(content_item.title) > 40 else content_item.title

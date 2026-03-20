@@ -142,6 +142,11 @@ class TestAdminEndpoints:
         resp = client.get("/ops/status")
         assert resp.status_code in [401, 403, 422]
 
+    def test_playlist_stats_requires_admin_key(self, client):
+        """Playlist stats should not be publicly accessible."""
+        resp = client.get("/api/v1/session/playlist-stats")
+        assert resp.status_code in [401, 403]
+
 
 class TestAIChatEndpoints:
     """Test AI chat endpoints (without actual LLM calls)."""
@@ -160,6 +165,11 @@ class TestAIChatEndpoints:
         resp = client.get("/api/v1/starters/1")
         assert resp.status_code in [200, 404, 500]
 
+    def test_legacy_conversations_endpoint_not_exposed(self, client):
+        """Legacy public conversation CRUD should not be mounted."""
+        resp = client.get("/api/v1/conversations/1")
+        assert resp.status_code == 404
+
 
 class TestRateLimiting:
     """Test rate limiting behavior."""
@@ -175,16 +185,36 @@ class TestRateLimiting:
 class TestOpenAPISpec:
     """Test OpenAPI specification."""
 
-    def test_openapi_json_available(self, client):
-        """OpenAPI spec should be available."""
-        resp = client.get("/api/v1/openapi.json")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "openapi" in data
-        assert "paths" in data
+    def test_openapi_json_hidden_when_docs_disabled(self, client):
+        """OpenAPI spec should be hidden when docs are disabled."""
+        from app.core.config import settings
 
-    def test_docs_endpoint_exists(self, client):
-        """Swagger UI should be available."""
-        resp = client.get("/docs")
-        # May redirect or return HTML
-        assert resp.status_code in [200, 307, 404]
+        original = settings.DOCS_ENABLED
+        settings.DOCS_ENABLED = False
+        try:
+            resp = client.get("/api/v1/openapi.json")
+        finally:
+            settings.DOCS_ENABLED = original
+
+        assert resp.status_code == 404
+
+    def test_docs_endpoint_hidden_when_docs_disabled(self, client):
+        """Swagger UI should not be available when docs are disabled."""
+        from app.core.config import settings
+
+        original = settings.DOCS_ENABLED
+        settings.DOCS_ENABLED = False
+        try:
+            resp = client.get("/docs")
+        finally:
+            settings.DOCS_ENABLED = original
+
+        assert resp.status_code == 404
+
+    def test_preferences_require_matching_device_header(self, client):
+        """Preferences APIs must reject callers acting on another device."""
+        resp = client.get(
+            "/api/v1/users/device-alpha/categories",
+            headers={"X-Device-ID": "device-beta"},
+        )
+        assert resp.status_code == 403

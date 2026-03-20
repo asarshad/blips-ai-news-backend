@@ -32,7 +32,7 @@ Auth rules:
 
 - `/health` does not require auth.
 - `/metrics`, `/ops/status`, `/api/v1/metrics/*`, `/api/v1/inventory/health*`, and `/api/v1/admin/*` require `X-Admin-Key`.
-- The server-rendered admin UI is under `/api/v1/admin/ui/*` and accepts `?key=$ADMIN_KEY`.
+- The server-rendered admin UI is under `/api/v1/admin/ui/*` and uses a browser login form that sets an HTTP-only session cookie.
 
 ## Core operational endpoints
 
@@ -50,7 +50,7 @@ Auth rules:
 | `POST /api/v1/admin/trigger-fetch` | `X-Admin-Key` | Manual ingestion trigger |
 | `POST /api/v1/admin/trigger-summarize` | `X-Admin-Key` | Manual AI retry trigger |
 | `POST /api/v1/admin/youtube/reset-search-cooldown` | `X-Admin-Key` | Reset YouTube discovery cooldown keys |
-| `GET /api/v1/admin/ui/` | query `key` | Operator UI entry point |
+| `GET /api/v1/admin/ui/` | browser login | Operator UI entry point |
 
 ## Quick commands
 
@@ -84,7 +84,7 @@ curl -s -X POST -H "X-Admin-Key: $ADMIN_KEY" "$HOST/api/v1/admin/maintenance/cle
 Admin UI:
 
 ```text
-https://blips-api.onrender.com/api/v1/admin/ui/?key=<ADMIN_API_KEY>
+https://blips-api.onrender.com/api/v1/admin/ui/
 ```
 
 ## Environment expectations

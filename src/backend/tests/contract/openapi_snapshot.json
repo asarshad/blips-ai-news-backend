@@ -574,6 +574,24 @@
         "title": "Body_ui_hold_api_v1_admin_ui_action__content_id__hold_post",
         "type": "object"
       },
+      "Body_ui_login_api_v1_admin_ui_login_post": {
+        "properties": {
+          "admin_key": {
+            "title": "Admin Key",
+            "type": "string"
+          },
+          "next": {
+            "default": "/api/v1/admin/ui/dashboard",
+            "title": "Next",
+            "type": "string"
+          }
+        },
+        "required": [
+          "admin_key"
+        ],
+        "title": "Body_ui_login_api_v1_admin_ui_login_post",
+        "type": "object"
+      },
       "Body_ui_promote_api_v1_admin_ui_action__content_id__promote_post": {
         "properties": {
           "key": {
@@ -1549,27 +1567,6 @@
           "content_item_id"
         ],
         "title": "ConversationCreate",
-        "type": "object"
-      },
-      "ConversationHistory": {
-        "properties": {
-          "content_item_id": {
-            "title": "Content Item Id",
-            "type": "integer"
-          },
-          "conversations": {
-            "items": {
-              "$ref": "#/components/schemas/ConversationOut"
-            },
-            "title": "Conversations",
-            "type": "array"
-          }
-        },
-        "required": [
-          "content_item_id",
-          "conversations"
-        ],
-        "title": "ConversationHistory",
         "type": "object"
       },
       "ConversationOut": {
@@ -4169,22 +4166,6 @@
         "operationId": "ui_root_api_v1_admin_ui__get",
         "parameters": [
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "X-Admin-Key",
             "required": false,
@@ -4198,6 +4179,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -4244,22 +4241,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "Referer",
             "required": false,
@@ -4289,6 +4270,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -4342,22 +4339,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "Referer",
             "required": false,
@@ -4387,6 +4368,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -4440,22 +4437,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "Referer",
             "required": false,
@@ -4485,6 +4466,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -4538,22 +4535,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "Referer",
             "required": false,
@@ -4583,6 +4564,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -4636,22 +4633,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "Referer",
             "required": false,
@@ -4681,6 +4662,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -4734,22 +4731,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "Referer",
             "required": false,
@@ -4779,6 +4760,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -4832,22 +4829,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "Referer",
             "required": false,
@@ -4877,6 +4858,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -4930,22 +4927,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "Referer",
             "required": false,
@@ -4975,6 +4956,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -5028,22 +5025,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "Referer",
             "required": false,
@@ -5073,6 +5054,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -5126,22 +5123,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "Referer",
             "required": false,
@@ -5171,6 +5152,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -5224,22 +5221,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "Referer",
             "required": false,
@@ -5269,6 +5250,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -5446,22 +5443,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "X-Admin-Key",
             "required": false,
@@ -5475,6 +5456,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -5528,22 +5525,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "X-Admin-Key",
             "required": false,
@@ -5557,6 +5538,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -5619,22 +5616,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "X-Admin-Key",
             "required": false,
@@ -5648,6 +5629,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -5674,6 +5671,162 @@
           }
         },
         "summary": "Ui Content Detail",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
+    "/api/v1/admin/ui/login": {
+      "get": {
+        "operationId": "ui_login_form_api_v1_admin_ui_login_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "flash",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Flash"
+            }
+          },
+          {
+            "in": "query",
+            "name": "next",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Login Form",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      },
+      "post": {
+        "operationId": "ui_login_api_v1_admin_ui_login_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ui_login_api_v1_admin_ui_login_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Login",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
+    "/api/v1/admin/ui/logout": {
+      "post": {
+        "operationId": "ui_logout_api_v1_admin_ui_logout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ui Logout",
         "tags": [
           "admin-ui",
           "admin-ui"
@@ -5850,22 +6003,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "X-Admin-Key",
             "required": false,
@@ -5879,6 +6016,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -5916,22 +6069,6 @@
         "operationId": "ui_review_bulk_action_api_v1_admin_ui_review_bulk_action_post",
         "parameters": [
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "Referer",
             "required": false,
@@ -5961,6 +6098,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -6022,22 +6175,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "X-Admin-Key",
             "required": false,
@@ -6051,6 +6188,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -6086,22 +6239,6 @@
         "operationId": "ui_submit_url_api_v1_admin_ui_submit_post",
         "parameters": [
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "X-Admin-Key",
             "required": false,
@@ -6115,6 +6252,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -6182,22 +6335,6 @@
             }
           },
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "X-Admin-Key",
             "required": false,
@@ -6211,6 +6348,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -6248,22 +6401,6 @@
         "operationId": "ui_video_sources_api_v1_admin_ui_video_sources_get",
         "parameters": [
           {
-            "in": "query",
-            "name": "key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Key"
-            }
-          },
-          {
             "in": "header",
             "name": "X-Admin-Key",
             "required": false,
@@ -6277,6 +6414,22 @@
                 }
               ],
               "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
             }
           }
         ],
@@ -6385,6 +6538,22 @@
                 }
               ],
               "title": "User-Agent"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Device-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Device-Id"
             }
           }
         ],
@@ -6593,142 +6762,6 @@
         "summary": "Client configuration",
         "tags": [
           "config"
-        ]
-      }
-    },
-    "/api/v1/conversations/{content_item_id}": {
-      "delete": {
-        "description": "Delete conversation history for a content item.",
-        "operationId": "delete_conversation_api_v1_conversations__content_item_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "content_item_id",
-            "required": true,
-            "schema": {
-              "title": "Content Item Id",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Conversation",
-        "tags": [
-          "conversations"
-        ]
-      },
-      "get": {
-        "description": "Get conversation history for a content item.",
-        "operationId": "get_conversations_api_v1_conversations__content_item_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "content_item_id",
-            "required": true,
-            "schema": {
-              "title": "Content Item Id",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConversationHistory"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Conversations",
-        "tags": [
-          "conversations"
-        ]
-      },
-      "post": {
-        "description": "Save a new message to the conversation history.",
-        "operationId": "save_message_api_v1_conversations__content_item_id__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "content_item_id",
-            "required": true,
-            "schema": {
-              "title": "Content Item Id",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "message",
-            "required": true,
-            "schema": {
-              "title": "Message",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sender",
-            "required": true,
-            "schema": {
-              "title": "Sender",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConversationOut"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Save Message",
-        "tags": [
-          "conversations"
         ]
       }
     },
@@ -7624,6 +7657,17 @@
       "get": {
         "description": "Get playlist generation statistics (admin endpoint).\n\nReturns candidate counts and diversity metrics per content type.",
         "operationId": "get_playlist_stats_api_v1_session_playlist_stats_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -7632,6 +7676,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Get Playlist Stats",
@@ -7662,6 +7716,22 @@
               "default": false,
               "title": "Regenerate",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
             }
           }
         ],
@@ -7705,6 +7775,15 @@
             "schema": {
               "title": "Content Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
             }
           }
         ],
@@ -7772,6 +7851,22 @@
               ],
               "title": "User-Agent"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-Device-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Device-Id"
+            }
           }
         ],
         "responses": {
@@ -7817,6 +7912,15 @@
               "title": "Device Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-Device-ID",
+            "required": true,
+            "schema": {
+              "title": "X-Device-Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -7858,6 +7962,15 @@
             "schema": {
               "description": "Device identifier",
               "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Device-ID",
+            "required": true,
+            "schema": {
+              "title": "X-Device-Id",
               "type": "string"
             }
           }

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings as _settings
 from app.core.dependencies import get_db, get_redis
-from app.core.device_id import get_device_id as _get_device_id_hashed
+from app.core.device_id import resolve_device_id
 from app.core.exceptions import (
     ArticleNotFoundError,
     ChatGenerationError,
@@ -20,7 +20,6 @@ from app.core.exceptions import (
 )
 from app.core.feature_flags import FeatureFlags, get_feature_flags
 from app.repositories.content_repo import ContentItemRepository
-from app.repositories.conversation_repo import ConversationRepository
 from app.repositories.usage_repo import UsageRepository
 from app.schemas.conversation import ConversationCreate
 from app.services.ai_chat import AiChatService
@@ -29,11 +28,6 @@ from app.services.quota_manager import QuotaManager
 _limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter()
-
-
-def _get_device_id(request: Request, user_agent: Optional[str]) -> str:
-    """Generate a hashed device ID from client IP and user agent."""
-    return _get_device_id_hashed(request, user_agent)
 
 
 @router.post("/respond")
@@ -45,6 +39,7 @@ def get_ai_response(
     redis_client: redis.Redis = Depends(get_redis),
     flags: FeatureFlags = Depends(get_feature_flags),
     user_agent: Optional[str] = Header(None),
+    x_device_id: Optional[str] = Header(None, alias="X-Device-ID"),
 ):
     """Generate AI response for a message about a content item."""
     # Check chat feature flag
@@ -53,10 +48,9 @@ def get_ai_response(
 
     # Create repositories
     content_repo = ContentItemRepository(db)
-    conversation_repo = ConversationRepository(db)
     usage_repo = UsageRepository(db)
 
-    device_id = _get_device_id(request, user_agent)
+    device_id = resolve_device_id(request, x_device_id=x_device_id, user_agent=user_agent)
 
     # Check quota
     quota_manager = QuotaManager(usage_repo, redis_client)
@@ -71,7 +65,7 @@ def get_ai_response(
         raise quota_exceeded_exception("article")
 
     # Get AI response
-    ai_service = AiChatService(content_repo, conversation_repo)
+    ai_service = AiChatService(content_repo)
 
     # Prepare history if provided
     history_dicts = None

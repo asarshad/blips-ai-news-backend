@@ -2,10 +2,11 @@
 
 from typing import List
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.core.auth import require_admin_key
 from app.core.dependencies import get_db
 from app.core.exceptions import not_found_exception
 from app.repositories.content_repo import ContentItemRepository
@@ -43,6 +44,7 @@ def get_starters(
     content_id: int,
     regenerate: bool = False,
     db: Session = Depends(get_db),
+    x_admin_key: str | None = Header(None, alias="X-Admin-Key"),
 ):
     """
     Get conversation starters for a content item.
@@ -60,14 +62,17 @@ def get_starters(
     if not content_item:
         raise not_found_exception("Content item", content_id)
 
-    # Get or generate starters
+    # Public callers may fetch cached starters, but regeneration is admin-only.
     starters_service = get_starters_service()
 
-    if regenerate or not content_item.conversation_starters:
-        starters = starters_service.generate_and_persist(content_item, force_regenerate=regenerate)
+    if regenerate:
+        require_admin_key(x_admin_key=x_admin_key)
+        starters = starters_service.generate_and_persist(content_item, force_regenerate=True)
         db.commit()
-    else:
+    elif content_item.conversation_starters:
         starters = content_item.conversation_starters
+    else:
+        starters = starters_service.get_default_starters(content_item)
 
     return StartersResponse(
         content_id=content_id,
@@ -80,6 +85,7 @@ def get_starters(
 def generate_starters(
     content_id: int,
     db: Session = Depends(get_db),
+    _admin_key: str = Depends(require_admin_key),
 ):
     """
     Force regenerate conversation starters for a content item.

@@ -296,7 +296,7 @@ app = FastAPI(
 _cors_origins: list[str] = (
     [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
     if settings.CORS_ORIGINS
-    else ["capacitor://localhost", "http://localhost"]
+    else (["capacitor://localhost", "http://localhost"] if settings.ENV != "prod" else [])
 )
 app.add_middleware(
     CORSMiddleware,
@@ -331,6 +331,20 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
 
 
 app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
+
+
+@app.middleware("http")
+async def docs_guard(request: Request, call_next):
+    """Hide documentation/schema endpoints when docs are disabled."""
+    protected_paths = {
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+        f"{settings.API_V1_STR}/openapi.json",
+    }
+    if request.url.path in protected_paths and not settings.DOCS_ENABLED:
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
+    return await call_next(request)
 
 
 # ── Redis fail-closed middleware ────────────────────────────────────────
