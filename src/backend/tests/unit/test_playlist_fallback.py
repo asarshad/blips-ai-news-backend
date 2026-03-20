@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timezone
+from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -188,6 +189,39 @@ def test_format_item_uses_effective_reel_type_for_explicit_shorts_video():
     formatted = service._format_item(shorts_item)
 
     assert formatted["type"] == ContentType.REEL.value
+
+
+def test_get_playlist_hydrates_missing_video_durations(monkeypatch):
+    content_repo = MagicMock()
+    video_item = _item(12)
+    video_item.type = ContentType.VIDEO
+    video_item.source_url = "https://www.youtube.com/watch?v=test1234567A"
+    video_item.video_url = "https://www.youtube.com/watch?v=test1234567A"
+    video_item.duration_seconds = None
+    content_repo.get_items_for_playlist.return_value = [video_item]
+
+    personalization = MagicMock()
+    personalization.compute_personalization_score.return_value = 0.1
+
+    playlist_service_module = import_module("app.services.playlist_service")
+    monkeypatch.setattr(
+        playlist_service_module,
+        "hydrate_missing_video_durations",
+        lambda items, *, content_repo, **_kwargs: {items[0].id: 742},
+    )
+
+    service = PlaylistService(
+        content_repo=content_repo,
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=personalization,
+        ranking_service=_RankingStub(),
+        redis_client=None,
+    )
+
+    result = service.get_playlist("device-duration", ContentType.VIDEO, size=20)
+
+    assert result["items"][0]["duration"] == 742
 
 
 def test_get_playlist_discards_stale_cached_snapshot_missing_conversation_starters():

@@ -31,6 +31,7 @@ from app.repositories.user_repo import (
 )
 from app.services.multi_factor_ranking_service import MultiFactorRankingService
 from app.services.personalization_service import PersonalizationService
+from app.services.video_duration_hydration import hydrate_missing_video_durations
 from app.video_surface_rules import effective_content_type, has_explicit_shorts_url
 
 logger = get_logger(__name__)
@@ -80,7 +81,7 @@ VIDEO_EXPOSED_EVENTS = {EventType.VIDEO_IMPRESSION}
 # Cache configuration
 PLAYLIST_CACHE_TTL_SECONDS = 300  # 5 minutes
 PLAYLIST_CACHE_PREFIX = "playlist:"
-VIDEO_REEL_PLAYLIST_CACHE_PREFIX = "playlist:video-reel-v2:"
+VIDEO_REEL_PLAYLIST_CACHE_PREFIX = "playlist:video-reel-v3:"
 SESSION_SNAPSHOT_TTL_SECONDS = 3600  # 1 hour for session snapshots
 
 
@@ -179,7 +180,11 @@ class PlaylistService:
                     target_size=MAX_PLAYLIST_SIZE,
                 )
 
-            playlist = [self._format_item(item) for item in playlist_items]
+            duration_overrides = self._hydrate_duration_overrides(playlist_items)
+            playlist = [
+                self._format_item(item, duration_overrides=duration_overrides)
+                for item in playlist_items
+            ]
 
             # If no new approved content is available, keep serving the prior feed.
             if not playlist:
@@ -231,7 +236,8 @@ class PlaylistService:
     ) -> List[Dict]:
         """Generate a new playlist with diversity constraints."""
         selected = self._generate_playlist_items(device_id, content_type, size)
-        return [self._format_item(item) for item in selected]
+        duration_overrides = self._hydrate_duration_overrides(selected)
+        return [self._format_item(item, duration_overrides=duration_overrides) for item in selected]
 
     def _generate_playlist_items(
         self, device_id: str, content_type: ContentType, size: int
@@ -368,7 +374,8 @@ class PlaylistService:
             exposed_ids=exposed_ids,
         )
         logger.info("Serving historical fallback playlist for %s", content_type.value)
-        return [self._format_item(item) for item in selected]
+        duration_overrides = self._hydrate_duration_overrides(selected)
+        return [self._format_item(item, duration_overrides=duration_overrides) for item in selected]
 
     def _get_candidates(
         self,
@@ -618,9 +625,24 @@ class PlaylistService:
                 category_count += 1
         return (category_count + 1) <= max_per_window
 
-    def _format_item(self, item: ContentItem) -> Dict:
+    def _hydrate_duration_overrides(self, items: List[ContentItem]) -> Dict[int, int]:
+        if not items:
+            return {}
+        return hydrate_missing_video_durations(items, content_repo=self.content_repo)
+
+    def _format_item(
+        self,
+        item: ContentItem,
+        *,
+        duration_overrides: Optional[Dict[int, int]] = None,
+    ) -> Dict:
         """Format content item for API response."""
         item_type = effective_content_type(item)
+        duration_seconds = (
+            duration_overrides.get(item.id)
+            if duration_overrides and item.id in duration_overrides
+            else item.duration_seconds
+        )
         return {
             "id": item.id,
             "type": item_type.value,
@@ -631,7 +653,7 @@ class PlaylistService:
             "summary": item.summary,
             "image_url": item.image_url,
             "video_url": item.video_url,
-            "duration": item.duration_seconds,
+            "duration": duration_seconds,
             "topics": item.topics or [],
             "entities": item.entities or [],
             "published_at": item.published_at.isoformat() if item.published_at else None,

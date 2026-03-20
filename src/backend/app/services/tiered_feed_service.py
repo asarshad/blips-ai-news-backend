@@ -32,6 +32,7 @@ from app.repositories.user_repo import InteractionEventRepository
 from app.services.diversity_mixer import enforce_channel_caps, mix_feed
 from app.services.inventory_service import FreshnessTier, Surface, _get_surface_config
 from app.services.video_content_policy import apply_content_policy
+from app.services.video_duration_hydration import hydrate_missing_video_durations
 from app.services.video_hybrid_rerank import rerank_video_candidates
 from app.video_age_policy import build_surface_age_filters, make_default_policy
 from app.video_surface_rules import (
@@ -506,7 +507,11 @@ def _default_starters_for(item) -> Dict[str, Any]:
     }
 
 
-def tiered_item_to_dict(tiered: TieredItem) -> Dict[str, Any]:
+def tiered_item_to_dict(
+    tiered: TieredItem,
+    *,
+    duration_overrides: Optional[Dict[int, int]] = None,
+) -> Dict[str, Any]:
     """
     Convert a tiered item to a dictionary with all fields.
 
@@ -514,6 +519,11 @@ def tiered_item_to_dict(tiered: TieredItem) -> Dict[str, Any]:
     """
     item = tiered.item
     item_type = effective_content_type(item)
+    duration_seconds = (
+        duration_overrides.get(item.id)
+        if duration_overrides and item.id in duration_overrides
+        else item.duration_seconds
+    )
     summary = item.summary or ""
     if not summary and item_type == ContentType.VIDEO:
         description = item.description or ""
@@ -566,7 +576,7 @@ def tiered_item_to_dict(tiered: TieredItem) -> Dict[str, Any]:
         result["video_url"] = item.video_url or item.source_url
         result["thumbnail_url"] = item.image_url or None  # coerce empty string
         result["category"] = item.topics[0] if item.topics else "Technology"
-        result["duration_seconds"] = item.duration_seconds
+        result["duration_seconds"] = duration_seconds
         result["hot_score"] = int(item.global_score * 100) if item.global_score else 0
 
     # Optional extraction debug fields (only when DEBUG_ROUTES_ENABLED)
@@ -658,7 +668,16 @@ def get_cached_tiered_feed(
         device_id=device_id,
     )
 
-    items = [tiered_item_to_dict(t) for t in tiered_items]
+    duration_overrides: Dict[int, int] = {}
+    if surface in (Surface.VIDEOS, Surface.REELS) and tiered_items:
+        from app.repositories.content_repo import ContentItemRepository
+
+        duration_overrides = hydrate_missing_video_durations(
+            [tiered.item for tiered in tiered_items],
+            content_repo=ContentItemRepository(db),
+        )
+
+    items = [tiered_item_to_dict(t, duration_overrides=duration_overrides) for t in tiered_items]
 
     # Log DB query result for debugging
     if items:
