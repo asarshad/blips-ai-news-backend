@@ -45,17 +45,15 @@ Blips aggregates tech news from multiple sources (RSS feeds, YouTube channels), 
 ## Quick Start
 
 ```bash
-cd src/backend
-
-# Create environment file
-cp .env.example .env
+# From the repository root
+cp src/backend/.env.example src/backend/.env
 # Edit .env and add OPENAI_API_KEY
 
 # Start services
-docker-compose up -d
+docker compose -f src/docker-compose.yml up -d
 
 # Run migrations
-docker-compose exec api alembic upgrade head
+docker compose -f src/docker-compose.yml exec api alembic upgrade head
 
 # Verify
 curl http://localhost:8000/health
@@ -108,25 +106,27 @@ Interactive API documentation is available at:
 ## Project Structure
 
 ```
-src/backend/
-├── app/
-│   ├── api/routes/          # HTTP endpoints
-│   ├── models/              # SQLAlchemy models
-│   ├── repositories/        # Data access layer
-│   ├── services/            # Business logic
-│   │   ├── inventory_service.py   # Health monitoring
-│   │   ├── tiered_feed_service.py # Freshness tiers
-│   │   ├── topup_service.py       # Auto ingestion
-│   │   ├── playlist_service.py    # Personalized feeds
-│   │   └── diversity_mixer.py     # Feed balancing
-│   ├── ingestion/           # Content fetching
-│   ├── clustering/          # Content deduplication
-│   ├── ranking/             # Item scoring
-│   ├── scheduler/           # Background jobs
-│   └── core/                # Config, settings
-├── alembic/                 # Database migrations
-├── tests/                   # Unit tests
-└── docker-compose.yml
+src/
+├── Dockerfile
+├── docker-compose.yml
+└── backend/
+    ├── app/
+    │   ├── api/routes/          # HTTP endpoints
+    │   ├── models/              # SQLAlchemy models
+    │   ├── repositories/        # Data access layer
+    │   ├── services/            # Business logic
+    │   │   ├── inventory_service.py   # Health monitoring
+    │   │   ├── tiered_feed_service.py # Freshness tiers
+    │   │   ├── topup_service.py       # Auto ingestion
+    │   │   ├── playlist_service.py    # Personalized feeds
+    │   │   └── diversity_mixer.py     # Feed balancing
+    │   ├── ingestion/           # Content fetching
+    │   ├── clustering/          # Content deduplication
+    │   ├── ranking/             # Item scoring
+    │   ├── scheduler/           # Background jobs
+    │   └── core/                # Config, settings
+    ├── alembic/                 # Database migrations
+    └── tests/                   # Unit tests
 ```
 
 ## Documentation
@@ -145,19 +145,19 @@ src/backend/
 
 ```bash
 # View logs
-docker-compose logs -f api
+docker compose -f src/docker-compose.yml logs -f api
 
 # Run tests
-docker-compose exec api pytest
+docker compose -f src/docker-compose.yml exec api pytest
 
 # Run specific tests
-docker-compose exec api pytest tests/unit/test_tiered_feed.py -v
+docker compose -f src/docker-compose.yml exec api pytest tests/unit/test_tiered_feed.py -v
 
 # Database shell
-docker-compose exec db psql -U postgres -d blips
+docker compose -f src/docker-compose.yml exec db psql -U postgres -d blips
 
 # Generate migration
-docker-compose exec api alembic revision --autogenerate -m "description"
+docker compose -f src/docker-compose.yml exec api alembic revision --autogenerate -m "description"
 ```
 
 ## Related Projects

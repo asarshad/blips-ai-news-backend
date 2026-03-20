@@ -33,20 +33,20 @@ cd blips
 ### 2. Backend Setup
 
 ```bash
-cd blips-ai-news-backend/src/backend
+cd blips-ai-news-backend
 
 # Create environment file
-cp .env.example .env
+cp src/backend/.env.example src/backend/.env
 # Edit .env and add your OPENAI_API_KEY
 
 # Start services
-docker-compose up -d
+docker compose -f src/docker-compose.yml up -d
 
 # Run migrations
-docker-compose exec api alembic upgrade head
+docker compose -f src/docker-compose.yml exec api alembic upgrade head
 
 # Optional: populate initial content immediately instead of waiting for the scheduler
-docker-compose exec api python scripts/trigger_ingestion.py
+docker compose -f src/docker-compose.yml exec api python scripts/trigger_ingestion.py
 ```
 
 Verify it's working:
@@ -77,16 +77,16 @@ flutter run
 ### With Docker (Recommended)
 
 ```bash
-cd blips-ai-news-backend/src/backend
+cd blips-ai-news-backend
 
 # Start all services
-docker-compose up -d
+docker compose -f src/docker-compose.yml up -d
 
 # View logs
-docker-compose logs -f api
+docker compose -f src/docker-compose.yml logs -f api
 
 # Stop services
-docker-compose down
+docker compose -f src/docker-compose.yml down
 ```
 
 ### Without Docker (Development)
@@ -165,7 +165,7 @@ flutter run
 
 ```bash
 # Connect via Docker
-docker-compose exec db psql -U postgres -d blips
+docker compose -f src/docker-compose.yml exec db psql -U postgres -d blips
 
 # Common queries
 SELECT COUNT(*) FROM content_items;
@@ -177,25 +177,25 @@ SELECT * FROM feed_sources WHERE is_active = true;
 
 ```bash
 # Generate new migration
-docker-compose exec api alembic revision --autogenerate -m "description"
+docker compose -f src/docker-compose.yml exec api alembic revision --autogenerate -m "description"
 
 # Apply migrations
-docker-compose exec api alembic upgrade head
+docker compose -f src/docker-compose.yml exec api alembic upgrade head
 
 # Rollback one migration
-docker-compose exec api alembic downgrade -1
+docker compose -f src/docker-compose.yml exec api alembic downgrade -1
 
 # View migration history
-docker-compose exec api alembic history
+docker compose -f src/docker-compose.yml exec api alembic history
 ```
 
 ### Reset Database
 
 ```bash
 # Drop and recreate
-docker-compose down -v  # -v removes volumes
-docker-compose up -d
-docker-compose exec api alembic upgrade head
+docker compose -f src/docker-compose.yml down -v  # -v removes volumes
+docker compose -f src/docker-compose.yml up -d
+docker compose -f src/docker-compose.yml exec api alembic upgrade head
 ```
 
 ---
@@ -268,12 +268,12 @@ curl -X POST http://localhost:8000/api/v1/session/interactions \
 
 **View logs**:
 ```bash
-docker-compose logs -f api
+docker compose -f src/docker-compose.yml logs -f api
 ```
 
 **Python shell with app context**:
 ```bash
-docker-compose exec api python
+docker compose -f src/docker-compose.yml exec api python
 ```
 ```python
 from app.db.base import SessionLocal
@@ -323,18 +323,18 @@ debugPrint('State: $state');
 
 ```bash
 # Check if services are running
-docker-compose ps
+docker compose -f src/docker-compose.yml ps
 
 # Check container logs
-docker-compose logs api
-docker-compose logs db
-docker-compose logs redis
+docker compose -f src/docker-compose.yml logs api
+docker compose -f src/docker-compose.yml logs db
+docker compose -f src/docker-compose.yml logs redis
 
 # Check database connectivity
-docker-compose exec api python -c "from sqlalchemy import text; from app.db.base import engine; conn = engine.connect(); print(conn.execute(text('SELECT 1')).scalar()); conn.close()"
+docker compose -f src/docker-compose.yml exec api python -c "from sqlalchemy import text; from app.db.base import engine; conn = engine.connect(); print(conn.execute(text('SELECT 1')).scalar()); conn.close()"
 
 # Check Redis connectivity
-docker-compose exec redis redis-cli PING
+docker compose -f src/docker-compose.yml exec redis redis-cli PING
 ```
 
 ---
@@ -354,10 +354,10 @@ docker-compose exec redis redis-cli PING
 **Fix**:
 ```bash
 # Check current revision
-docker-compose exec api alembic current
+docker compose -f src/docker-compose.yml exec api alembic current
 
 # If stuck, reset
-docker-compose exec api alembic stamp head
+docker compose -f src/docker-compose.yml exec api alembic stamp head
 ```
 
 ### 3. Mobile app shows "No items"
@@ -366,7 +366,7 @@ docker-compose exec api alembic stamp head
 **Fix**:
 1. Check backend: `curl http://localhost:8000/health`
 2. Check data: `curl http://localhost:8000/api/v1/articles/recent`
-3. Run fetch job: `docker-compose exec api python -c "from app.scheduler.tasks import fetch_and_process_news; fetch_and_process_news()"`
+3. Run fetch job: `docker compose -f src/docker-compose.yml exec api python -c "from app.scheduler.tasks import fetch_and_process_news; fetch_and_process_news()"`
 
 ### 4. Videos don't play on iOS simulator
 
@@ -398,7 +398,7 @@ docker-compose exec api alembic stamp head
 **Fix**:
 ```bash
 # Check logs
-docker-compose logs api
+docker compose -f src/docker-compose.yml logs api
 
 # Common issues:
 # - Missing OPENAI_API_KEY
@@ -464,11 +464,11 @@ flutter analyze  # Linting
 
 ```bash
 # Backend
-docker-compose up -d              # Start services
-docker-compose down               # Stop services
-docker-compose logs -f api        # View API logs
-docker-compose exec api alembic upgrade head  # Run migrations
-docker-compose exec db psql -U postgres -d blips  # Database shell
+docker compose -f src/docker-compose.yml up -d              # Start services
+docker compose -f src/docker-compose.yml down               # Stop services
+docker compose -f src/docker-compose.yml logs -f api        # View API logs
+docker compose -f src/docker-compose.yml exec api alembic upgrade head  # Run migrations
+docker compose -f src/docker-compose.yml exec db psql -U postgres -d blips  # Database shell
 
 # Mobile
 flutter run                       # Run app
