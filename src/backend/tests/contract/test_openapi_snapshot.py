@@ -37,10 +37,17 @@ def _strip_pydantic_schemas(schema: dict) -> dict:
 
 def test_openapi_snapshot_is_stable(request: pytest.FixtureRequest):
     # Import after pytest autouse env fixture disables scheduler/create-tables.
+    from app.core.config import settings
     from app.main import app
 
-    client = TestClient(app)
-    resp = client.get("/api/v1/openapi.json")
+    original = settings.DOCS_ENABLED
+    settings.DOCS_ENABLED = True
+    try:
+        client = TestClient(app)
+        resp = client.get("/api/v1/openapi.json")
+    finally:
+        settings.DOCS_ENABLED = original
+
     assert resp.status_code == 200
 
     current = _strip_pydantic_schemas(resp.json())

@@ -12,11 +12,12 @@ personalised feed score.
 
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, Header, HTTPException, Path
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_db
+from app.core.device_id import validate_device_id
 from app.core.logging import get_logger
 from app.repositories.user_repo import UserCategorySelectionRepository
 
@@ -51,6 +52,13 @@ def get_category_selection_repo(
     return UserCategorySelectionRepository(db)
 
 
+def get_authenticated_device_id(
+    x_device_id: str = Header(..., alias="X-Device-ID"),
+) -> str:
+    """Validate the caller's device identity header."""
+    return validate_device_id(x_device_id)
+
+
 @router.get(
     "/{device_id}/categories",
     response_model=CategorySelectionResponse,
@@ -58,9 +66,12 @@ def get_category_selection_repo(
 )
 def get_categories(
     device_id: str = Path(..., description="Device identifier"),
+    authenticated_device_id: str = Depends(get_authenticated_device_id),
     repo: UserCategorySelectionRepository = Depends(get_category_selection_repo),
 ) -> CategorySelectionResponse:
     """Return the user's declared category selections."""
+    if authenticated_device_id != device_id:
+        raise HTTPException(status_code=403, detail="Device ID mismatch")
     categories = repo.get_selected_categories(device_id)
     return CategorySelectionResponse(device_id=device_id, selected_categories=categories)
 
@@ -73,6 +84,7 @@ def get_categories(
 def set_categories(
     body: CategorySelectionRequest,
     device_id: str = Path(..., description="Device identifier"),
+    authenticated_device_id: str = Depends(get_authenticated_device_id),
     repo: UserCategorySelectionRepository = Depends(get_category_selection_repo),
 ) -> CategorySelectionResponse:
     """
@@ -81,6 +93,9 @@ def set_categories(
     Categories are stored as an ordered list.  The first element is treated
     as the highest-priority interest when ranking content.
     """
+    if authenticated_device_id != device_id:
+        raise HTTPException(status_code=403, detail="Device ID mismatch")
+
     # Normalise: strip whitespace, deduplicate while preserving order
     seen = set()
     cleaned: List[str] = []
@@ -97,7 +112,11 @@ def set_categories(
         )
 
     row = repo.upsert(device_id=device_id, categories=cleaned)
-    logger.info(f"Category selection updated for device={device_id}: {cleaned}")
+    logger.info(
+        "Category selection updated for device=%s count=%s",
+        device_id[:8],
+        len(cleaned),
+    )
     return CategorySelectionResponse(
         device_id=row.device_id,
         selected_categories=row.selected_categories,

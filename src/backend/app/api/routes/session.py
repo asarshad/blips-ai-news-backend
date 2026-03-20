@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.core.auth import require_admin_key
 from app.core.dependencies import get_db, get_redis
 from app.core.logging import get_logger
 from app.models.content import ContentType, EventType, InteractionEvent, UserPreference, UserProfile
@@ -287,7 +288,10 @@ def record_interaction(
 
 
 @router.get("/playlist-stats")
-def get_playlist_stats(playlist_service: PlaylistService = Depends(get_playlist_service)):
+def get_playlist_stats(
+    _admin_key: str = Depends(require_admin_key),
+    playlist_service: PlaylistService = Depends(get_playlist_service),
+):
     """
     Get playlist generation statistics (admin endpoint).
 

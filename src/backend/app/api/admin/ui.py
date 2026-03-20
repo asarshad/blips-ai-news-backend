@@ -28,16 +28,21 @@ POST /admin/ui/action/{id}/note
 from __future__ import annotations
 
 import math
-import secrets
 from collections import Counter
 from datetime import date, datetime, timedelta
 from typing import Optional
 from urllib.parse import parse_qsl, urlencode, urlparse
 
-from fastapi import APIRouter, Depends, Form, Header, Query
+from fastapi import APIRouter, Cookie, Depends, Form, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
+from app.core.auth import (
+    build_admin_ui_session_token,
+    is_admin_key_configured,
+    is_valid_admin_key,
+    is_valid_admin_ui_session,
+)
 from app.core.config import settings
 from app.core.dependencies import get_db
 from app.domain.editorial.service import EditorialService
@@ -49,25 +54,44 @@ from app.services.tiered_feed_service import invalidate_tiered_feed_cache
 # ---------------------------------------------------------------------------
 
 
-def _require_admin_key_or_query(
-    key: Optional[str] = Query(None),
+_ADMIN_UI_COOKIE_NAME = "blips_admin_session"
+_ADMIN_UI_COOKIE_TTL_SECONDS = 8 * 60 * 60
+_ADMIN_UI_PREFIX = "/api/v1/admin/ui"
+
+
+def _require_admin_ui_auth(
+    admin_session: Optional[str] = Cookie(None, alias=_ADMIN_UI_COOKIE_NAME),
     x_admin_key: Optional[str] = Header(None, alias="X-Admin-Key"),
 ) -> str:
-    configured_key = settings.ADMIN_API_KEY
-    if not configured_key:
-        from fastapi import HTTPException
-
+    if not is_admin_key_configured():
         raise HTTPException(status_code=401, detail="Admin endpoints disabled")
-    provided = x_admin_key or key
-    if not provided:
-        from fastapi import HTTPException
 
-        raise HTTPException(status_code=401, detail="Missing admin key")
-    if not secrets.compare_digest(provided, configured_key):
-        from fastapi import HTTPException
+    if is_valid_admin_key(x_admin_key) or is_valid_admin_ui_session(admin_session):
+        return build_admin_ui_session_token()
 
-        raise HTTPException(status_code=403, detail="Invalid admin key")
-    return provided
+    if x_admin_key or admin_session:
+        raise HTTPException(status_code=403, detail="Invalid admin credentials")
+
+    raise HTTPException(status_code=401, detail="Missing admin credentials")
+
+
+def _has_admin_ui_auth(
+    admin_session: Optional[str] = Cookie(None, alias=_ADMIN_UI_COOKIE_NAME),
+    x_admin_key: Optional[str] = Header(None, alias="X-Admin-Key"),
+) -> bool:
+    return is_valid_admin_key(x_admin_key) or is_valid_admin_ui_session(admin_session)
+
+
+def _set_admin_ui_cookie(response: RedirectResponse) -> None:
+    response.set_cookie(
+        key=_ADMIN_UI_COOKIE_NAME,
+        value=build_admin_ui_session_token(),
+        max_age=_ADMIN_UI_COOKIE_TTL_SECONDS,
+        httponly=True,
+        secure=settings.ENV == "prod",
+        samesite="strict",
+        path=_ADMIN_UI_PREFIX,
+    )
 
 
 router = APIRouter(prefix="/admin/ui", tags=["admin-ui"])
@@ -88,7 +112,7 @@ def _nav(key: str, active: str = "") -> str:
             cls = f"{base} bg-white text-slate-950 shadow-sm"
         else:
             cls = f"{base} text-slate-300 hover:bg-slate-800/80 hover:text-white"
-        return f'<a href="{href}?key={key}" class="{cls}">{label}</a>'
+        return f'<a href="{href}" class="{cls}">{label}</a>'
 
     return f"""
     <nav class="sticky top-0 z-40 border-b border-slate-200/70 bg-white/85 backdrop-blur-xl">
@@ -111,6 +135,11 @@ def _nav(key: str, active: str = "") -> str:
               {_link("/api/v1/admin/ui/review", "Review Queue", "review")}
               {_link("/api/v1/admin/ui/content", "Content", "content")}
               {_link("/api/v1/admin/ui/submit", "Submit URL", "submit")}
+              <form method="post" action="/api/v1/admin/ui/logout" class="shrink-0">
+                <button type="submit" class="inline-flex items-center rounded-full px-3 py-2 text-sm font-medium text-slate-300 transition-all duration-150 hover:bg-slate-800/80 hover:text-white">
+                  Logout
+                </button>
+              </form>
             </div>
           </div>
         </div>
@@ -183,7 +212,20 @@ _ADMIN_STYLES = """
 """
 
 
-def _base(body: str, key: str = "", active: str = "") -> HTMLResponse:
+def _strip_admin_auth_artifacts(html: str, key: str) -> str:
+    if not key:
+        return html
+
+    html = html.replace(f"?key={key}&", "?")
+    html = html.replace(f"&key={key}", "")
+    html = html.replace(f"?key={key}", "")
+    html = html.replace(f'<input type="hidden" name="key" value="{key}">', "")
+    html = html.replace("?&", "?")
+    html = html.replace("&&", "&")
+    return html
+
+
+def _base(body: str, key: str = "", active: str = "", *, show_nav: bool = True) -> HTMLResponse:
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -194,13 +236,19 @@ def _base(body: str, key: str = "", active: str = "") -> HTMLResponse:
   {_ADMIN_STYLES}
 </head>
 <body class="min-h-screen">
-  {_nav(key, active)}
+  {_nav(key, active) if show_nav else ""}
   <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
     {body}
   </main>
 </body>
 </html>"""
-    return HTMLResponse(html)
+    response = HTMLResponse(_strip_admin_auth_artifacts(html, key))
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    return response
 
 
 def _add_flash(url: str, flash: str) -> str:
@@ -218,7 +266,7 @@ def _resolve_ui_url(
     next_url: Optional[str] = None,
     referer: Optional[str] = None,
 ) -> str:
-    allowed_prefix = "/api/v1/admin/ui/"
+    allowed_prefix = f"{_ADMIN_UI_PREFIX}/"
     for candidate in (next_url, referer):
         if not candidate:
             continue
@@ -227,10 +275,10 @@ def _resolve_ui_url(
         if not path.startswith(allowed_prefix):
             continue
         params = dict(parse_qsl(parsed.query, keep_blank_values=True))
-        params["key"] = admin_key
+        params.pop("key", None)
         query = urlencode(params)
-        return f"{path}?{query}"
-    return f"{fallback_path}?key={admin_key}"
+        return f"{path}?{query}" if query else path
+    return fallback_path
 
 
 def _resolve_next_ui_url(
@@ -426,13 +474,101 @@ def _summarize_feed_window(
 
 
 # ---------------------------------------------------------------------------
-# GET /admin/ui/ → redirect to dashboard
+# GET /admin/ui/ → redirect to login or dashboard
 # ---------------------------------------------------------------------------
 
 
 @router.get("/", response_class=HTMLResponse)
-def ui_root(admin_key: str = Depends(_require_admin_key_or_query)):
-    return RedirectResponse(f"/api/v1/admin/ui/dashboard?key={admin_key}", status_code=302)
+def ui_root(is_authenticated: bool = Depends(_has_admin_ui_auth)):
+    target = "/api/v1/admin/ui/dashboard" if is_authenticated else "/api/v1/admin/ui/login"
+    return RedirectResponse(target, status_code=302)
+
+
+@router.get("/login", response_class=HTMLResponse)
+def ui_login_form(
+    flash: Optional[str] = Query(None),
+    next_url: Optional[str] = Query(None, alias="next"),
+    is_authenticated: bool = Depends(_has_admin_ui_auth),
+):
+    if is_authenticated:
+        target = _resolve_ui_url(
+            admin_key="",
+            fallback_path="/api/v1/admin/ui/dashboard",
+            next_url=next_url,
+        )
+        return RedirectResponse(target, status_code=302)
+
+    flash_html = ""
+    if flash:
+        cls = (
+            "bg-rose-100 text-rose-900"
+            if "invalid" in flash.lower()
+            else "bg-slate-100 text-slate-700"
+        )
+        flash_html = f'<div class="mb-4 rounded-2xl px-4 py-3 text-sm {cls}">{_esc(flash)}</div>'
+
+    next_value = _esc(next_url or "/api/v1/admin/ui/dashboard")
+    body = f"""
+    <div class="mx-auto max-w-md">
+      <div class="glass-panel rounded-[2rem] p-8">
+        <p class="panel-kicker mb-3">Admin Access</p>
+        <h1 class="text-3xl font-semibold tracking-tight text-slate-950">Sign in</h1>
+        <p class="mt-2 text-sm text-slate-600">
+          Use the configured admin API key. The browser stores only an HTTP-only session cookie.
+        </p>
+        {flash_html}
+        <form method="post" action="/api/v1/admin/ui/login" class="mt-6 space-y-4">
+          <input type="hidden" name="next" value="{next_value}">
+          <div>
+            <label class="mb-1 block text-sm font-medium text-slate-700">Admin API key</label>
+            <input
+              type="password"
+              name="admin_key"
+              required
+              autocomplete="current-password"
+              class="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm text-slate-900 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-200"
+            >
+          </div>
+          <button
+            type="submit"
+            class="inline-flex w-full items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-medium text-white hover:bg-slate-800"
+          >
+            Continue
+          </button>
+        </form>
+      </div>
+    </div>"""
+    return _base(body, show_nav=False)
+
+
+@router.post("/login")
+def ui_login(
+    admin_key: str = Form(...),
+    next_path: str = Form("/api/v1/admin/ui/dashboard", alias="next"),
+):
+    if not is_admin_key_configured():
+        raise HTTPException(status_code=401, detail="Admin endpoints disabled")
+
+    if not is_valid_admin_key(admin_key):
+        target = _add_flash("/api/v1/admin/ui/login", "Invalid admin key")
+        return RedirectResponse(target, status_code=303)
+
+    target = _resolve_ui_url(
+        admin_key="",
+        fallback_path="/api/v1/admin/ui/dashboard",
+        next_url=next_path,
+    )
+    response = RedirectResponse(target, status_code=303)
+    _set_admin_ui_cookie(response)
+    return response
+
+
+@router.post("/logout")
+def ui_logout():
+    response = RedirectResponse("/api/v1/admin/ui/login", status_code=303)
+    response.delete_cookie(_ADMIN_UI_COOKIE_NAME, path=_ADMIN_UI_PREFIX)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -444,7 +580,7 @@ def ui_root(admin_key: str = Depends(_require_admin_key_or_query)):
 def ui_dashboard(
     day: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     from sqlalchemy import and_, func, or_
 
@@ -1373,7 +1509,7 @@ def ui_video_lanes(
     hours: int = Query(24, ge=1, le=24 * 14),
     view: str = Query("lane"),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     from app.services.video_metrics_service import compute_video_lane_metrics
 
@@ -1542,7 +1678,7 @@ def ui_video_lanes(
 @router.get("/video-sources", response_class=HTMLResponse)
 def ui_video_sources(
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     from app.services.video_metrics_service import compute_video_source_metrics
 
@@ -1809,7 +1945,7 @@ def ui_review_queue(
     page: int = Query(1, ge=1),
     flash: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     from app.models.content import ContentStatus
 
@@ -2394,7 +2530,7 @@ def ui_review_bulk_action(
     key: str = Form(""),
     referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     raw_ids = [chunk.strip() for chunk in content_ids_csv.split(",") if chunk.strip()]
     parsed_ids: list[int] = []
@@ -2487,7 +2623,7 @@ def ui_content_list(
     page: int = Query(1, ge=1),
     flash: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     from app.models.content import ContentStatus
 
@@ -2714,7 +2850,7 @@ def ui_content_detail(
     content_id: int,
     flash: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     from app.models.content import ContentStatus
 
@@ -2962,7 +3098,7 @@ def ui_content_detail(
 @router.get("/submit", response_class=HTMLResponse)
 def ui_submit_form(
     flash: Optional[str] = Query(None),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     flash_html = ""
     if flash:
@@ -3011,16 +3147,16 @@ def ui_submit_url(
     importance_level: int = Form(0),
     key: str = Form(""),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     svc = EditorialService(db)
     result = svc.submit_url(url=url, importance_level=importance_level, actor=ACTOR)
     msg = f"{result.status}: {result.message}"
     if result.content_id:
-        target = f"/api/v1/admin/ui/detail/{result.content_id}?key={admin_key}"
+        target = f"/api/v1/admin/ui/detail/{result.content_id}"
         return RedirectResponse(_add_flash(target, msg), status_code=303)
     return RedirectResponse(
-        _add_flash(f"/api/v1/admin/ui/submit?key={admin_key}", msg),
+        _add_flash("/api/v1/admin/ui/submit", msg),
         status_code=303,
     )
 
@@ -3050,7 +3186,7 @@ def ui_boost(
     key: str = Form(""),
     referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     repo = EditorialRepository(db)
     bounded_level = max(0, min(3, level))
@@ -3080,7 +3216,7 @@ def ui_suppress(
     key: str = Form(""),
     referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     repo = EditorialRepository(db)
     item = repo.suppress(content_id, actor=ACTOR)
@@ -3109,7 +3245,7 @@ def ui_unsuppress(
     key: str = Form(""),
     referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     repo = EditorialRepository(db)
     item = repo.unsuppress(content_id, actor=ACTOR)
@@ -3138,7 +3274,7 @@ def ui_promote(
     key: str = Form(""),
     referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     repo = EditorialRepository(db)
     item = repo.promote(content_id, actor=ACTOR)
@@ -3167,7 +3303,7 @@ def ui_demote(
     key: str = Form(""),
     referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     repo = EditorialRepository(db)
     item = repo.demote(content_id, actor=ACTOR)
@@ -3197,7 +3333,7 @@ def ui_approve(
     key: str = Form(""),
     referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     repo = EditorialRepository(db)
     clean_note = note.strip() or None
@@ -3228,7 +3364,7 @@ def ui_reject(
     key: str = Form(""),
     referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     repo = EditorialRepository(db)
     clean_note = note.strip() or None
@@ -3259,7 +3395,7 @@ def ui_hold(
     key: str = Form(""),
     referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     repo = EditorialRepository(db)
     clean_note = note.strip() or None
@@ -3290,7 +3426,7 @@ def ui_request_changes(
     key: str = Form(""),
     referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     clean_note = note.strip()
     if not clean_note:
@@ -3331,7 +3467,7 @@ def ui_approve_publish(
     key: str = Form(""),
     referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     bounded_boost = max(0, min(3, boost_level))
     clean_note = note.strip() or None
@@ -3368,7 +3504,7 @@ def ui_add_note(
     key: str = Form(""),
     referer: Optional[str] = Header(None, alias="Referer"),
     db: Session = Depends(get_db),
-    admin_key: str = Depends(_require_admin_key_or_query),
+    admin_key: str = Depends(_require_admin_ui_auth),
 ):
     clean_note = note.strip()
     if not clean_note:

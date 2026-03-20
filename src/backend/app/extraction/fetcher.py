@@ -17,6 +17,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from threading import Lock
 from typing import Optional
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -33,6 +34,8 @@ USER_AGENT: str = (
 MAX_RESPONSE_BYTES: int = 5 * 1024 * 1024  # 5 MB byte cap
 
 _TRANSIENT_STATUS = {429, 500, 502, 503, 504}
+_REDIRECT_STATUS = {301, 302, 303, 307, 308}
+_MAX_REDIRECTS = 5
 
 # ── Response dataclass ────────────────────────────────────────────────────────
 
@@ -127,8 +130,7 @@ def _build_client() -> httpx.Client:
             write=10.0,
             pool=10.0,
         ),
-        follow_redirects=True,
-        max_redirects=5,
+        follow_redirects=False,
         headers={
             "User-Agent": USER_AGENT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -164,19 +166,12 @@ def fetch_url(
     Security: requests to private/loopback/link-local hosts are rejected
     before any connection is made to prevent SSRF attacks.
     """
-    from urllib.parse import urlparse
-
     parsed = urlparse(url)
     domain = parsed.netloc
-    host = parsed.hostname or ""
 
-    # ── SSRF guard ────────────────────────────────────────────────────────
-    if host and _is_private_host(host):
-        logger.warning(f"[fetch] SSRF blocked: {url!r} resolves to a private address")
-        return FetchResult(
-            url=url,
-            error=f"SSRF: host {host!r} resolves to a private/internal address",
-        )
+    target_error = _validate_fetch_target(url)
+    if target_error is not None:
+        return FetchResult(url=url, error=target_error)
 
     s = get_settings()
     max_retries = int(getattr(s, "EXTRACTION_MAX_RETRIES", 3))
@@ -197,8 +192,7 @@ def fetch_url(
     for attempt in range(1, max_retries + 1):
         t0 = time.monotonic()
         try:
-            resp = client.get(url, headers=headers)
-            elapsed = (time.monotonic() - t0) * 1000
+            resp, elapsed = _get_with_validated_redirects(client, url, headers)
 
             if resp.status_code == 304:
                 return FetchResult(
@@ -253,6 +247,12 @@ def fetch_url(
             logger.warning(f"[fetch] HTTP error fetching {url} (attempt {attempt}): {exc}")
             _backoff(attempt)
 
+        except ValueError as exc:
+            elapsed = (time.monotonic() - t0) * 1000
+            last_error = str(exc)
+            logger.warning(f"[fetch] Request blocked for {url} (attempt {attempt}): {exc}")
+            break
+
         except Exception as exc:
             elapsed = (time.monotonic() - t0) * 1000
             last_error = f"Unexpected: {exc}"
@@ -271,3 +271,51 @@ def _backoff(attempt: int) -> None:
     s = get_settings()
     base = float(getattr(s, "EXTRACTION_BACKOFF_BASE", 1.5))
     time.sleep(min(base**attempt, 30.0))
+
+
+def _validate_fetch_target(url: str) -> Optional[str]:
+    """Return an SSRF/validation error string for an invalid target, else None."""
+    parsed = urlparse(url)
+    scheme = (parsed.scheme or "").lower()
+    host = parsed.hostname or ""
+
+    if scheme not in {"http", "https"}:
+        logger.warning("[fetch] Unsupported URL scheme blocked: %r", url)
+        return f"Unsupported URL scheme {scheme!r}"
+
+    if host and _is_private_host(host):
+        logger.warning(f"[fetch] SSRF blocked: {url!r} resolves to a private address")
+        return f"SSRF: host {host!r} resolves to a private/internal address"
+
+    return None
+
+
+def _get_with_validated_redirects(
+    client: httpx.Client,
+    url: str,
+    headers: dict[str, str],
+) -> tuple[httpx.Response, float]:
+    """Issue a GET request while validating each redirect hop before following it."""
+    current_url = url
+    total_elapsed_ms = 0.0
+
+    for _ in range(_MAX_REDIRECTS + 1):
+        t0 = time.monotonic()
+        response = client.get(current_url, headers=headers)
+        total_elapsed_ms += (time.monotonic() - t0) * 1000
+
+        if response.status_code not in _REDIRECT_STATUS:
+            return response, total_elapsed_ms
+
+        location = response.headers.get("Location")
+        if not location:
+            return response, total_elapsed_ms
+
+        next_url = urljoin(str(response.url), location)
+        target_error = _validate_fetch_target(next_url)
+        if target_error is not None:
+            raise ValueError(target_error)
+
+        current_url = next_url
+
+    raise ValueError("Too many redirects")
