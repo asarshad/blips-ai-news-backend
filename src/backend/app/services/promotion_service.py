@@ -893,6 +893,13 @@ class PromotionService:
             return channel_config.effective_daily_reel_cap
         return 1
 
+    def _has_editorial_override(self, item: ContentItem) -> bool:
+        """Manual editorial actions should win over automatic rescoring demotions."""
+        if getattr(item, "manual_added", False) is True:
+            return True
+        actor = getattr(item, "last_modified_by", None)
+        return isinstance(actor, str) and bool(actor.strip())
+
     # ── Re-score existing PROMOTED items ──────────────────────────────────
 
     def _rescore_promoted(
@@ -958,7 +965,10 @@ class PromotionService:
             if block_reason:
                 item.promotion_reason = f"{item.promotion_reason}|blocked={block_reason}"
             if block_reason in demote_reasons:
-                item.curation_status = ContentStatus.CANDIDATE
+                if self._has_editorial_override(item):
+                    item.promotion_reason = f"{item.promotion_reason}|preserved=editorial_override"
+                else:
+                    item.curation_status = ContentStatus.CANDIDATE
             count += 1
         return count
 
