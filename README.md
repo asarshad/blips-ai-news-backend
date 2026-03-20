@@ -81,7 +81,6 @@ Interactive API documentation is available at:
 |--------|----------|-------------|
 | GET | `/api/v1/session/playlist` | Personalized mixed feed |
 | POST | `/api/v1/session/interactions` | Log user engagement events |
-| GET | `/api/v1/session/preferences` | Get user preferences |
 
 ### Health & Monitoring
 | Method | Endpoint | Description |
