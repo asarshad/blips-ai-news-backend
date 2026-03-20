@@ -4,8 +4,7 @@ Session and playlist routes for personalized content delivery.
 Endpoints:
 - GET /session/playlist: Get personalized playlist (session snapshots)
 - POST /session/interactions: Record user interaction
-- GET /session/preferences: Get user preferences (debug)
-- GET /session/stats: Get user stats (debug)
+- GET /session/playlist-stats: Get playlist generation stats (internal ops)
 """
 
 from enum import Enum
@@ -115,25 +114,6 @@ class PlaylistResponse(BaseModel):
     cursor: Optional[int]
     has_more: bool
     total_items: int
-
-
-class PreferencesResponse(BaseModel):
-    """Response for preferences endpoint."""
-
-    topics: List[dict]
-    entities: List[dict]
-    sources: List[dict]
-    formats: List[dict]
-
-
-class UserStatsResponse(BaseModel):
-    """Response for user stats endpoint."""
-
-    device_id: str
-    user_id: str
-    created_at: str
-    preference_counts: dict
-    engagement_7d: dict
 
 
 # ============================================================================
@@ -302,46 +282,8 @@ def record_interaction(
 
 
 # ============================================================================
-# Debug/Admin Endpoints
+# Internal diagnostics endpoint
 # ============================================================================
-
-
-@router.get("/preferences", response_model=PreferencesResponse)
-def get_preferences(
-    device_id: str = Depends(get_device_id),
-    personalization_service: PersonalizationService = Depends(get_personalization_service),
-):
-    """
-    Get user's current preferences (debug endpoint).
-
-    Returns learned preferences across topics, entities, sources, and formats.
-    """
-    prefs = personalization_service.get_user_preferences(device_id)
-
-    return PreferencesResponse(
-        topics=[{"key": k, "weight": w} for k, w in prefs.get("TOPIC", [])],
-        entities=[{"key": k, "weight": w} for k, w in prefs.get("ENTITY", [])],
-        sources=[{"key": k, "weight": w} for k, w in prefs.get("SOURCE", [])],
-        formats=[{"key": k, "weight": w} for k, w in prefs.get("FORMAT", [])],
-    )
-
-
-@router.get("/stats", response_model=UserStatsResponse)
-def get_user_stats(
-    device_id: str = Depends(get_device_id),
-    personalization_service: PersonalizationService = Depends(get_personalization_service),
-):
-    """
-    Get user statistics (debug endpoint).
-
-    Returns preference counts and engagement metrics.
-    """
-    stats = personalization_service.get_user_stats(device_id)
-
-    if "error" in stats:
-        raise HTTPException(status_code=404, detail=stats["error"])
-
-    return UserStatsResponse(**stats)
 
 
 @router.get("/playlist-stats")
@@ -352,18 +294,6 @@ def get_playlist_stats(playlist_service: PlaylistService = Depends(get_playlist_
     Returns candidate counts and diversity metrics per content type.
     """
     return playlist_service.get_playlist_stats()
-
-
-@router.delete("/cache")
-def invalidate_cache(
-    device_id: str = Depends(get_device_id),
-    playlist_service: PlaylistService = Depends(get_playlist_service),
-):
-    """
-    Invalidate user's playlist cache (debug endpoint).
-    """
-    playlist_service.invalidate_user_cache(device_id)
-    return {"success": True, "message": "Cache invalidated"}
 
 
 # ============================================================================

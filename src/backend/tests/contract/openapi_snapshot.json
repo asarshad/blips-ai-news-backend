@@ -2208,51 +2208,6 @@
         "title": "PlaylistResponse",
         "type": "object"
       },
-      "PreferencesResponse": {
-        "description": "Response for preferences endpoint.",
-        "properties": {
-          "entities": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Entities",
-            "type": "array"
-          },
-          "formats": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Formats",
-            "type": "array"
-          },
-          "sources": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Sources",
-            "type": "array"
-          },
-          "topics": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Topics",
-            "type": "array"
-          }
-        },
-        "required": [
-          "topics",
-          "entities",
-          "sources",
-          "formats"
-        ],
-        "title": "PreferencesResponse",
-        "type": "object"
-      },
       "PromoteResponse": {
         "properties": {
           "content_id": {
@@ -2535,42 +2490,6 @@
           "remaining_daily_messages"
         ],
         "title": "UsageStats",
-        "type": "object"
-      },
-      "UserStatsResponse": {
-        "description": "Response for user stats endpoint.",
-        "properties": {
-          "created_at": {
-            "title": "Created At",
-            "type": "string"
-          },
-          "device_id": {
-            "title": "Device Id",
-            "type": "string"
-          },
-          "engagement_7d": {
-            "additionalProperties": true,
-            "title": "Engagement 7D",
-            "type": "object"
-          },
-          "preference_counts": {
-            "additionalProperties": true,
-            "title": "Preference Counts",
-            "type": "object"
-          },
-          "user_id": {
-            "title": "User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "device_id",
-          "user_id",
-          "created_at",
-          "preference_counts",
-          "engagement_7d"
-        ],
-        "title": "UserStatsResponse",
         "type": "object"
       },
       "Video": {
@@ -7483,49 +7402,6 @@
         ]
       }
     },
-    "/api/v1/session/cache": {
-      "delete": {
-        "description": "Invalidate user's playlist cache (debug endpoint).",
-        "operationId": "invalidate_cache_api_v1_session_cache_delete",
-        "parameters": [
-          {
-            "description": "Device identifier",
-            "in": "header",
-            "name": "x-device-id",
-            "required": true,
-            "schema": {
-              "description": "Device identifier",
-              "title": "X-Device-Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Invalidate Cache",
-        "tags": [
-          "session"
-        ]
-      }
-    },
     "/api/v1/session/data": {
       "delete": {
         "description": "Delete all data associated with a device.\n\nRemoves usage records, interaction events, learned preferences, and the\ndevice profile.  Returns counts of deleted rows per table.",
@@ -7759,96 +7635,6 @@
           }
         },
         "summary": "Get Playlist Stats",
-        "tags": [
-          "session"
-        ]
-      }
-    },
-    "/api/v1/session/preferences": {
-      "get": {
-        "description": "Get user's current preferences (debug endpoint).\n\nReturns learned preferences across topics, entities, sources, and formats.",
-        "operationId": "get_preferences_api_v1_session_preferences_get",
-        "parameters": [
-          {
-            "description": "Device identifier",
-            "in": "header",
-            "name": "x-device-id",
-            "required": true,
-            "schema": {
-              "description": "Device identifier",
-              "title": "X-Device-Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PreferencesResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Preferences",
-        "tags": [
-          "session"
-        ]
-      }
-    },
-    "/api/v1/session/stats": {
-      "get": {
-        "description": "Get user statistics (debug endpoint).\n\nReturns preference counts and engagement metrics.",
-        "operationId": "get_user_stats_api_v1_session_stats_get",
-        "parameters": [
-          {
-            "description": "Device identifier",
-            "in": "header",
-            "name": "x-device-id",
-            "required": true,
-            "schema": {
-              "description": "Device identifier",
-              "title": "X-Device-Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserStatsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get User Stats",
         "tags": [
           "session"
         ]

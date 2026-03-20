@@ -14,9 +14,10 @@ The Blips Curation System is a production-quality personalization engine that de
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          API Layer                                       │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐       │
-│  │ GET /playlist    │  │ POST /interactions│  │ GET /preferences │       │
-│  └──────────────────┘  └──────────────────┘  └──────────────────┘       │
+│  ┌──────────────────────────┐  ┌──────────────────────────┐              │
+│  │ GET /api/v1/session/     │  │ POST /api/v1/session/    │              │
+│  │ playlist                 │  │ interactions             │              │
+│  └──────────────────────────┘  └──────────────────────────┘              │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -183,7 +184,7 @@ The item with highest `global_score` per cluster+type combination is marked cano
 
 ## API Endpoints
 
-### GET /session/playlist
+### GET /api/v1/session/playlist
 Get personalized content playlist. Uses session-based snapshots with cursor pagination.
 
 **Headers:**
@@ -224,7 +225,7 @@ Get personalized content playlist. Uses session-based snapshots with cursor pagi
 > from the response to continue fetching more items. This ensures stable ordering during 
 > swipe feeds (no shifting items on re-request).
 
-### POST /session/interactions
+### POST /api/v1/session/interactions
 Record user interaction.
 
 **Headers:**
@@ -239,14 +240,8 @@ Record user interaction.
 }
 ```
 
-### GET /session/preferences
-Get user's learned preferences (debug).
-
-### GET /session/stats
-Get user statistics (debug).
-
-### GET /session/playlist-stats
-Get playlist generation statistics (admin).
+### GET /api/v1/session/playlist-stats
+Get playlist generation statistics for internal operator dashboards.
 
 ## Scheduled Tasks
 
