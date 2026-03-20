@@ -141,6 +141,19 @@ class TieredItem:
     added_age_seconds: int
 
 
+def _prioritize_unseen_items(
+    primary_items: List[ContentItem],
+    demoted_items: List[ContentItem],
+    *,
+    target_size: int,
+) -> List[ContentItem]:
+    """Use recently exposed items only after unseen items are exhausted."""
+    if len(primary_items) >= target_size:
+        return primary_items[:target_size]
+    remaining = max(0, target_size - len(primary_items))
+    return [*primary_items, *demoted_items[:remaining]]
+
+
 def _surface_to_content_type(surface: Surface) -> ContentType:
     """Map surface to content type."""
     return {
@@ -358,19 +371,35 @@ def get_tiered_feed(
     consumed_ids, exposed_ids = _get_recent_feedback_ids(db, device_id, surface)
     if consumed_ids:
         results = [tiered for tiered in results if tiered.item.id not in consumed_ids]
-    if exposed_ids:
-        promoted = [tiered for tiered in results if tiered.item.id not in exposed_ids]
-        demoted = [tiered for tiered in results if tiered.item.id in exposed_ids]
-        results = promoted + demoted
+    primary_results = [tiered for tiered in results if tiered.item.id not in exposed_ids]
+    demoted_results = [tiered for tiered in results if tiered.item.id in exposed_ids]
 
-    raw_items = [t.item for t in results]
+    primary_items = [tiered.item for tiered in primary_results]
+    demoted_items = [tiered.item for tiered in demoted_results]
 
     if surface == Surface.VIDEOS and hybrid_video_rerank:
-        raw_items = rerank_video_candidates(raw_items, target_count=target_count)
+        primary_items = rerank_video_candidates(primary_items, target_count=target_count)
 
     # Mix for diversity (this returns a subset in mixed order)
     surface_name = surface.value
-    mixed_items = mix_feed(raw_items, surface=surface_name, target_size=target_count)
+    mixed_primary_items = mix_feed(primary_items, surface=surface_name, target_size=target_count)
+
+    mixed_demoted_items: List[ContentItem] = []
+    if len(mixed_primary_items) < target_count and demoted_items:
+        remaining = target_count - len(mixed_primary_items)
+        if surface == Surface.VIDEOS and hybrid_video_rerank:
+            demoted_items = rerank_video_candidates(demoted_items, target_count=remaining)
+        mixed_demoted_items = mix_feed(
+            demoted_items,
+            surface=surface_name,
+            target_size=remaining,
+        )
+
+    mixed_items = _prioritize_unseen_items(
+        mixed_primary_items,
+        mixed_demoted_items,
+        target_size=target_count,
+    )
 
     # Enforce position-based channel caps (videos/reels only)
     mixed_items = enforce_channel_caps(mixed_items, surface=surface_name)

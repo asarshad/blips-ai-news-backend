@@ -246,17 +246,12 @@ class PlaylistService:
             logger.warning(f"No candidates found for {content_type}")
             return []
 
-        # Score candidates with personalization
-        scored_candidates = self._score_candidates(
-            device_id,
-            candidates,
-            demoted_ids=exposed_ids,
+        return self._select_fresh_session_items(
+            device_id=device_id,
+            candidates=candidates,
+            size=size,
+            exposed_ids=exposed_ids,
         )
-
-        # Select items with diversity constraints
-        selected = self._select_diverse_items(scored_candidates, size)
-
-        return selected
 
     def _relaxed_fill_items(
         self,
@@ -305,16 +300,17 @@ class PlaylistService:
 
         consumed_ids, exposed_ids = self._get_recent_feedback_ids(device_id, content_type)
         selected_ids = {item.id for item in selected_items}
-        scored = self._score_candidates(
-            device_id,
-            [
+        return self._select_fresh_session_items(
+            device_id=device_id,
+            candidates=[
                 item
                 for item in fallback_candidates
                 if item.id not in selected_ids and item.id not in consumed_ids
             ],
-            demoted_ids=exposed_ids,
+            size=target_size,
+            exposed_ids=exposed_ids,
+            selected_items=selected_items,
         )
-        return self._relaxed_fill_items(selected_items, scored, target_size)
 
     def _load_fallback_playlist(self, device_id: str, content_type: ContentType) -> List[Dict]:
         """Load fallback playlist from cache or widened historical window."""
@@ -338,14 +334,12 @@ class PlaylistService:
             return []
 
         consumed_ids, exposed_ids = self._get_recent_feedback_ids(device_id, content_type)
-        eligible_candidates = [item for item in fallback_candidates if item.id not in consumed_ids]
-        scored = self._score_candidates(
-            device_id,
-            eligible_candidates,
-            demoted_ids=exposed_ids,
+        selected = self._select_fresh_session_items(
+            device_id=device_id,
+            candidates=[item for item in fallback_candidates if item.id not in consumed_ids],
+            size=MAX_PLAYLIST_SIZE,
+            exposed_ids=exposed_ids,
         )
-        selected = self._select_diverse_items(scored, MAX_PLAYLIST_SIZE)
-        selected = self._relaxed_fill_items(selected, scored, MAX_PLAYLIST_SIZE)
         logger.info("Serving historical fallback playlist for %s", content_type.value)
         return [self._format_item(item) for item in selected]
 
@@ -397,6 +391,43 @@ class PlaylistService:
         scored.sort(key=lambda x: x[1], reverse=True)
 
         return scored
+
+    def _select_fresh_session_items(
+        self,
+        *,
+        device_id: str,
+        candidates: List[ContentItem],
+        size: int,
+        exposed_ids: Set[int],
+        selected_items: Optional[List[ContentItem]] = None,
+    ) -> List[ContentItem]:
+        """
+        Fill fresh sessions from unseen items first, using exposed items only
+        when the unseen pool is exhausted.
+        """
+        selected = list(selected_items or [])
+        if len(selected) >= size or not candidates:
+            return selected
+
+        unseen_candidates = [item for item in candidates if item.id not in exposed_ids]
+        unseen_scored = self._score_candidates(device_id, unseen_candidates)
+        if not selected:
+            selected = self._select_diverse_items(unseen_scored, size)
+        selected = self._relaxed_fill_items(selected, unseen_scored, size)
+
+        if len(selected) >= size:
+            return selected
+
+        exposed_candidates = [item for item in candidates if item.id in exposed_ids]
+        if not exposed_candidates:
+            return selected
+
+        exposed_scored = self._score_candidates(
+            device_id,
+            exposed_candidates,
+            demoted_ids=exposed_ids,
+        )
+        return self._relaxed_fill_items(selected, exposed_scored, size)
 
     def _get_recent_feedback_ids(
         self, device_id: str, content_type: ContentType

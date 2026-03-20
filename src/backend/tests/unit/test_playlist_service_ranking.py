@@ -68,3 +68,32 @@ def test_generate_playlist_items_excludes_consumed_and_demotes_exposed():
     selected = service._generate_playlist_items("device-1", ContentType.VIDEO, 3)
 
     assert [item.id for item in selected] == [3, 1]
+
+
+def test_generate_playlist_items_prefers_unseen_pool_before_exposed_fill():
+    ranking = _RankingStub()
+    personalization = MagicMock()
+    personalization.compute_personalization_score.return_value = 0.0
+    interaction_repo = MagicMock()
+    interaction_repo.get_recent_feedback_ids.return_value = (set(), {4})
+    content_repo = MagicMock()
+    content_repo.get_items_for_playlist.return_value = [
+        _item(1),
+        _item(2),
+        _item(3),
+        _item(4),
+    ]
+
+    service = PlaylistService(
+        content_repo=content_repo,
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=personalization,
+        interaction_repo=interaction_repo,
+        ranking_service=ranking,
+        redis_client=None,
+    )
+
+    selected = service._generate_playlist_items("device-1", ContentType.VIDEO, 3)
+
+    assert [item.id for item in selected] == [3, 2, 1]
