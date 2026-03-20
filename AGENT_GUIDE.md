@@ -63,79 +63,78 @@
 #### Quick Start
 
 ```bash
-# Navigate to source directory
-cd /path/to/blips-ai-news-backend/src
+# Navigate to repository root
+cd /path/to/blips-ai-news-backend
 
 # Start all services (API, PostgreSQL, Redis)
-docker compose up -d
+docker compose -f src/docker-compose.yml up -d
 
 # View logs
-docker compose logs -f api
+docker compose -f src/docker-compose.yml logs -f api
 
 # Stop services
-docker compose down
+docker compose -f src/docker-compose.yml down
 ```
 
 #### Container Services
 
 1. **api** - FastAPI application (port 8000)
-   - Built from `Dockerfile` with Python 3.11-slim
-   - Runs with Gunicorn + 4 Uvicorn workers
+   - Built from `src/Dockerfile` with Python 3.11-slim
+   - Runs with Gunicorn + 2 Uvicorn workers
    - Auto-restarts on failure
    - Health checks every 30s
 
 2. **db** - PostgreSQL 14 (port 5432)
    - Persistent volume for data
-   - Database: `blips_news`
+   - Database: `blips`
 
 3. **redis** - Redis 7 (port 6379)
-   - In-memory cache
-   - No persistence (cache only)
+   - In-memory cache with append-only persistence enabled
 
 #### Making Code Changes
 
 ```bash
 # After modifying Python code or requirements.txt
-cd /path/to/blips-ai-news-backend/src
+cd /path/to/blips-ai-news-backend
 
 # Rebuild and restart API container
-docker compose build api
-docker compose up -d
+docker compose -f src/docker-compose.yml build api
+docker compose -f src/docker-compose.yml up -d
 
 # Verify changes
-docker compose logs -f api
+docker compose -f src/docker-compose.yml logs -f api
 ```
 
 #### Database Migrations
 
 ```bash
 # Run migrations inside container
-docker compose exec api alembic upgrade head
+docker compose -f src/docker-compose.yml exec api alembic upgrade head
 
 # Create new migration
-docker compose exec api alembic revision --autogenerate -m "description"
+docker compose -f src/docker-compose.yml exec api alembic revision --autogenerate -m "description"
 ```
 
 #### Verifying Installation
 
 ```bash
 # Check container status
-docker compose ps
+docker compose -f src/docker-compose.yml ps
 
 # Test API health
 curl http://localhost:8000/health
 
 # Verify Pillow (for image proxy)
-docker compose exec api python -c "from PIL import Image; print(f'Pillow: {Image.__version__}')"
+docker compose -f src/docker-compose.yml exec api python -c "from PIL import Image; print(f'Pillow: {Image.__version__}')"
 ```
 
 #### Environment Variables
 
-Create `.env` file in `src/` directory:
+Create `src/backend/.env` (for example by copying `src/backend/.env.example`):
 
 ```bash
 # Database
-DATABASE_URL=postgresql://postgres:postgres@db:5432/blips_news
+DATABASE_URL=postgresql://postgres:postgres@db:5432/blips
 
 # Redis
 REDIS_URL=redis://redis:6379/0
@@ -151,14 +150,14 @@ CORS_ORIGINS=["http://localhost:5173","capacitor://localhost","ionic://localhost
 
 **Container won't start:**
 ```bash
-docker compose logs api
-docker compose restart api
+docker compose -f src/docker-compose.yml logs api
+docker compose -f src/docker-compose.yml restart api
 ```
 
 **Database connection errors:**
 ```bash
 # Check if db container is healthy
-docker compose ps
+docker compose -f src/docker-compose.yml ps
 # Wait 10s for PostgreSQL to fully initialize
 ```
 
@@ -166,7 +165,7 @@ docker compose ps
 ```bash
 # Check what's using port 8000
 lsof -i :8000
-# Edit docker-compose.yml to use different port
+# Edit src/docker-compose.yml to use a different port
 ```
 
 ### Development Without Docker (Optional)
@@ -174,13 +173,14 @@ lsof -i :8000
 **Not recommended** - If you need local Python environment for IDE autocomplete:
 
 ```bash
+cd /path/to/blips-ai-news-backend/src/backend
+
 # Create venv (for IDE only, not for running)
-python3 -m venv venv
-source venv/bin/activate
-pip install -r backend/requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
 # Run locally (requires PostgreSQL + Redis running)
-cd backend
 uvicorn app.main:app --reload
 ```
 
@@ -720,8 +720,8 @@ alembic current
 
 ### Starting the Stack
 ```bash
-cd src/backend
-docker-compose up -d
+cd /path/to/blips-ai-news-backend
+docker compose -f src/docker-compose.yml up -d
 ```
 
 ### Health Checks
@@ -730,14 +730,14 @@ docker-compose up -d
 curl http://localhost:8000/health
 
 # Database
-docker-compose exec db pg_isready -U postgres
+docker compose -f src/docker-compose.yml exec db pg_isready -U postgres
 
 # Redis
-docker-compose exec redis redis-cli ping
+docker compose -f src/docker-compose.yml exec redis redis-cli ping
 ```
 
 ### Production Deployment
-**Dockerfile:** `src/backend/Dockerfile`
+**Dockerfile:** `src/Dockerfile`
 
 **Entry Point:** Gunicorn with Uvicorn workers
 ```bash
@@ -801,9 +801,9 @@ logger.error("Failed to fetch", exc_info=True)
 ## Testing Strategy
 
 ### Manual Testing
-1. Start services: `docker-compose up`
+1. Start services: `docker compose -f src/docker-compose.yml up`
 2. Test endpoints with curl/Postman
-3. Check logs: `docker-compose logs -f api`
+3. Check logs: `docker compose -f src/docker-compose.yml logs -f api`
 
 ### API Testing
 ```bash
@@ -821,7 +821,7 @@ curl "http://localhost:8000/api/v1/usage?content_item_id=1"
 
 ### Database Inspection
 ```bash
-docker-compose exec db psql -U postgres -d blips
+docker compose -f src/docker-compose.yml exec db psql -U postgres -d blips
 \dt  # List tables
 SELECT * FROM articles LIMIT 5;
 ```
@@ -875,22 +875,22 @@ SELECT * FROM articles LIMIT 5;
 **1. Database connection error**
 ```bash
 # Check if DB is running
-docker-compose ps db
+docker compose -f src/docker-compose.yml ps db
 
 # Restart
-docker-compose restart db
+docker compose -f src/docker-compose.yml restart db
 
 # Check logs
-docker-compose logs db
+docker compose -f src/docker-compose.yml logs db
 ```
 
 **2. Redis connection error**
 ```bash
 # Check if Redis is running
-docker-compose ps redis
+docker compose -f src/docker-compose.yml ps redis
 
 # Test connection
-docker-compose exec redis redis-cli ping
+docker compose -f src/docker-compose.yml exec redis redis-cli ping
 ```
 
 **3. OpenAI API errors**
@@ -899,16 +899,16 @@ docker-compose exec redis redis-cli ping
 - Frontend can override with `X-OpenAI-Key` header
 
 **4. Articles not fetching**
-- Check scheduler logs: `docker-compose logs api | grep scheduler`
+- Check scheduler logs: `docker compose -f src/docker-compose.yml logs api | grep scheduler`
 - Manually trigger: `POST /api/v1/admin/trigger-fetch`
 - Verify RSS feed URLs are accessible
 
 **5. Migrations fail**
 ```bash
 # Reset database (DEV ONLY)
-docker-compose down -v
-docker-compose up -d
-alembic upgrade head
+docker compose -f src/docker-compose.yml down -v
+docker compose -f src/docker-compose.yml up -d
+docker compose -f src/docker-compose.yml exec api alembic upgrade head
 ```
 
 ---
@@ -967,13 +967,13 @@ Response:
 ### Local Development
 ```bash
 # 1. Start services
-docker-compose up -d
+docker compose -f src/docker-compose.yml up -d
 
 # 2. Apply migrations
-docker-compose exec api alembic upgrade head
+docker compose -f src/docker-compose.yml exec api alembic upgrade head
 
 # 3. View logs
-docker-compose logs -f api
+docker compose -f src/docker-compose.yml logs -f api
 
 # 4. Test API
 curl http://localhost:8000/api/v1/articles/recent
@@ -982,25 +982,25 @@ curl http://localhost:8000/api/v1/articles/recent
 ### Making Changes
 ```bash
 # 1. Edit code (hot-reload enabled)
-vim app/api/routes/articles.py
+vim src/backend/app/api/routes/articles.py
 
 # 2. Test change
 curl http://localhost:8000/api/v1/...
 
 # 3. Check logs
-docker-compose logs api
+docker compose -f src/docker-compose.yml logs api
 ```
 
 ### Adding Dependencies
 ```bash
 # 1. Add to requirements.txt
-echo "requests==2.31.0" >> requirements.txt
+echo "requests==2.31.0" >> src/backend/requirements.txt
 
 # 2. Rebuild container
-docker-compose build api
+docker compose -f src/docker-compose.yml build api
 
 # 3. Restart
-docker-compose up -d api
+docker compose -f src/docker-compose.yml up -d api
 ```
 
 ---
@@ -1034,13 +1034,13 @@ docker-compose up -d api
 
 ```bash
 # View all logs
-docker-compose logs -f
+docker compose -f src/docker-compose.yml logs -f
 
 # API logs only
-docker-compose logs -f api
+docker compose -f src/docker-compose.yml logs -f api
 
 # Search logs
-docker-compose logs api | grep ERROR
+docker compose -f src/docker-compose.yml logs api | grep ERROR
 ```
 
 ### Metrics to Monitor
@@ -1104,11 +1104,11 @@ When working on this project:
 
 ### Commands
 ```bash
-docker-compose up -d             # Start services
-docker-compose logs -f api       # View logs
-alembic upgrade head             # Apply migrations
-docker-compose exec db psql -U postgres -d blips  # DB shell
-docker-compose exec redis redis-cli              # Redis shell
+docker compose -f src/docker-compose.yml up -d             # Start services
+docker compose -f src/docker-compose.yml logs -f api       # View logs
+docker compose -f src/docker-compose.yml exec api alembic upgrade head  # Apply migrations
+docker compose -f src/docker-compose.yml exec db psql -U postgres -d blips  # DB shell
+docker compose -f src/docker-compose.yml exec redis redis-cli              # Redis shell
 ```
 
 ### Port Numbers
