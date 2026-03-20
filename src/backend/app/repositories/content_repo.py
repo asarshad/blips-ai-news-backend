@@ -341,6 +341,24 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         self.db.commit()
         return items
 
+    def update_duration_seconds_bulk(self, updates: Dict[int, int]) -> int:
+        """Persist best-effort video duration backfills for existing items."""
+        normalized_updates = [
+            {
+                "id": item_id,
+                "duration_seconds": int(duration_seconds),
+                "updated_at": datetime.utcnow(),
+            }
+            for item_id, duration_seconds in updates.items()
+            if item_id and isinstance(duration_seconds, (int, float)) and int(duration_seconds) > 0
+        ]
+        if not normalized_updates:
+            return 0
+
+        self.db.bulk_update_mappings(ContentItem, normalized_updates)
+        self.db.commit()
+        return len(normalized_updates)
+
     def get_similar_items(
         self, item: ContentItem, hours_back: int = 48, limit: int = 50
     ) -> List[ContentItem]:

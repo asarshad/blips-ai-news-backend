@@ -291,3 +291,63 @@ def test_get_tiered_feed_filters_recent_negative_feedback(monkeypatch):
     assert [tiered.item.id for tiered in tiered_items] == [3]
     assert has_more is False
     assert remaining == 0
+
+
+def test_get_cached_tiered_feed_hydrates_missing_video_durations(monkeypatch):
+    now = datetime(2026, 3, 20, 12, 0, 0)
+    item = SimpleNamespace(
+        id=44,
+        type=ContentType.VIDEO,
+        title="Video",
+        source_url="https://www.youtube.com/watch?v=test1234567A",
+        video_url="https://www.youtube.com/watch?v=test1234567A",
+        summary="summary",
+        description="description",
+        image_url=None,
+        source="Trusted Source",
+        created_at=now - timedelta(minutes=5),
+        published_at=now - timedelta(minutes=10),
+        global_score=0.5,
+        promotion_score=0.4,
+        recency_score=0.9,
+        topics=["Technology"],
+        channel_id="channel-1",
+        acquisition_lane="search",
+        source_status="discovery",
+        views_per_hour=100.0,
+        format_fit_score=1.0,
+        promotion_reason="search",
+        conversation_starters=None,
+        duration_seconds=None,
+    )
+    tiered_item = TieredItem(
+        item=item,
+        tier=FreshnessTier.A,
+        reason="fresh_published",
+        published_age_seconds=600,
+        added_age_seconds=300,
+    )
+
+    monkeypatch.setattr(tiered_feed_service, "_get_redis_client", lambda: None)
+    monkeypatch.setattr(
+        tiered_feed_service,
+        "get_tiered_feed",
+        lambda *args, **kwargs: ([tiered_item], False, 0),
+    )
+    monkeypatch.setattr(
+        tiered_feed_service,
+        "hydrate_missing_video_durations",
+        lambda items, *, content_repo, **_kwargs: {items[0].id: 915},
+    )
+
+    items, has_more, meta = tiered_feed_service.get_cached_tiered_feed(
+        db=SimpleNamespace(),
+        surface=Surface.VIDEOS,
+        limit=20,
+        offset=0,
+        require_ai_processed=False,
+    )
+
+    assert items[0]["duration_seconds"] == 915
+    assert has_more is False
+    assert meta.cache_hit is False
