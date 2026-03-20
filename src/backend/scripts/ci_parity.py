@@ -22,9 +22,7 @@ def build_command_plan(
         [python, "-m", "pytest", "tests/unit", "tests/contract"],
     ]
     if include_integration:
-        commands.append(
-            [python, "-m", "pytest", "tests/integration", "--force-enable-socket"]
-        )
+        commands.append([python, "-m", "pytest", "tests/integration", "--force-enable-socket"])
     return commands
 
 
