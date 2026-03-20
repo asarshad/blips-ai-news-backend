@@ -220,7 +220,7 @@ def get_source_health_metrics(db: Session = Depends(get_db)):
         status_actions = (
             db.query(
                 VideoSourceProfile.status,
-                func.count(VideoSourceProfile.id),
+                func.count(VideoSourceProfile.channel_id),
             )
             .filter(
                 VideoSourceProfile.status_changed_at >= cutoff_7d,

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Dict, List, Optional
 
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.models.content import ContentItem, ContentType
@@ -62,9 +62,7 @@ def build_quality_report(db: Session, *, day: date) -> Dict[str, object]:
         db.query(
             ContentItem.type.label("type"),
             func.count(ContentItem.id).label("total"),
-            func.sum(func.case((ContentItem.is_suppressed.is_(True), 1), else_=0)).label(
-                "suppressed"
-            ),
+            func.sum(case((ContentItem.is_suppressed.is_(True), 1), else_=0)).label("suppressed"),
         )
         .filter(ContentItem.ingestion_day == day)
         .group_by(ContentItem.type)
