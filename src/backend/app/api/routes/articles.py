@@ -4,7 +4,7 @@ Updated to serve content from the unified content_items table with AI filtering.
 Includes tiered freshness strategy (A/B/C) and diversity mixing.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from sqlalchemy.orm import Session
@@ -19,8 +19,7 @@ from app.models.content import ContentType
 from app.ranking.feed_score import rerank_feed
 from app.repositories.content_repo import ContentItemRepository
 from app.repositories.user_repo import UserCategorySelectionRepository
-from app.schemas.article import Article as ArticleSchema
-from app.schemas.article import ArticleList, ArticleWithConversation, TagCount
+from app.schemas.article import ArticleWithConversation
 from app.services.ad_mixer import inject_ads
 from app.services.inventory_service import Surface
 from app.services.tiered_feed_service import (
@@ -54,57 +53,6 @@ def _content_item_to_article_schema(item) -> dict:
         "read_time_minutes": max(1, len(summary) // 200) if summary else 1,
         "tags": tags,
     }
-
-
-@router.get("/next", response_model=ArticleSchema)
-def get_next_article(
-    current_id: Optional[int] = Query(None, description="Current article ID"),
-    content_repo: ContentItemRepository = Depends(get_content_repo),
-):
-    """
-    Get the next article after the current one.
-    Returns the most recent article if no current_id is provided.
-    Only returns AI-processed articles with valid summaries.
-    """
-    # Only show articles with AI summaries
-    items = content_repo.get_by_type(
-        ContentType.ARTICLE,
-        limit=50,
-        hours_back=168,  # 7 days
-        ai_processed_only=True,
-    )
-
-    if not items:
-        raise not_found_exception("Article", current_id or "latest")
-
-    if current_id is None:
-        # Return most recent
-        return _content_item_to_article_schema(items[0])
-
-    # Find current position and return next
-    for i, item in enumerate(items):
-        if item.id == current_id:
-            if i + 1 < len(items):
-                return _content_item_to_article_schema(items[i + 1])
-            else:
-                # Wrap to first
-                return _content_item_to_article_schema(items[0])
-
-    # Current not found, return first
-    return _content_item_to_article_schema(items[0])
-
-
-@router.get("/cache", response_model=List[ArticleSchema])
-def get_cached_articles(content_repo: ContentItemRepository = Depends(get_content_repo)):
-    """Get pre-cached articles for quick access."""
-    items = content_repo.get_by_type(
-        ContentType.ARTICLE, limit=5, hours_back=72, ai_processed_only=True
-    )
-
-    if not items:
-        raise HTTPException(status_code=404, detail="No cached articles found")
-
-    return [_content_item_to_article_schema(item) for item in items]
 
 
 @router.get("/recent", response_model=Dict[str, Any])
@@ -205,40 +153,6 @@ def get_recent_articles(
         "has_more": has_more,
         "page": page,
     }
-
-
-@router.get("/tags/{tag_name}", response_model=ArticleList)
-def get_articles_by_tag(
-    tag_name: str,
-    limit: int = Query(10, ge=1, le=50, description="Number of articles to return"),
-    content_repo: ContentItemRepository = Depends(get_content_repo),
-):
-    """Get articles by tag/topic name."""
-    # Get all recent articles and filter by topic (only AI-processed)
-    items = content_repo.get_by_type(
-        ContentType.ARTICLE, limit=200, hours_back=168, ai_processed_only=True
-    )
-
-    # Filter by topic
-    matching = [
-        item for item in items if tag_name.lower() in [t.lower() for t in (item.topics or [])]
-    ][:limit]
-
-    if not matching:
-        raise HTTPException(status_code=404, detail=f"No articles found with tag '{tag_name}'")
-
-    return {"articles": [_content_item_to_article_schema(item) for item in matching]}
-
-
-@router.get("/tags", response_model=List[TagCount])
-def get_popular_tags(
-    limit: int = Query(10, ge=1, le=50, description="Number of tags to return"),
-    content_repo: ContentItemRepository = Depends(get_content_repo),
-):
-    """Get the most popular tags with article counts."""
-    distribution = content_repo.get_topic_distribution(ContentType.ARTICLE, hours_back=168)
-
-    return [{"name": topic, "count": count} for topic, count in distribution[:limit]]
 
 
 @router.get("/{article_id}", response_model=ArticleWithConversation)

@@ -10,11 +10,6 @@ class Tag(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class TagCount(BaseModel):
-    name: str
-    count: int
-
-
 class ArticleBase(BaseModel):
     title: str
     source_url: str
@@ -41,10 +36,6 @@ class ArticleWithConversation(Article):
     conversations: List["ConversationOut"] = []
 
     model_config = {"from_attributes": True}
-
-
-class ArticleList(BaseModel):
-    articles: List[Article]
 
 
 # Import at the end to resolve circular import
