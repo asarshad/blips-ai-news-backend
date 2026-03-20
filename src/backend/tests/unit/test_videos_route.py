@@ -168,3 +168,48 @@ def test_get_recent_videos_uses_remaining_window_count_for_caught_up(monkeypatch
     assert result["has_more"] is True
     assert result["remaining_count"] == 0
     assert result["inventory_state"] == "caught_up"
+
+
+def test_get_reels_passes_hybrid_rerank_flag(monkeypatch):
+    captured = {}
+
+    def _fake_feed(
+        db,
+        surface,
+        *,
+        limit,
+        offset,
+        require_ai_processed,
+        hybrid_video_rerank,
+        device_id=None,
+    ):
+        captured["surface"] = surface
+        captured["hybrid_video_rerank"] = hybrid_video_rerank
+        captured["device_id"] = device_id
+        meta = SimpleNamespace(
+            generated_at=datetime(2026, 3, 13, 12, 0, 0),
+            source="db",
+            cache_key="reels",
+            cache_hit=False,
+            tier_config={"fresh_hours": 168},
+            remaining_window_count=1,
+        )
+        return ([], False, meta)
+
+    monkeypatch.setattr(videos_module, "get_cached_tiered_feed", _fake_feed)
+    monkeypatch.setattr(videos_module, "check_and_trigger_topup", lambda *_args, **_kwargs: None)
+
+    result = videos_module.get_reels(
+        limit=1,
+        cursor=None,
+        page=None,
+        x_device_id="device-reels",
+        response=Response(),
+        db=object(),
+        flags=SimpleNamespace(is_enabled=lambda name: name in {"reels", "video_hybrid_rerank"}),
+    )
+
+    assert captured["surface"].value == "reels"
+    assert captured["hybrid_video_rerank"] is True
+    assert captured["device_id"] == "device-reels"
+    assert result["inventory_state"] == "warming_up"

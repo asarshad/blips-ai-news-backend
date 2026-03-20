@@ -1,8 +1,9 @@
-"""Hybrid reranking for video feed candidates."""
+"""Hybrid reranking for video and reel feed candidates."""
 
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import ceil
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -35,12 +36,40 @@ _QUALITY_WEIGHT = {
 }
 
 _RECENT_HOURS = 72.0
-_RECENT_FLOOR_RATIO = 0.40
-_MAX_PER_SOURCE = 4
 _OFF_ROSTER_ESCAPE_MIN_PROMOTION = 0.34
 _OFF_ROSTER_ESCAPE_MIN_GLOBAL = 0.32
 _SHAPED_PREFIX_MULTIPLIER = 2
 _MIN_SHAPED_PREFIX = 40
+
+
+@dataclass(frozen=True)
+class SurfaceRerankConfig:
+    recent_floor_ratio: float
+    max_per_source: int
+    max_per_creator: int
+    repetition_window: int
+    source_repeat_penalty: float
+    creator_repeat_penalty: float
+
+
+_SURFACE_CONFIG = {
+    "videos": SurfaceRerankConfig(
+        recent_floor_ratio=0.40,
+        max_per_source=4,
+        max_per_creator=3,
+        repetition_window=4,
+        source_repeat_penalty=0.03,
+        creator_repeat_penalty=0.04,
+    ),
+    "reels": SurfaceRerankConfig(
+        recent_floor_ratio=0.55,
+        max_per_source=2,
+        max_per_creator=2,
+        repetition_window=6,
+        source_repeat_penalty=0.05,
+        creator_repeat_penalty=0.08,
+    ),
+}
 
 
 def _normalize_terms(values: object) -> List[str]:
@@ -72,6 +101,18 @@ def _story_graph(items: Iterable[ContentItem]) -> Tuple[Dict[str, int], Dict[str
         for entity in _normalize_terms(getattr(item, "entities", None))[:3]:
             entity_counts[entity] += 1
     return dict(topic_counts), dict(entity_counts)
+
+
+def _surface_config(surface: str) -> SurfaceRerankConfig:
+    return _SURFACE_CONFIG.get(surface, _SURFACE_CONFIG["videos"])
+
+
+def _creator_key(item: ContentItem) -> str:
+    return (
+        str(getattr(item, "channel_id", "") or "").strip()
+        or str(getattr(item, "source", "") or "").strip()
+        or "unknown"
+    )
 
 
 def _hours_old(item: ContentItem) -> Optional[float]:
@@ -147,11 +188,14 @@ def _base_score(
     return round(score, 6)
 
 
-def rerank_video_candidates(items: List[ContentItem], *, target_count: int) -> List[ContentItem]:
-    """Reorder promoted video candidates with curated-first but freshness-aware bias."""
+def rerank_video_candidates(
+    items: List[ContentItem], *, target_count: int, surface: str = "videos"
+) -> List[ContentItem]:
+    """Reorder promoted video candidates with freshness and repetition control."""
     if not items:
         return []
 
+    config = _surface_config(surface)
     story_topic_counts, story_entity_counts = _story_graph(items)
     scored = [
         (
@@ -179,12 +223,13 @@ def rerank_video_candidates(items: List[ContentItem], *, target_count: int) -> L
     )
     recent_floor = min(
         sum(1 for item, _score in scored if _is_recent(item)),
-        ceil(min(target_count, shaped_target) * _RECENT_FLOOR_RATIO),
+        ceil(min(target_count, shaped_target) * config.recent_floor_ratio),
     )
 
     selected: List[ContentItem] = []
     used_ids: set[int] = set()
     per_source: Counter[str] = Counter()
+    per_creator: Counter[str] = Counter()
     recent_selected = 0
 
     while len(selected) < shaped_target:
@@ -196,11 +241,26 @@ def rerank_video_candidates(items: List[ContentItem], *, target_count: int) -> L
             if item.id in used_ids:
                 continue
             source = getattr(item, "source", "") or "unknown"
-            if per_source[source] >= _MAX_PER_SOURCE:
+            creator = _creator_key(item)
+            if per_source[source] >= config.max_per_source:
+                continue
+            if per_creator[creator] >= config.max_per_creator:
                 continue
             if need_recent and not _is_recent(item):
                 continue
-            adjusted = score - min(max(per_source[source] - 1, 0), 4) * 0.03
+            recent_window = (
+                selected[-config.repetition_window :] if config.repetition_window else []
+            )
+            source_hits = sum(
+                1 for prev in recent_window if (getattr(prev, "source", "") or "unknown") == source
+            )
+            creator_hits = sum(1 for prev in recent_window if _creator_key(prev) == creator)
+            adjusted = score
+            adjusted -= min(max(per_source[source] - 1, 0), 4) * config.source_repeat_penalty
+            adjusted -= source_hits * config.source_repeat_penalty
+            adjusted -= creator_hits * config.creator_repeat_penalty
+            if recent_window and _creator_key(recent_window[-1]) == creator:
+                adjusted -= config.creator_repeat_penalty
             if adjusted > chosen_score:
                 chosen = item
                 chosen_score = adjusted
@@ -224,7 +284,9 @@ def rerank_video_candidates(items: List[ContentItem], *, target_count: int) -> L
         selected.append(chosen)
         used_ids.add(chosen.id)
         source = getattr(chosen, "source", "") or "unknown"
+        creator = _creator_key(chosen)
         per_source[source] += 1
+        per_creator[creator] += 1
         if _is_recent(chosen):
             recent_selected += 1
 
