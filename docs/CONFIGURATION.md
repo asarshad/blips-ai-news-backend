@@ -1,394 +1,253 @@
 # Configuration Reference
 
-This document lists all configuration options for both the backend and mobile app, explains what they do, and warns about dangerous values.
-
----
-
-## Backend Configuration
-
-All backend configuration is in environment variables. Set them in `.env` file or via Docker environment.
-
-### Database Settings
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | `postgresql://postgres:postgres@db:5432/blips` | PostgreSQL connection string |
-| `DATABASE_POOL_SIZE` | `5` | Connection pool size |
-| `DATABASE_MAX_OVERFLOW` | `10` | Extra connections allowed |
-| `DATABASE_POOL_TIMEOUT` | `30` | Seconds to wait for connection |
-
-**Safe values**: Pool size 5-20, overflow 10-30
-**Dangerous**: Pool size > 50 (exhausts DB connections)
-
-### Redis Settings
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `REDIS_URL` | `redis://redis:6379/0` | Redis connection string |
-
-**Safe values**: Use database 0-15
-**Dangerous**: Using production Redis without auth
-
-### OpenAI Settings
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `OPENAI_API_KEY` | `` (required) | Your OpenAI API key |
-| `OPENAI_MODEL` | `gpt-4o-mini` | Model for summarization |
-| `OPENAI_MAX_TOKENS` | `300` | Max tokens per summary |
-| `OPENAI_TEMPERATURE` | `0.7` | Creativity (0-1) |
-
-**Safe values**: 
-- Model: `gpt-4o-mini` (cheap), `gpt-4o` (better quality)
-- Max tokens: 200-500
-- Temperature: 0.5-0.8
-
-**Dangerous**: 
-- Temperature > 0.9 (unpredictable outputs)
-- Max tokens > 1000 (expensive, summaries too long)
-
-### Scheduler Settings
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SCHEDULER_NEWS_FETCH_INTERVAL_MINUTES` | `30` | Minutes between feed fetches |
-| `SCHEDULER_SCORING_INTERVAL_MINUTES` | `60` | Minutes between score updates |
-| `SCHEDULER_CLUSTERING_INTERVAL_MINUTES` | `15` | Minutes between clustering runs |
-| `SCHEDULER_PREFERENCE_DECAY_INTERVAL_HOURS` | `24` | Hours between preference decay |
-
-**Safe values**:
-- News fetch: 15-60 minutes
-- Scoring: 30-120 minutes
-- Clustering: 10-30 minutes
-
-**Dangerous**:
-- News fetch < 10 min (may hit API rate limits)
-- Scoring < 15 min (database load)
-- Clustering < 5 min (CPU intensive)
-
-### Quota Settings
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `QUOTA_MAX_MESSAGES_PER_DAY` | `5` | AI chat messages per user per day |
-| `QUOTA_MAX_MESSAGES_PER_ARTICLE` | `3` | AI chat messages per article |
-
-**Safe values**: 3-10 messages per day
-**Dangerous**: > 50 (OpenAI costs will spike)
-
-### Cache Settings
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CACHE_ARTICLE_CACHE_COUNT` | `5` | Articles to pre-cache |
-| `CACHE_PLAYLIST_CACHE_TTL_SECONDS` | `300` | Playlist cache duration |
-| `CACHE_SESSION_SNAPSHOT_TTL_SECONDS` | `3600` | Session cache duration |
-
-**Safe values**:
-- Article cache: 3-10
-- Playlist TTL: 60-600 seconds
-
-**Dangerous**:
-- Playlist TTL < 30 seconds (defeats caching)
-- Session TTL > 86400 (stale data)
-
-### Content Settings
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DEFAULT_PLAYLIST_SIZE` | `50` | Items in personalized feed |
-| `MAX_CONTENT_AGE_HOURS` | `72` | Max age for content in feeds |
-
-**Safe values**:
-- Playlist size: 20-100
-- Max age: 24-168 hours
-
-**Dangerous**:
-- Playlist size > 200 (slow queries)
-- Max age > 168 (stale content)
-
----
-
-## Clustering Configuration
-
-File: `/app/config/clustering.py`
-
-### Similarity Thresholds
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `window_hours` | `48` | Time window for clustering |
-| `min_entity_overlap` | `0.3` | Min entity overlap (0-1) |
-| `min_title_similarity` | `0.6` | Min title similarity (0-1) |
-| `min_topic_overlap` | `0.4` | Min topic overlap (0-1) |
-| `combined_threshold` | `0.5` | Final threshold for clustering |
-
-**Tuning guide**:
-
-```
-More aggressive clustering (fewer duplicates, may miss unique angles):
-  combined_threshold: 0.4
-  min_entity_overlap: 0.2
-
-Less aggressive clustering (more items, more duplicates):
-  combined_threshold: 0.6
-  min_entity_overlap: 0.4
-```
-
-### Similarity Weights
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `entity_weight` | `0.40` | Weight for entity overlap |
-| `title_weight` | `0.40` | Weight for title similarity |
-| `topic_weight` | `0.20` | Weight for topic overlap |
-
-**Must sum to 1.0**
-
-**Tuning guide**:
-- Increase `entity_weight` if same entities = same story
-- Increase `title_weight` if titles are reliable
-- Increase `topic_weight` if different sources use different words
-
----
-
-## Ranking Configuration
-
-File: `/app/config/ranking.py`
-
-### Score Weights
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `quality_weight` | `0.25` | Weight for content quality |
-| `recency_weight` | `0.35` | Weight for freshness |
-| `trend_weight` | `0.25` | Weight for engagement |
-| `diversity_weight` | `0.15` | Weight for topic balance |
-
-**Must sum to 1.0**
-
-**Tuning guide**:
-
-```
-For breaking news emphasis:
-  recency_weight: 0.45
-  trend_weight: 0.30
-  quality_weight: 0.15
-  diversity_weight: 0.10
-
-For quality emphasis:
-  quality_weight: 0.40
-  recency_weight: 0.25
-  trend_weight: 0.20
-  diversity_weight: 0.15
-```
-
-### Recency Decay
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `recency_half_life_hours` | `12` | Half-life for time decay |
-
-**Tuning guide**:
-- 6 hours: Very aggressive, old news dies fast
-- 12 hours: Balanced (default)
-- 24 hours: Slow decay, older content stays relevant
-
----
-
-## Mobile Configuration
-
-### Video Player Pool
-
-File: `/lib/features/feed/providers/video/video_config.dart`
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `poolSize` | `5` | Number of video players |
-| `preloadCount` | `2` | Videos to preload ahead |
-| `disposeThreshold` | `3` | Videos behind before cleanup |
-| `metricsHistorySize` | `20` | Performance samples to keep |
-
-**Safe values**:
-- Pool size: 3-7
-- Preload count: 1-3
-
-**Dangerous**:
-- Pool size > 7 (memory issues)
-- Pool size < 3 (poor scroll performance)
-- Preload count > pool size (impossible)
-
-### API Configuration
-
-File: `/lib/core/api/api_client.dart`
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `baseUrl` | `http://localhost:8000/api/v1` | Backend API URL |
-| `connectTimeout` | `10000` | Connection timeout (ms) |
-| `receiveTimeout` | `30000` | Response timeout (ms) |
-
-**Production values**:
-```dart
-baseUrl: 'https://api.blips.app/api/v1'
-connectTimeout: 15000
-receiveTimeout: 60000
-```
-
----
-
-## Docker Configuration
-
-File: `docker-compose.yml`
-
-### Service Ports
-
-| Service | Internal | External | Description |
-|---------|----------|----------|-------------|
-| `api` | `8000` | `8000` | FastAPI server |
-| `db` | `5432` | `5432` | PostgreSQL |
-| `redis` | `6379` | `6379` | Redis |
-
-**Production**: Don't expose db/redis ports externally.
-
-### Resource Limits
-
-```yaml
-services:
-  api:
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 256M
-```
-
-**Safe values**:
-- API: 256M-1G
-- PostgreSQL: 256M-2G
-- Redis: 64M-256M
-
----
-
-## Rolling Freshness Strategy
-
-The tiered content strategy ensures feeds never feel empty.
-
-### Articles Freshness
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ARTICLES_FRESH_PUBLISHED_HOURS` | `36` | Tier A: Fresh content window |
-| `ARTICLES_BACKFILL_CREATED_HOURS` | `24` | Tier B: Recently added window |
-| `ARTICLES_EVERGREEN_MAX_DAYS` | `14` | Tier C: Max age for evergreen |
-| `MIN_FRESH_ARTICLES` | `30` | Minimum fresh items (triggers top-up) |
-| `RESERVOIR_ARTICLES` | `200` | Total inventory size |
-
-### Videos Freshness
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VIDEOS_FRESH_PUBLISHED_HOURS` | `72` | Tier A: Fresh content window |
-| `VIDEOS_BACKFILL_CREATED_HOURS` | `48` | Tier B: Recently added window |
-| `VIDEOS_EVERGREEN_MAX_DAYS` | `30` | Tier C: Max age for evergreen |
-| `MIN_FRESH_VIDEOS` | `25` | Minimum fresh items |
-| `RESERVOIR_VIDEOS` | `150` | Total inventory size |
-
-### Reels Freshness
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `REELS_FRESH_PUBLISHED_HOURS` | `168` | Tier A: 7 days (shorts stay relevant) |
-| `REELS_BACKFILL_CREATED_HOURS` | `72` | Tier B: Recently added window |
-| `REELS_EVERGREEN_MAX_DAYS` | `45` | Tier C: Max age for evergreen |
-| `MIN_FRESH_REELS` | `20` | Minimum fresh items |
-| `RESERVOIR_REELS` | `300` | Total inventory size |
-
-### Top-Up Controls
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TOPUP_LOCK_TTL_SECONDS` | `120` | Lock timeout for top-up |
-| `TOPUP_MAX_RUNTIME_SECONDS` | `300` | Max top-up duration |
-| `INVENTORY_HEALTH_CACHE_TTL` | `60` | Health check cache duration |
-
-**Tuning guide**:
-- Increase fresh windows during slow news periods
-- Decrease MIN_FRESH thresholds if hitting API limits
-- Increase RESERVOIR for more browsing depth
-
----
-
-## Environment-Specific Overrides
-
-### Development
-
-```env
-DEBUG=true
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/blips_dev
-OPENAI_API_KEY=sk-dev-key
-SCHEDULER_NEWS_FETCH_INTERVAL_MINUTES=60
-```
-
-### Staging
-
-```env
-DEBUG=false
-DATABASE_URL=postgresql://user:pass@staging-db:5432/blips
-OPENAI_API_KEY=sk-staging-key
-SCHEDULER_NEWS_FETCH_INTERVAL_MINUTES=30
-```
-
-### Production
-
-```env
-DEBUG=false
-DATABASE_URL=postgresql://user:pass@prod-db:5432/blips
-OPENAI_API_KEY=sk-prod-key
-SCHEDULER_NEWS_FETCH_INTERVAL_MINUTES=15
-
-# Tighter quotas
-QUOTA_MAX_MESSAGES_PER_DAY=3
-CACHE_PLAYLIST_CACHE_TTL_SECONDS=600
-
-# Freshness tuning
-ARTICLES_FRESH_PUBLISHED_HOURS=24
-MIN_FRESH_ARTICLES=50
-```
-
----
-
-## Common Mistakes
-
-### 1. Missing OpenAI Key
-
-**Symptom**: Articles have no summaries, chat doesn't work
-**Fix**: Set `OPENAI_API_KEY` in environment
-
-### 2. Wrong Database URL
-
-**Symptom**: "Connection refused" errors
-**Fix**: 
-- Local dev: `localhost:5432`
-- Docker: `db:5432` (service name)
-
-### 3. Redis Not Running
-
-**Symptom**: Caching doesn't work, slow responses
-**Fix**: Ensure Redis container is running
-
-### 4. Pool Size Too Small
-
-**Symptom**: "Connection pool exhausted" errors
-**Fix**: Increase `DATABASE_POOL_SIZE` or reduce concurrent requests
-
-### 5. Video Pool Too Large
-
-**Symptom**: App crashes on low-memory devices
-**Fix**: Reduce `poolSize` to 3-4
-
-### 6. Empty Feeds at Day Rollover
-
-**Symptom**: "No articles" message at midnight
-**Fix**: This is fixed by the tiered freshness strategy. Verify `MIN_FRESH_ARTICLES` threshold is reasonable.
+This document describes the current backend configuration surface.
+
+Primary sources of truth:
+
+- `src/backend/app/core/config.py`
+- `src/backend/app/core/feature_flags.py`
+- env-only scheduler/runtime knobs in:
+  - `src/backend/app/main.py`
+  - `src/backend/app/scheduler/__init__.py`
+  - `src/backend/app/scheduler/config.py`
+
+If this document, `.env.example`, and the code disagree, the code wins and the docs should be updated immediately.
+
+## Loading model
+
+- Most backend settings are loaded through `pydantic-settings` in `app/core/config.py`.
+- A smaller set of runtime knobs is read directly from `os.getenv(...)` in scheduler/worker code.
+- Feature flags resolve in this order:
+  1. Redis key `blips:feature:{name}`
+  2. env var fallback `FEATURE_{NAME}_ENABLED`
+  3. defaults in `app/core/feature_flags.py`
+
+## Core runtime
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `ENV` | `dev` | `dev` or `prod` |
+| `LOG_LEVEL` | `INFO` | Standard Python log levels |
+| `ADMIN_API_KEY` | `""` | Required for admin, metrics, and ops endpoints in production |
+| `CORS_ORIGINS` | `""` | Empty falls back to `capacitor://localhost,http://localhost` |
+| `DOCS_ENABLED` | `false` | Enables `/docs` and `/redoc` |
+| `DEBUG_ROUTES_ENABLED` | `false` | Mounts conditional debug routes |
+| `RATE_LIMIT_DEFAULT` | `60/minute` | Default per-IP rate limit |
+| `RATE_LIMIT_CHAT` | `10/minute` | Chat-specific rate limit |
+| `ALERT_ENABLED` | `false` | Enables webhook-based alerting |
+| `ALERT_WEBHOOK_URL` | `""` | Alert destination |
+
+## Database and Redis
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `DATABASE_URL` | `postgresql://postgres:postgres@db:5432/blips` | Primary Postgres connection |
+| `DB_POOL_SIZE` | `3` | SQLAlchemy pool size per process |
+| `DB_MAX_OVERFLOW` | `5` | Extra DB connections above pool size |
+| `DB_POOL_TIMEOUT` | `30` | Seconds to wait for a DB connection |
+| `DB_POOL_RECYCLE_SECONDS` | `1800` | Connection recycle interval |
+| `REDIS_URL` | `redis://redis:6379/0` | Primary Redis connection |
+| `REDIS_MAX_CONNECTIONS` | `20` | Shared Redis pool ceiling |
+
+## LLM providers and external APIs
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `LLM_PROVIDER` | `openai` | Supported: `openai`, `mistral` |
+| `OPENAI_API_KEY` | `""` | Required when `LLM_PROVIDER=openai` |
+| `OPENAI_MODEL` | `gpt-4o-mini` | Current OpenAI default |
+| `MISTRAL_API_KEY` | `""` | Required when `LLM_PROVIDER=mistral` |
+| `MISTRAL_MODEL` | `mistral-small-latest` | Current Mistral default |
+| `LLM_REQUEST_TIMEOUT` | `30` | Seconds per LLM request |
+| `LLM_DAILY_COST_CEILING` | `5.0` | Estimated daily spend ceiling in USD; `0` disables the ceiling |
+| `YOUTUBE_API_KEY` | unset | Used directly by video discovery, trending, and reliable Shorts detection |
+
+## Scheduler and ingestion
+
+These settings are spread across `app/core/config.py`, `app/main.py`, and scheduler modules.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `SCHEDULER_ENABLED` | `true` | Env-only. In production the API runs with `false`; the worker runs with `true` |
+| `SCHEDULER_LOCK_TTL_SECONDS` | `120` | Env-only Redis leader-lock TTL |
+| `SCHEDULER_LOCK_REFRESH_SECONDS` | `30` | Env-only leader-lock refresh cadence |
+| `INGESTION_ENABLED` | `true` | Master ingestion switch |
+| `INGESTION_CRON_DISABLED` | `false` | Emergency stop for scheduled ingestion |
+| `INGESTION_MAX_WORKERS` | `1` | Parallel ingestion worker count |
+| `INGESTION_SCHEDULER_MINUTES` | `15` effective default | Preferred cadence knob; scheduler clamps values into the supported 5-15 minute range |
+| `NEWS_FETCH_INTERVAL_MINUTES` | `30` | Backward-compatible fallback if `INGESTION_SCHEDULER_MINUTES` is unset; values are also clamped to 5-15 minutes |
+| `NEWS_FETCH_INTERVAL_HOURS` | `3` | Legacy fallback only; not recommended for continuous ingestion |
+| `MAX_ITEMS_PER_RUN` | `100` | Env-only cap for per-run processing |
+| `MAX_LLM_CALLS_PER_RUN` | `50` | Env-only cap for AI retry work |
+| `LLM_RATE_LIMIT_DELAY` | `0.5` | Env-only pause between LLM calls |
+| `INGEST_UNTIL_TARGETS` | `true` | Catch-up loop master switch |
+| `INGEST_CATCHUP_MAX_SECONDS` | `1800` | Max catch-up runtime |
+| `RSS_ENTRIES_PER_FEED` | `50` | Per-feed RSS fetch depth |
+| `YT_VIDEOS_PER_CHANNEL` | `30` | Per-channel YouTube fetch depth |
+| `YT_CURATED_LOOKBACK_HOURS` | `168` | Video curation lookback window |
+| `YOUTUBE_CURATED_ONLY` | `false` | Disable discovery and use curated channels only |
+| `YOUTUBE_DISCOVERY_ENABLED` | `true` | Enable search/discovery-based channel expansion |
+| `DISCOVERY_SIGNAL_ENABLED` | `true` | Enable Substack/Beehiiv signal ingestion |
+| `DISCOVERY_SIGNAL_LIMIT` | `25` | Total signals per run |
+| `DISCOVERY_SIGNAL_PER_SOURCE_LIMIT` | `5` | Per-source signal cap |
+| `INGESTION_TARGET_DEFAULTS` | `""` | JSON overrides keyed by `{source_type}:{feed_name}` |
+
+### Advanced YouTube discovery controls
+
+These knobs are read directly by discovery/quota/bootstrap code rather than by `Settings`.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `YOUTUBE_SEARCH_MIN_INTERVAL_MINUTES` | `180` | Shared discovery cooldown fallback |
+| `YOUTUBE_VIDEO_SEARCH_MIN_INTERVAL_MINUTES` | inherits shared fallback | Video discovery cooldown override |
+| `YOUTUBE_REEL_SEARCH_MIN_INTERVAL_MINUTES` | inherits shared fallback | Reels discovery cooldown override |
+| `YOUTUBE_SEARCH_MIN_VIDEO_DEFICIT` | `1` | Minimum video deficit before search expands |
+| `YOUTUBE_SEARCH_MIN_REEL_DEFICIT` | `1` | Minimum reels deficit before search expands |
+| `YOUTUBE_VIDEO_TRENDING_ENABLED` | `0` | Enable trending-assisted long-form discovery |
+| `YOUTUBE_REEL_TRENDING_ENABLED` | `0` | Enable trending-assisted reels discovery |
+| `YOUTUBE_API_SEARCH_DAILY_BUDGET_UNITS` | `4500` | Search-unit quota budget |
+| `YOUTUBE_API_DURATION_DAILY_BUDGET_UNITS` | `800` | Duration-check quota budget |
+| `YT_CHANNEL_BOOTSTRAP_ENABLED` | `true` | Latest-first bootstrap for newly added channels |
+| `YT_BOOTSTRAP_MAX_PROFILE_AGE_DAYS` | `2` | Bootstrap age gate |
+| `YT_BOOTSTRAP_MAX_ROWS` | `32` | Max bootstrap rows per run |
+| `YT_BOOTSTRAP_BATCH_SIZE` | `10` | Bootstrap processing batch size |
+
+## Feed, session, and personalization
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `DEFAULT_PLAYLIST_SIZE` | `50` | Mixed-feed size target |
+| `ARTICLE_CACHE_COUNT` | `5` | Article pre-cache count |
+| `PLAYLIST_CACHE_TTL_SECONDS` | `300` | Session playlist cache TTL |
+| `SESSION_SNAPSHOT_TTL_SECONDS` | `3600` | Session snapshot TTL |
+| `FEED_CACHE_TTL_SECONDS` | `300` | Feed cache TTL |
+| `ITEM_CACHE_TTL_SECONDS` | `3600` | Per-item cache TTL |
+| `CONFIG_CACHE_TTL_SECONDS` | `21600` | Config / feature flag TTL |
+| `LEASE_TTL_SECONDS` | `300` | Distributed lease TTL |
+| `MAX_CONTENT_AGE_HOURS` | `72` | Content age ceiling for serving |
+| `RECENCY_HALF_LIFE_HOURS` | `24` | Recency decay |
+| `PREFERENCE_DECAY_FACTOR` | `0.95` | Slower decay as value approaches `1.0` |
+| `MAX_TOPIC_DOMINANCE` | `0.40` | Prevent single-topic feed domination |
+| `MAX_MESSAGES_PER_DAY` | `5` | Per-device chat quota |
+| `MAX_MESSAGES_PER_ARTICLE` | `3` | Per-article chat quota |
+| `CLUSTER_WINDOW_HOURS` | `48` | Story-clustering time window |
+| `MIN_CLUSTER_SIMILARITY` | `0.5` | Story-clustering threshold |
+| `PERSONALIZATION_TOPIC_WEIGHT` | `0.35` | Personalization mix weight |
+| `PERSONALIZATION_ENTITY_WEIGHT` | `0.30` | Personalization mix weight |
+| `PERSONALIZATION_SOURCE_WEIGHT` | `0.20` | Personalization mix weight |
+| `PERSONALIZATION_FORMAT_WEIGHT` | `0.15` | Personalization mix weight |
+| `TREND_CLUSTER_WEIGHT` | `0.80` | Trend scoring weight |
+| `TREND_ENGAGEMENT_WEIGHT` | `0.20` | Trend scoring weight |
+
+## Inventory, freshness, and extraction
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `DAILY_TARGET_ARTICLES` | `100` | Daily article ingestion target |
+| `DAILY_TARGET_VIDEOS` | `60` | Daily video ingestion target |
+| `DAILY_TARGET_REELS` | `40` | Daily reels ingestion target |
+| `ARTICLES_FRESH_PUBLISHED_HOURS` | `36` | Tier A article freshness window |
+| `ARTICLES_BACKFILL_CREATED_HOURS` | `24` | Tier B article window |
+| `ARTICLES_EVERGREEN_MAX_DAYS` | `14` | Tier C article max age |
+| `VIDEOS_FRESH_PUBLISHED_HOURS` | `168` | Tier A video window |
+| `VIDEOS_BACKFILL_CREATED_HOURS` | `72` | Tier B video window |
+| `VIDEOS_EVERGREEN_MAX_DAYS` | `30` | Tier C video max age |
+| `VIDEOS_REFRESH_PUBLISHED_HOURS` | `36` | Video refresh window |
+| `MIN_REFRESH_VIDEOS` | `8` | Video refresh threshold |
+| `REELS_FRESH_PUBLISHED_HOURS` | `168` | Tier A reels window |
+| `REELS_BACKFILL_CREATED_HOURS` | `72` | Tier B reels window |
+| `REELS_EVERGREEN_MAX_DAYS` | `45` | Tier C reels max age |
+| `REELS_REFRESH_PUBLISHED_HOURS` | `24` | Reels refresh window |
+| `MIN_REFRESH_REELS` | `12` | Reels refresh threshold |
+| `REEL_MAX_DURATION_SECONDS` | `180` | Max duration for content to stay in reels |
+| `MIN_FRESH_ARTICLES` | `50` | Minimum fresh article inventory |
+| `MIN_FRESH_VIDEOS` | `60` | Minimum fresh video inventory |
+| `MIN_FRESH_REELS` | `40` | Minimum fresh reels inventory |
+| `RESERVOIR_ARTICLES` | `250` | Article reservoir size |
+| `RESERVOIR_VIDEOS` | `180` | Video reservoir size |
+| `RESERVOIR_REELS` | `320` | Reels reservoir size |
+| `TOPUP_LOCK_TTL_SECONDS` | `120` | Top-up lock TTL |
+| `TOPUP_MAX_RUNTIME_SECONDS` | `300` | Top-up max runtime |
+| `INVENTORY_HEALTH_CACHE_TTL` | `60` | Inventory-health cache TTL |
+| `EXTRACTION_ENABLED` | `true` | Enable extraction hardening path |
+| `EXTRACTION_CONNECT_TIMEOUT` | `10.0` | Extraction connect timeout |
+| `EXTRACTION_READ_TIMEOUT` | `20.0` | Extraction read timeout |
+| `EXTRACTION_MAX_RETRIES` | `3` | Extraction retries |
+| `EXTRACTION_BACKOFF_BASE` | `1.5` | Extraction retry backoff |
+| `EXTRACTION_DOMAIN_MIN_INTERVAL` | `1.0` | Per-domain request floor |
+| `EXTRACTION_MIN_TEXT_WORDS` | `100` | Minimum extracted text threshold |
+| `EXTRACTION_IDEAL_TEXT_WORDS` | `300` | Target extracted text size |
+| `SOURCE_HEALTH_DEGRADED_THRESHOLD` | `0.3` | Source-health warning threshold |
+
+## Ads and retention
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `ADS_ENABLED` | `false` | Legacy backend-injected ads master switch |
+| `ADS_FEED_CARD_ENABLED` | `false` | Legacy backend in-feed ads |
+| `ADS_BANNER_ENABLED` | `false` | Legacy backend banner ads |
+| `ADS_FEED_FREQUENCY` | `0` | Legacy backend ad cadence |
+| `ADS_CANARY_PERCENT` | `0` | Legacy backend rollout |
+| `ADS_RUNTIME_ENABLED` | `true` | Runtime mobile-ads config master switch |
+| `ADS_PROVIDER` | `admob_native` | Runtime ads provider |
+| `ADS_RUNTIME_CANARY_PERCENT` | `5` | Runtime ads rollout |
+| `ADS_CONFIG_TTL_SECONDS` | `300` | Runtime ads config TTL |
+| `ADS_ARTICLES_ENABLED` | `true` | Article ad placements |
+| `ADS_ARTICLES_FREQUENCY` | `8` | Article ad cadence |
+| `ADS_ARTICLES_FIRST_SLOT_AFTER` | `2` | First article ad slot |
+| `ADS_VIDEOS_ENABLED` | `true` | Video ad placements |
+| `ADS_VIDEOS_FREQUENCY` | `8` | Video ad cadence |
+| `ADS_VIDEOS_FIRST_SLOT_AFTER` | `2` | First video ad slot |
+| `ADS_REELS_ENABLED` | `false` | Reels ad placements |
+| `ADS_REELS_FREQUENCY` | `0` | Reels ad cadence |
+| `ADS_REELS_FIRST_SLOT_AFTER` | `0` | First reels ad slot |
+| `RETAIN_CONTENT_DAYS` | `90` | Content retention |
+| `RETAIN_INGESTION_PROGRESS_DAYS` | `14` | Ingestion progress retention |
+| `RETAIN_EVENTS_DAYS` | `30` | Event retention |
+| `RETAIN_CONVERSATIONS_DAYS` | `30` | Conversation retention |
+| `RETAIN_USAGE_DAYS` | `90` | Usage retention |
+| `RETAIN_EDITORIAL_DAYS` | `180` | Editorial audit retention |
+| `RETAIN_DEBUG_DAYS` | `7` | Debug retention |
+| `AUTO_APPROVE_REVIEW_CONTENT` | `false` | Promote review-candidate content immediately when intentionally enabled |
+
+## Feature flags
+
+Known logical feature names and their env fallback names:
+
+| Feature name | Env fallback | Default |
+| --- | --- | --- |
+| `ingestion` | `FEATURE_INGESTION_ENABLED` | `true` |
+| `summarization` | `FEATURE_SUMMARIZATION_ENABLED` | `true` |
+| `chat` | `FEATURE_CHAT_ENABLED` | `false` |
+| `reels` | `FEATURE_REELS_ENABLED` | `true` |
+| `videos` | `FEATURE_VIDEOS_ENABLED` | `true` |
+| `clustering` | `FEATURE_CLUSTERING_ENABLED` | `true` |
+| `personalization` | `FEATURE_PERSONALIZATION_ENABLED` | `true` |
+| `signals` | `FEATURE_SIGNALS_ENABLED` | `true` |
+| `promotion` | `FEATURE_PROMOTION_ENABLED` | `true` |
+| `video_hybrid_rerank` | `FEATURE_VIDEO_HYBRID_RERANK_ENABLED` | `true` |
+
+Runtime management:
+
+- Redis key format: `blips:feature:{name}`
+- List flags: `GET /api/v1/admin/flags`
+- Inspect one flag: `GET /api/v1/admin/flags/{feature}`
+- Override a flag: `PUT /api/v1/admin/flags/{feature}`
+- Remove Redis override: `DELETE /api/v1/admin/flags/{feature}`
+
+## Local development baseline
+
+1. Copy `src/backend/.env.example` to `src/backend/.env`.
+2. Set `ADMIN_API_KEY`.
+3. Set either the OpenAI or Mistral API key for the provider you want to use.
+4. Set `YOUTUBE_API_KEY` if you need reliable Shorts detection, trending discovery, or YouTube search-based discovery.
+5. For local docs and debug work, enable `DOCS_ENABLED=true` and `DEBUG_ROUTES_ENABLED=true`.
+
+## Documentation discipline
+
+When adding or renaming backend configuration:
+
+1. Update `src/backend/app/core/config.py` or the relevant env-only module.
+2. Update `src/backend/.env.example`.
+3. Update this document.
+4. Update `docs/OPERATIONS.md` if the setting affects deploy or incident handling.
