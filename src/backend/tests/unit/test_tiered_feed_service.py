@@ -8,6 +8,7 @@ from app.services.inventory_service import FreshnessTier
 from app.services.tiered_feed_service import (
     TieredItem,
     _cache_key,
+    _prioritize_unseen_items,
     tiered_item_to_dict,
 )
 
@@ -87,3 +88,14 @@ def test_cache_key_includes_device_hash_when_personalized():
 
     assert personalized_key.startswith("blips:tiered_feed:videos:")
     assert ":d" in personalized_key
+
+
+def test_prioritize_unseen_items_only_uses_demoted_fill_when_needed():
+    primary = [SimpleNamespace(id=1), SimpleNamespace(id=2), SimpleNamespace(id=3)]
+    demoted = [SimpleNamespace(id=4), SimpleNamespace(id=5)]
+
+    selected = _prioritize_unseen_items(primary, demoted, target_size=3)
+    assert [item.id for item in selected] == [1, 2, 3]
+
+    selected = _prioritize_unseen_items(primary, demoted, target_size=4)
+    assert [item.id for item in selected] == [1, 2, 3, 4]
