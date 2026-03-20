@@ -298,40 +298,40 @@ class InteractionEventRepository(BaseRepository[InteractionEvent]):
         exposed_hours: int = 0,
     ) -> Tuple[Set[int], Set[int]]:
         """Return recent consumed and exposed-only content ids for a device."""
-        relevant_event_types = set(consumed_event_types)
-        if exposed_event_types:
-            relevant_event_types.update(exposed_event_types)
-
-        if not relevant_event_types:
+        if not consumed_event_types and not exposed_event_types:
             return set(), set()
 
-        max_hours = max(consumed_hours, exposed_hours)
-        events = self.get_user_events(
-            device_id=device_id,
-            hours_back=max_hours,
-            event_types=list(relevant_event_types),
-        )
-
         now = datetime.utcnow()
-        consumed_cutoff = now - timedelta(hours=consumed_hours)
-        exposed_cutoff = now - timedelta(hours=exposed_hours)
-
         consumed_ids: Set[int] = set()
+        if consumed_event_types and consumed_hours > 0:
+            consumed_cutoff = now - timedelta(hours=consumed_hours)
+            consumed_rows = (
+                self.db.query(InteractionEvent.content_item_id)
+                .filter(
+                    InteractionEvent.device_id == device_id,
+                    InteractionEvent.event_type.in_(list(consumed_event_types)),
+                    InteractionEvent.created_at >= consumed_cutoff,
+                )
+                .distinct()
+                .all()
+            )
+            consumed_ids = {row[0] for row in consumed_rows}
+
         exposed_ids: Set[int] = set()
+        if exposed_event_types and exposed_hours > 0:
+            exposed_cutoff = now - timedelta(hours=exposed_hours)
+            exposed_query = self.db.query(InteractionEvent.content_item_id).filter(
+                InteractionEvent.device_id == device_id,
+                InteractionEvent.event_type.in_(list(exposed_event_types)),
+                InteractionEvent.created_at >= exposed_cutoff,
+            )
+            if consumed_ids:
+                exposed_query = exposed_query.filter(
+                    ~InteractionEvent.content_item_id.in_(consumed_ids)
+                )
+            exposed_rows = exposed_query.distinct().all()
+            exposed_ids = {row[0] for row in exposed_rows}
 
-        for event in events:
-            if event.event_type in consumed_event_types and event.created_at >= consumed_cutoff:
-                consumed_ids.add(event.content_item_id)
-                continue
-
-            if (
-                exposed_event_types
-                and event.event_type in exposed_event_types
-                and event.created_at >= exposed_cutoff
-            ):
-                exposed_ids.add(event.content_item_id)
-
-        exposed_ids.difference_update(consumed_ids)
         return consumed_ids, exposed_ids
 
     def get_recent_negative_feedback(
