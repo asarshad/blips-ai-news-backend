@@ -96,7 +96,9 @@ def existing_test_files(repo_root: Path) -> Set[str]:
     tests_root = repo_root / "tests"
     if not tests_root.exists():
         return set()
-    return {_normalize(path.relative_to(repo_root).as_posix()) for path in tests_root.rglob("test_*.py")}
+    return {
+        _normalize(path.relative_to(repo_root).as_posix()) for path in tests_root.rglob("test_*.py")
+    }
 
 
 def detect_missing_tests(
