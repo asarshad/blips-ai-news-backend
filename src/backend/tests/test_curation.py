@@ -21,6 +21,7 @@ from app.models.content import (
     ContentItem,
     ContentType,
     EventType,
+    PrefType,
 )
 from app.ranking import ScoringService
 from app.ranking.quality import compute_source_weight as get_source_quality_weight
@@ -403,6 +404,37 @@ class TestPersonalizationService:
 
         # New user has no preferences, score should be 0
         assert score == 0.0
+
+    def test_compute_personalization_scores_reuses_single_preference_snapshot(
+        self,
+        mock_profile_repo,
+        mock_preference_repo,
+        mock_event_repo,
+        mock_content_repo,
+        sample_content_item,
+    ):
+        """Batch scoring should not reload preferences per candidate."""
+        mock_profile_repo.get_by_device_id = Mock(return_value=Mock(device_id="active-user"))
+        mock_preference_repo.get_top_preferences = Mock(
+            return_value={
+                PrefType.TOPIC: [Mock(key="ai", weight=10.0)],
+                PrefType.ENTITY: [],
+                PrefType.SOURCE: [Mock(key=sample_content_item.source.lower(), weight=8.0)],
+                PrefType.FORMAT: [Mock(key=sample_content_item.type.value, weight=4.0)],
+            }
+        )
+
+        service = PersonalizationService(
+            mock_profile_repo, mock_preference_repo, mock_event_repo, mock_content_repo
+        )
+
+        scores = service.compute_personalization_scores(
+            "active-user", [sample_content_item, sample_content_item]
+        )
+
+        assert sample_content_item.id in scores
+        mock_profile_repo.get_by_device_id.assert_called_once_with("active-user")
+        mock_preference_repo.get_top_preferences.assert_called_once_with("active-user", limit=50)
 
     # --- Preference decay correctness tests ---
 

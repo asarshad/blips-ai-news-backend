@@ -389,9 +389,13 @@ class PlaylistService:
         """Score candidates with multi-factor ranking."""
         scored = []
         demoted_ids = demoted_ids or set()
+        personalization_scores = self.personalization.compute_personalization_scores(
+            device_id,
+            candidates,
+        )
 
         for item in candidates:
-            personalization = self.personalization.compute_personalization_score(device_id, item)
+            personalization = personalization_scores.get(item.id, 0.0)
             final_score = self.ranking_service.score_item(
                 item, personalization_score=personalization
             )

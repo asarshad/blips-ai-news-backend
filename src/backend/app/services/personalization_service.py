@@ -11,7 +11,8 @@ Updates user preferences based on interaction signals:
 Applies daily decay to prevent stale preferences.
 """
 
-from typing import Dict, Optional
+from dataclasses import dataclass
+from typing import Dict, Iterable, Optional
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -51,6 +52,16 @@ DAILY_DECAY_FACTOR = 0.95
 
 # Minimum weight before preference is pruned
 MIN_PREFERENCE_WEIGHT = 0.1
+
+
+@dataclass(frozen=True)
+class PersonalizationSnapshot:
+    """In-memory preference maps for scoring many candidates efficiently."""
+
+    topic_prefs: Dict[str, float]
+    entity_prefs: Dict[str, float]
+    source_prefs: Dict[str, float]
+    format_prefs: Dict[str, float]
 
 
 class PersonalizationService:
@@ -210,6 +221,44 @@ class PersonalizationService:
         logger.info(f"Decay complete: {stats}")
         return stats
 
+    def load_personalization_snapshot(self, device_id: str) -> Optional[PersonalizationSnapshot]:
+        """Load and normalize preference data once for batch scoring."""
+        profile = self.profile_repo.get_by_device_id(device_id)
+        if not profile:
+            return None
+
+        grouped = self.preference_repo.get_top_preferences(profile.device_id, limit=50)
+
+        def _weights(pref_type: PrefType, *, limit: Optional[int] = None) -> Dict[str, float]:
+            prefs = grouped.get(pref_type, [])
+            if limit is not None:
+                prefs = prefs[:limit]
+            return {preference.key: preference.weight for preference in prefs}
+
+        return PersonalizationSnapshot(
+            topic_prefs=_weights(PrefType.TOPIC),
+            entity_prefs=_weights(PrefType.ENTITY),
+            source_prefs=_weights(PrefType.SOURCE),
+            format_prefs=_weights(PrefType.FORMAT, limit=10),
+        )
+
+    def compute_personalization_scores(
+        self, device_id: str, contents: Iterable[ContentItem]
+    ) -> Dict[int, float]:
+        """Compute scores for many candidates with a single preference lookup."""
+        snapshot = self.load_personalization_snapshot(device_id)
+        if snapshot is None:
+            return {
+                int(getattr(content, "id", 0) or 0): 0.0
+                for content in contents
+                if int(getattr(content, "id", 0) or 0) > 0
+            }
+
+        return {
+            int(content.id): self._compute_score_from_snapshot(snapshot, content)
+            for content in contents
+        }
+
     def compute_personalization_score(self, device_id: str, content: ContentItem) -> float:
         """
         Compute how well content matches user preferences.
@@ -217,35 +266,20 @@ class PersonalizationService:
         Returns:
             Score from 0.0 to 1.0 indicating preference match
         """
-        profile = self.profile_repo.get_by_device_id(device_id)
-        if not profile:
+        snapshot = self.load_personalization_snapshot(device_id)
+        if snapshot is None:
             return 0.0
 
-        # Get user's preferences
-        topic_prefs = {
-            p.key: p.weight
-            for p in self.preference_repo.get_top_preferences(profile.device_id, limit=50).get(
-                PrefType.TOPIC, []
-            )
-        }
-        entity_prefs = {
-            p.key: p.weight
-            for p in self.preference_repo.get_top_preferences(profile.device_id, limit=50).get(
-                PrefType.ENTITY, []
-            )
-        }
-        source_prefs = {
-            p.key: p.weight
-            for p in self.preference_repo.get_top_preferences(profile.device_id, limit=50).get(
-                PrefType.SOURCE, []
-            )
-        }
-        format_prefs = {
-            p.key: p.weight
-            for p in self.preference_repo.get_top_preferences(profile.device_id, limit=10).get(
-                PrefType.FORMAT, []
-            )
-        }
+        return self._compute_score_from_snapshot(snapshot, content)
+
+    def _compute_score_from_snapshot(
+        self, snapshot: PersonalizationSnapshot, content: ContentItem
+    ) -> float:
+        """Compute personalization score from preloaded preference maps."""
+        topic_prefs = snapshot.topic_prefs
+        entity_prefs = snapshot.entity_prefs
+        source_prefs = snapshot.source_prefs
+        format_prefs = snapshot.format_prefs
 
         # Compute topic match
         topic_score = 0.0

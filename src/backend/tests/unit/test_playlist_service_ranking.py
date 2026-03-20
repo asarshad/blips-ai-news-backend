@@ -32,7 +32,7 @@ def _item(
 def test_score_candidates_uses_ranking_service_and_sorts_descending():
     ranking = _RankingStub()
     personalization = MagicMock()
-    personalization.compute_personalization_score.side_effect = [0.1, 0.2]
+    personalization.compute_personalization_scores.return_value = {1: 0.1, 2: 0.2}
 
     service = PlaylistService(
         content_repo=MagicMock(),
@@ -45,6 +45,7 @@ def test_score_candidates_uses_ranking_service_and_sorts_descending():
 
     scored = service._score_candidates("device-1", [_item(1), _item(2)])
 
+    personalization.compute_personalization_scores.assert_called_once()
     assert ranking.calls == [(1, 0.1), (2, 0.2)]
     assert [item.id for item, _ in scored] == [2, 1]
 
@@ -52,7 +53,7 @@ def test_score_candidates_uses_ranking_service_and_sorts_descending():
 def test_generate_playlist_items_excludes_consumed_and_demotes_exposed():
     ranking = _RankingStub()
     personalization = MagicMock()
-    personalization.compute_personalization_score.return_value = 0.0
+    personalization.compute_personalization_scores.return_value = {1: 0.0, 2: 0.0, 3: 0.0}
     interaction_repo = MagicMock()
     interaction_repo.get_recent_feedback_ids.return_value = ({2}, {1})
     interaction_repo.get_recent_negative_feedback.return_value = (set(), set())
@@ -77,7 +78,12 @@ def test_generate_playlist_items_excludes_consumed_and_demotes_exposed():
 def test_generate_playlist_items_prefers_unseen_pool_before_exposed_fill():
     ranking = _RankingStub()
     personalization = MagicMock()
-    personalization.compute_personalization_score.return_value = 0.0
+    personalization.compute_personalization_scores.return_value = {
+        1: 0.0,
+        2: 0.0,
+        3: 0.0,
+        4: 0.0,
+    }
     interaction_repo = MagicMock()
     interaction_repo.get_recent_feedback_ids.return_value = (set(), {4})
     interaction_repo.get_recent_negative_feedback.return_value = (set(), set())
@@ -107,7 +113,7 @@ def test_generate_playlist_items_prefers_unseen_pool_before_exposed_fill():
 def test_generate_playlist_items_filters_negative_item_and_creator_feedback():
     ranking = _RankingStub()
     personalization = MagicMock()
-    personalization.compute_personalization_score.return_value = 0.0
+    personalization.compute_personalization_scores.return_value = {1: 0.0, 2: 0.0, 3: 0.0}
     interaction_repo = MagicMock()
     interaction_repo.get_recent_feedback_ids.return_value = (set(), set())
     interaction_repo.get_recent_negative_feedback.return_value = ({1}, {"creator-2"})
