@@ -59,6 +59,8 @@ PREFER_CANONICAL_WEIGHT = 0.7  # 70% canonical, 30% fresh
 CONSUMED_SUPPRESSION_HOURS = 24
 EXPOSED_DEMOTION_HOURS = 6
 EXPOSED_ONLY_DEMOTION_MULTIPLIER = 0.65
+NEGATIVE_ITEM_SUPPRESSION_HOURS = 24
+NEGATIVE_CREATOR_SUPPRESSION_HOURS = 168
 
 ARTICLE_CONSUMED_EVENTS = {
     EventType.OPEN_SOURCE,
@@ -236,11 +238,21 @@ class PlaylistService:
     ) -> List[ContentItem]:
         """Generate selected content items (pre-format) for a new playlist."""
         consumed_ids, exposed_ids = self._get_recent_feedback_ids(device_id, content_type)
+        negative_item_ids, negative_creator_keys = self._get_recent_negative_feedback(
+            device_id, content_type
+        )
 
         # Get candidate items
         candidates = self._get_candidates(content_type)
         if consumed_ids:
             candidates = [item for item in candidates if item.id not in consumed_ids]
+        if negative_item_ids or negative_creator_keys:
+            candidates = [
+                item
+                for item in candidates
+                if item.id not in negative_item_ids
+                and self._creator_feedback_key(item) not in negative_creator_keys
+            ]
 
         if not candidates:
             logger.warning(f"No candidates found for {content_type}")
@@ -299,13 +311,19 @@ class PlaylistService:
             return selected_items
 
         consumed_ids, exposed_ids = self._get_recent_feedback_ids(device_id, content_type)
+        negative_item_ids, negative_creator_keys = self._get_recent_negative_feedback(
+            device_id, content_type
+        )
         selected_ids = {item.id for item in selected_items}
         return self._select_fresh_session_items(
             device_id=device_id,
             candidates=[
                 item
                 for item in fallback_candidates
-                if item.id not in selected_ids and item.id not in consumed_ids
+                if item.id not in selected_ids
+                and item.id not in consumed_ids
+                and item.id not in negative_item_ids
+                and self._creator_feedback_key(item) not in negative_creator_keys
             ],
             size=target_size,
             exposed_ids=exposed_ids,
@@ -334,9 +352,18 @@ class PlaylistService:
             return []
 
         consumed_ids, exposed_ids = self._get_recent_feedback_ids(device_id, content_type)
+        negative_item_ids, negative_creator_keys = self._get_recent_negative_feedback(
+            device_id, content_type
+        )
         selected = self._select_fresh_session_items(
             device_id=device_id,
-            candidates=[item for item in fallback_candidates if item.id not in consumed_ids],
+            candidates=[
+                item
+                for item in fallback_candidates
+                if item.id not in consumed_ids
+                and item.id not in negative_item_ids
+                and self._creator_feedback_key(item) not in negative_creator_keys
+            ],
             size=MAX_PLAYLIST_SIZE,
             exposed_ids=exposed_ids,
         )
@@ -449,6 +476,28 @@ class PlaylistService:
             consumed_hours=CONSUMED_SUPPRESSION_HOURS,
             exposed_event_types=exposed_event_types,
             exposed_hours=EXPOSED_DEMOTION_HOURS,
+        )
+
+    def _get_recent_negative_feedback(
+        self, device_id: str, content_type: ContentType
+    ) -> Tuple[Set[int], Set[str]]:
+        """Return recent skipped item ids and creator-downvote keys."""
+        if not self.interaction_repo or content_type == ContentType.ARTICLE:
+            return set(), set()
+
+        return self.interaction_repo.get_recent_negative_feedback(
+            device_id=device_id,
+            item_hours=NEGATIVE_ITEM_SUPPRESSION_HOURS,
+            creator_hours=NEGATIVE_CREATOR_SUPPRESSION_HOURS,
+            content_types=(ContentType.VIDEO, ContentType.REEL),
+        )
+
+    def _creator_feedback_key(self, item: ContentItem) -> str:
+        """Normalize creator identity for negative-feedback filtering."""
+        return (
+            str(getattr(item, "channel_id", "") or "").strip().lower()
+            or str(getattr(item, "source", "") or "").strip().lower()
+            or "unknown"
         )
 
     def _select_diverse_items(

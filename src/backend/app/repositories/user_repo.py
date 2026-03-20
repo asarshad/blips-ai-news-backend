@@ -11,6 +11,8 @@ from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from app.models.content import (
+    ContentItem,
+    ContentType,
     EventType,
     InteractionEvent,
     PrefType,
@@ -331,6 +333,72 @@ class InteractionEventRepository(BaseRepository[InteractionEvent]):
 
         exposed_ids.difference_update(consumed_ids)
         return consumed_ids, exposed_ids
+
+    def get_recent_negative_feedback(
+        self,
+        device_id: str,
+        *,
+        item_hours: int,
+        creator_hours: int,
+        content_types: Optional[Tuple[ContentType, ...]] = None,
+    ) -> Tuple[Set[int], Set[str]]:
+        """Return recently skipped item ids and creator keys for a device."""
+        max_hours = max(item_hours, creator_hours)
+        if max_hours <= 0:
+            return set(), set()
+
+        allowed_content_types = {
+            content_type.value if isinstance(content_type, ContentType) else str(content_type)
+            for content_type in (content_types or ())
+        }
+        cutoff = datetime.utcnow() - timedelta(hours=max_hours)
+        rows = (
+            self.db.query(
+                InteractionEvent.event_type,
+                InteractionEvent.content_item_id,
+                InteractionEvent.created_at,
+                ContentItem.type,
+                ContentItem.channel_id,
+                ContentItem.source,
+            )
+            .join(ContentItem, ContentItem.id == InteractionEvent.content_item_id)
+            .filter(
+                InteractionEvent.device_id == device_id,
+                InteractionEvent.event_type.in_(
+                    [EventType.VIDEO_SKIP_LT_2S, EventType.LESS_FROM_CREATOR]
+                ),
+                InteractionEvent.created_at >= cutoff,
+            )
+            .order_by(desc(InteractionEvent.created_at))
+            .all()
+        )
+
+        now = datetime.utcnow()
+        item_cutoff = now - timedelta(hours=item_hours)
+        creator_cutoff = now - timedelta(hours=creator_hours)
+        skipped_item_ids: Set[int] = set()
+        creator_keys: Set[str] = set()
+
+        for event_type, content_item_id, created_at, content_type, channel_id, source in rows:
+            if allowed_content_types:
+                normalized_content_type = (
+                    content_type.value
+                    if isinstance(content_type, ContentType)
+                    else str(content_type)
+                )
+                if normalized_content_type not in allowed_content_types:
+                    continue
+
+            if event_type == EventType.VIDEO_SKIP_LT_2S and created_at >= item_cutoff:
+                skipped_item_ids.add(content_item_id)
+                continue
+
+            if event_type == EventType.LESS_FROM_CREATOR and created_at >= creator_cutoff:
+                creator_key = (str(channel_id or "").strip() or str(source or "").strip()).lower()
+                if creator_key:
+                    creator_keys.add(creator_key)
+
+        return skipped_item_ids, creator_keys
 
     def get_engagement_stats(self, content_item_id: int, hours_back: int = 48) -> Dict[str, int]:
         """Get engagement statistics for a content item."""
