@@ -14,10 +14,13 @@ class _RankingStub:
         return float(item.id) + float(personalization_score)
 
 
-def _item(id_: int) -> SimpleNamespace:
+def _item(
+    id_: int, *, source: str = "techcrunch", channel_id: str | None = None
+) -> SimpleNamespace:
     return SimpleNamespace(
         id=id_,
-        source="techcrunch",
+        source=source,
+        channel_id=channel_id or source,
         global_score=0.5,
         promotion_score=0.5,
         editorial_boost=0,
@@ -52,6 +55,7 @@ def test_generate_playlist_items_excludes_consumed_and_demotes_exposed():
     personalization.compute_personalization_score.return_value = 0.0
     interaction_repo = MagicMock()
     interaction_repo.get_recent_feedback_ids.return_value = ({2}, {1})
+    interaction_repo.get_recent_negative_feedback.return_value = (set(), set())
     content_repo = MagicMock()
     content_repo.get_items_for_playlist.return_value = [_item(1), _item(2), _item(3)]
 
@@ -76,6 +80,7 @@ def test_generate_playlist_items_prefers_unseen_pool_before_exposed_fill():
     personalization.compute_personalization_score.return_value = 0.0
     interaction_repo = MagicMock()
     interaction_repo.get_recent_feedback_ids.return_value = (set(), {4})
+    interaction_repo.get_recent_negative_feedback.return_value = (set(), set())
     content_repo = MagicMock()
     content_repo.get_items_for_playlist.return_value = [
         _item(1),
@@ -97,3 +102,32 @@ def test_generate_playlist_items_prefers_unseen_pool_before_exposed_fill():
     selected = service._generate_playlist_items("device-1", ContentType.VIDEO, 3)
 
     assert [item.id for item in selected] == [3, 2, 1]
+
+
+def test_generate_playlist_items_filters_negative_item_and_creator_feedback():
+    ranking = _RankingStub()
+    personalization = MagicMock()
+    personalization.compute_personalization_score.return_value = 0.0
+    interaction_repo = MagicMock()
+    interaction_repo.get_recent_feedback_ids.return_value = (set(), set())
+    interaction_repo.get_recent_negative_feedback.return_value = ({1}, {"creator-2"})
+    content_repo = MagicMock()
+    content_repo.get_items_for_playlist.return_value = [
+        _item(1, source="Source A", channel_id="creator-1"),
+        _item(2, source="Source B", channel_id="creator-2"),
+        _item(3, source="Source C", channel_id="creator-3"),
+    ]
+
+    service = PlaylistService(
+        content_repo=content_repo,
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=personalization,
+        interaction_repo=interaction_repo,
+        ranking_service=ranking,
+        redis_client=None,
+    )
+
+    selected = service._generate_playlist_items("device-1", ContentType.VIDEO, 3)
+
+    assert [item.id for item in selected] == [3]

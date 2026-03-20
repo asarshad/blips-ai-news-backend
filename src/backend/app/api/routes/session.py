@@ -26,8 +26,11 @@ from app.repositories.user_repo import (
     UserPreferenceRepository,
     UserProfileRepository,
 )
+from app.services.inventory_service import Surface
 from app.services.personalization_service import PersonalizationService
 from app.services.playlist_service import PlaylistService
+from app.services.tiered_feed_service import invalidate_tiered_feed_cache
+from app.video_surface_rules import effective_content_type
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -169,6 +172,21 @@ def get_device_id(x_device_id: str = Header(..., description="Device identifier"
     return x_device_id
 
 
+def _tiered_surfaces_for_interaction(content_item, event_type: EventType) -> List[Surface]:
+    """Map an interaction to the device-scoped tiered feed caches it affects."""
+    effective_type = effective_content_type(content_item)
+    if effective_type == ContentType.ARTICLE:
+        return [Surface.ARTICLES]
+
+    if event_type == EventType.LESS_FROM_CREATOR:
+        return [Surface.VIDEOS, Surface.REELS]
+
+    if effective_type == ContentType.REEL:
+        return [Surface.REELS]
+
+    return [Surface.VIDEOS]
+
+
 # ============================================================================
 # Playlist Endpoints
 # ============================================================================
@@ -267,11 +285,18 @@ def record_interaction(
         EventType.VIDEO_SHARE,
         EventType.VIDEO_50PCT,
         EventType.VIDEO_95PCT,
+        EventType.VIDEO_SKIP_LT_2S,
         EventType.CHAT_START,
         EventType.CHAT_MESSAGE,
         EventType.LESS_FROM_CREATOR,
     ):
         playlist_service.invalidate_user_cache(device_id)
+
+    if event_type in (EventType.VIDEO_SKIP_LT_2S, EventType.LESS_FROM_CREATOR):
+        content_item = personalization_service.content_repo.get_by_id(request.content_item_id)
+        if content_item:
+            for surface in _tiered_surfaces_for_interaction(content_item, event_type):
+                invalidate_tiered_feed_cache(surface=surface, device_id=device_id)
 
     return InteractionResponse(success=True, event_id=event.id)
 

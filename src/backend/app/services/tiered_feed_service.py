@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from sqlalchemy import and_, desc, or_
+from sqlalchemy import and_, desc, func, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -46,6 +46,8 @@ logger = get_logger(__name__)
 TIERED_FEED_CACHE_TTL = 45  # 45 seconds - balance freshness vs DB load
 CONSUMED_SUPPRESSION_HOURS = 24
 EXPOSED_DEMOTION_HOURS = 6
+NEGATIVE_ITEM_SUPPRESSION_HOURS = 24
+NEGATIVE_CREATOR_SUPPRESSION_HOURS = 168
 ARTICLE_CONSUMED_EVENTS = {
     EventType.OPEN_SOURCE,
     EventType.SHARE,
@@ -105,7 +107,11 @@ def _cache_key(
     return f"{base_key}:d{device_hash}"
 
 
-def invalidate_tiered_feed_cache(surface: Optional[Surface] = None):
+def invalidate_tiered_feed_cache(
+    surface: Optional[Surface] = None,
+    *,
+    device_id: Optional[str] = None,
+):
     """
     Invalidate tiered feed cache.
 
@@ -117,8 +123,14 @@ def invalidate_tiered_feed_cache(surface: Optional[Surface] = None):
         return
 
     try:
-        if surface:
+        if surface and device_id:
+            device_hash = hashlib.md5(device_id.encode()).hexdigest()[:12]
+            pattern = f"blips:tiered_feed:{surface.value}:*:d{device_hash}"
+        elif surface:
             pattern = f"blips:tiered_feed:{surface.value}:*"
+        elif device_id:
+            device_hash = hashlib.md5(device_id.encode()).hexdigest()[:12]
+            pattern = f"blips:tiered_feed:*:d{device_hash}"
         else:
             pattern = "blips:tiered_feed:*"
 
@@ -152,6 +164,39 @@ def _prioritize_unseen_items(
         return primary_items[:target_size]
     remaining = max(0, target_size - len(primary_items))
     return [*primary_items, *demoted_items[:remaining]]
+
+
+def _feedback_creator_key(item: ContentItem) -> str:
+    return (
+        str(getattr(item, "channel_id", "") or "").strip().lower()
+        or str(getattr(item, "source", "") or "").strip().lower()
+        or "unknown"
+    )
+
+
+def _apply_inventory_suppression(
+    query,
+    *,
+    consumed_ids: Set[int],
+    negative_item_ids: Set[int],
+    negative_creator_keys: Set[str],
+):
+    if consumed_ids:
+        query = query.filter(~ContentItem.id.in_(consumed_ids))
+    if negative_item_ids:
+        query = query.filter(~ContentItem.id.in_(negative_item_ids))
+    if negative_creator_keys:
+        creator_key_expr = func.lower(func.coalesce(ContentItem.channel_id, ContentItem.source))
+        query = query.filter(~creator_key_expr.in_(sorted(negative_creator_keys)))
+    return query
+
+
+def _count_accessible_fresh_items(
+    query,
+    *,
+    fresh_window_filter,
+):
+    return query.filter(fresh_window_filter).count()
 
 
 def _surface_to_content_type(surface: Surface) -> ContentType:
@@ -264,6 +309,18 @@ def get_tiered_feed(
 
     results: List[TieredItem] = []
     seen_ids = set()
+    consumed_ids, exposed_ids = _get_recent_feedback_ids(db, device_id, surface)
+    negative_item_ids, negative_creator_keys = _get_recent_negative_feedback(db, device_id, surface)
+    base_inventory_query = apply_content_policy(
+        db.query(ContentItem).filter(base_filter),
+        content_type=content_type,
+    )
+    eligible_inventory_query = _apply_inventory_suppression(
+        base_inventory_query,
+        consumed_ids=consumed_ids,
+        negative_item_ids=negative_item_ids,
+        negative_creator_keys=negative_creator_keys,
+    )
 
     # Calculate how many we need from each tier
     # We fetch more to allow diversity mixing
@@ -273,18 +330,11 @@ def get_tiered_feed(
     # =========================================================================
     # TIER A: Fresh (published within window)
     # =========================================================================
-    total_fresh_count = (
-        apply_content_policy(
-            db.query(ContentItem).filter(base_filter),
-            content_type=content_type,
-        )
-        .filter(fresh_window_filter)
-        .count()
+    total_fresh_count = _count_accessible_fresh_items(
+        eligible_inventory_query,
+        fresh_window_filter=fresh_window_filter,
     )
-    tier_a_query = apply_content_policy(
-        db.query(ContentItem).filter(base_filter),
-        content_type=content_type,
-    ).filter(fresh_window_filter)
+    tier_a_query = eligible_inventory_query.filter(fresh_window_filter)
     if surface in (Surface.VIDEOS, Surface.REELS):
         tier_a_query = tier_a_query.order_by(
             desc(ContentItem.published_at),
@@ -310,11 +360,7 @@ def get_tiered_feed(
     # =========================================================================
     if len(results) < target_count * fetch_multiplier:
         tier_b_items = (
-            apply_content_policy(
-                db.query(ContentItem).filter(base_filter),
-                content_type=content_type,
-            )
-            .filter(backfill_window_filter)
+            eligible_inventory_query.filter(backfill_window_filter)
             .order_by(
                 desc(ContentItem.promotion_score),
                 desc(ContentItem.global_score),
@@ -338,11 +384,7 @@ def get_tiered_feed(
     # =========================================================================
     if len(results) < target_count * fetch_multiplier:
         tier_c_items = (
-            apply_content_policy(
-                db.query(ContentItem).filter(base_filter),
-                content_type=content_type,
-            )
-            .filter(
+            eligible_inventory_query.filter(
                 evergreen_tier_filter,
                 ContentItem.global_score >= 0.3,  # Quality threshold
             )
@@ -368,9 +410,15 @@ def get_tiered_feed(
     # Apply diversity mixing to the combined candidates
     # =========================================================================
     # Extract raw items for mixing
-    consumed_ids, exposed_ids = _get_recent_feedback_ids(db, device_id, surface)
     if consumed_ids:
         results = [tiered for tiered in results if tiered.item.id not in consumed_ids]
+    if negative_item_ids or negative_creator_keys:
+        results = [
+            tiered
+            for tiered in results
+            if tiered.item.id not in negative_item_ids
+            and _feedback_creator_key(tiered.item) not in negative_creator_keys
+        ]
     primary_results = [tiered for tiered in results if tiered.item.id not in exposed_ids]
     demoted_results = [tiered for tiered in results if tiered.item.id in exposed_ids]
 
@@ -674,4 +722,22 @@ def _get_recent_feedback_ids(
         consumed_hours=CONSUMED_SUPPRESSION_HOURS,
         exposed_event_types=exposed_event_types,
         exposed_hours=EXPOSED_DEMOTION_HOURS,
+    )
+
+
+def _get_recent_negative_feedback(
+    db: Session,
+    device_id: Optional[str],
+    surface: Surface,
+) -> Tuple[Set[int], Set[str]]:
+    """Return recently skipped item ids and creator-downvote keys."""
+    if not device_id or surface == Surface.ARTICLES:
+        return set(), set()
+
+    interaction_repo = InteractionEventRepository(db)
+    return interaction_repo.get_recent_negative_feedback(
+        device_id=device_id,
+        item_hours=NEGATIVE_ITEM_SUPPRESSION_HOURS,
+        creator_hours=NEGATIVE_CREATOR_SUPPRESSION_HOURS,
+        content_types=(ContentType.VIDEO, ContentType.REEL),
     )

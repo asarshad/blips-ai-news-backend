@@ -206,6 +206,19 @@ class TestCacheInvalidation:
         mock_client.keys.assert_called_once_with("blips:tiered_feed:articles:*")
 
     @patch("app.services.tiered_feed_service._get_redis_client")
+    def test_invalidate_specific_surface_for_device(self, mock_redis):
+        """Device-scoped invalidation only clears personalized cache entries."""
+        from app.services.tiered_feed_service import invalidate_tiered_feed_cache
+
+        mock_client = MagicMock()
+        mock_client.keys.return_value = [b"key1"]
+        mock_redis.return_value = mock_client
+
+        invalidate_tiered_feed_cache(Surface.REELS, device_id="device-12345678")
+
+        mock_client.keys.assert_called_once_with("blips:tiered_feed:reels:*:de7d086593e47")
+
+    @patch("app.services.tiered_feed_service._get_redis_client")
     def test_invalidate_handles_no_redis(self, mock_redis):
         """Gracefully handles Redis unavailability."""
         from app.services.tiered_feed_service import invalidate_tiered_feed_cache

@@ -195,3 +195,99 @@ def test_get_tiered_feed_applies_hybrid_rerank_to_reels_when_enabled(monkeypatch
     assert [tiered.item.id for tiered in tiered_items] == [9, 8]
     assert has_more is True
     assert remaining == 7
+
+
+def test_get_tiered_feed_filters_recent_negative_feedback(monkeypatch):
+    now = datetime(2026, 3, 20, 12, 0, 0)
+    items = [
+        SimpleNamespace(
+            id=1,
+            source="Source 1",
+            channel_id="creator-1",
+            published_at=now - timedelta(hours=1),
+            created_at=now - timedelta(hours=1),
+        ),
+        SimpleNamespace(
+            id=2,
+            source="Source 2",
+            channel_id="creator-2",
+            published_at=now - timedelta(hours=2),
+            created_at=now - timedelta(hours=2),
+        ),
+        SimpleNamespace(
+            id=3,
+            source="Source 3",
+            channel_id="creator-3",
+            published_at=now - timedelta(hours=3),
+            created_at=now - timedelta(hours=3),
+        ),
+    ]
+
+    class _FakeQuery:
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def order_by(self, *_args, **_kwargs):
+            return self
+
+        def limit(self, *_args, **_kwargs):
+            return self
+
+        def count(self):
+            return len(items)
+
+        def all(self):
+            return list(items)
+
+    class _FakeDB:
+        def query(self, *_args, **_kwargs):
+            return _FakeQuery()
+
+    monkeypatch.setattr(tiered_feed_service, "apply_content_policy", lambda query, **_kwargs: query)
+    monkeypatch.setattr(
+        tiered_feed_service,
+        "_get_surface_config",
+        lambda _surface: {"fresh_hours": 168, "backfill_hours": 336, "evergreen_days": 30},
+    )
+    monkeypatch.setattr(tiered_feed_service, "make_default_policy", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        tiered_feed_service,
+        "build_surface_age_filters",
+        lambda **_kwargs: SimpleNamespace(fresh=True, backfill=True, evergreen_tier=True),
+    )
+    monkeypatch.setattr(
+        tiered_feed_service, "_get_recent_feedback_ids", lambda *_args: (set(), set())
+    )
+    monkeypatch.setattr(
+        tiered_feed_service,
+        "_get_recent_negative_feedback",
+        lambda *_args: ({1}, {"creator-2"}),
+    )
+    monkeypatch.setattr(
+        tiered_feed_service,
+        "_count_accessible_fresh_items",
+        lambda *_args, **_kwargs: 1,
+    )
+    monkeypatch.setattr(
+        tiered_feed_service,
+        "mix_feed",
+        lambda feed_items, surface, target_size, session_seed=None: list(feed_items)[:target_size],
+    )
+    monkeypatch.setattr(
+        tiered_feed_service, "enforce_channel_caps", lambda feed_items, surface: feed_items
+    )
+
+    tiered_items, has_more, remaining = tiered_feed_service.get_tiered_feed(
+        _FakeDB(),
+        Surface.VIDEOS,
+        limit=5,
+        offset=0,
+        now=now,
+        require_ai_processed=False,
+        hybrid_video_rerank=False,
+        device_id="device-12345678",
+    )
+
+    assert [tiered.item.id for tiered in tiered_items] == [3]
+    assert has_more is False
+    assert remaining == 0
