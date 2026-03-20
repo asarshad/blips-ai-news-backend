@@ -209,28 +209,6 @@ class PlaylistService:
             "total_items": len(playlist),
         }
 
-    def get_playlist_legacy(
-        self,
-        device_id: str,
-        content_type: ContentType,
-        size: int = DEFAULT_PLAYLIST_SIZE,
-        offset: int = 0,
-        force_refresh: bool = False,
-    ) -> List[Dict]:
-        """
-        Legacy offset-based pagination (deprecated).
-
-        Prefer get_playlist() with session_id and cursor for swipe feeds.
-        """
-        result = self.get_playlist(
-            device_id=device_id,
-            content_type=content_type,
-            size=size,
-            cursor=offset,
-            force_refresh=force_refresh,
-        )
-        return result["items"]
-
     def _generate_playlist(
         self, device_id: str, content_type: ContentType, size: int
     ) -> List[Dict]:
