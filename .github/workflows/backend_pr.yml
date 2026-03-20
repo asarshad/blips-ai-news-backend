@@ -11,6 +11,9 @@ on:
       - "src/backend/**"
       - ".github/workflows/backend_pr.yml"
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
