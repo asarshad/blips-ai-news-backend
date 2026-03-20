@@ -55,7 +55,7 @@ If this document, `.env.example`, and the code disagree, the code wins and the d
 | --- | --- | --- |
 | `LLM_PROVIDER` | `openai` | Supported: `openai`, `mistral` |
 | `OPENAI_API_KEY` | `""` | Required when `LLM_PROVIDER=openai` |
-| `OPENAI_MODEL` | `gpt-4o-mini` | Current OpenAI default |
+| `OPENAI_MODEL` | `gpt-5-nano` | Legacy knob; OpenAI is pinned to `gpt-5-nano` and ignores overrides |
 | `MISTRAL_API_KEY` | `""` | Required when `LLM_PROVIDER=mistral` |
 | `MISTRAL_MODEL` | `mistral-small-latest` | Current Mistral default |
 | `LLM_REQUEST_TIMEOUT` | `30` | Seconds per LLM request |

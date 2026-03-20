@@ -197,6 +197,32 @@ class TestLLMRetryConfig:
         assert "TimeoutError" in type_names
 
 
+class TestOpenAIModelPinning:
+    """Verify OpenAI usage stays pinned to gpt-5-nano."""
+
+    def test_llm_client_ignores_openai_model_setting(self):
+        """LLMClient should ignore OpenAI model overrides and pin to gpt-5-nano."""
+        with patch("app.integrations.llm_client.settings") as mock_settings:
+            mock_settings.LLM_PROVIDER = "openai"
+            mock_settings.OPENAI_API_KEY = "sk-test-fake-key-12345678901234567890"
+            mock_settings.OPENAI_MODEL = "gpt-4o-mini"
+
+            from app.integrations.llm_client import LLMClient
+
+            client = LLMClient(provider="openai", api_key=mock_settings.OPENAI_API_KEY)
+            assert client._client.model == "gpt-5-nano"
+
+    def test_deprecated_openai_client_ignores_model_override(self):
+        """Legacy OpenAIClient should also stay pinned to gpt-5-nano."""
+        from app.integrations.openai_client import OpenAIClient
+
+        client = OpenAIClient(
+            api_key="sk-test-fake-key-12345678901234567890",
+            model="gpt-4o-mini",
+        )
+        assert client.model == "gpt-5-nano"
+
+
 # ── Mistral timeout ──────────────────────────────────────────────────
 
 

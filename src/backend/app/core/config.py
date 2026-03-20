@@ -10,6 +10,8 @@ from typing import List
 
 from pydantic_settings import BaseSettings
 
+PINNED_OPENAI_MODEL = "gpt-5-nano"
+
 
 class Settings(BaseSettings):
     # API Settings
@@ -50,7 +52,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_MODEL: str = PINNED_OPENAI_MODEL  # legacy setting; OpenAI path ignores overrides
 
     # Mistral
     MISTRAL_API_KEY: str = ""
