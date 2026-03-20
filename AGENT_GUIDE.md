@@ -232,11 +232,10 @@ src/backend/
 │   │   └── usage.py                # Usage quota schemas
 │   │
 │   ├── services/               # Business logic layer
-│   │   ├── news_fetcher.py         # RSS feed fetching
-│   │   ├── video_fetcher.py        # YouTube video fetching
-│   │   ├── summarizer.py           # AI summarization
-│   │   ├── article_service.py      # Article business logic
-│   │   ├── video_service.py        # Video business logic
+│   │   ├── tiered_feed_service.py  # Cached article/video feed assembly
+│   │   ├── playlist_service.py     # Session playlist snapshots
+│   │   ├── personalization_service.py  # Interaction-driven ranking signals
+│   │   ├── multi_factor_ranking_service.py  # Ranking strategy
 │   │   ├── ai_chat.py              # AI chat service
 │   │   └── quota_manager.py        # Usage quota management
 │   │
@@ -294,12 +293,8 @@ FastAPI's dependency system provides:
 - Service instances
 
 ```python
-def get_article_service(
-    db: Session = Depends(get_db),
-    redis_client: redis.Redis = Depends(get_redis)
-) -> ArticleService:
-    article_repo = ArticleRepository(db)
-    return ArticleService(article_repo, redis_client)
+def get_content_repo(db: Session = Depends(get_db)) -> ContentItemRepository:
+    return ContentItemRepository(db)
 ```
 
 ---
@@ -376,22 +371,6 @@ usage:
 GET  /api/v1/articles/recent?limit=100
      Returns most recent articles ordered by published_date DESC
      Response: { articles: Article[] }
-
-GET  /api/v1/articles/next?current_id=123
-     Get next article after current_id
-     Response: Article
-
-GET  /api/v1/articles/cache
-     Get pre-cached articles (5 most recent)
-     Response: Article[]
-
-GET  /api/v1/articles/tags/{tag_name}?limit=10
-     Get articles by tag
-     Response: { articles: Article[] }
-
-GET  /api/v1/articles/tags?limit=10
-     Get popular tags with counts
-     Response: TagCount[]
 
 POST /api/v1/admin/trigger-fetch
      Manually trigger ingestion
@@ -500,25 +479,19 @@ Article: {title}
 Content: {content}
 ```
 
-### 4. ArticleService (article_service.py)
-**Purpose:** Business logic for articles.
+### 4. Article Feed Stack
+**Purpose:** Serve article feeds from the unified `content_items` table.
 
-**Key Methods:**
+**Key Entry Points:**
 ```python
-get_recent_articles(limit: int) -> List[Article]:
-    # Returns articles ordered by published_date DESC
+get_recent_articles(...):
+    # Builds the user-facing article feed from tiered cached results
 
-get_next_article(current_id: int) -> Article:
-    # Returns next article after current_id
+get_article(article_id: int):
+    # Returns one article plus conversation scaffold
 
-get_cached_articles() -> List[Article]:
-    # Returns 5 pre-cached articles from Redis
-    
-cache_articles() -> None:
-    # Caches 5 most recent articles to Redis
-    
-get_articles_by_tag(tag_name: str, limit: int) -> List[Article]
-get_popular_tags(limit: int) -> List[TagCount]
+get_cached_tiered_feed(...):
+    # Shared cached feed primitive used by article/video surfaces
 ```
 
 ### 5. AiChatService (ai_chat.py)
@@ -606,21 +579,18 @@ get_remaining_quota(user_id: str, article_id: int) -> Dict:
 ## Caching Strategy
 
 ### Redis Cache
-**Location:** Redis keys managed by `ArticleService`
+**Location:** Shared feed caches in `tiered_feed_service.py` and session snapshots in `PlaylistService`
 
 **Cached Data:**
-- 5 most recent articles (`articles:cache`)
-- Article count (`articles:count`)
+- Device-scoped article/video feed pages
+- Session playlist snapshots
 
-**TTL:** 5 minutes
+**TTL:** Surface-dependent in the feed/session services
 
 **Usage:**
 ```python
-# Cache articles
-article_service.cache_articles()
-
-# Retrieve cached articles
-cached = article_service.get_cached_articles()
+articles, has_more, meta = get_cached_tiered_feed(...)
+playlist_service.invalidate_user_cache(device_id)
 ```
 
 ---

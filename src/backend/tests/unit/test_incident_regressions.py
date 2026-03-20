@@ -18,8 +18,8 @@ during incident response.  If these tests break, the incidents are back.
 class TestArticlesFeedAiProcessed:
     """
     POLICY: Summarization is enabled in production.  Articles without
-    AI summaries should not be shown to users.  All article endpoints
-    must filter to ai_processed=True so only summarized content appears.
+    AI summaries should not be shown to users.  The user-facing articles
+    feed must filter to ai_processed=True so only summarized content appears.
     """
 
     def test_articles_recent_requires_ai_processed(self):
@@ -36,24 +36,6 @@ class TestArticlesFeedAiProcessed:
             "get_recent_articles must use require_ai_processed=True "
             "to hide articles without AI summaries"
         )
-
-    def test_articles_next_requires_ai_processed(self):
-        """The /articles/next endpoint must filter on ai_processed."""
-        import inspect
-
-        from app.api.routes.articles import get_next_article
-
-        source = inspect.getsource(get_next_article)
-        assert "ai_processed_only=True" in source
-
-    def test_articles_cache_requires_ai_processed(self):
-        """The /articles/cache endpoint must filter on ai_processed."""
-        import inspect
-
-        from app.api.routes.articles import get_cached_articles
-
-        source = inspect.getsource(get_cached_articles)
-        assert "ai_processed_only=True" in source
 
 
 class TestArticlesDiagnosticHeaders:
