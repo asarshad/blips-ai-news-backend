@@ -134,11 +134,12 @@ src/backend/
 | Document | Description |
 |----------|-------------|
 | [Architecture](docs/ARCHITECTURE.md) | System design and data flow |
-| [Backend Structure](docs/BACKEND_STRUCTURE.md) | Code organization and patterns |
+| [Content Sources](docs/CONTENT_SOURCES.md) | Active RSS feeds and YouTube channels |
 | [Configuration](docs/CONFIGURATION.md) | Environment variables and tuning |
-| [Development Guide](docs/DEVELOPMENT_GUIDE.md) | Local setup, testing, debugging |
+| [Development Guide](docs/DEVELOPMENT.md) | Local setup, testing, debugging |
 | [Feed Freshness Strategy](docs/FEED_FRESHNESS_STRATEGY.md) | Tiered content delivery |
-| [Inventory Runbook](docs/INVENTORY_RUNBOOK.md) | Monitoring and troubleshooting |
+| [Ingestion Guide](docs/INGESTION.md) | Ingestion pipeline and observability |
+| [Operations](docs/OPERATIONS.md) | Monitoring, incidents, and runbooks |
 
 ## Development
 
