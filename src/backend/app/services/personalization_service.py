@@ -11,7 +11,7 @@ Updates user preferences based on interaction signals:
 Applies daily decay to prevent stale preferences.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -51,9 +51,6 @@ DAILY_DECAY_FACTOR = 0.95
 
 # Minimum weight before preference is pruned
 MIN_PREFERENCE_WEIGHT = 0.1
-
-# Maximum preferences per type to keep
-MAX_PREFERENCES_PER_TYPE = 100
 
 
 class PersonalizationService:
@@ -213,37 +210,6 @@ class PersonalizationService:
         logger.info(f"Decay complete: {stats}")
         return stats
 
-    def prune_old_preferences(self) -> Dict[str, int]:
-        """
-        Prune preferences exceeding max count per type.
-
-        Keeps only top MAX_PREFERENCES_PER_TYPE preferences by weight.
-        """
-        stats = {"users_processed": 0, "preferences_pruned": 0}
-
-        profiles = self.profile_repo.get_all(limit=10000)
-        stats["users_processed"] = len(profiles)
-
-        return stats
-
-    def get_user_preferences(self, device_id: str) -> Dict[str, List[Tuple[str, float]]]:
-        """
-        Get a user's current preferences.
-
-        Returns:
-            Dictionary mapping pref_type -> [(key, weight), ...]
-        """
-        profile = self.profile_repo.get_by_device_id(device_id)
-        if not profile:
-            return {}
-
-        result = {}
-        for pref_type in PrefType:
-            prefs = self.preference_repo.get_top_preferences(device_id, limit=20)
-            result[pref_type.value] = [(p.key, p.weight) for p in prefs.get(pref_type, [])]
-
-        return result
-
     def compute_personalization_score(self, device_id: str, content: ContentItem) -> float:
         """
         Compute how well content matches user preferences.
@@ -319,31 +285,3 @@ class PersonalizationService:
         )
 
         return min(1.0, max(0.0, personalization))
-
-    def get_user_stats(self, device_id: str) -> Dict[str, any]:
-        """Get statistics about a user's preferences and activity."""
-        profile = self.profile_repo.get_by_device_id(device_id)
-        if not profile:
-            return {"error": "User not found"}
-
-        # Get preference counts
-        pref_counts = {}
-        for pref_type in PrefType:
-            prefs = self.preference_repo.get_top_preferences(device_id, limit=1000).get(
-                pref_type, []
-            )
-            pref_counts[pref_type.value] = len(prefs)
-
-        # Get engagement stats
-        engagement = self.event_repo.get_engagement_stats(
-            profile.device_id,
-            hours_back=168,  # 7 days
-        )
-
-        return {
-            "device_id": device_id,
-            "user_id": profile.device_id,
-            "created_at": profile.created_at.isoformat(),
-            "preference_counts": pref_counts,
-            "engagement_7d": engagement,
-        }
