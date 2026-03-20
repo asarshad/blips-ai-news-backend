@@ -3,7 +3,7 @@ Critical API integration tests for release readiness.
 
 Tests the most important API paths:
 - Health check validates DB and Redis
-- Feed endpoints return proper structure
+- Current content endpoints return proper structure
 - Inventory health endpoints work correctly
 - Metrics and operational status endpoints (admin-protected)
 
@@ -55,39 +55,54 @@ class TestHealthEndpoint:
             assert data.get("redis") == "ok"
 
 
-class TestFeedEndpoints:
-    """Test the tiered feed endpoints."""
+class TestContentEndpoints:
+    """Test the current content retrieval endpoints."""
 
-    def test_articles_feed_returns_list(self, client):
-        """Articles feed should return a list (empty is OK for tests)."""
-        resp = client.get("/api/v1/feed/articles")
-        # 404 means empty DB, 422 means validation failed, 200 means success
-        # All are acceptable - we're testing the endpoint exists and responds
-        assert resp.status_code in [200, 404, 422, 500]
+    def test_articles_recent_returns_payload(self, client):
+        """Articles recent endpoint should exist and return the current payload shape."""
+        resp = client.get("/api/v1/articles/recent")
+        assert resp.status_code in [200, 404, 500]
         if resp.status_code == 200:
             data = resp.json()
-            assert isinstance(data, list)
+            assert isinstance(data, dict)
+            assert "articles" in data
+            assert "has_more" in data
+            assert "page" in data
 
-    def test_videos_feed_returns_list(self, client):
-        """Videos feed should return a list."""
-        resp = client.get("/api/v1/feed/videos")
-        assert resp.status_code in [200, 404, 422, 500]
+    def test_videos_recent_returns_payload(self, client):
+        """Videos recent endpoint should exist and return the current payload shape."""
+        resp = client.get("/api/v1/videos/recent")
+        assert resp.status_code in [200, 500, 503]
         if resp.status_code == 200:
             data = resp.json()
-            assert isinstance(data, list)
+            assert isinstance(data, dict)
+            assert "items" in data
+            assert "has_more" in data
+            assert "inventory_state" in data
 
-    def test_reels_feed_returns_list(self, client):
-        """Reels feed should return a list."""
-        resp = client.get("/api/v1/feed/reels")
-        assert resp.status_code in [200, 404, 422, 500]
+    def test_reels_recent_returns_payload(self, client):
+        """Reels endpoint should exist and return the current payload shape."""
+        resp = client.get("/api/v1/videos/reels")
+        assert resp.status_code in [200, 500, 503]
         if resp.status_code == 200:
             data = resp.json()
-            assert isinstance(data, list)
+            assert isinstance(data, dict)
+            assert "items" in data
+            assert "has_more" in data
+            assert "inventory_state" in data
 
     def test_playlist_endpoint_exists(self, client):
-        """Playlist endpoint should exist."""
-        resp = client.get("/api/v1/feed/playlist?device_id=test123")
-        assert resp.status_code in [200, 404, 422, 500]
+        """Playlist endpoint should exist on the session API."""
+        resp = client.get(
+            "/api/v1/session/playlist?type=ARTICLE&size=10",
+            headers={"X-Device-ID": "test-device-1234"},
+        )
+        assert resp.status_code in [200, 500]
+        if resp.status_code == 200:
+            data = resp.json()
+            assert "items" in data
+            assert "session_id" in data
+            assert "has_more" in data
 
 
 class TestInventoryEndpoints:
