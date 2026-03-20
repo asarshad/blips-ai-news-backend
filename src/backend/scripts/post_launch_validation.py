@@ -28,12 +28,12 @@ def build_checks() -> List[Check]:
         ),
         Check(
             name="source_metrics",
-            path="/metrics/sources",
+            path="/api/v1/metrics/sources",
             admin_required=True,
         ),
         Check(
             name="inventory_metrics",
-            path="/metrics/inventory/health",
+            path="/api/v1/metrics/inventory/health",
             admin_required=True,
         ),
     ]

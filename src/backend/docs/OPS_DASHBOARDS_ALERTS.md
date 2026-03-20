@@ -6,8 +6,9 @@ This document defines the minimum production dashboards and alerts required to o
 Source APIs:
 - `GET /health`
 - `GET /metrics` (admin)
-- `GET /metrics/sources` (admin)
-- `GET /metrics/inventory/health` (admin)
+- `GET /api/v1/metrics/sources` (admin)
+- `GET /api/v1/metrics/inventory/health` (admin)
+- `GET /api/v1/metrics/ai-coverage` (admin)
 - `GET /api/v1/inventory/health`
 - `GET /ops/status` (admin)
 
@@ -32,7 +33,7 @@ Primary alerts:
 ## Dashboard 2: Ingestion Reliability
 
 Panels:
-- Per-source ingestion status (`/metrics/sources.sources[].feeds[].status`)
+- Per-source ingestion status (`/api/v1/metrics/sources.sources[].feeds[].status`)
 - Retry backlog (`retry_count`, `retry_at`)
 - Attempted vs inserted items
 - Failed feed count
@@ -50,9 +51,9 @@ Primary alerts:
 Panels:
 - Surface inventory health (`/api/v1/inventory/health`)
 - Tier counts per surface (A/B/C)
-- Dominant source percentage (`/metrics/inventory/health.dominant_source_pct`)
-- Infra coverage percentage (`/metrics/inventory/health.infra_share_pct`)
-- AI share/cap check (`/metrics/ai-coverage.ai_share_pct`)
+- Dominant source percentage (`/api/v1/metrics/inventory/health.dominant_source_pct`)
+- Infra coverage percentage (`/api/v1/metrics/inventory/health.infra_share_pct`)
+- AI share/cap check (`/api/v1/metrics/ai-coverage.ai_share_pct`)
 
 Primary alerts:
 - `surface_inventory_low`
