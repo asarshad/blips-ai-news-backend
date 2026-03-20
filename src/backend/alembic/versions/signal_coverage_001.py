@@ -101,8 +101,7 @@ def upgrade() -> None:
     row = conn.execute(sa.text("SELECT 1 FROM pg_type WHERE typname = 'enqueuedstatus'"))
     if not row.fetchone():
         op.execute(
-            "CREATE TYPE enqueuedstatus AS ENUM "
-            "('pending', 'ingested', 'duplicate', 'rejected')"
+            "CREATE TYPE enqueuedstatus AS ENUM ('pending', 'ingested', 'duplicate', 'rejected')"
         )
 
     # ── 5. signal_urls table ──────────────────────────────────────────────
@@ -116,7 +115,10 @@ def upgrade() -> None:
             sa.Column(
                 "signal_source",
                 postgresql.ENUM(
-                    "hn_top", "hn_best", "github_trending", "yt_trending",
+                    "hn_top",
+                    "hn_best",
+                    "github_trending",
+                    "yt_trending",
                     name="signalsource",
                     create_type=False,
                 ),
@@ -127,7 +129,10 @@ def upgrade() -> None:
             sa.Column(
                 "enqueue_status",
                 postgresql.ENUM(
-                    "pending", "ingested", "duplicate", "rejected",
+                    "pending",
+                    "ingested",
+                    "duplicate",
+                    "rejected",
                     name="enqueuedstatus",
                     create_type=False,
                 ),

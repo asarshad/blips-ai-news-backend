@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 
 import openai
 
-from app.core.config import settings
+from app.core.config import PINNED_OPENAI_MODEL, settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -49,13 +49,13 @@ class OpenAIClient:
     for the rest of the application.
     """
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
+    def __init__(self, api_key: Optional[str] = None, model: str = PINNED_OPENAI_MODEL):
         """
         Initialize OpenAI client.
 
         Args:
             api_key: OpenAI API key. Defaults to settings.OPENAI_API_KEY
-            model: Model to use for completions. Defaults to gpt-4o-mini
+            model: Legacy model selector. OpenAI is pinned to gpt-5-nano
 
         Raises:
             ValueError: If API key is missing or empty
@@ -70,7 +70,14 @@ class OpenAIClient:
             logger.warning("OpenAI API key is missing or invalid. AI features will be unavailable.")
             self.api_key = None
 
-        self.model = model
+        requested_model = model or settings.OPENAI_MODEL
+        self.model = PINNED_OPENAI_MODEL
+        if requested_model != self.model:
+            logger.warning(
+                "Ignoring OpenAI model override '%s'; using pinned model '%s'",
+                requested_model,
+                self.model,
+            )
         if self.api_key:
             openai.api_key = self.api_key
 

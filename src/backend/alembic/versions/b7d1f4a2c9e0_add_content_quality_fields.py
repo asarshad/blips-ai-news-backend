@@ -59,7 +59,11 @@ def _normalize_url_for_key(url: str) -> str:
     scheme = (parts.scheme or "https").lower()
     netloc = (parts.netloc or "").lower()
 
-    query_pairs = [(k, v) for (k, v) in parse_qsl(parts.query, keep_blank_values=True) if k.lower() not in _TRACKING_PARAMS]
+    query_pairs = [
+        (k, v)
+        for (k, v) in parse_qsl(parts.query, keep_blank_values=True)
+        if k.lower() not in _TRACKING_PARAMS
+    ]
     query = urlencode(query_pairs, doseq=True)
 
     path = parts.path or ""
@@ -102,7 +106,9 @@ def _extract_youtube_id(url: str) -> Optional[str]:
     return None
 
 
-def _canonical_key(content_type: str, canonical_url: Optional[str], source_url: str, video_url: Optional[str]) -> Optional[str]:
+def _canonical_key(
+    content_type: str, canonical_url: Optional[str], source_url: str, video_url: Optional[str]
+) -> Optional[str]:
     # VIDEO/REEL: prefer YouTube video_id if present.
     if content_type in ("VIDEO", "REEL"):
         vid = _extract_youtube_id(video_url or "") or _extract_youtube_id(source_url or "")
@@ -138,10 +144,16 @@ def upgrade() -> None:
     op.create_index("ix_content_items_ingestion_day", "content_items", ["ingestion_day"])
     op.create_index("ix_content_items_is_suppressed", "content_items", ["is_suppressed"])
     op.create_index("ix_content_items_simhash", "content_items", ["simhash"])
-    op.create_index("ix_content_items_ingestion_day_type", "content_items", ["ingestion_day", "type"])
+    op.create_index(
+        "ix_content_items_ingestion_day_type", "content_items", ["ingestion_day", "type"]
+    )
 
     # Backfill ingestion_day best-effort from created_at (UTC date).
-    conn.execute(sa.text("UPDATE content_items SET ingestion_day = DATE(created_at) WHERE ingestion_day IS NULL"))
+    conn.execute(
+        sa.text(
+            "UPDATE content_items SET ingestion_day = DATE(created_at) WHERE ingestion_day IS NULL"
+        )
+    )
 
     # Backfill canonical_key in batches.
     batch_size = 500

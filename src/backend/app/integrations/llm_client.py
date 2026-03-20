@@ -20,7 +20,7 @@ from tenacity import (
     wait_exponential,
 )
 
-from app.core.config import settings
+from app.core.config import PINNED_OPENAI_MODEL, settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -35,7 +35,7 @@ LLM_DAILY_COST_CEILING = float(getattr(settings, "LLM_DAILY_COST_CEILING", 5.0))
 
 # Approximate cost per 1K tokens (input+output blended) for budgeting
 _TOKEN_COST_PER_1K = {
-    "openai": 0.00030,  # gpt-4o-mini blended
+    "openai": 0.00020,  # gpt-5-nano approximate blended rate
     "mistral": 0.00025,  # mistral-small blended
     "fake": 0.0,
 }
@@ -122,7 +122,7 @@ class OpenAILLMClient(BaseLLMClient):
     # Transient exception types that should trigger a retry.
     _RETRYABLE: tuple = ()  # populated in __init__ after import
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "gpt-4o-mini"):
+    def __init__(self, api_key: Optional[str] = None, model: str = PINNED_OPENAI_MODEL):
         import openai
 
         # Build the retryable tuple once at init time.
@@ -136,8 +136,16 @@ class OpenAILLMClient(BaseLLMClient):
         )
 
         self.api_key = api_key or settings.OPENAI_API_KEY
-        self.model = model
+        requested_model = model or settings.OPENAI_MODEL
+        self.model = PINNED_OPENAI_MODEL
         self._client = None
+
+        if requested_model != self.model:
+            logger.warning(
+                "Ignoring OpenAI model override '%s'; using pinned model '%s'",
+                requested_model,
+                self.model,
+            )
 
         if not self._is_valid_key(self.api_key):
             logger.warning("OpenAI API key is missing or invalid. AI features will be unavailable.")

@@ -38,7 +38,7 @@ Blips aggregates tech news from multiple sources (RSS feeds, YouTube channels), 
 | API | FastAPI (Python 3.11+) |
 | Database | PostgreSQL + SQLAlchemy |
 | Cache | Redis |
-| AI | OpenAI GPT-4o-mini / Mistral |
+| AI | OpenAI GPT-5 nano / Mistral |
 | Scheduler | APScheduler |
 | Container | Docker + Docker Compose |
 

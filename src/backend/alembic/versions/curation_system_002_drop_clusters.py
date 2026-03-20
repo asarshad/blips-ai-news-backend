@@ -13,13 +13,14 @@ MIGRATION POLICY: ADDITIVE ONLY
 - Never drop columns with data
 - Deprecated tables can be cleaned up manually after verification
 """
+
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = 'curation_system_002'
-down_revision = 'curation_system_001'
+revision = "curation_system_002"
+down_revision = "curation_system_001"
 branch_labels = None
 depends_on = None
 
@@ -41,17 +42,22 @@ def upgrade() -> None:
 def downgrade() -> None:
     # Recreate content_clusters table
     op.create_table(
-        'content_clusters',
-        sa.Column('id', sa.String(64), nullable=False),
-        sa.Column('primary_topic', sa.String(255), nullable=True),
-        sa.Column('primary_entities', postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default='[]'),
-        sa.Column('item_count', sa.Integer(), nullable=True, server_default='0'),
-        sa.Column('first_seen', sa.DateTime(), nullable=False),
-        sa.Column('last_updated', sa.DateTime(), nullable=False),
-        sa.Column('window_start', sa.DateTime(), nullable=False),
-        sa.Column('window_end', sa.DateTime(), nullable=False),
-        sa.PrimaryKeyConstraint('id')
+        "content_clusters",
+        sa.Column("id", sa.String(64), nullable=False),
+        sa.Column("primary_topic", sa.String(255), nullable=True),
+        sa.Column(
+            "primary_entities",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=False,
+            server_default="[]",
+        ),
+        sa.Column("item_count", sa.Integer(), nullable=True, server_default="0"),
+        sa.Column("first_seen", sa.DateTime(), nullable=False),
+        sa.Column("last_updated", sa.DateTime(), nullable=False),
+        sa.Column("window_start", sa.DateTime(), nullable=False),
+        sa.Column("window_end", sa.DateTime(), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index('ix_content_clusters_primary_topic', 'content_clusters', ['primary_topic'])
-    op.create_index('ix_content_clusters_window_start', 'content_clusters', ['window_start'])
-    op.create_index('ix_content_clusters_window_end', 'content_clusters', ['window_end'])
+    op.create_index("ix_content_clusters_primary_topic", "content_clusters", ["primary_topic"])
+    op.create_index("ix_content_clusters_window_start", "content_clusters", ["window_start"])
+    op.create_index("ix_content_clusters_window_end", "content_clusters", ["window_end"])
