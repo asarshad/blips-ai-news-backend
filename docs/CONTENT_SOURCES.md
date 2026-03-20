@@ -6,7 +6,7 @@ All RSS feeds and YouTube channels that power the Blips News feed.
 
 > **AI Feed Governance** — AI-category items are capped at **40 % of any visible feed window**. No more than **2 consecutive AI items** may appear in sequence. Multiple publishers covering the same AI story are collapsed into a single cluster; the representative source is chosen by `global_score`. See `app/config/diversity.py` for enforcement logic and `tests/unit/test_ai_coverage.py` for cap tests.
 
-> **Inventory Health** — Category and source distribution are measured continuously via `GET /metrics/inventory/health`. Alerts fire when any single source exceeds **30 %** of the promoted window or infrastructure topics fall below **10 %** combined share. Validated by `tests/unit/test_feed_distribution.py`.
+> **Inventory Health** — Category and source distribution are measured continuously via `GET /api/v1/metrics/inventory/health`. Alerts fire when any single source exceeds **30 %** of the promoted window or infrastructure topics fall below **10 %** combined share. Validated by `tests/unit/test_feed_distribution.py`.
 
 ---
 
@@ -239,4 +239,4 @@ These targets are enforced at runtime by `DiversityMixer` category-cap logic and
 | ROLE_QUOTAS: SECURITY | 5/day |
 | ROLE_QUOTAS: DEV | 5/day |
 
-Distribution is validated by `tests/unit/test_feed_distribution.py` and monitored in production via `GET /metrics/inventory/health`.
+Distribution is validated by `tests/unit/test_feed_distribution.py` and monitored in production via `GET /api/v1/metrics/inventory/health`.

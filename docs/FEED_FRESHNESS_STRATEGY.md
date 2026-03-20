@@ -74,7 +74,7 @@ RESERVOIR_REELS=300
 The inventory service continuously monitors content levels:
 
 ```
-GET /inventory/health
+GET /api/v1/inventory/health
 ```
 
 Returns:
@@ -165,14 +165,14 @@ Articles page 1: {'A': 8, 'B': 5, 'C': 2} (limit=15)
 
 Check inventory health:
 ```bash
-curl http://localhost:8000/inventory/health | jq
+curl http://localhost:8000/api/v1/inventory/health | jq
 ```
 
 ## Troubleshooting
 
 ### "All items are Tier C"
-- Check if RSS feeds are being fetched (`/sources/status`)
-- Verify ingestion is running (`/admin/metrics`)
+- Check if RSS feeds are being fetched (`/api/v1/metrics/sources`)
+- Verify ingestion is running (`/metrics`)
 - Increase `ARTICLES_FRESH_PUBLISHED_HOURS` temporarily
 
 ### Top-up not triggering

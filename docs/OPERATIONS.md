@@ -393,7 +393,7 @@ The `/metrics` endpoint exposes pool statistics:
 3. Verify: Check logs for "fetch_and_process_news completed"
 
 **If feeds are failing:**
-1. Check `/metrics/sources` for `problem_feeds`
+1. Check `/api/v1/metrics/sources` for `problem_feeds`
 2. Check if specific RSS feeds changed URLs
 3. Check if YouTube API key is exhausted (quota resets at midnight PT)
 4. Verify: `articles_ingested_last_2h > 0` in `/metrics`
@@ -809,10 +809,10 @@ scaling:
 
 ```bash
 # Full health status
-curl -s http://localhost:8000/inventory/health | jq
+curl -s http://localhost:8000/api/v1/inventory/health | jq
 
 # Single surface
-curl -s http://localhost:8000/inventory/health/articles | jq
+curl -s http://localhost:8000/api/v1/inventory/health/articles | jq
 ```
 
 ## Key Metrics
@@ -884,7 +884,7 @@ Set up alerts for:
 ## Recovery Procedures
 
 ### Empty Feed
-1. Check `/inventory/health` - identify which tier is empty
+1. Check `/api/v1/inventory/health` - identify which tier is empty
 2. Check `/sources` - verify feeds are active
 3. Trigger manual ingest if needed
 4. Monitor tier counts recovering

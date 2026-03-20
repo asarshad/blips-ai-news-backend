@@ -74,8 +74,8 @@ Blips is a personalized tech news aggregator with two main components:
 │   /api/v1/videos/recent       - Paginated video list                │
 │   /api/v1/videos/reels        - Short-form videos for reels         │
 │   /api/v1/session/playlist    - Personalized mixed feed             │
-│   /api/v1/interactions        - Log user engagement                 │
-│   /api/v1/chat                - AI chat about articles              │
+│   /api/v1/session/interactions - Log user engagement                │
+│   /api/v1/ai/respond          - AI chat about content               │
 └─────────────────────────────────────────────────────────────────────┘
                                │
                                ▼

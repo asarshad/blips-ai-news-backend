@@ -63,4 +63,4 @@ src/backend/
 ```
 
 ## Frontend
-The frontend is in a separate repo (`tech-whisperer-digest`) - React + Vite + Capacitor iOS app.
+The current mobile client is in a separate repo (`blips-mobile`) and is built with Flutter for iOS and Android.

@@ -115,7 +115,7 @@ Shift videos and reels from daily target budgeting to a continuous rolling 7-day
 - **Files**: `src/backend/app/ingestion/language_filter.py`, `src/backend/app/ingestion/service.py`, `src/backend/app/ingestion/checkpoint_worker.py`
 
 ### Step 10: Extend Admin Metrics
-- Add to `/metrics/sources` response: `7d_pool_count`, `recent_24h_count`, `curated_vs_discovery_mix`, `classification_drops` (items reclassified), `source_promotion_demotion_actions`, `language_filtered_count`
+- Add to `/api/v1/metrics/sources` response: `7d_pool_count`, `recent_24h_count`, `curated_vs_discovery_mix`, `classification_drops` (items reclassified), `source_promotion_demotion_actions`, `language_filtered_count`
 - **Files**: `src/backend/app/api/routes/metrics.py`, `src/backend/app/services/video_source_service.py`
 
 ---
@@ -282,7 +282,7 @@ Shift videos and reels from daily target budgeting to a continuous rolling 7-day
 8. **caught_up correct**: Page through entire 7-day pool → verify caught_up only fires after last promoted item in window
 9. **Language filtering**: Submit a Hindi-title video and a short (<30 char) transliterated non-English title → verify both are rejected without regressing valid short English titles
 10. **YouTube quota**: Monitor actual YouTube API quota usage over 24h → verify search plus duration traffic stays within the configured real-unit budget
-11. **Admin metrics**: Verify `/metrics/sources` includes 7d_pool_count, curated_vs_discovery_mix, language_filtered_count
+11. **Admin metrics**: Verify `/api/v1/metrics/sources` includes 7d_pool_count, curated_vs_discovery_mix, language_filtered_count
 
 ---
 

@@ -44,7 +44,7 @@ transitions computed by `refresh_video_source_health()`:
 - Otherwise channels earn `rotation` or `core` status based on score_7d thresholds
 
 Demoted channels remain in ingestion but receive lower promotion multipliers.
-The admin metrics endpoint (`GET /metrics/sources`) reports demoted channels
+The admin metrics endpoint (`GET /api/v1/metrics/sources`) reports demoted channels
 under `demoted_channels`.
 
 ### Reel scorecard command
@@ -293,8 +293,8 @@ in `ExtractionResult.fetch_error` and `extraction_status`.
 
 ### Observability
 
-- `GET /metrics/extraction` — Global counters, per-source health, degraded sources
-- `GET /metrics/extraction/samples` — Last N extraction samples for debugging
+- `GET /api/v1/metrics/extraction` — Global counters, per-source health, degraded sources
+- `GET /api/v1/metrics/extraction/samples` — Last N extraction samples for debugging
 
 Both endpoints require `ADMIN_API_KEY`.
 
@@ -302,13 +302,13 @@ Both endpoints require `ADMIN_API_KEY`.
 
 ```bash
 # Check extraction health
-curl -H "X-Admin-Key: $ADMIN_API_KEY" https://YOUR-SERVICE/metrics/extraction | jq
+curl -H "X-Admin-Key: $ADMIN_API_KEY" https://YOUR-SERVICE/api/v1/metrics/extraction | jq
 
 # Check recent samples
-curl -H "X-Admin-Key: $ADMIN_API_KEY" https://YOUR-SERVICE/metrics/extraction/samples?limit=10 | jq
+curl -H "X-Admin-Key: $ADMIN_API_KEY" https://YOUR-SERVICE/api/v1/metrics/extraction/samples?limit=10 | jq
 
 # Look for degraded sources
-curl -H "X-Admin-Key: $ADMIN_API_KEY" https://YOUR-SERVICE/metrics/extraction | jq '.degraded_sources'
+curl -H "X-Admin-Key: $ADMIN_API_KEY" https://YOUR-SERVICE/api/v1/metrics/extraction | jq '.degraded_sources'
 ```
 
 ### Tests

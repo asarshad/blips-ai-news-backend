@@ -45,13 +45,13 @@ docker-compose up -d
 # Run migrations
 docker-compose exec api alembic upgrade head
 
-# Seed default sources
-docker-compose exec api python -c "from app.config.sources import seed_default_sources; seed_default_sources()"
+# Optional: populate initial content immediately instead of waiting for the scheduler
+docker-compose exec api python scripts/trigger_ingestion.py
 ```
 
 Verify it's working:
 ```bash
-curl http://localhost:8000/api/v1/health
+curl http://localhost:8000/health
 # Should return: {"status": "healthy"}
 ```
 
@@ -242,7 +242,7 @@ flutter test integration_test
 
 ```bash
 # Health check
-curl http://localhost:8000/api/v1/health
+curl http://localhost:8000/health
 
 # Get articles
 curl http://localhost:8000/api/v1/articles/recent
@@ -254,9 +254,10 @@ curl http://localhost:8000/api/v1/videos/recent
 curl http://localhost:8000/api/v1/videos/reels
 
 # Post interaction
-curl -X POST http://localhost:8000/api/v1/interactions \
+curl -X POST http://localhost:8000/api/v1/session/interactions \
   -H "Content-Type: application/json" \
-  -d '{"content_id": 1, "event_type": "view"}'
+  -H "X-Device-ID: test-device-1234" \
+  -d '{"content_item_id": 1, "event_type": "VIEW_10S"}'
 ```
 
 ---
@@ -275,19 +276,26 @@ docker-compose logs -f api
 docker-compose exec api python
 ```
 ```python
-from app.db.session import SessionLocal
+from app.db.base import SessionLocal
+from app.models.content import ContentType
 from app.repositories.content_repo import ContentItemRepository
 
 db = SessionLocal()
 repo = ContentItemRepository(db)
-items = repo.get_recent_articles(limit=5)
+items = repo.get_by_type(
+    ContentType.ARTICLE,
+    limit=5,
+    hours_back=72,
+    ai_processed_only=True,
+)
 print(items)
 ```
 
 **Debug specific job**:
 ```python
-from app.scheduler.jobs import fetch_news
-fetch_news()  # Runs immediately
+from app.scheduler.tasks import fetch_and_process_news
+
+fetch_and_process_news()  # Runs immediately
 ```
 
 ### Mobile Debugging
@@ -323,7 +331,7 @@ docker-compose logs db
 docker-compose logs redis
 
 # Check database connectivity
-docker-compose exec api python -c "from app.db.session import engine; print(engine.execute('SELECT 1').fetchone())"
+docker-compose exec api python -c "from sqlalchemy import text; from app.db.base import engine; conn = engine.connect(); print(conn.execute(text('SELECT 1')).scalar()); conn.close()"
 
 # Check Redis connectivity
 docker-compose exec redis redis-cli PING
@@ -356,14 +364,14 @@ docker-compose exec api alembic stamp head
 
 **Cause**: Backend not running or no data
 **Fix**:
-1. Check backend: `curl http://localhost:8000/api/v1/health`
+1. Check backend: `curl http://localhost:8000/health`
 2. Check data: `curl http://localhost:8000/api/v1/articles/recent`
-3. Run fetch job: `docker-compose exec api python -c "from app.scheduler.jobs import fetch_news; fetch_news()"`
+3. Run fetch job: `docker-compose exec api python -c "from app.scheduler.tasks import fetch_and_process_news; fetch_and_process_news()"`
 
 ### 4. Videos don't play on iOS simulator
 
-**Cause**: youtube_explode_dart rate limited
-**Fix**: Wait a few minutes and retry. Consider caching resolved URLs longer.
+**Cause**: YouTube playback requests are being throttled or the simulator network is flaky
+**Fix**: Wait a few minutes, verify `/api/v1/videos/recent` still returns items, and retry on a physical device if the simulator remains unstable.
 
 ### 5. Hot reload doesn't update providers
 

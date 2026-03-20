@@ -123,7 +123,7 @@ docker compose exec api alembic revision --autogenerate -m "description"
 docker compose ps
 
 # Test API health
-curl http://localhost:8000/api/v1/health
+curl http://localhost:8000/health
 
 # Verify Pillow (for image proxy)
 docker compose exec api python -c "from PIL import Image; print(f'Pillow: {Image.__version__}')"
@@ -393,46 +393,44 @@ GET  /api/v1/articles/tags?limit=10
      Get popular tags with counts
      Response: TagCount[]
 
-POST /api/v1/articles/fetch
-     Manually trigger article fetching
+POST /api/v1/admin/trigger-fetch
+     Manually trigger ingestion
      Response: { status, message }
 ```
 
 ### Videos
 ```
 GET  /api/v1/videos/recent?limit=50
-     Returns most recent videos ordered by created_at DESC
-     Response: { videos: Video[] }
+     Returns the current video payload
+     Response: { items: Video[], next_cursor, has_more, inventory_state }
 
-POST /api/v1/videos/fetch
-     Manually trigger video fetching
-     Response: { status, message }
+GET  /api/v1/videos/reels?limit=50
+     Returns short-form video payload
+     Response: { items: Video[], next_cursor, has_more, inventory_state }
 ```
 
 ### Chat
 ```
-POST /api/v1/chat/{article_id}
-     Send message and get AI response
-     Body: { message: string }
-     Headers: X-OpenAI-Key (optional)
+POST /api/v1/ai/respond
+     Send message and get AI response for a content item
+     Body: { content_item_id: int, message: string, history?: Message[] }
      Response: { 
        response: string,
        remaining_daily: int,
-       remaining_article: int | null
+       remaining_article: int | null,
      }
 
-GET  /api/v1/chat/{article_id}/history
-     Get conversation history for article
-     Response: {
-       article_id: int,
-       conversations: Conversation[]
-     }
+GET  /api/v1/conversations/{content_item_id}
+     Get device-scoped conversation history for a content item
+
+POST /api/v1/conversations/{content_item_id}
+     Save a device-scoped message for a content item
 ```
 
 ### Usage
 ```
-GET  /api/v1/usage/stats/{article_id}
-     Get remaining quota for user
+GET  /api/v1/usage?content_item_id={id}
+     Get remaining quota for the current device
      Response: {
        remaining_daily_messages: int,
        remaining_article_messages: int | null
@@ -813,12 +811,12 @@ logger.error("Failed to fetch", exc_info=True)
 curl http://localhost:8000/api/v1/articles/recent?limit=5
 
 # Chat
-curl -X POST http://localhost:8000/api/v1/chat/1 \
+curl -X POST http://localhost:8000/api/v1/ai/respond \
   -H "Content-Type: application/json" \
-  -d '{"message": "What is this article about?"}'
+  -d '{"content_item_id": 1, "message": "What is this article about?"}'
 
 # Check quota
-curl http://localhost:8000/api/v1/usage/stats/1
+curl "http://localhost:8000/api/v1/usage?content_item_id=1"
 ```
 
 ### Database Inspection
@@ -902,7 +900,7 @@ docker-compose exec redis redis-cli ping
 
 **4. Articles not fetching**
 - Check scheduler logs: `docker-compose logs api | grep scheduler`
-- Manually trigger: `POST /api/v1/articles/fetch`
+- Manually trigger: `POST /api/v1/admin/trigger-fetch`
 - Verify RSS feed URLs are accessible
 
 **5. Migrations fail**
@@ -1087,7 +1085,7 @@ When working on this project:
 
 ## Related Documentation
 
-- **Frontend Guide:** See `tech-whisperer-digest/AGENT_GUIDE.md`
+- **Mobile App:** See `../blips-mobile/README.md`
 - **Copilot Instructions:** `.github/copilot-instructions.md`
 - **FastAPI Docs:** https://fastapi.tiangolo.com
 - **SQLAlchemy Docs:** https://docs.sqlalchemy.org
