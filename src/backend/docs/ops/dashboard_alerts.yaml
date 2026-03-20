@@ -20,16 +20,16 @@ dashboards:
     title: Ingestion Reliability
     panels:
       - metric: feed_status
-        source: /metrics/sources
+        source: /api/v1/metrics/sources
         path: sources[].feeds[].status
       - metric: retry_count
-        source: /metrics/sources
+        source: /api/v1/metrics/sources
         path: sources[].feeds[].retry_count
       - metric: retry_at
-        source: /metrics/sources
+        source: /api/v1/metrics/sources
         path: sources[].feeds[].retry_at
       - metric: attempted_vs_inserted
-        source: /metrics/sources
+        source: /api/v1/metrics/sources
         path: sources[].feeds[]
 
   - id: feed_inventory_quality
@@ -38,13 +38,13 @@ dashboards:
       - metric: surface_health
         source: /api/v1/inventory/health
       - metric: dominant_source_pct
-        source: /metrics/inventory/health
+        source: /api/v1/metrics/inventory/health
         path: dominant_source_pct
       - metric: infra_share_pct
-        source: /metrics/inventory/health
+        source: /api/v1/metrics/inventory/health
         path: infra_share_pct
       - metric: ai_share_pct
-        source: /metrics/ai-coverage
+        source: /api/v1/metrics/ai-coverage
         path: ai_share_pct
 
   - id: editorial_delivery

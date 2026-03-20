@@ -3,7 +3,7 @@ Feed inventory health metrics.
 
 Provides lightweight, in-process computation of category and source
 distribution across a promoted feed window.  Used by the
-``/metrics/inventory/health`` endpoint to help operators detect:
+``/api/v1/metrics/inventory/health`` endpoint to help operators detect:
 
 - Single-source dominance  (any source > 30 % of window)
 - Category imbalance       (e.g. AI crowding out Infra/Security)
