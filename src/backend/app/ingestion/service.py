@@ -118,6 +118,58 @@ class IngestionPipeline:
         self.youtube_client = youtube_client or YouTubeClient()
         self.llm_client = llm_client or LLMClient()
 
+    def _maybe_refresh_existing_article_metadata(
+        self,
+        existing_item: ContentItem,
+        *,
+        source_url: Optional[str],
+        rss_image_url: Optional[str],
+    ) -> bool:
+        """Backfill missing image/canonical metadata for already-ingested articles."""
+        needs_image = not (existing_item.image_url or "").strip()
+        needs_canonical = not (existing_item.canonical_url or "").strip()
+        if not needs_image and not needs_canonical:
+            return False
+
+        from app.extraction.normalize import validate_image_url
+        from app.services.article_image_service import fetch_article_page_metadata
+
+        refreshed_image = (
+            validate_image_url(rss_image_url) if needs_image and rss_image_url else None
+        )
+        refreshed_canonical = None
+
+        if source_url and (needs_canonical or not refreshed_image):
+            metadata = fetch_article_page_metadata(source_url)
+            if metadata is not None:
+                if needs_image and not refreshed_image and metadata.image_url:
+                    refreshed_image = metadata.image_url
+                if needs_canonical and metadata.canonical_url:
+                    refreshed_canonical = metadata.canonical_url
+
+        if not refreshed_image and not refreshed_canonical:
+            return False
+
+        if refreshed_image:
+            existing_item.image_url = refreshed_image
+        if refreshed_canonical:
+            existing_item.canonical_url = refreshed_canonical
+        existing_item.updated_at = datetime.utcnow()
+
+        try:
+            self.db.add(existing_item)
+            self.db.commit()
+            self.db.refresh(existing_item)
+            return True
+        except Exception as exc:
+            self.db.rollback()
+            logger.warning(
+                "Failed to refresh existing article metadata for %s: %s",
+                source_url or getattr(existing_item, "id", "unknown"),
+                exc,
+            )
+            return False
+
     def _fresh_promoted_inventory_count(self, content_type: ContentType) -> int:
         """Count recent promoted inventory for the surface users actually see."""
         cutoff = datetime.utcnow() - timedelta(hours=DISCOVERY_FRESH_WINDOW_HOURS)
@@ -164,6 +216,11 @@ class IngestionPipeline:
         if normalized_url:
             existing_by_url = self.content_repo.get_by_source_url(normalized_url)
             if existing_by_url:
+                self._maybe_refresh_existing_article_metadata(
+                    existing_by_url,
+                    source_url=normalized_url,
+                    rss_image_url=entry.image_url,
+                )
                 logger.debug(f"Article already ingested (source_url): {entry.title}")
                 return None
 
@@ -172,6 +229,11 @@ class IngestionPipeline:
 
         existing = self.content_repo.get_by_dedupe_key(dedupe_key)
         if existing:
+            self._maybe_refresh_existing_article_metadata(
+                existing,
+                source_url=normalized_url,
+                rss_image_url=entry.image_url,
+            )
             logger.debug(f"Article already ingested: {entry.title}")
             return None
 
@@ -212,6 +274,11 @@ class IngestionPipeline:
                         extraction.canonical_url
                     )
                     if existing_canon:
+                        self._maybe_refresh_existing_article_metadata(
+                            existing_canon,
+                            source_url=extraction.canonical_url or normalized_url,
+                            rss_image_url=extraction.image_url or entry.image_url,
+                        )
                         logger.debug(f"Article already ingested (canonical_url): {entry.title}")
                         return None
             except Exception as exc:

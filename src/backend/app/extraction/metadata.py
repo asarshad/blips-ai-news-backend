@@ -26,7 +26,7 @@ class PageMetadata:
     canonical_url: Optional[str] = None
     title: Optional[str] = None
     image_url: Optional[str] = None
-    image_source: str = "none"  # og | twitter | rss | none
+    image_source: str = "none"  # og | twitter | body | rss | none
     description: Optional[str] = None
     published_at_str: Optional[str] = None  # raw from meta tags
 
@@ -75,7 +75,7 @@ def extract_metadata(html: str, source_url: str) -> PageMetadata:
     meta_desc = _meta_content(head, attrs={"name": "description"})
     meta.description = og_desc or meta_desc
 
-    # ── Image URL (priority: og:image → twitter:image) ───────────────────
+    # ── Image URL (priority: og:image → twitter:image → body image) ──────
     og_image = _meta_content(head, prop="og:image")
     tw_image = _meta_content(head, attrs={"name": "twitter:image"})
 
@@ -86,6 +86,9 @@ def extract_metadata(html: str, source_url: str) -> PageMetadata:
         if validated:
             meta.image_url = validated
             meta.image_source = "og" if og_image else "twitter"
+    elif body_image := _extract_body_image(soup, source_url):
+        meta.image_url = body_image
+        meta.image_source = "body"
 
     # ── Published date (best effort from meta tags) ───────────────────────
     for attr_name in [
@@ -118,3 +121,89 @@ def _meta_content(
     except Exception:
         pass
     return None
+
+
+def _extract_body_image(soup: BeautifulSoup, source_url: str) -> Optional[str]:
+    """Return the first likely editorial image found in the page body."""
+    seen_roots: set[int] = set()
+    for root in (soup.find("article"), soup.find("main"), soup.body, soup):
+        if root is None or id(root) in seen_roots:
+            continue
+        seen_roots.add(id(root))
+        for img in root.find_all("img"):
+            candidate = _img_candidate_url(img)
+            if not candidate or not _looks_like_editorial_image(img, candidate):
+                continue
+            absolute = make_absolute_url(candidate, source_url)
+            validated = validate_image_url(absolute)
+            if validated:
+                return validated
+    return None
+
+
+def _img_candidate_url(img) -> Optional[str]:
+    """Pick the best URL-like attribute from an <img> tag."""
+    for attr in ("src", "data-src", "data-lazy-src", "data-original", "data-image"):
+        value = img.get(attr)
+        if value and str(value).strip():
+            return str(value).strip()
+
+    for attr in ("srcset", "data-srcset"):
+        value = img.get(attr)
+        if value and str(value).strip():
+            first_candidate = str(value).split(",")[0].strip().split(" ")[0].strip()
+            if first_candidate:
+                return first_candidate
+
+    return None
+
+
+def _looks_like_editorial_image(img, candidate_url: str) -> bool:
+    """Filter obvious logos, icons, placeholders, and tiny decorative images."""
+    haystack = " ".join(
+        filter(
+            None,
+            [
+                candidate_url,
+                img.get("alt"),
+                img.get("id"),
+                " ".join(img.get("class", [])),
+                img.get("aria-label"),
+            ],
+        )
+    ).lower()
+    excluded_keywords = (
+        "logo",
+        "icon",
+        "avatar",
+        "badge",
+        "emoji",
+        "favicon",
+        "placeholder",
+        "sprite",
+        "tracking",
+        "pixel",
+        "advert",
+        "banner",
+    )
+    if any(keyword in haystack for keyword in excluded_keywords):
+        return False
+
+    width = _parse_dimension(img.get("width"))
+    height = _parse_dimension(img.get("height"))
+    if width is not None and width < 160:
+        return False
+    if height is not None and height < 120:
+        return False
+
+    return True
+
+
+def _parse_dimension(value) -> Optional[int]:
+    """Parse integer dimensions from HTML width/height attributes."""
+    if value is None:
+        return None
+    try:
+        return int(str(value).strip().replace("px", ""))
+    except (TypeError, ValueError):
+        return None

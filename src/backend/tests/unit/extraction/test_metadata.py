@@ -111,6 +111,40 @@ class TestImageExtraction:
         assert meta.image_url is None
         assert meta.image_source == "none"
 
+    def test_body_image_fallback_when_head_metadata_missing(self):
+        html = """<!DOCTYPE html>
+<html>
+  <head><title>Body Image</title></head>
+  <body>
+    <article>
+      <img src="/images/hero.jpg" width="1280" height="720" alt="Hero image" />
+    </article>
+  </body>
+</html>"""
+        meta = extract_metadata(html, "https://example.com/story")
+        assert meta.image_url == "https://example.com/images/hero.jpg"
+        assert meta.image_source == "body"
+
+    def test_body_image_skips_logo_and_uses_next_editorial_image(self):
+        html = """<!DOCTYPE html>
+<html>
+  <head><title>Logo First</title></head>
+  <body>
+    <article>
+      <img src="/assets/logo.png" width="96" height="96" class="site-logo" alt="Site logo" />
+      <img
+        data-srcset="/images/hero-1280.jpg 1280w, /images/hero-640.jpg 640w"
+        width="1280"
+        height="720"
+        alt="Feature photo"
+      />
+    </article>
+  </body>
+</html>"""
+        meta = extract_metadata(html, "https://example.com/story")
+        assert meta.image_url == "https://example.com/images/hero-1280.jpg"
+        assert meta.image_source == "body"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Published date
