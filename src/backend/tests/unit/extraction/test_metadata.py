@@ -1,6 +1,6 @@
 """Tests for app.extraction.metadata — HTML head metadata extraction."""
 
-from app.extraction.metadata import PageMetadata, extract_metadata
+from app.extraction.metadata import PageMetadata, extract_metadata, is_probably_generic_image_url
 
 
 def _html_with_head(head_content: str) -> str:
@@ -76,6 +76,9 @@ class TestTitleExtraction:
 
 
 class TestImageExtraction:
+    def test_nojs_placeholder_image_marked_generic(self):
+        assert is_probably_generic_image_url("https://www.cbc.ca/a/assets/nojsimg.gif")
+
     def test_og_image_preferred(self):
         html = _html_with_head(
             '<meta property="og:image" content="https://cdn.example.com/og.jpg" />'
