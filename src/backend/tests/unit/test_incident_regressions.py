@@ -134,46 +134,41 @@ class TestReelsDurationFilter:
 
 class TestReelClassificationIngestion:
     """
-    ROOT CAUSE: Ingestion used `if is_short or is_shorts_url or is_short_duration`
-    with a logical OR, so is_short metadata could override known long duration.
+    ROOT CAUSE: Ingestion treated short duration as sufficient evidence for REEL,
+    which misclassified plain `watch?v=` videos under 3 minutes.
 
-    FIX: Known duration is authoritative — if duration > max, always VIDEO.
+    FIX: Only durable Shorts signals should create REELs.
     """
 
-    def test_long_duration_overrides_is_short_flag(self):
-        """A video with known long duration must NOT become a REEL."""
+    def test_duration_only_no_longer_promotes_reels(self):
+        """Short duration alone must not be enough to classify a reel."""
         import inspect
 
         from app.ingestion.service import IngestionPipeline
 
         source = inspect.getsource(IngestionPipeline.ingest_youtube_entry)
-        # The new code should check is_long_duration FIRST
-        assert "is_long_duration" in source, (
-            "Ingestion must check for long duration and force VIDEO type"
+        assert "classify_video_like_item" in source, (
+            "Ingestion must use shared durable Shorts classification"
         )
 
-    def test_classification_priority_order(self):
-        """
-        In the new ingestion code, the priority must be:
-        1. is_long_duration → VIDEO (authoritative)
-        2. is_short_duration → REEL (authoritative)
-        3. is_shorts_url → REEL (strong hint)
-        4. is_short metadata → REEL (weak hint, only if no duration)
-        """
-        import inspect
+    def test_duration_authority_still_protects_long_videos(self):
+        """Known long duration must still force VIDEO even with reel-like signals."""
+        from app.models.content import ContentType
+        from app.video_surface_rules import classify_video_like_item
 
-        from app.ingestion.service import IngestionPipeline
+        item = type(
+            "Item",
+            (),
+            {
+                "duration_seconds": 601,
+                "video_url": "https://www.youtube.com/shorts/not-actually-short",
+                "title": "#shorts but long",
+                "channel_id": None,
+            },
+        )()
 
-        source = inspect.getsource(IngestionPipeline.ingest_youtube_entry)
-
-        # is_long_duration check must come BEFORE is_short_duration
-        # After the first mention, find the if-block ordering
-        long_if = source.index("if is_long_duration")
-        short_elif = source.index("elif is_short_duration")
-        url_elif = source.index("elif is_shorts_url")
-
-        assert long_if < short_elif < url_elif, (
-            "Classification must check long_duration first, then short_duration, then URL pattern"
+        assert classify_video_like_item(item) == ContentType.VIDEO, (
+            "Long duration must still override reel-like hints"
         )
 
 

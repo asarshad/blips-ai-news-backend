@@ -835,13 +835,17 @@ class YouTubeClient:
         like_count = self._safe_int(statistics.get("likeCount"))
         comment_count = self._safe_int(statistics.get("commentCount"))
 
+        channel_cfg = get_channel_by_id(channel_id) if channel_id else None
+        short_max_seconds = int(os.getenv("YT_SHORT_MAX_SECONDS", "120"))
+        title_lower = title.lower()
+        title_has_shorts_tag = "#shorts" in title_lower or "#short" in title_lower
+        channel_is_shorts = channel_cfg and channel_cfg.content_format == ContentFormat.SHORTS
+        duration_allows_short = duration_seconds is None or duration_seconds <= short_max_seconds
+        permalink_short = duration_allows_short and self.is_youtube_short(video_id)
         is_short = bool(
-            duration_seconds is not None
-            and duration_seconds <= int(os.getenv("YT_SHORT_MAX_SECONDS", "120"))
+            duration_allows_short and (permalink_short or title_has_shorts_tag or channel_is_shorts)
         )
         content_format = ContentFormat.SHORTS if is_short else ContentFormat.LONG_FORM
-
-        channel_cfg = get_channel_by_id(channel_id) if channel_id else None
         channel_role = (
             channel_cfg.role
             if channel_cfg
@@ -862,7 +866,11 @@ class YouTubeClient:
             role=channel_role,
         )
 
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        video_url = (
+            f"https://www.youtube.com/shorts/{video_id}"
+            if is_short
+            else f"https://www.youtube.com/watch?v={video_id}"
+        )
         return VideoEntry(
             title=title,
             video_url=video_url,
@@ -1124,11 +1132,14 @@ class YouTubeClient:
                     summary = self._get_summary(entry)
                     category = self._categorize_video(title, summary)
                     published_at = self._parse_entry_published_at(entry)
+                    normalized_video_url = (
+                        f"https://www.youtube.com/shorts/{video_id}" if is_short else video_url
+                    )
 
                     videos.append(
                         VideoEntry(
                             title=title,
-                            video_url=video_url,
+                            video_url=normalized_video_url,
                             thumbnail_url=thumbnail_url,
                             summary=summary,
                             source=channel_name,
@@ -1227,42 +1238,36 @@ class YouTubeClient:
             logger.debug("_detect_short: vid=%s -> True (title contains #shorts)", video_id)
             return True
 
-        # For mixed channels, use duration heuristic.
-        # YouTube RSS links are commonly /watch?v=... for both videos and Shorts,
-        # so URL-only detection is unreliable.
+        # For mixed channels, confirm via Shorts permalink instead of duration
+        # alone. Short duration by itself is not enough: many regular videos
+        # are under 3 minutes and should still stay on the videos surface.
         if config.content_format == ContentFormat.MIXED:
             short_max_seconds = int(
                 os.getenv("YT_SHORT_MAX_SECONDS", str(settings.REEL_MAX_DURATION_SECONDS))
             )
 
-            # Try duration (requires API key - scraping blocked in Docker by consent pages)
             duration = self.get_video_duration(video_id)
-            if duration is not None:
-                if duration <= short_max_seconds:
-                    logger.debug(
-                        "_detect_short: vid=%s -> True (MIXED, duration=%ds <= %ds)",
-                        video_id,
-                        duration,
-                        short_max_seconds,
-                    )
-                    return True
-                else:
-                    logger.debug(
-                        "_detect_short: vid=%s -> False (MIXED, duration=%ds > %ds)",
-                        video_id,
-                        duration,
-                        short_max_seconds,
-                    )
-                    return False
+            if duration is not None and duration > short_max_seconds:
+                logger.debug(
+                    "_detect_short: vid=%s -> False (MIXED, duration=%ds > %ds)",
+                    video_id,
+                    duration,
+                    short_max_seconds,
+                )
+                return False
 
-            # Duration detection failed (no API key and scraping blocked)
-            # NOTE: Thumbnail aspect ratio detection via oembed doesn't work - YouTube
-            # always returns horizontal (480x360) thumbnails regardless of video type.
-            # Without YOUTUBE_API_KEY, we cannot reliably detect Shorts for MIXED channels.
+            if self.is_youtube_short(video_id):
+                logger.debug(
+                    "_detect_short: vid=%s -> True (MIXED, shorts permalink confirmed)",
+                    video_id,
+                )
+                return True
+
             logger.debug(
-                "_detect_short: vid=%s -> False (MIXED, duration detection failed - set YOUTUBE_API_KEY for reliable detection)",
+                "_detect_short: vid=%s -> False (MIXED, no durable shorts signal)",
                 video_id,
             )
+            return False
             return False
 
         logger.debug("_detect_short: vid=%s -> False (LONG_FORM channel)", video_id)

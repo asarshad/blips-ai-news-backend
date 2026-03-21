@@ -52,6 +52,18 @@ def test_effective_content_type_treats_explicit_shorts_video_as_reel():
     assert effective_content_type(item) == ContentType.REEL
 
 
+def test_effective_content_type_demotes_misclassified_short_watch_video_to_video():
+    item = _make_item(
+        item_type=ContentType.REEL,
+        source_url="https://www.youtube.com/watch?v=watch123",
+        title="Foundry IQ: Building the Data Pipeline with Knowledge Sources",
+    )
+
+    item.duration_seconds = 134
+
+    assert effective_content_type(item) == ContentType.VIDEO
+
+
 def test_surface_content_filter_maps_explicit_shorts_video_to_reels():
     engine = create_engine("sqlite:///:memory:")
     ContentItem.__table__.create(bind=engine)
@@ -63,6 +75,12 @@ def test_surface_content_filter_maps_explicit_shorts_video_to_reels():
         source_url="https://www.youtube.com/watch?v=watch123",
         title="Regular video",
     )
+    misclassified_reel = _make_item(
+        item_type=ContentType.REEL,
+        source_url="https://www.youtube.com/watch?v=watch456",
+        title="Short video but not a short",
+    )
+    misclassified_reel.duration_seconds = 134
     shorts_video = _make_item(
         item_type=ContentType.VIDEO,
         source_url="https://www.youtube.com/shorts/VvGaDPViMKY",
@@ -74,7 +92,7 @@ def test_surface_content_filter_maps_explicit_shorts_video_to_reels():
         title="Native reel",
     )
 
-    db.add_all([regular_video, shorts_video, native_reel])
+    db.add_all([regular_video, misclassified_reel, shorts_video, native_reel])
     db.commit()
 
     video_titles = {
@@ -84,7 +102,7 @@ def test_surface_content_filter_maps_explicit_shorts_video_to_reels():
         row.title for row in db.query(ContentItem).filter(surface_content_filter("reels")).all()
     }
 
-    assert video_titles == {"Regular video"}
+    assert video_titles == {"Regular video", "Short video but not a short"}
     assert reel_titles == {"Explicit Shorts URL", "Native reel"}
 
 

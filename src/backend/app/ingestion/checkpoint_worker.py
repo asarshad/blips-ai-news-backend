@@ -21,6 +21,7 @@ from app.ingestion.url_normalizer import normalize_url
 from app.models.content import ContentItem, ContentType
 from app.repositories.ingestion_budget_repo import IngestionBudgetRepository
 from app.repositories.ingestion_progress_repo import IngestionProgressRepository
+from app.video_surface_rules import classify_video_like_item
 
 logger = get_logger(__name__)
 
@@ -55,20 +56,8 @@ def _int_env(name: str, default: int) -> int:
 
 
 def _youtube_entry_is_reel(entry) -> bool:
-    """Classify a YouTube entry using the same duration-first rule as live ingest."""
-    duration_seconds = getattr(entry, "duration_seconds", None)
-    if not isinstance(duration_seconds, (int, float)):
-        duration_seconds = None
-
-    is_short = bool(getattr(entry, "is_short", False))
-    video_url = getattr(entry, "video_url", None) or ""
-    is_shorts_url = "/shorts/" in video_url
-
-    if duration_seconds is not None:
-        return duration_seconds <= settings.REEL_MAX_DURATION_SECONDS
-    if is_shorts_url:
-        return True
-    return is_short
+    """Classify a YouTube entry using durable Shorts signals."""
+    return classify_video_like_item(entry, allow_is_short_hint=True) == ContentType.REEL
 
 
 def _insert_content_items_postgres(db: Session, *, values: List[dict]) -> int:
@@ -240,7 +229,7 @@ def process_progress_row_batch(
                         "title": e.title,
                         "description": (e.content or "")[:500] if e.content else None,
                         "content_text": (e.content or "")[:8000] if e.content else None,
-                        "image_url": e.image_url,
+                        "image_url": (e.image_url or None),
                         "video_url": None,
                         "summary": None,
                         "ai_processed": False,

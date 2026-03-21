@@ -102,6 +102,19 @@ def test_youtube_entry_is_reel_for_134_second_shorts_url():
     assert checkpoint_worker._youtube_entry_is_reel(entry) is True
 
 
+def test_youtube_entry_is_not_reel_for_short_watch_url_without_shorts_signal():
+    entry = SimpleNamespace(
+        duration_seconds=134,
+        is_short=False,
+        video_url="https://www.youtube.com/watch?v=regular12345",
+        title="Foundry IQ: Building the Data Pipeline with Knowledge Sources",
+        channel_id="UC9PBzalIcEQCsiIkq36PyUA",
+        content_format=None,
+    )
+
+    assert checkpoint_worker._youtube_entry_is_reel(entry) is False
+
+
 def test_worker_skips_when_retry_at_in_future(monkeypatch):
     # Inject dummy integration modules to avoid importing feedparser under Python 3.14.
     pkg = ModuleType("app.integrations")
@@ -364,7 +377,7 @@ def test_worker_persists_youtube_metadata_fields(monkeypatch):
     assert inserted["discovered_via"] == "yt_curated"
 
 
-def test_worker_treats_short_duration_long_form_entry_as_reel(monkeypatch):
+def test_worker_keeps_short_duration_long_form_entry_off_reels(monkeypatch):
     progress = _Progress(
         id=1,
         day_utc=None,
@@ -445,9 +458,8 @@ def test_worker_treats_short_duration_long_form_entry_as_reel(monkeypatch):
     )
 
     assert result["status"] == "ok"
-    assert result["inserted"] == 1
-    assert len(captured_values) == 1
-    assert captured_values[0]["type"] == checkpoint_worker.ContentType.REEL
+    assert result["inserted"] == 0
+    assert len(captured_values) == 0
 
 
 def test_worker_uses_channel_specific_lookback_for_long_form_sources(monkeypatch):

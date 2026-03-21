@@ -382,6 +382,11 @@ def test_fetch_channel_with_mixed_format_batches_duration_lookups(monkeypatch):
         }
 
     monkeypatch.setattr(client, "_youtube_api_json", _fake_api_json)
+    monkeypatch.setattr(
+        client,
+        "is_youtube_short",
+        lambda video_id: video_id == "short12345A",
+    )
 
     videos = client._fetch_channel_with_config(config, 2)
 
@@ -393,8 +398,43 @@ def test_fetch_channel_with_mixed_format_batches_duration_lookups(monkeypatch):
         "duration",
     )
     assert [video.is_short for video in videos] == [True, False]
+    assert [video.video_url for video in videos] == [
+        "https://www.youtube.com/shorts/short12345A",
+        "https://www.youtube.com/watch?v=long12345AB",
+    ]
     assert [video.duration_seconds for video in videos] == [30, 600]
     assert [video.source_status for video in videos] == ["core", "core"]
     assert videos[0].acquisition_lane == "curated"
     assert videos[0].format_fit_score == 1.0
     assert videos[1].format_fit_score == 1.0
+
+
+def test_api_item_short_duration_requires_shorts_permalink_probe(monkeypatch):
+    client = YouTubeClient(channel_configs=[])
+    monkeypatch.setattr(client, "is_youtube_short", lambda _video_id: False)
+
+    item = {
+        "id": "watchonly123",
+        "snippet": {
+            "title": "A regular short video",
+            "description": "Still not a YouTube Short",
+            "channelId": "unknown-channel",
+            "channelTitle": "Regular Videos",
+            "publishedAt": "2026-03-19T12:00:00Z",
+        },
+        "contentDetails": {"duration": "PT2M14S"},
+        "statistics": {},
+        "status": {},
+    }
+
+    entry = client._entry_from_api_item(
+        item,
+        acquisition_lane="discovery",
+        query_label=None,
+        region=None,
+        surface="videos",
+    )
+
+    assert entry is not None
+    assert entry.is_short is False
+    assert entry.video_url == "https://www.youtube.com/watch?v=watchonly123"

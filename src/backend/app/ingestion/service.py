@@ -44,6 +44,7 @@ from app.ranking.quality import compute_source_weight
 from app.ranking.service import ScoringService
 from app.repositories.content_repo import ContentItemRepository
 from app.services.video_discovery_provenance import build_discovered_via
+from app.video_surface_rules import classify_video_like_item
 
 logger = get_logger(__name__)
 
@@ -77,19 +78,8 @@ def _youtube_discovery_enabled() -> bool:
 
 
 def _entry_is_reel(entry: VideoEntry) -> bool:
-    """Classify a YouTube entry with the same duration-first rule used at ingest time."""
-    duration_seconds = getattr(entry, "duration_seconds", None)
-    if not isinstance(duration_seconds, (int, float)):
-        duration_seconds = None
-
-    is_short = bool(getattr(entry, "is_short", False))
-    is_shorts_url = bool(entry.video_url and "/shorts/" in entry.video_url)
-
-    if duration_seconds is not None:
-        return duration_seconds <= settings.REEL_MAX_DURATION_SECONDS
-    if is_shorts_url:
-        return True
-    return is_short
+    """Classify a YouTube entry using durable Shorts signals."""
+    return classify_video_like_item(entry, allow_is_short_hint=True) == ContentType.REEL
 
 
 class IngestionPipeline:
@@ -424,36 +414,15 @@ class IngestionPipeline:
             except Exception as e:
                 logger.warning(f"Failed to get duration for video {entry.title}: {e}")
 
-        # Classify as REEL if it's a Short.
-        # Priority: known duration > URL pattern > entry metadata hint.
-        # If we have a concrete duration, that is authoritative.
+        # Classify as REEL only when durable Shorts signals are present.
         if content_type == ContentType.VIDEO:
-            is_short = getattr(entry, "is_short", False)
-            is_shorts_url = entry.video_url and "/shorts/" in entry.video_url
-            is_short_duration = (
-                duration_seconds is not None
-                and duration_seconds <= settings.REEL_MAX_DURATION_SECONDS
-            )
-            is_long_duration = (
-                duration_seconds is not None
-                and duration_seconds > settings.REEL_MAX_DURATION_SECONDS
-            )
-
-            if is_long_duration:
-                # Authoritative: known duration > 180s → always VIDEO
-                content_type = ContentType.VIDEO
-            elif is_short_duration:
-                # Authoritative: known short duration → always REEL
-                content_type = ContentType.REEL
-            elif is_shorts_url:
-                # URL-based signal (/shorts/ in URL) — strong hint
-                content_type = ContentType.REEL
-            elif is_short and duration_seconds is None:
-                # Metadata hint without duration — accept but log for audit
+            inferred_type = classify_video_like_item(entry, allow_is_short_hint=True)
+            if inferred_type == ContentType.REEL:
                 content_type = ContentType.REEL
                 logger.info(
-                    f"Reel classified by metadata hint only (no duration): "
-                    f"{entry.title} [{entry.video_id}]"
+                    "Reel classified from durable Shorts signal: %s [%s]",
+                    entry.title,
+                    entry.video_id,
                 )
 
         source = entry.source or "YouTube"
