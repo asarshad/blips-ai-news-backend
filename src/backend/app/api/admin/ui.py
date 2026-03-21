@@ -2554,6 +2554,7 @@ def ui_review_bulk_action(
         )
 
     repo = EditorialRepository(db)
+    service = EditorialService(db, repo=repo)
     clean_note = note.strip() or None
     bounded_boost = max(0, min(3, boost_level))
 
@@ -2562,9 +2563,9 @@ def ui_review_bulk_action(
     for content_id in content_ids:
         item = None
         if action == "approve":
-            item = repo.approve(content_id, actor=ACTOR, note=clean_note)
+            item = service.approve_content(content_id, actor=ACTOR, note=clean_note)
         elif action == "approve_publish":
-            item = repo.approve_and_publish(
+            item = service.approve_and_publish(
                 content_id=content_id,
                 actor=ACTOR,
                 boost_level=bounded_boost,
@@ -3292,8 +3293,8 @@ def ui_promote(
     db: Session = Depends(get_db),
     admin_key: str = Depends(_require_admin_ui_auth),
 ):
-    repo = EditorialRepository(db)
-    item = repo.promote(content_id, actor=ACTOR)
+    service = EditorialService(db)
+    item = service.promote_content(content_id, actor=ACTOR)
     if not item:
         return _redirect_after_action(
             content_id=content_id,
@@ -3351,9 +3352,9 @@ def ui_approve(
     db: Session = Depends(get_db),
     admin_key: str = Depends(_require_admin_ui_auth),
 ):
-    repo = EditorialRepository(db)
+    service = EditorialService(db)
     clean_note = note.strip() or None
-    item = repo.approve(content_id, actor=ACTOR, note=clean_note)
+    item = service.approve_content(content_id, actor=ACTOR, note=clean_note)
     if not item:
         return _redirect_after_action(
             content_id=content_id,
@@ -3487,8 +3488,8 @@ def ui_approve_publish(
 ):
     bounded_boost = max(0, min(3, boost_level))
     clean_note = note.strip() or None
-    repo = EditorialRepository(db)
-    item = repo.approve_and_publish(
+    service = EditorialService(db)
+    item = service.approve_and_publish(
         content_id=content_id,
         actor=ACTOR,
         boost_level=bounded_boost,

@@ -308,10 +308,11 @@ def promote_content(
     db: Session = Depends(get_db),
 ):
     """Promote a candidate item to the feed-visible tier."""
-    repo = EditorialRepository(db)
-    item = repo.promote(content_id, actor=ACTOR)
+    service = EditorialService(db)
+    item = service.promote_content(content_id, actor=ACTOR)
     if not item:
         raise HTTPException(status_code=404, detail="Content not found")
+    invalidate_tiered_feed_cache()
 
     return PromoteResponse(
         content_id=item.id,
@@ -390,11 +391,12 @@ def approve_content(
     db: Session = Depends(get_db),
 ):
     """Approve and promote content into feed-eligible state."""
-    repo = EditorialRepository(db)
+    service = EditorialService(db)
     note = body.note if body else None
-    item = repo.approve(content_id, actor=ACTOR, note=note)
+    item = service.approve_content(content_id, actor=ACTOR, note=note)
     if not item:
         raise HTTPException(status_code=404, detail="Content not found")
+    invalidate_tiered_feed_cache()
     return _review_action_response(
         item=item,
         action=EditorialActionType.APPROVE,
@@ -476,8 +478,8 @@ def approve_publish_content(
     db: Session = Depends(get_db),
 ):
     """Approve candidate content and publish it to top of playlist ordering."""
-    repo = EditorialRepository(db)
-    item = repo.approve_and_publish(
+    service = EditorialService(db)
+    item = service.approve_and_publish(
         content_id=content_id,
         actor=ACTOR,
         boost_level=body.boost_level,

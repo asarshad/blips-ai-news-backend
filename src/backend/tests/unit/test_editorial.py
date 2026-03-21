@@ -17,13 +17,14 @@ implicitly via contract/integration tests and by Pydantic's own validation.
 """
 
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 
 from app.domain.editorial.service import EditorialService, _extract_domain
-from app.models.content import ContentStatus
+from app.models.content import ContentStatus, ContentType
 from app.ranking.global_score import (
     EDITORIAL_BOOST_WEIGHT,
     compute_global_score,
@@ -57,9 +58,18 @@ class FakeContentItem:
         self.manual_added = kwargs.get("manual_added", False)
         self.canonical_key = kwargs.get("canonical_key", None)
         self.source_url = kwargs.get("source_url", "")
+        self.canonical_url = kwargs.get("canonical_url", "")
         self.type = kwargs.get("type", None)
         self.source = kwargs.get("source", "")
         self.title = kwargs.get("title", "Test")
+        self.description = kwargs.get("description", None)
+        self.content_text = kwargs.get("content_text", None)
+        self.summary = kwargs.get("summary", None)
+        self.image_url = kwargs.get("image_url", None)
+        self.ai_processed = kwargs.get("ai_processed", False)
+        self.topics = kwargs.get("topics", [])
+        self.entities = kwargs.get("entities", [])
+        self.conversation_starters = kwargs.get("conversation_starters", None)
         self.curation_status = kwargs.get("curation_status", ContentStatus.CANDIDATE)
         self.published_at = kwargs.get("published_at", datetime.now(timezone.utc))
         self.created_at = kwargs.get("created_at", datetime.now(timezone.utc))
@@ -142,6 +152,179 @@ class TestEditorialServiceSubmit:
         assert result.content_id == 77
         db.rollback.assert_called_once()
         repo.log_add_action.assert_not_called()
+
+
+class TestEditorialServiceApproval:
+    def _make_service(self, repo_mock):
+        svc = EditorialService.__new__(EditorialService)
+        svc.db = MagicMock()
+        svc.repo = repo_mock
+        svc._llm_client = None
+        return svc
+
+    def test_approve_hydrates_article_candidate_before_promoting(self):
+        repo = MagicMock()
+        item = FakeContentItem(
+            id=10,
+            type=ContentType.ARTICLE,
+            source="Example",
+            source_url="https://www.apple.com/newsroom/2026/03/story",
+            canonical_url="",
+            title="[pending] https://www.apple.com/newsroom/2026/03/story",
+            description=None,
+            content_text=None,
+            summary=None,
+            image_url=None,
+            ai_processed=False,
+            topics=[],
+            entities=[],
+            is_suppressed=True,
+        )
+        repo.get_content_by_id.return_value = item
+        repo.approve.return_value = item
+
+        svc = self._make_service(repo)
+        svc._run_article_extraction = MagicMock(
+            return_value=SimpleNamespace(
+                canonical_url="https://www.apple.com/newsroom/2026/03/story/",
+                title="Apple launches new AI features",
+                published_at=datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc),
+                image_url="https://images.apple.com/story/hero.jpg",
+                main_text="Apple introduced a new AI feature set across iPhone, iPad, and Mac. "
+                * 60,
+                excerpt_fallback=None,
+            )
+        )
+        svc._summarize_article = MagicMock(
+            return_value=SimpleNamespace(
+                summary=(
+                    "Apple introduced a broad set of AI features across its devices, with "
+                    "new developer tools, writing help, and on-device assistance."
+                ),
+                conversation_starters={
+                    "starters": ["Which Apple AI feature matters most to you?"],
+                    "fallback": ["What are the main points of this?"],
+                },
+            )
+        )
+
+        result = svc.approve_content(10, actor="reviewer", note="Looks good")
+
+        assert result is item
+        assert item.canonical_url == "https://www.apple.com/newsroom/2026/03/story/"
+        assert item.title == "Apple launches new AI features"
+        assert item.image_url == "https://images.apple.com/story/hero.jpg"
+        assert item.content_text.startswith("Apple introduced a new AI feature set")
+        assert item.summary.startswith("Apple introduced a broad set of AI features")
+        assert item.ai_processed is True
+        assert item.conversation_starters is not None
+        assert "ai" in item.topics
+        assert "apple" in item.entities
+        assert item.source == "Apple"
+        repo.approve.assert_called_once_with(10, actor="reviewer", note="Looks good")
+
+    def test_promote_uses_hydrated_article_candidate(self):
+        repo = MagicMock()
+        item = FakeContentItem(
+            id=14,
+            type=ContentType.ARTICLE,
+            source_url="https://example.com/story",
+            title="[pending] https://example.com/story",
+        )
+        repo.get_content_by_id.return_value = item
+        repo.promote.return_value = item
+
+        svc = self._make_service(repo)
+        svc._hydrate_article_candidate = MagicMock()
+
+        result = svc.promote_content(14, actor="reviewer")
+
+        assert result is item
+        svc._hydrate_article_candidate.assert_called_once_with(item)
+        repo.promote.assert_called_once_with(14, actor="reviewer")
+
+    def test_approve_skips_llm_when_item_is_already_processed(self):
+        repo = MagicMock()
+        item = FakeContentItem(
+            id=11,
+            type=ContentType.ARTICLE,
+            source="Reuters",
+            source_url="https://www.reuters.com/technology/story",
+            canonical_url="https://www.reuters.com/technology/story",
+            title="Existing Reuters article",
+            content_text="Existing article text about AI and chips. " * 40,
+            summary="A complete existing summary that is already long enough to keep.",
+            image_url=None,
+            ai_processed=True,
+            topics=["ai"],
+            entities=["reuters"],
+        )
+        repo.get_content_by_id.return_value = item
+        repo.approve.return_value = item
+
+        svc = self._make_service(repo)
+        svc._run_article_extraction = MagicMock(
+            return_value=SimpleNamespace(
+                canonical_url="https://www.reuters.com/technology/story",
+                title="Updated Reuters article title",
+                published_at=None,
+                image_url="https://www.reuters.com/resizer/story-hero.jpg",
+                main_text=None,
+                excerpt_fallback=None,
+            )
+        )
+        svc._summarize_article = MagicMock()
+
+        result = svc.approve_content(11, actor="reviewer")
+
+        assert result is item
+        assert item.image_url == "https://www.reuters.com/resizer/story-hero.jpg"
+        assert item.summary == "A complete existing summary that is already long enough to keep."
+        svc._summarize_article.assert_not_called()
+
+    def test_approve_still_promotes_when_hydration_fails(self):
+        repo = MagicMock()
+        item = FakeContentItem(
+            id=12,
+            type=ContentType.ARTICLE,
+            source_url="https://example.com/story",
+            title="[pending] https://example.com/story",
+        )
+        repo.get_content_by_id.return_value = item
+        repo.approve.return_value = item
+
+        svc = self._make_service(repo)
+        svc._hydrate_article_candidate = MagicMock(side_effect=RuntimeError("fetch failed"))
+
+        result = svc.approve_content(12, actor="reviewer")
+
+        assert result is item
+        repo.approve.assert_called_once_with(12, actor="reviewer", note=None)
+
+    def test_approve_does_not_summarize_placeholder_title_when_extraction_fails(self):
+        repo = MagicMock()
+        item = FakeContentItem(
+            id=13,
+            type=ContentType.ARTICLE,
+            source_url="https://example.com/story",
+            title="[pending] https://example.com/story",
+            content_text=None,
+            description=None,
+            summary=None,
+            ai_processed=False,
+        )
+        repo.get_content_by_id.return_value = item
+        repo.approve.return_value = item
+
+        svc = self._make_service(repo)
+        svc._run_article_extraction = MagicMock(return_value=None)
+        svc._summarize_article = MagicMock()
+
+        result = svc.approve_content(13, actor="reviewer")
+
+        assert result is item
+        svc._summarize_article.assert_not_called()
+        repo.approve.assert_called_once_with(13, actor="reviewer", note=None)
 
 
 # ---------------------------------------------------------------------------
