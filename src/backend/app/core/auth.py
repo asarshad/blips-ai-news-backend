@@ -57,8 +57,10 @@ def require_admin_key(
         HTTPException 401 – header missing or ADMIN_API_KEY not configured.
         HTTPException 403 – key present but wrong.
     """
+    configured_key = settings.ADMIN_API_KEY
+
     # Fail-closed: reject everything when no key is configured
-    if not is_admin_key_configured():
+    if not configured_key:
         raise HTTPException(
             status_code=401,
             detail="Admin endpoints are disabled (ADMIN_API_KEY not configured)",
@@ -70,7 +72,7 @@ def require_admin_key(
             detail="Missing X-Admin-Key header",
         )
 
-    if not is_valid_admin_key(x_admin_key):
+    if not secrets.compare_digest(x_admin_key, configured_key):
         raise HTTPException(
             status_code=403,
             detail="Invalid admin key",
