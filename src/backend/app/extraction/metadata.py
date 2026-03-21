@@ -1,15 +1,14 @@
-"""Metadata extraction from HTML: canonical URL, title, og:image, twitter:image.
+"""Metadata extraction from HTML with editorial image ranking.
 
-Parses <head> with BeautifulSoup (lxml parser) to extract:
-- canonical_url: <link rel="canonical"> else source_url
-- title: og:title → twitter:title → <title>
-- image_url: og:image → twitter:image → RSS metadata
+Parses page metadata with BeautifulSoup and prefers article hero imagery
+over generic social/share art when the body exposes a stronger candidate.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
@@ -29,6 +28,89 @@ class PageMetadata:
     image_source: str = "none"  # og | twitter | body | rss | none
     description: Optional[str] = None
     published_at_str: Optional[str] = None  # raw from meta tags
+
+
+@dataclass(frozen=True)
+class _ImageCandidate:
+    url: str
+    source: str
+    score: float
+
+
+_GENERIC_URL_KEYWORDS = (
+    "logo",
+    "icon",
+    "avatar",
+    "placeholder",
+    "sprite",
+    "social-share",
+    "social_share",
+    "socialshare",
+    "share-image",
+    "share_image",
+    "meta-image",
+    "meta_image",
+    "og-image",
+    "og_image",
+    "open-graph",
+    "opengraph",
+    "default-image",
+    "default_image",
+    "site-image",
+    "site_image",
+    "brand-image",
+    "brand_image",
+)
+_EDITORIAL_URL_KEYWORDS = (
+    "hero",
+    "feature",
+    "featured",
+    "cover",
+    "lead",
+    "story",
+    "article",
+    "post",
+    "header-image",
+    "header_image",
+)
+_NON_EDITORIAL_CONTEXT_KEYWORDS = (
+    "logo",
+    "icon",
+    "avatar",
+    "badge",
+    "emoji",
+    "favicon",
+    "placeholder",
+    "sprite",
+    "tracking",
+    "pixel",
+    "advert",
+    "sponsor",
+    "promo",
+    "nav",
+    "footer",
+    "comment",
+    "share",
+    "related",
+    "author",
+    "byline",
+    "thumbnail",
+    "thumb",
+)
+_EDITORIAL_CONTEXT_KEYWORDS = (
+    "hero",
+    "feature",
+    "featured",
+    "cover",
+    "lead",
+    "article-image",
+    "article_image",
+    "post-image",
+    "post_image",
+    "story-image",
+    "story_image",
+    "wp-post-image",
+)
 
 
 def extract_metadata(html: str, source_url: str) -> PageMetadata:
@@ -75,20 +157,27 @@ def extract_metadata(html: str, source_url: str) -> PageMetadata:
     meta_desc = _meta_content(head, attrs={"name": "description"})
     meta.description = og_desc or meta_desc
 
-    # ── Image URL (priority: og:image → twitter:image → body image) ──────
+    # ── Image URL (rank head metadata against body/editorial candidates) ──
+    head_candidates = []
     og_image = _meta_content(head, prop="og:image")
     tw_image = _meta_content(head, attrs={"name": "twitter:image"})
 
-    raw_image = og_image or tw_image
-    if raw_image:
-        absolute = make_absolute_url(raw_image, source_url)
-        validated = validate_image_url(absolute)
-        if validated:
-            meta.image_url = validated
-            meta.image_source = "og" if og_image else "twitter"
-    elif body_image := _extract_body_image(soup, source_url):
-        meta.image_url = body_image
-        meta.image_source = "body"
+    if og_image:
+        candidate = _build_head_image_candidate(og_image, "og", source_url)
+        if candidate:
+            head_candidates.append(candidate)
+    if tw_image:
+        candidate = _build_head_image_candidate(tw_image, "twitter", source_url)
+        if candidate:
+            head_candidates.append(candidate)
+
+    best_image = _select_best_image_candidate(
+        head_candidates,
+        _extract_best_editorial_image(soup, source_url, source_label="body"),
+    )
+    if best_image:
+        meta.image_url = best_image.url
+        meta.image_source = best_image.source
 
     # ── Published date (best effort from meta tags) ───────────────────────
     for attr_name in [
@@ -103,6 +192,48 @@ def extract_metadata(html: str, source_url: str) -> PageMetadata:
             break
 
     return meta
+
+
+def extract_best_image_from_fragment(fragment_html: str, source_url: str) -> Optional[str]:
+    """Extract the strongest editorial image from an HTML fragment."""
+    if not fragment_html:
+        return None
+
+    try:
+        soup = BeautifulSoup(fragment_html, "html.parser")
+    except Exception:
+        return None
+
+    candidate = _extract_best_editorial_image(soup, source_url, source_label="body")
+    return candidate.url if candidate else None
+
+
+def is_probably_generic_image_url(url: Optional[str]) -> bool:
+    """Return True when the URL looks like reusable social/share/site art."""
+    if not url or not url.strip():
+        return False
+
+    parsed = urlparse(url.strip())
+    haystack = " ".join(
+        part.lower()
+        for part in (
+            parsed.path or "",
+            parsed.query or "",
+            parsed.fragment or "",
+        )
+        if part
+    )
+    if not haystack:
+        return False
+
+    if any(keyword in haystack for keyword in _GENERIC_URL_KEYWORDS):
+        return True
+
+    filename = (parsed.path.rsplit("/", 1)[-1] or "").lower()
+    if filename in {"logo.png", "logo.jpg", "logo.jpeg", "logo.webp"}:
+        return True
+
+    return False
 
 
 def _meta_content(
@@ -123,80 +254,244 @@ def _meta_content(
     return None
 
 
-def _extract_body_image(soup: BeautifulSoup, source_url: str) -> Optional[str]:
-    """Return the first likely editorial image found in the page body."""
+def _build_head_image_candidate(
+    raw_url: str, source: str, source_url: str
+) -> Optional[_ImageCandidate]:
+    """Build a scored candidate from OG/Twitter metadata."""
+    absolute = make_absolute_url(raw_url, source_url)
+    validated = validate_image_url(absolute)
+    if not validated:
+        return None
+
+    score = 48.0
+    if source == "og":
+        score += 2.0
+    if not is_probably_generic_image_url(validated):
+        score += 8.0
+    else:
+        score -= 24.0
+    if any(keyword in validated.lower() for keyword in _EDITORIAL_URL_KEYWORDS):
+        score += 4.0
+
+    return _ImageCandidate(url=validated, source=source, score=score)
+
+
+def _extract_best_editorial_image(
+    soup: BeautifulSoup, source_url: str, *, source_label: str
+) -> Optional[_ImageCandidate]:
+    """Return the highest-scoring editorial image found in the page body."""
+    best_candidate: Optional[_ImageCandidate] = None
+    seen_urls: set[str] = set()
     seen_roots: set[int] = set()
     for root in (soup.find("article"), soup.find("main"), soup.body, soup):
         if root is None or id(root) in seen_roots:
             continue
         seen_roots.add(id(root))
-        for img in root.find_all("img"):
-            candidate = _img_candidate_url(img)
-            if not candidate or not _looks_like_editorial_image(img, candidate):
+        for position, tag in enumerate(root.find_all(["picture", "img"], limit=20)):
+            candidate = _tag_candidate_url(tag)
+            if not candidate or not _looks_like_editorial_image(tag, candidate):
                 continue
             absolute = make_absolute_url(candidate, source_url)
             validated = validate_image_url(absolute)
-            if validated:
-                return validated
+            if not validated or validated in seen_urls:
+                continue
+            seen_urls.add(validated)
+            score = _score_body_image_candidate(tag, validated, position)
+            candidate_obj = _ImageCandidate(url=validated, source=source_label, score=score)
+            if best_candidate is None or candidate_obj.score > best_candidate.score:
+                best_candidate = candidate_obj
+
+    return best_candidate
+
+
+def _select_best_image_candidate(
+    head_candidates: list[_ImageCandidate], body_candidate: Optional[_ImageCandidate]
+) -> Optional[_ImageCandidate]:
+    """Choose the strongest image candidate across metadata and body signals."""
+    candidates = list(head_candidates)
+    if body_candidate:
+        candidates.append(body_candidate)
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda candidate: (
+            candidate.score,
+            1 if candidate.source == "body" else 0,
+        ),
+        reverse=True,
+    )
+    return candidates[0]
+
+
+def _tag_candidate_url(tag) -> Optional[str]:
+    """Pick the strongest URL-like attribute from a picture/img tag."""
+    if getattr(tag, "name", None) == "picture":
+        for source in tag.find_all("source"):
+            if candidate := _attribute_candidate_url(source):
+                return candidate
+        img = tag.find("img")
+        if img and (candidate := _attribute_candidate_url(img)):
+            return candidate
+        return None
+
+    return _attribute_candidate_url(tag)
+
+
+def _attribute_candidate_url(tag) -> Optional[str]:
+    """Pick the best candidate URL from a single HTML node."""
+    for attr in (
+        "data-src",
+        "data-lazy-src",
+        "data-original",
+        "data-image",
+        "data-url",
+        "data-srcset",
+        "srcset",
+        "src",
+    ):
+        value = tag.get(attr)
+        if not value or not str(value).strip():
+            continue
+        if attr.endswith("srcset"):
+            if candidate := _best_srcset_candidate(str(value)):
+                return candidate
+            continue
+        return str(value).strip()
+
     return None
 
 
-def _img_candidate_url(img) -> Optional[str]:
-    """Pick the best URL-like attribute from an <img> tag."""
-    for attr in ("src", "data-src", "data-lazy-src", "data-original", "data-image"):
-        value = img.get(attr)
-        if value and str(value).strip():
-            return str(value).strip()
+def _best_srcset_candidate(srcset: str) -> Optional[str]:
+    """Return the largest-width candidate from an srcset string."""
+    best_url = None
+    best_width = -1
+    for part in str(srcset).split(","):
+        chunk = part.strip()
+        if not chunk:
+            continue
+        pieces = [p for p in chunk.split(" ") if p]
+        candidate_url = pieces[0].strip()
+        width = 0
+        for piece in pieces[1:]:
+            if piece.endswith("w"):
+                try:
+                    width = int(piece[:-1])
+                except ValueError:
+                    width = 0
+                break
+        if width >= best_width:
+            best_width = width
+            best_url = candidate_url
+    return best_url
 
-    for attr in ("srcset", "data-srcset"):
-        value = img.get(attr)
-        if value and str(value).strip():
-            first_candidate = str(value).split(",")[0].strip().split(" ")[0].strip()
-            if first_candidate:
-                return first_candidate
 
-    return None
-
-
-def _looks_like_editorial_image(img, candidate_url: str) -> bool:
+def _looks_like_editorial_image(tag, candidate_url: str) -> bool:
     """Filter obvious logos, icons, placeholders, and tiny decorative images."""
+    context_tag = _image_context_tag(tag)
     haystack = " ".join(
         filter(
             None,
             [
                 candidate_url,
-                img.get("alt"),
-                img.get("id"),
-                " ".join(img.get("class", [])),
-                img.get("aria-label"),
+                context_tag.get("alt"),
+                context_tag.get("id"),
+                " ".join(context_tag.get("class", [])),
+                context_tag.get("aria-label"),
+                _ancestor_context(context_tag),
             ],
         )
     ).lower()
-    excluded_keywords = (
-        "logo",
-        "icon",
-        "avatar",
-        "badge",
-        "emoji",
-        "favicon",
-        "placeholder",
-        "sprite",
-        "tracking",
-        "pixel",
-        "advert",
-        "banner",
-    )
-    if any(keyword in haystack for keyword in excluded_keywords):
+    if any(keyword in haystack for keyword in _NON_EDITORIAL_CONTEXT_KEYWORDS):
+        return False
+    if is_probably_generic_image_url(candidate_url) and not any(
+        keyword in haystack for keyword in _EDITORIAL_CONTEXT_KEYWORDS
+    ):
         return False
 
-    width = _parse_dimension(img.get("width"))
-    height = _parse_dimension(img.get("height"))
+    width = _parse_dimension(context_tag.get("width")) or _parse_dimension(
+        context_tag.get("data-width")
+    )
+    height = _parse_dimension(context_tag.get("height")) or _parse_dimension(
+        context_tag.get("data-height")
+    )
     if width is not None and width < 160:
         return False
     if height is not None and height < 120:
         return False
 
     return True
+
+
+def _score_body_image_candidate(tag, candidate_url: str, position: int) -> float:
+    """Score a body-image candidate; higher is better."""
+    context_tag = _image_context_tag(tag)
+    score = 70.0
+    width = _parse_dimension(context_tag.get("width")) or _parse_dimension(
+        context_tag.get("data-width")
+    )
+    height = _parse_dimension(context_tag.get("height")) or _parse_dimension(
+        context_tag.get("data-height")
+    )
+    if width:
+        score += min(width, 1600) / 80.0
+    if height:
+        score += min(height, 1200) / 120.0
+
+    if position < 3:
+        score += 12.0 - (position * 3.0)
+    else:
+        score -= min(18.0, (position - 2) * 2.5)
+
+    context = " ".join(
+        filter(
+            None,
+            [
+                candidate_url,
+                context_tag.get("alt"),
+                context_tag.get("id"),
+                " ".join(context_tag.get("class", [])),
+                context_tag.get("aria-label"),
+                _ancestor_context(context_tag),
+            ],
+        )
+    ).lower()
+    if any(keyword in context for keyword in _EDITORIAL_CONTEXT_KEYWORDS):
+        score += 12.0
+    if any(keyword in context for keyword in ("thumb", "thumbnail", "gallery", "inline")):
+        score -= 12.0
+    if is_probably_generic_image_url(candidate_url):
+        score -= 30.0
+
+    return score
+
+
+def _ancestor_context(tag) -> str:
+    """Collect a small amount of ancestor context for image heuristics."""
+    parts = []
+    current = getattr(tag, "parent", None)
+    hops = 0
+    while current is not None and hops < 3:
+        parts.extend(
+            filter(
+                None,
+                [
+                    getattr(current, "name", None),
+                    current.get("id"),
+                    " ".join(current.get("class", [])),
+                ],
+            )
+        )
+        current = getattr(current, "parent", None)
+        hops += 1
+    return " ".join(str(part) for part in parts if part)
+
+
+def _image_context_tag(tag):
+    """Use the nested <img> for picture nodes when scoring editorial signals."""
+    if getattr(tag, "name", None) == "picture":
+        return tag.find("img") or tag
+    return tag
 
 
 def _parse_dimension(value) -> Optional[int]:

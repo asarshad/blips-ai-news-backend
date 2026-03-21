@@ -22,6 +22,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from app.core.logging import get_logger
+from app.extraction.metadata import extract_best_image_from_fragment, is_probably_generic_image_url
 from app.extraction.normalize import make_absolute_url, validate_image_url
 from app.integrations.rss_feeds import (
     DecayProfile,
@@ -46,7 +47,7 @@ class FeedEntry:
     title: str
     url: str
     content: str
-    image_url: str
+    image_url: Optional[str]
     published_date: datetime
     # Role-based metadata
     feed_name: str = ""
@@ -302,21 +303,23 @@ class RSSClient:
 
         return ""
 
-    def _extract_image_url(self, entry, article_url: str) -> str:
-        """Extract featured image URL from RSS metadata, then page metadata fallback."""
+    def _extract_image_url(self, entry, article_url: str) -> Optional[str]:
+        """Extract the strongest image from RSS metadata, then page metadata fallback."""
+        candidates: list[tuple[str, str]] = []
+
         # Check media content
         if hasattr(entry, "media_content") and entry.media_content:
             for media in entry.media_content:
                 candidate = self._validate_image_candidate(media.get("url"), article_url)
                 if candidate:
-                    return candidate
+                    candidates.append((candidate, "media_content"))
 
         # Check media_thumbnail
         if hasattr(entry, "media_thumbnail") and entry.media_thumbnail:
             for thumb in entry.media_thumbnail:
                 candidate = self._validate_image_candidate(thumb.get("url"), article_url)
                 if candidate:
-                    return candidate
+                    candidates.append((candidate, "media_thumbnail"))
 
         # Check enclosures
         if hasattr(entry, "enclosures") and entry.enclosures:
@@ -330,43 +333,106 @@ class RSSClient:
                 if enclosure_type and str(enclosure_type).startswith("image"):
                     candidate = self._validate_image_candidate(enclosure_url, article_url)
                     if candidate:
-                        return candidate
+                        candidates.append((candidate, "enclosure"))
 
-        # Check summary/content for images
-        if hasattr(entry, "summary") and entry.summary:
-            soup = BeautifulSoup(entry.summary, "html.parser")
-            img_tag = soup.find("img")
-            if img_tag and img_tag.get("src"):
-                candidate = self._validate_image_candidate(img_tag["src"], article_url)
-                if candidate:
-                    return candidate
+        # Check feed-provided HTML fragments for editorial images.
+        for fragment_source, fragment_html in self._rss_image_fragments(entry):
+            candidate = extract_best_image_from_fragment(fragment_html, article_url)
+            if candidate:
+                candidates.append((candidate, fragment_source))
 
-        # Fallback: fetch page metadata (og:image/twitter:image) only when RSS
-        # metadata has no usable image. Guarded by env switch + per-run budget.
+        best_candidate = self._best_rss_image_candidate(candidates)
+        if best_candidate and not is_probably_generic_image_url(best_candidate):
+            return best_candidate
+
+        # Fallback: fetch page metadata when RSS has no usable image or only
+        # suspicious generic/share art. Guarded by env switch + per-run budget.
         fallback = self._extract_image_from_page_metadata(article_url)
         if fallback:
             logger.debug("Image fallback used from page metadata: %s", article_url)
             return fallback
 
-        return ""
+        return best_candidate
 
-    def _validate_image_candidate(self, candidate: Optional[str], article_url: str) -> str:
+    def _validate_image_candidate(
+        self, candidate: Optional[str], article_url: str
+    ) -> Optional[str]:
         """Normalize/validate an image URL candidate to an absolute public URL."""
         if not candidate:
-            return ""
+            return None
         absolute = make_absolute_url(candidate, article_url) or candidate
         validated = validate_image_url(absolute)
-        return validated or ""
+        return validated or None
 
-    def _extract_image_from_page_metadata(self, article_url: str) -> str:
-        """Best-effort OG/Twitter image fallback for RSS entries with no image."""
+    def _rss_image_fragments(self, entry) -> list[tuple[str, str]]:
+        """Return raw RSS HTML fragments worth searching for inline images."""
+        fragments: list[tuple[str, str]] = []
+
+        for attr in ("summary", "description"):
+            value = getattr(entry, attr, None)
+            if value and str(value).strip():
+                fragments.append((attr, str(value)))
+
+        content_blocks = getattr(entry, "content", None) or []
+        for block in content_blocks:
+            if isinstance(block, dict):
+                value = block.get("value")
+            else:
+                value = getattr(block, "value", None)
+            if value and str(value).strip():
+                fragments.append(("content", str(value)))
+
+        return fragments
+
+    def _best_rss_image_candidate(self, candidates: list[tuple[str, str]]) -> Optional[str]:
+        """Select the strongest RSS-provided image candidate."""
+        best_url: Optional[str] = None
+        best_score = float("-inf")
+        seen: set[str] = set()
+
+        for url, source in candidates:
+            if url in seen:
+                continue
+            seen.add(url)
+            score = self._score_rss_image_candidate(url, source)
+            if score > best_score:
+                best_score = score
+                best_url = url
+
+        return best_url
+
+    def _score_rss_image_candidate(self, url: str, source: str) -> float:
+        """Score RSS image candidates so editorial HTML beats weak metadata."""
+        score = {
+            "content": 72.0,
+            "summary": 68.0,
+            "description": 66.0,
+            "media_content": 62.0,
+            "enclosure": 60.0,
+            "media_thumbnail": 54.0,
+        }.get(source, 56.0)
+
+        lowered = url.lower()
+        if is_probably_generic_image_url(url):
+            score -= 28.0
+        else:
+            score += 8.0
+        if any(keyword in lowered for keyword in ("thumb", "thumbnail", "small", "avatar")):
+            score -= 14.0
+        if any(keyword in lowered for keyword in ("hero", "feature", "featured", "cover", "lead")):
+            score += 8.0
+
+        return score
+
+    def _extract_image_from_page_metadata(self, article_url: str) -> Optional[str]:
+        """Best-effort metadata/body-image fallback for RSS entries with weak images."""
         if not self._image_fallback_enabled:
-            return ""
+            return None
         if self._image_fallback_budget_remaining <= 0:
-            return ""
+            return None
         parsed = urlparse(article_url or "")
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            return ""
+            return None
 
         self._image_fallback_budget_remaining -= 1
         try:
@@ -375,14 +441,14 @@ class RSSClient:
 
             fetch = fetch_url(article_url)
             if fetch.error or not fetch.html:
-                return ""
+                return None
             metadata = extract_metadata(fetch.html, article_url)
             if metadata.image_url:
                 return metadata.image_url
         except Exception as exc:
             logger.debug("Image metadata fallback failed for %s: %s", article_url, exc)
 
-        return ""
+        return None
 
     def _parse_date(self, entry) -> datetime:
         """Parse and normalize publication date."""

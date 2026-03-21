@@ -145,6 +145,48 @@ class TestImageExtraction:
         assert meta.image_url == "https://example.com/images/hero-1280.jpg"
         assert meta.image_source == "body"
 
+    def test_body_image_beats_generic_head_share_image(self):
+        html = """<!DOCTYPE html>
+<html>
+  <head>
+    <title>Generic Share Art</title>
+    <meta property="og:image" content="https://cdn.example.com/social-share.png" />
+  </head>
+  <body>
+    <article>
+      <img src="/images/article-hero.jpg" width="1280" height="720" alt="Feature image" />
+    </article>
+  </body>
+</html>"""
+        meta = extract_metadata(html, "https://example.com/story")
+        assert meta.image_url == "https://example.com/images/article-hero.jpg"
+        assert meta.image_source == "body"
+
+    def test_body_image_uses_picture_source_before_placeholder_src(self):
+        html = """<!DOCTYPE html>
+<html>
+  <head><title>Picture Hero</title></head>
+  <body>
+    <article>
+      <picture class="article-image">
+        <source
+          srcset="/images/hero-640.jpg 640w, /images/hero-1600.jpg 1600w"
+          type="image/jpeg"
+        />
+        <img
+          src="data:image/gif;base64,R0lGODlhAQABAAAAACw="
+          width="1600"
+          height="900"
+          alt="Hero image"
+        />
+      </picture>
+    </article>
+  </body>
+</html>"""
+        meta = extract_metadata(html, "https://example.com/story")
+        assert meta.image_url == "https://example.com/images/hero-1600.jpg"
+        assert meta.image_source == "body"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Published date

@@ -115,8 +115,11 @@ class IngestionPipeline:
         source_url: Optional[str],
         rss_image_url: Optional[str],
     ) -> bool:
-        """Backfill missing image/canonical metadata for already-ingested articles."""
-        needs_image = not (existing_item.image_url or "").strip()
+        """Backfill missing or suspicious image/canonical metadata for existing articles."""
+        from app.extraction.metadata import is_probably_generic_image_url
+
+        current_image_url = (existing_item.image_url or "").strip()
+        needs_image = not current_image_url or is_probably_generic_image_url(current_image_url)
         needs_canonical = not (existing_item.canonical_url or "").strip()
         if not needs_image and not needs_canonical:
             return False
@@ -128,11 +131,24 @@ class IngestionPipeline:
             validate_image_url(rss_image_url) if needs_image and rss_image_url else None
         )
         refreshed_canonical = None
+        should_compare_page_image = needs_image and (
+            is_probably_generic_image_url(current_image_url)
+            or (refreshed_image is not None and is_probably_generic_image_url(refreshed_image))
+        )
 
-        if source_url and (needs_canonical or not refreshed_image):
+        if source_url and (needs_canonical or not refreshed_image or should_compare_page_image):
             metadata = fetch_article_page_metadata(source_url)
             if metadata is not None:
-                if needs_image and not refreshed_image and metadata.image_url:
+                if needs_image and (
+                    (not refreshed_image and metadata.image_url)
+                    or (
+                        refreshed_image
+                        and current_image_url
+                        and is_probably_generic_image_url(current_image_url)
+                        and metadata.image_url
+                        and metadata.image_url != current_image_url
+                    )
+                ):
                     refreshed_image = metadata.image_url
                 if needs_canonical and metadata.canonical_url:
                     refreshed_canonical = metadata.canonical_url

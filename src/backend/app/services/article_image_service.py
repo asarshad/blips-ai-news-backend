@@ -5,12 +5,15 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.extraction.fetcher import fetch_url
-from app.extraction.metadata import PageMetadata, extract_metadata
+from app.extraction.metadata import (
+    PageMetadata,
+    extract_metadata,
+    is_probably_generic_image_url,
+)
 from app.models.content import ContentItem, ContentType
 
 logger = get_logger(__name__)
@@ -36,25 +39,34 @@ def repair_article_image_metadata(
     *,
     lookback_days: int = 14,
     limit: int = 200,
+    include_generic: bool = True,
 ) -> Dict[str, int]:
-    """Backfill missing article image/canonical metadata for recent rows."""
+    """Backfill missing or suspicious article image/canonical metadata."""
     cutoff = datetime.utcnow() - timedelta(days=lookback_days)
-    items = (
+    recent_items = (
         db.query(ContentItem)
         .filter(
             ContentItem.type == ContentType.ARTICLE,
             ContentItem.published_at >= cutoff,
             ContentItem.source_url.isnot(None),
-            or_(ContentItem.image_url.is_(None), ContentItem.image_url == ""),
         )
         .order_by(ContentItem.published_at.desc())
-        .limit(limit)
         .all()
     )
+
+    items = []
+    for item in recent_items:
+        if _needs_article_metadata_repair(item, include_generic=include_generic):
+            items.append(item)
+        if len(items) >= limit:
+            break
 
     scanned = 0
     updated = 0
     failures = 0
+    filled_missing = 0
+    replaced_generic = 0
+    pending_changes = 0
 
     for item in items:
         scanned += 1
@@ -70,9 +82,14 @@ def repair_article_image_metadata(
             continue
 
         changed = False
-        if not (item.image_url or "").strip() and metadata.image_url:
+        if _should_replace_image(item.image_url, metadata.image_url):
+            was_missing = not (item.image_url or "").strip()
             item.image_url = metadata.image_url
             changed = True
+            if was_missing:
+                filled_missing += 1
+            else:
+                replaced_generic += 1
         if not (item.canonical_url or "").strip() and metadata.canonical_url:
             item.canonical_url = metadata.canonical_url
             changed = True
@@ -80,13 +97,45 @@ def repair_article_image_metadata(
         if changed:
             item.updated_at = datetime.utcnow()
             updated += 1
+            pending_changes += 1
 
-    if updated:
+        if pending_changes >= 25:
+            db.commit()
+            pending_changes = 0
+
+    if pending_changes:
         db.commit()
 
     return {
         "scanned": scanned,
         "updated": updated,
         "failures": failures,
+        "filled_missing": filled_missing,
+        "replaced_generic": replaced_generic,
         "lookback_days": lookback_days,
     }
+
+
+def _needs_article_metadata_repair(item: ContentItem, *, include_generic: bool) -> bool:
+    """Return True when a row should be revisited for image/canonical metadata."""
+    has_missing_image = not (item.image_url or "").strip()
+    has_missing_canonical = not (item.canonical_url or "").strip()
+    has_generic_image = include_generic and is_probably_generic_image_url(item.image_url)
+    return has_missing_image or has_missing_canonical or has_generic_image
+
+
+def _should_replace_image(
+    existing_image_url: Optional[str], candidate_image_url: Optional[str]
+) -> bool:
+    """Return True when the fetched image should replace the stored value."""
+    if not candidate_image_url:
+        return False
+
+    existing = (existing_image_url or "").strip()
+    if not existing:
+        return True
+    if existing == candidate_image_url:
+        return False
+    if is_probably_generic_image_url(existing):
+        return True
+    return False

@@ -109,6 +109,27 @@ def test_extract_image_url_uses_rss_summary_image_without_page_fallback(monkeypa
     assert image_url == "https://example.com/images/hero.jpg"
 
 
+def test_extract_image_url_prefers_editorial_summary_image_over_logo(monkeypatch):
+    client = RSSClient(feed_configs=[])
+    entry = SimpleNamespace(
+        media_content=[],
+        media_thumbnail=[],
+        enclosures=[],
+        summary=(
+            '<p><img src="/assets/logo.png" width="96" height="96" alt="Site logo" /></p>'
+            '<p><img src="/images/hero.jpg" width="1280" height="720" alt="Feature image" /></p>'
+        ),
+    )
+
+    def _should_not_run(_url):
+        raise AssertionError("page metadata fallback should not run when RSS hero image exists")
+
+    monkeypatch.setattr(client, "_extract_image_from_page_metadata", _should_not_run)
+
+    image_url = client._extract_image_url(entry, "https://example.com/story/logo-first")
+    assert image_url == "https://example.com/images/hero.jpg"
+
+
 def test_extract_image_url_falls_back_to_page_metadata(monkeypatch):
     client = RSSClient(feed_configs=[])
     entry = SimpleNamespace(media_content=[], media_thumbnail=[], enclosures=[], summary="")
@@ -120,3 +141,21 @@ def test_extract_image_url_falls_back_to_page_metadata(monkeypatch):
 
     image_url = client._extract_image_url(entry, "https://example.com/story/2")
     assert image_url == "https://cdn.example.com/og.jpg"
+
+
+def test_extract_image_url_replaces_generic_rss_candidate_with_page_metadata(monkeypatch):
+    client = RSSClient(feed_configs=[])
+    entry = SimpleNamespace(
+        media_content=[{"url": "https://cdn.example.com/social-share.png"}],
+        media_thumbnail=[],
+        enclosures=[],
+        summary="",
+    )
+    monkeypatch.setattr(
+        client,
+        "_extract_image_from_page_metadata",
+        lambda _url: "https://example.com/images/article-hero.jpg",
+    )
+
+    image_url = client._extract_image_url(entry, "https://example.com/story/3")
+    assert image_url == "https://example.com/images/article-hero.jpg"

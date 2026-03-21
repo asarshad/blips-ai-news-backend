@@ -21,7 +21,12 @@ def run_backfill_job():
 
         pipeline = create_ingestion_pipeline(db)
         result = pipeline.run_backfill(hours_back=168, limit=1000)  # 7 days
-        image_repair = repair_article_image_metadata(db, lookback_days=14, limit=200)
+        image_repair = repair_article_image_metadata(
+            db,
+            lookback_days=30,
+            limit=500,
+            include_generic=True,
+        )
 
         stats.items_processed = result.get("items_created", 0) if isinstance(result, dict) else 0
         logger.info(f"[backfill] Result: {result}")
