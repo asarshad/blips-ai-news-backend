@@ -222,17 +222,18 @@ class TestOpenAIModelPinning:
         )
         assert client.model == "gpt-5-nano"
 
-    def test_llm_client_uses_gpt5_compatible_chat_parameters(self):
-        """Pinned GPT-5 requests should avoid deprecated/unsupported chat params."""
+    def test_llm_client_uses_gpt5_compatible_responses_parameters(self):
+        """Pinned GPT-5 requests should use the Responses API contract."""
         from types import SimpleNamespace
 
         from app.integrations.llm_client import ChatMessage, OpenAILLMClient
 
         client = OpenAILLMClient(api_key="sk-test-fake-key-12345678901234567890")
         client._client = Mock()
-        client._client.chat.completions.create.return_value = SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+        client._client.responses.create.return_value = SimpleNamespace(
+            output_text="ok",
             usage=SimpleNamespace(total_tokens=42),
+            model="gpt-5-nano-2025-08-07",
         )
 
         response = client.chat(
@@ -241,12 +242,41 @@ class TestOpenAIModelPinning:
             temperature=0.2,
         )
 
-        kwargs = client._client.chat.completions.create.call_args.kwargs
+        kwargs = client._client.responses.create.call_args.kwargs
         assert response.content == "ok"
         assert kwargs["model"] == "gpt-5-nano"
-        assert kwargs["max_completion_tokens"] == 123
-        assert "max_tokens" not in kwargs
+        assert kwargs["input"] == [{"role": "user", "content": "hello"}]
+        assert kwargs["max_output_tokens"] == 123
+        assert kwargs["reasoning"] == {"effort": "minimal"}
+        assert kwargs["store"] is False
+        assert "max_completion_tokens" not in kwargs
         assert "temperature" not in kwargs
+
+    def test_llm_client_maps_system_prompt_to_responses_instructions(self):
+        """System prompts should move to the Responses API instructions field."""
+        from types import SimpleNamespace
+
+        from app.integrations.llm_client import ChatMessage, OpenAILLMClient
+
+        client = OpenAILLMClient(api_key="sk-test-fake-key-12345678901234567890")
+        client._client = Mock()
+        client._client.responses.create.return_value = SimpleNamespace(
+            output_text="ok",
+            usage=SimpleNamespace(total_tokens=21),
+            model="gpt-5-nano-2025-08-07",
+        )
+
+        client.chat(
+            [
+                ChatMessage(role="system", content="You are helpful."),
+                ChatMessage(role="user", content="hello"),
+            ],
+            max_tokens=50,
+        )
+
+        kwargs = client._client.responses.create.call_args.kwargs
+        assert kwargs["instructions"] == "You are helpful."
+        assert kwargs["input"] == [{"role": "user", "content": "hello"}]
 
 
 # ── Mistral timeout ──────────────────────────────────────────────────

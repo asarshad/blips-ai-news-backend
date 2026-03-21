@@ -121,6 +121,7 @@ class OpenAILLMClient(BaseLLMClient):
 
     # Transient exception types that should trigger a retry.
     _RETRYABLE: tuple = ()  # populated in __init__ after import
+    _REASONING_EFFORT = "minimal"
 
     def __init__(self, api_key: Optional[str] = None, model: str = PINNED_OPENAI_MODEL):
         import openai
@@ -184,25 +185,39 @@ class OpenAILLMClient(BaseLLMClient):
             )
 
         try:
-            api_messages = [{"role": msg.role, "content": msg.content} for msg in messages]
+            instructions = "\n\n".join(
+                msg.content for msg in messages if msg.role == "system"
+            ).strip()
+            input_messages = [
+                {"role": msg.role, "content": msg.content}
+                for msg in messages
+                if msg.role != "system"
+            ]
 
             request_kwargs = {
                 "model": self.model,
-                "messages": api_messages,
-                "max_completion_tokens": max_tokens,
+                "input": input_messages,
+                "max_output_tokens": max_tokens,
+                "reasoning": {"effort": self._REASONING_EFFORT},
+                "store": False,
             }
+            if instructions:
+                request_kwargs["instructions"] = instructions
             if temperature != 0.7:
                 logger.warning(
                     "Ignoring OpenAI temperature override for pinned GPT-5 model '%s'",
                     self.model,
                 )
 
-            response = self._client.chat.completions.create(**request_kwargs)
+            response = self._client.responses.create(**request_kwargs)
+            content = (response.output_text or "").strip()
+            if not content:
+                raise ValueError("Empty text output returned from OpenAI Responses API")
 
             return ChatResponse(
-                content=response.choices[0].message.content,
+                content=content,
                 tokens_used=response.usage.total_tokens if response.usage else 0,
-                model=self.model,
+                model=getattr(response, "model", self.model),
                 provider="openai",
             )
         except tuple(self._RETRYABLE):
