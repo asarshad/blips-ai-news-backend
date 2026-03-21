@@ -96,6 +96,7 @@ def run_extraction(
     rss = rss_entry or RSSEntryData()
 
     html = ""
+    fetched_url = source_url
 
     # ── Step 1: Fetch ─────────────────────────────────────────────────
     if not skip_fetch:
@@ -111,6 +112,7 @@ def run_extraction(
                 # Fall through to RSS-only extraction
             else:
                 html = fetch.html
+                fetched_url = fetch.url or source_url
         except Exception as exc:
             result.fetch_error = str(exc)
             logger.error(f"[extraction] Unexpected fetch error for {source_url}: {exc}")
@@ -124,8 +126,8 @@ def run_extraction(
         try:
             from app.extraction.metadata import extract_metadata
 
-            meta = extract_metadata(html, source_url)
-            result.canonical_url = meta.canonical_url or source_url
+            meta = extract_metadata(html, fetched_url)
+            result.canonical_url = meta.canonical_url or fetched_url
             page_title = meta.title
             page_image = meta.image_url
             page_image_source = meta.image_source
@@ -137,7 +139,7 @@ def run_extraction(
 
     # Canonical URL fallback
     if not result.canonical_url:
-        result.canonical_url = source_url
+        result.canonical_url = fetched_url
 
     # ── Step 3: Title (page → RSS) ───────────────────────────────────
     result.title = page_title or rss.title

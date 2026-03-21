@@ -28,7 +28,7 @@ def fetch_article_page_metadata(article_url: str) -> Optional[PageMetadata]:
         fetch = fetch_url(article_url)
         if fetch.error or not fetch.html:
             return None
-        return extract_metadata(fetch.html, article_url)
+        return extract_metadata(fetch.html, fetch.url or article_url)
     except Exception as exc:
         logger.debug("Article metadata fetch failed for %s: %s", article_url, exc)
         return None

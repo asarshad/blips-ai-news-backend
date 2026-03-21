@@ -195,6 +195,33 @@ class TestRunExtractionWithFetch:
         assert result.published_at.year == 2024
 
     @patch(_FETCH_URL_PATCH)
+    def test_pipeline_uses_final_fetched_url_for_relative_metadata(self, mock_fetch):
+        html = """<!DOCTYPE html>
+<html>
+<head>
+<title>Redirected Article</title>
+<meta property="og:title" content="Redirected Article" />
+<meta property="og:image" content="/images/hero.jpg" />
+<link rel="canonical" href="/story/final" />
+</head>
+<body>
+<article><p>"""
+        html += " ".join(["content"] * 200)
+        html += """</p></article>
+</body>
+</html>"""
+        mock_fetch.return_value = self._make_fetch_result(
+            html,
+            url="https://www.example.com/story/final",
+        )
+
+        result = run_extraction("https://example.com/story")
+
+        assert result.canonical_url == "https://www.example.com/story/final"
+        assert result.image_url == "https://www.example.com/images/hero.jpg"
+        assert result.image_source == "og"
+
+    @patch(_FETCH_URL_PATCH)
     def test_rss_fallback_when_page_has_no_image(self, mock_fetch):
         html = (
             """<!DOCTYPE html>

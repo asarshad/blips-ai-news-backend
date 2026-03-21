@@ -11,6 +11,7 @@ Uses httpx with:
 from __future__ import annotations
 
 import ipaddress
+import re
 import socket
 import time
 from collections import OrderedDict
@@ -20,6 +21,7 @@ from typing import Optional
 from urllib.parse import urljoin, urlparse
 
 import httpx
+import requests
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -39,8 +41,18 @@ MAX_RESPONSE_BYTES: int = 5 * 1024 * 1024  # 5 MB byte cap
 
 _TRANSIENT_STATUS = {429, 500, 502, 503, 504}
 _BOT_BLOCK_STATUS = {403, 429}
+_REQUESTS_FALLBACK_STATUS = {401, 402, 403, 429}
 _REDIRECT_STATUS = {301, 302, 303, 307, 308}
 _MAX_REDIRECTS = 5
+_HTML_CONTENT_TYPE_HINTS = (
+    "text/html",
+    "application/xhtml+xml",
+    "application/xml",
+)
+_PLAIN_TEXT_FALLBACK_HINTS = (
+    "text/plain",
+    "text/markdown",
+)
 
 # ── Response dataclass ────────────────────────────────────────────────────────
 
@@ -202,14 +214,7 @@ def fetch_url(
 
             if resp.status_code in _BOT_BLOCK_STATUS and not tried_browser_fallback:
                 tried_browser_fallback = True
-                browser_headers = dict(headers)
-                browser_headers["User-Agent"] = BROWSER_FALLBACK_USER_AGENT
-                browser_headers["Accept"] = (
-                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                    "image/avif,image/webp,*/*;q=0.8"
-                )
-                browser_headers["Accept-Language"] = "en-US,en;q=0.9"
-                browser_headers["Upgrade-Insecure-Requests"] = "1"
+                browser_headers = _build_browser_fallback_headers(headers)
                 fallback_resp, fallback_elapsed = _get_with_validated_redirects(
                     client,
                     url,
@@ -218,9 +223,21 @@ def fetch_url(
                 resp = fallback_resp
                 elapsed += fallback_elapsed
 
+            if _should_try_requests_browser_fallback(
+                resp
+            ) and not _response_prefers_browser_variant(resp):
+                browser_headers = _build_browser_fallback_headers(headers)
+                fallback_resp, fallback_elapsed = _requests_get_with_validated_redirects(
+                    url,
+                    browser_headers,
+                )
+                elapsed += fallback_elapsed
+                if _response_prefers_browser_variant(fallback_resp):
+                    resp = fallback_resp
+
             if resp.status_code == 304:
                 return FetchResult(
-                    url=url,
+                    url=str(resp.url),
                     status_code=304,
                     not_modified=True,
                     etag=resp.headers.get("ETag"),
@@ -235,7 +252,7 @@ def fetch_url(
 
             if resp.status_code >= 400:
                 return FetchResult(
-                    url=url,
+                    url=str(resp.url),
                     status_code=resp.status_code,
                     error=f"HTTP {resp.status_code}",
                     elapsed_ms=elapsed,
@@ -250,7 +267,7 @@ def fetch_url(
 
             ct = resp.headers.get("Content-Type", "")
             return FetchResult(
-                url=url,
+                url=str(resp.url),
                 status_code=resp.status_code,
                 html=html_text,
                 content_type=ct,
@@ -314,6 +331,48 @@ def _validate_fetch_target(url: str) -> Optional[str]:
     return None
 
 
+def _build_browser_fallback_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Return browser-like headers for bot-sensitive sites."""
+    browser_headers = dict(headers)
+    browser_headers["User-Agent"] = BROWSER_FALLBACK_USER_AGENT
+    browser_headers["Accept"] = (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+    )
+    browser_headers["Accept-Language"] = "en-US,en;q=0.9"
+    browser_headers["Upgrade-Insecure-Requests"] = "1"
+    return browser_headers
+
+
+def _should_try_requests_browser_fallback(response: httpx.Response) -> bool:
+    """Return True when the shared httpx path likely saw a bot-specific variant."""
+    if response.status_code in _REQUESTS_FALLBACK_STATUS:
+        return True
+    content_type = (response.headers.get("Content-Type") or "").lower()
+    if response.status_code >= 400:
+        return False
+    return any(hint in content_type for hint in _PLAIN_TEXT_FALLBACK_HINTS)
+
+
+def _response_prefers_browser_variant(response) -> bool:
+    """Return True when a response looks like the canonical browser-facing document."""
+    if response.status_code >= 400:
+        return False
+
+    content_type = (response.headers.get("Content-Type") or "").lower()
+    if content_type:
+        if any(hint in content_type for hint in _PLAIN_TEXT_FALLBACK_HINTS):
+            return False
+        if not any(hint in content_type for hint in _HTML_CONTENT_TYPE_HINTS):
+            return False
+
+    raw = response.content[:4096]
+    encoding = response.encoding or "utf-8"
+    text = raw.decode(encoding, errors="replace").lstrip().lower()
+    if "<html" in text or text.startswith("<!doctype html"):
+        return True
+    return bool(re.search(r"<meta|<title|<article|<main", text))
+
+
 def _get_with_validated_redirects(
     client: httpx.Client,
     url: str,
@@ -341,5 +400,47 @@ def _get_with_validated_redirects(
             raise ValueError(target_error)
 
         current_url = next_url
+
+    raise ValueError("Too many redirects")
+
+
+def _requests_get_with_validated_redirects(
+    url: str,
+    headers: dict[str, str],
+) -> tuple[requests.Response, float]:
+    """Browser-style fallback fetch with the same redirect validation rules."""
+    settings = get_settings()
+    connect_timeout = float(getattr(settings, "EXTRACTION_CONNECT_TIMEOUT", 10))
+    read_timeout = float(getattr(settings, "EXTRACTION_READ_TIMEOUT", 20))
+    current_url = url
+    total_elapsed_ms = 0.0
+
+    session = requests.Session()
+    try:
+        for _ in range(_MAX_REDIRECTS + 1):
+            t0 = time.monotonic()
+            response = session.get(
+                current_url,
+                headers=headers,
+                timeout=(connect_timeout, read_timeout),
+                allow_redirects=False,
+            )
+            total_elapsed_ms += (time.monotonic() - t0) * 1000
+
+            if response.status_code not in _REDIRECT_STATUS:
+                return response, total_elapsed_ms
+
+            location = response.headers.get("Location")
+            if not location:
+                return response, total_elapsed_ms
+
+            next_url = urljoin(str(response.url), location)
+            target_error = _validate_fetch_target(next_url)
+            if target_error is not None:
+                raise ValueError(target_error)
+
+            current_url = next_url
+    finally:
+        session.close()
 
     raise ValueError("Too many redirects")

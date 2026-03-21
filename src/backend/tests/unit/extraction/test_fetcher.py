@@ -198,6 +198,7 @@ class TestFetchUrlHappyPath:
 
         assert result.status_code == 200
         assert "Redirected" in result.html
+        assert result.url == "https://cdn.example.com/final"
 
     def test_429_retries_once_with_browser_user_agent(self):
         blocked_response = MagicMock()
@@ -226,6 +227,71 @@ class TestFetchUrlHappyPath:
         assert mock_get.call_count == 2
         assert "User-Agent" not in mock_get.call_args_list[0].args[2]
         assert mock_get.call_args_list[1].args[2]["User-Agent"] == BROWSER_FALLBACK_USER_AGENT
+
+    def test_401_falls_back_to_requests_browser_transport(self):
+        blocked_response = MagicMock()
+        blocked_response.status_code = 401
+        blocked_response.headers = {}
+        blocked_response.url = "https://example.com/article"
+        blocked_response.content = b""
+        blocked_response.encoding = "utf-8"
+
+        recovered_response = self._mock_http_response(
+            200, body=b"<html><head><title>Recovered</title></head></html>"
+        )
+        recovered_response.url = "https://www.example.com/article"
+
+        with self._mock_public_host():
+            with patch("app.extraction.fetcher._get_client") as mock_client:
+                mock_client.return_value = MagicMock()
+                with patch(
+                    "app.extraction.fetcher._get_with_validated_redirects"
+                ) as mock_httpx_get:
+                    mock_httpx_get.return_value = (blocked_response, 10.0)
+                    with patch(
+                        "app.extraction.fetcher._requests_get_with_validated_redirects"
+                    ) as mock_requests_get:
+                        mock_requests_get.return_value = (recovered_response, 30.0)
+                        with patch("app.extraction.fetcher._rate_limit_domain"):
+                            result = fetch_url("https://example.com/article")
+
+        assert result.status_code == 200
+        assert "Recovered" in result.html
+        assert result.url == "https://www.example.com/article"
+        mock_requests_get.assert_called_once()
+
+    def test_text_plain_response_falls_back_to_requests_browser_transport(self):
+        plain_response = MagicMock()
+        plain_response.status_code = 200
+        plain_response.headers = {"Content-Type": "text/plain; charset=utf-8"}
+        plain_response.url = "https://example.com/article"
+        plain_response.content = b"# AI Agent Bracket Challenge"
+        plain_response.encoding = "utf-8"
+
+        recovered_response = self._mock_http_response(
+            200,
+            body=b"<html><head><meta property='og:title' content='Recovered'></head><body></body></html>",
+        )
+        recovered_response.url = "https://www.example.com/article"
+
+        with self._mock_public_host():
+            with patch("app.extraction.fetcher._get_client") as mock_client:
+                mock_client.return_value = MagicMock()
+                with patch(
+                    "app.extraction.fetcher._get_with_validated_redirects"
+                ) as mock_httpx_get:
+                    mock_httpx_get.return_value = (plain_response, 12.0)
+                    with patch(
+                        "app.extraction.fetcher._requests_get_with_validated_redirects"
+                    ) as mock_requests_get:
+                        mock_requests_get.return_value = (recovered_response, 18.0)
+                        with patch("app.extraction.fetcher._rate_limit_domain"):
+                            result = fetch_url("https://example.com/article")
+
+        assert result.status_code == 200
+        assert result.content_type == "text/html"
+        assert result.url == "https://www.example.com/article"
+        mock_requests_get.assert_called_once()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

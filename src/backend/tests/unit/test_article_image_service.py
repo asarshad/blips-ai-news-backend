@@ -130,3 +130,33 @@ def test_repair_article_image_metadata_replaces_generic_images(monkeypatch):
     assert result["updated"] == 1
     assert result["replaced_generic"] == 1
     assert repaired.image_url == "https://cdn.example.com/article-hero.jpg"
+
+
+def test_fetch_article_page_metadata_uses_final_fetched_url_for_relative_assets(monkeypatch):
+    from app.extraction.fetcher import FetchResult
+
+    html = """<!DOCTYPE html>
+<html>
+<head>
+  <link rel="canonical" href="/story/final" />
+  <meta property="og:image" content="/images/hero.jpg" />
+</head>
+<body><article><p>Story</p></article></body>
+</html>"""
+
+    monkeypatch.setattr(
+        article_image_service,
+        "fetch_url",
+        lambda article_url: FetchResult(
+            url="https://www.example.com/story/final",
+            status_code=200,
+            html=html,
+            content_type="text/html",
+        ),
+    )
+
+    metadata = article_image_service.fetch_article_page_metadata("https://example.com/story")
+
+    assert metadata is not None
+    assert metadata.canonical_url == "https://www.example.com/story/final"
+    assert metadata.image_url == "https://www.example.com/images/hero.jpg"
