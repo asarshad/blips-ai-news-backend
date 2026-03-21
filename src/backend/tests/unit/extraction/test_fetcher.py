@@ -6,6 +6,7 @@ import time
 from unittest.mock import MagicMock, patch
 
 from app.extraction.fetcher import (
+    BROWSER_FALLBACK_USER_AGENT,
     _is_private_host,
     _rate_limit_domain,
     fetch_url,
@@ -197,6 +198,34 @@ class TestFetchUrlHappyPath:
 
         assert result.status_code == 200
         assert "Redirected" in result.html
+
+    def test_429_retries_once_with_browser_user_agent(self):
+        blocked_response = MagicMock()
+        blocked_response.status_code = 429
+        blocked_response.headers = {}
+        blocked_response.url = "https://example.com/article"
+
+        recovered_response = self._mock_http_response(
+            200, body=b"<html><body>Recovered</body></html>"
+        )
+        recovered_response.url = "https://example.com/article"
+
+        with self._mock_public_host():
+            with patch("app.extraction.fetcher._get_client") as mock_client:
+                mock_client.return_value = MagicMock()
+                with patch("app.extraction.fetcher._get_with_validated_redirects") as mock_get:
+                    mock_get.side_effect = [
+                        (blocked_response, 15.0),
+                        (recovered_response, 25.0),
+                    ]
+                    with patch("app.extraction.fetcher._rate_limit_domain"):
+                        result = fetch_url("https://example.com/article")
+
+        assert result.status_code == 200
+        assert "Recovered" in result.html
+        assert mock_get.call_count == 2
+        assert "User-Agent" not in mock_get.call_args_list[0].args[2]
+        assert mock_get.call_args_list[1].args[2]["User-Agent"] == BROWSER_FALLBACK_USER_AGENT
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

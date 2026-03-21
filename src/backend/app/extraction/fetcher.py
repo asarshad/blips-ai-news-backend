@@ -31,9 +31,14 @@ logger = get_logger(__name__)
 USER_AGENT: str = (
     f"BlipsBot/1.0 (+https://blips.dev/bot; content-extraction) httpx/{httpx.__version__}"
 )
+BROWSER_FALLBACK_USER_AGENT: str = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+)
 MAX_RESPONSE_BYTES: int = 5 * 1024 * 1024  # 5 MB byte cap
 
 _TRANSIENT_STATUS = {429, 500, 502, 503, 504}
+_BOT_BLOCK_STATUS = {403, 429}
 _REDIRECT_STATUS = {301, 302, 303, 307, 308}
 _MAX_REDIRECTS = 5
 
@@ -188,11 +193,30 @@ def fetch_url(
     client = _get_client()
     last_error: Optional[str] = None
     elapsed: float = 0.0  # Always defined — prevents NameError when max_retries=0
+    tried_browser_fallback = False
 
     for attempt in range(1, max_retries + 1):
         t0 = time.monotonic()
         try:
             resp, elapsed = _get_with_validated_redirects(client, url, headers)
+
+            if resp.status_code in _BOT_BLOCK_STATUS and not tried_browser_fallback:
+                tried_browser_fallback = True
+                browser_headers = dict(headers)
+                browser_headers["User-Agent"] = BROWSER_FALLBACK_USER_AGENT
+                browser_headers["Accept"] = (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "image/avif,image/webp,*/*;q=0.8"
+                )
+                browser_headers["Accept-Language"] = "en-US,en;q=0.9"
+                browser_headers["Upgrade-Insecure-Requests"] = "1"
+                fallback_resp, fallback_elapsed = _get_with_validated_redirects(
+                    client,
+                    url,
+                    browser_headers,
+                )
+                resp = fallback_resp
+                elapsed += fallback_elapsed
 
             if resp.status_code == 304:
                 return FetchResult(
