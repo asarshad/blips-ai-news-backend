@@ -457,7 +457,7 @@ Article Content: {truncated_content}
 
 Perform ALL three tasks below in a single response.
 
-Task 1: Write a concise summary of this tech article in exactly 85-90 words. Keep it informative and engaging.
+Task 1: Write a concise summary of this tech article in at most 85 words. Keep it informative and engaging.
 
 Task 2: Generate 3-5 relevant tags for this article. Tags should be lowercase, single words or hyphenated phrases.
 
@@ -547,7 +547,7 @@ Video Description: {truncated_desc}
 
 Perform BOTH tasks below in a single response.
 
-Task 1: Write a concise summary of this video in exactly 85-90 words based on the description.
+Task 1: Write a concise summary of this video in at most 85 words based on the description.
 Focus on the main topic and key points. Remove any channel promotion, "link in bio", or "subscribe" text.
 
 Task 2: Generate exactly 3 conversation-starter questions about this specific video. Each question must:

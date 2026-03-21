@@ -160,7 +160,7 @@ class OpenAIClient:
             
             Article Content: {truncated_content}
             
-            Task 1: Write a concise summary of this tech article in exactly 85-90 words. Keep it informative and engaging.
+            Task 1: Write a concise summary of this tech article in at most 85 words. Keep it informative and engaging.
             
             Task 2: Generate 5-7 relevant tags for this article, separated by commas.
             
@@ -225,7 +225,7 @@ class OpenAIClient:
             
             Video Description: {truncated_desc}
             
-            Task: Write a concise summary of this video in exactly 85-90 words based on the description. 
+            Task: Write a concise summary of this video in at most 85 words based on the description. 
             Focus on the main topic and key points. Remove any channel promotion, "link in bio", or "subscribe" text.
             
             Format your response as just the summary text.

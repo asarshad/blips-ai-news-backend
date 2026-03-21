@@ -279,6 +279,76 @@ class TestOpenAIModelPinning:
         assert kwargs["input"] == [{"role": "user", "content": "hello"}]
 
 
+class TestSummaryLengthPrompting:
+    """Verify summary length is enforced in backend prompts, not the client UI."""
+
+    def test_llm_client_article_summary_prompt_caps_at_85_words(self):
+        """Article summaries should request at most 85 words from the model."""
+        from types import SimpleNamespace
+
+        from app.integrations.llm_client import LLMClient
+
+        client = LLMClient(provider="openai", api_key="sk-test-fake-key-12345678901234567890")
+        client.chat = Mock(
+            return_value=SimpleNamespace(
+                content="SUMMARY: test\nTAGS: ai, chips\nSTARTERS: q1 | q2 | q3"
+            )
+        )
+
+        client.summarize_article("Title", "Content")
+
+        prompt = client.chat.call_args.kwargs["messages"][0].content
+        assert "at most 85 words" in prompt
+        assert "exactly 85-90 words" not in prompt
+
+    def test_llm_client_video_summary_prompt_caps_at_85_words(self):
+        """Video summaries should request at most 85 words from the model."""
+        from types import SimpleNamespace
+
+        from app.integrations.llm_client import LLMClient
+
+        client = LLMClient(provider="openai", api_key="sk-test-fake-key-12345678901234567890")
+        client.chat = Mock(
+            return_value=SimpleNamespace(content="SUMMARY: test\nSTARTERS: q1 | q2 | q3")
+        )
+
+        client.summarize_video("Title", "Description")
+
+        prompt = client.chat.call_args.kwargs["messages"][1].content
+        assert "at most 85 words" in prompt
+        assert "exactly 85-90 words" not in prompt
+
+    def test_legacy_openai_client_article_summary_prompt_caps_at_85_words(self):
+        """Legacy OpenAIClient should match the same article summary contract."""
+        from types import SimpleNamespace
+
+        from app.integrations.openai_client import OpenAIClient
+
+        client = OpenAIClient(api_key="sk-test-fake-key-12345678901234567890")
+        client.chat = Mock(return_value=SimpleNamespace(content="SUMMARY: test\nTAGS: ai, chips"))
+
+        client.summarize_article("Title", "Content")
+
+        prompt = client.chat.call_args.args[0][1].content
+        assert "at most 85 words" in prompt
+        assert "exactly 85-90 words" not in prompt
+
+    def test_legacy_openai_client_video_summary_prompt_caps_at_85_words(self):
+        """Legacy OpenAIClient should match the same video summary contract."""
+        from types import SimpleNamespace
+
+        from app.integrations.openai_client import OpenAIClient
+
+        client = OpenAIClient(api_key="sk-test-fake-key-12345678901234567890")
+        client.chat = Mock(return_value=SimpleNamespace(content="summary"))
+
+        client.summarize_video("Title", "Description")
+
+        prompt = client.chat.call_args.args[0][1].content
+        assert "at most 85 words" in prompt
+        assert "exactly 85-90 words" not in prompt
+
+
 # ── Mistral timeout ──────────────────────────────────────────────────
 
 
