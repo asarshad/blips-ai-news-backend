@@ -186,12 +186,18 @@ class OpenAILLMClient(BaseLLMClient):
         try:
             api_messages = [{"role": msg.role, "content": msg.content} for msg in messages]
 
-            response = self._client.chat.completions.create(
-                model=self.model,
-                messages=api_messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
+            request_kwargs = {
+                "model": self.model,
+                "messages": api_messages,
+                "max_completion_tokens": max_tokens,
+            }
+            if temperature != 0.7:
+                logger.warning(
+                    "Ignoring OpenAI temperature override for pinned GPT-5 model '%s'",
+                    self.model,
+                )
+
+            response = self._client.chat.completions.create(**request_kwargs)
 
             return ChatResponse(
                 content=response.choices[0].message.content,

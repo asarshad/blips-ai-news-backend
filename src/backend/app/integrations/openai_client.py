@@ -110,11 +110,16 @@ class OpenAIClient:
         try:
             api_messages = [{"role": msg.role, "content": msg.content} for msg in messages]
 
+            if temperature != 0.7:
+                logger.warning(
+                    "Ignoring OpenAI temperature override for pinned GPT-5 model '%s'",
+                    self.model,
+                )
+
             response = openai.chat.completions.create(
                 model=self.model,
                 messages=api_messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
+                max_completion_tokens=max_tokens,
             )
 
             return ChatResponse(

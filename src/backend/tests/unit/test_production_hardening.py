@@ -222,6 +222,32 @@ class TestOpenAIModelPinning:
         )
         assert client.model == "gpt-5-nano"
 
+    def test_llm_client_uses_gpt5_compatible_chat_parameters(self):
+        """Pinned GPT-5 requests should avoid deprecated/unsupported chat params."""
+        from types import SimpleNamespace
+
+        from app.integrations.llm_client import ChatMessage, OpenAILLMClient
+
+        client = OpenAILLMClient(api_key="sk-test-fake-key-12345678901234567890")
+        client._client = Mock()
+        client._client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+            usage=SimpleNamespace(total_tokens=42),
+        )
+
+        response = client.chat(
+            [ChatMessage(role="user", content="hello")],
+            max_tokens=123,
+            temperature=0.2,
+        )
+
+        kwargs = client._client.chat.completions.create.call_args.kwargs
+        assert response.content == "ok"
+        assert kwargs["model"] == "gpt-5-nano"
+        assert kwargs["max_completion_tokens"] == 123
+        assert "max_tokens" not in kwargs
+        assert "temperature" not in kwargs
+
 
 # ── Mistral timeout ──────────────────────────────────────────────────
 
