@@ -142,13 +142,23 @@ class TestReelClassificationIngestion:
 
     def test_duration_only_no_longer_promotes_reels(self):
         """Short duration alone must not be enough to classify a reel."""
-        import inspect
+        from app.models.content import ContentType
+        from app.video_surface_rules import classify_video_like_item
 
-        from app.ingestion.service import IngestionPipeline
+        item = type(
+            "Item",
+            (),
+            {
+                "duration_seconds": 134,
+                "video_url": "https://www.youtube.com/watch?v=watch123",
+                "title": "Foundry IQ: Building the Data Pipeline with Knowledge Sources",
+                "channel_id": "UC9PBzalIcEQCsiIkq36PyUA",
+                "content_format": None,
+            },
+        )()
 
-        source = inspect.getsource(IngestionPipeline.ingest_youtube_entry)
-        assert "classify_video_like_item" in source, (
-            "Ingestion must use shared durable Shorts classification"
+        assert classify_video_like_item(item) == ContentType.VIDEO, (
+            "Short duration alone must not reclassify a normal watch URL as a reel"
         )
 
     def test_duration_authority_still_protects_long_videos(self):
