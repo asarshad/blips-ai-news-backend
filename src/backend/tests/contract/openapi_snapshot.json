@@ -2946,6 +2946,22 @@
           },
           {
             "in": "query",
+            "name": "has_image",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Has Image"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort_by",
             "required": false,
             "schema": {
@@ -5387,6 +5403,22 @@
                 }
               ],
               "title": "Manual Added"
+            }
+          },
+          {
+            "in": "query",
+            "name": "has_image",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Has Image"
             }
           },
           {

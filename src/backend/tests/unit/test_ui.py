@@ -20,6 +20,17 @@ class _FakeRepo:
         return None
 
 
+class _FakeContentRepo:
+    last_list_args = None
+
+    def __init__(self, db):
+        self.db = db
+
+    def list_content(self, **kwargs):
+        _FakeContentRepo.last_list_args = kwargs
+        return [], 0
+
+
 def test_review_queue_promoted_scope_passes_filters(monkeypatch):
     _FakeRepo.last_list_args = None
     _FakeRepo.last_count_args = None
@@ -84,3 +95,34 @@ def test_review_queue_all_scope_maps_to_no_status_filter(monkeypatch):
 
     html = response.body.decode("utf-8")
     assert "All statuses" in html
+
+
+def test_content_list_maps_missing_image_filter(monkeypatch):
+    _FakeContentRepo.last_list_args = None
+    monkeypatch.setattr(admin_ui, "EditorialRepository", _FakeContentRepo)
+
+    response = admin_ui.ui_content_list(
+        day=None,
+        type="ARTICLE",
+        source=None,
+        suppressed=None,
+        manual_added=None,
+        has_image="false",
+        curation_status="PROMOTED",
+        sort_by="published_at",
+        page=2,
+        flash=None,
+        db=object(),
+        admin_key="secret",
+    )
+
+    assert _FakeContentRepo.last_list_args is not None
+    assert _FakeContentRepo.last_list_args["content_type"] == "ARTICLE"
+    assert _FakeContentRepo.last_list_args["has_image"] is False
+    assert _FakeContentRepo.last_list_args["curation_status"] == "PROMOTED"
+
+    html = response.body.decode("utf-8")
+    assert 'name="has_image"' in html
+    assert "Missing" in html
+    assert "Present" in html
+    assert "has_image=false" in html

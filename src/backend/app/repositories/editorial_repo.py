@@ -34,6 +34,7 @@ class EditorialRepository:
         source: Optional[str] = None,
         suppressed: Optional[bool] = None,
         manual_added: Optional[bool] = None,
+        has_image: Optional[bool] = None,
         curation_status: Optional[str] = None,
         sort_by: str = "published_at",
         page: int = 1,
@@ -69,6 +70,13 @@ class EditorialRepository:
 
         if manual_added is not None:
             query = query.filter(ContentItem.manual_added == manual_added)
+
+        if has_image is not None:
+            image_url_text = func.trim(func.coalesce(ContentItem.image_url, ""))
+            if has_image:
+                query = query.filter(func.length(image_url_text) > 0)
+            else:
+                query = query.filter(func.length(image_url_text) == 0)
 
         if curation_status is not None:
             cs = curation_status.upper()

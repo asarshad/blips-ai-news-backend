@@ -2618,6 +2618,7 @@ def ui_content_list(
     source: Optional[str] = Query(None),
     suppressed: Optional[str] = Query(None),
     manual_added: Optional[str] = Query(None),
+    has_image: Optional[str] = Query(None),
     curation_status: Optional[str] = Query(None),
     sort_by: str = Query("published_at"),
     page: int = Query(1, ge=1),
@@ -2648,12 +2649,19 @@ def ui_content_list(
     elif manual_added == "false":
         manual = False
 
+    image_filter = None
+    if has_image == "true":
+        image_filter = True
+    elif has_image == "false":
+        image_filter = False
+
     items, total = repo.list_content(
         day=parsed_day,
         content_type=type,
         source=source,
         suppressed=supp,
         manual_added=manual,
+        has_image=image_filter,
         curation_status=curation_status or None,
         sort_by=sort_by,
         page=page,
@@ -2668,6 +2676,7 @@ def ui_content_list(
             "type": type or "",
             "source": source or "",
             "suppressed": suppressed or "",
+            "has_image": has_image or "",
             "curation_status": curation_status or "",
             "sort_by": sort_by,
         }
@@ -2695,6 +2704,8 @@ def ui_content_list(
             badges += _badge("manual", "blue") + " "
         if (i.editorial_boost or 0) > 0:
             badges += _badge(f"boost {i.editorial_boost}", "purple") + " "
+        if not (getattr(i, "image_url", None) or "").strip():
+            badges += _badge("no image", "gray") + " "
 
         pub = i.published_at.strftime("%m-%d %H:%M") if i.published_at else "—"
         score = f"{i.promotion_score:.3f}" if getattr(i, "promotion_score", None) else "—"
@@ -2753,7 +2764,7 @@ def ui_content_list(
 
     filter_form = f"""
     <div class="glass-panel rounded-[1.5rem] p-4 mb-4">
-      <form method="get" action="/api/v1/admin/ui/content" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 items-end">
+      <form method="get" action="/api/v1/admin/ui/content" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 items-end">
         <input type="hidden" name="key" value="{admin_key}">
         <div>
           <label class="block text-xs text-gray-500 mb-1">Day</label>
@@ -2770,6 +2781,10 @@ def ui_content_list(
         <div>
           <label class="block text-xs text-gray-500 mb-1">Source</label>
           <input type="text" name="source" value="{source or ""}" placeholder="filter..." class="w-full rounded border-gray-300 text-sm px-2 py-1">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Image</label>
+          {_sel("has_image", has_image or "", [("", "All"), ("true", "Present"), ("false", "Missing")])}
         </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Suppressed</label>
@@ -2794,6 +2809,7 @@ def ui_content_list(
                 "type": type or "",
                 "source": source or "",
                 "suppressed": suppressed or "",
+                "has_image": has_image or "",
                 "curation_status": curation_status or "",
                 "sort_by": sort_by,
             }

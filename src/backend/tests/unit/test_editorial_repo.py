@@ -52,3 +52,33 @@ def test_candidate_queue_counts_can_include_all_statuses():
 
     assert counts == {"ARTICLE": 2, "VIDEO": 1}
     assert query.filter.call_count == 0
+
+
+def test_list_content_has_image_true_filters_non_blank_image_urls():
+    session = MagicMock()
+    repo = EditorialRepository(session)
+    query = _make_query_chain(session)
+
+    repo.list_content(has_image=True, page=1, page_size=50)
+
+    assert query.filter.call_count == 1
+    expr = query.filter.call_args_list[0].args[0]
+    rendered = str(expr)
+    assert "image_url" in rendered
+    assert "length" in rendered.lower()
+    assert "> :length_" in rendered or "> :param_" in rendered
+
+
+def test_list_content_has_image_false_filters_blank_or_null_image_urls():
+    session = MagicMock()
+    repo = EditorialRepository(session)
+    query = _make_query_chain(session)
+
+    repo.list_content(has_image=False, page=1, page_size=50)
+
+    assert query.filter.call_count == 1
+    expr = query.filter.call_args_list[0].args[0]
+    rendered = str(expr)
+    assert "image_url" in rendered
+    assert "length" in rendered.lower()
+    assert "= :length_" in rendered or "= :param_" in rendered

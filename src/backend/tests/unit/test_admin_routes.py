@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fakeredis
 
+from app.api.admin import routes as admin_routes
 from app.api.routes import admin as admin_module
 from app.schemas.ads import AdsRuntimeConfigPatch
 
@@ -19,6 +20,17 @@ class _FakeRedis:
 
     def exists(self, _key):
         return 0
+
+
+class _FakeEditorialRepo:
+    last_list_args = None
+
+    def __init__(self, db):
+        self.db = db
+
+    def list_content(self, **kwargs):
+        _FakeEditorialRepo.last_list_args = kwargs
+        return [], 0
 
 
 def test_reset_youtube_search_cooldown_clears_both_surfaces(monkeypatch):
@@ -91,3 +103,28 @@ def test_reset_ads_config_returns_default_source():
 
     assert result.source == "default"
     assert result.ads.enabled is True
+
+
+def test_list_content_passes_has_image_filter(monkeypatch):
+    _FakeEditorialRepo.last_list_args = None
+    monkeypatch.setattr(admin_routes, "EditorialRepository", _FakeEditorialRepo)
+
+    response = admin_routes.list_content(
+        day=None,
+        type="ARTICLE",
+        source="example.com",
+        suppressed=False,
+        manual_added=None,
+        has_image=False,
+        sort_by="published_at",
+        page=1,
+        page_size=50,
+        db=object(),
+    )
+
+    assert _FakeEditorialRepo.last_list_args is not None
+    assert _FakeEditorialRepo.last_list_args["content_type"] == "ARTICLE"
+    assert _FakeEditorialRepo.last_list_args["source"] == "example.com"
+    assert _FakeEditorialRepo.last_list_args["suppressed"] is False
+    assert _FakeEditorialRepo.last_list_args["has_image"] is False
+    assert response.total == 0
