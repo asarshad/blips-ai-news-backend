@@ -258,6 +258,14 @@ projects:
                 value: "0"
               - key: YOUTUBE_REEL_TRENDING_ENABLED
                 value: "0"
+              - key: YT_REEL_UPLOADS_API_ENABLED
+                value: "true"
+              - key: YT_REEL_UPLOADS_MAX_PAGES
+                value: "2"
+              - key: YT_REEL_UPLOADS_PAGE_SIZE
+                value: "50"
+              - key: YT_UPLOADS_PLAYLIST_CACHE_TTL_SECONDS
+                value: "2592000"
               - key: YT_CHANNEL_BOOTSTRAP_ENABLED
                 value: "true"
               - key: YT_BOOTSTRAP_MAX_PROFILE_AGE_DAYS

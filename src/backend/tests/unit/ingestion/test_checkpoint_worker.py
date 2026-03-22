@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from types import ModuleType, SimpleNamespace
 
 from app.ingestion import checkpoint_worker
+from app.integrations.youtube_channels import ContentFormat
 
 
 class _FakeBudgetRepo:
@@ -90,6 +91,25 @@ class _Entry:
         self.content = "c"
         self.image_url = None
         self.published_date = None
+
+
+class _YTEntry:
+    def __init__(self, video_id: str, *, is_short: bool, url: str):
+        self.title = "yt"
+        self.summary = "summary"
+        self.thumbnail_url = "thumb"
+        self.source = "YouTube"
+        self.category = "Technology"
+        self.video_id = video_id
+        self.video_url = url
+        self.channel_id = "channel-yt"
+        self.content_format = ContentFormat.MIXED
+        self.is_short = is_short
+        self.published_at = datetime.utcnow()
+        self.acquisition_lane = "curated"
+        self.source_status = "core"
+        self.duration_seconds = 42 if is_short else 480
+        self.format_fit_score = 1.0
 
 
 def test_youtube_entry_is_reel_for_134_second_shorts_url():
@@ -218,6 +238,169 @@ def test_worker_reports_attempted_when_inserted_zero(monkeypatch):
     assert result["status"] == "ok"
     assert result["inserted"] == 0
     assert result["attempted"] == 6
+
+
+def test_youtube_reel_rows_use_uploads_head_scan_when_enabled(monkeypatch):
+    progress = _Progress(
+        id=1,
+        day_utc=None,
+        source_type="youtube_reel",
+        feed_name="Reel Channel",
+        target=1,
+        items_ingested=0,
+        items_attempted=0,
+        status="running",
+    )
+    session = _FakeSession(progress)
+    calls = {"uploads": 0, "rss": 0}
+
+    class _FakeYTClient:
+        def __init__(self):
+            self.channel_configs = [
+                SimpleNamespace(
+                    name="Reel Channel",
+                    content_format=ContentFormat.MIXED,
+                    fresh_published_hours=None,
+                    channel_id="channel-yt",
+                )
+            ]
+
+        def fetch_recent_reel_uploads(self, _config, *, max_entries):
+            calls["uploads"] += 1
+            assert max_entries >= 1
+            return (
+                [
+                    _YTEntry(
+                        "short1234567",
+                        is_short=True,
+                        url="https://www.youtube.com/shorts/short1234567",
+                    )
+                ],
+                {
+                    "fetch_strategy": "uploads_api",
+                    "playlist_pages_fetched": 1,
+                    "video_ids_hydrated": 1,
+                    "raw_entries": 1,
+                    "classified_reels": 1,
+                    "quota_units_requested": 3,
+                },
+            )
+
+        def _fetch_channel_with_config(self, _config, *, max_videos):
+            calls["rss"] += 1
+            return []
+
+    pkg = ModuleType("app.integrations")
+    pkg.__path__ = []
+    rss_mod = ModuleType("app.integrations.rss_client")
+    rss_mod.RSSClient = lambda: _FakeRSSClient([])  # type: ignore[attr-defined]
+    yt_mod = ModuleType("app.integrations.youtube_client")
+    yt_mod.YouTubeClient = _FakeYTClient  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "app.integrations", pkg)
+    monkeypatch.setitem(sys.modules, "app.integrations.rss_client", rss_mod)
+    monkeypatch.setitem(sys.modules, "app.integrations.youtube_client", yt_mod)
+    monkeypatch.setattr("app.db.base.SessionLocal", lambda: session)
+    monkeypatch.setattr(checkpoint_worker, "IngestionBudgetRepository", _FakeBudgetRepo)
+    monkeypatch.setattr(checkpoint_worker, "claim_lease", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(checkpoint_worker, "release_lease", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(checkpoint_worker.settings, "YT_REEL_UPLOADS_API_ENABLED", True)
+    monkeypatch.setattr(
+        checkpoint_worker,
+        "_insert_content_items_postgres",
+        lambda _db, *, values: len(values),
+    )
+
+    result = checkpoint_worker.process_progress_row_batch(
+        row_id=1,
+        day_utc=datetime.utcnow().date(),
+        redis_client=object(),
+        owner_token="t",
+        ttl_ms=1000,
+        batch_size=1,
+        retry_base_seconds=1,
+        retry_max_seconds=10,
+    )
+
+    assert result["status"] == "ok"
+    assert result["inserted"] == 1
+    assert calls == {"uploads": 1, "rss": 0}
+
+
+def test_youtube_video_rows_stay_on_rss_when_reel_uploads_enabled(monkeypatch):
+    progress = _Progress(
+        id=1,
+        day_utc=None,
+        source_type="youtube_video",
+        feed_name="Video Channel",
+        target=1,
+        items_ingested=0,
+        items_attempted=0,
+        status="running",
+    )
+    session = _FakeSession(progress)
+    calls = {"uploads": 0, "rss": 0}
+
+    class _FakeYTClient:
+        def __init__(self):
+            self.channel_configs = [
+                SimpleNamespace(
+                    name="Video Channel",
+                    content_format=ContentFormat.MIXED,
+                    fresh_published_hours=None,
+                    channel_id="channel-yt",
+                )
+            ]
+
+        def fetch_recent_reel_uploads(self, _config, *, max_entries):
+            calls["uploads"] += 1
+            return [], {}
+
+        def _fetch_channel_with_config(self, _config, *, max_videos):
+            calls["rss"] += 1
+            return [
+                _YTEntry(
+                    "video1234567",
+                    is_short=False,
+                    url="https://www.youtube.com/watch?v=video1234567",
+                )
+            ][:max_videos]
+
+    pkg = ModuleType("app.integrations")
+    pkg.__path__ = []
+    rss_mod = ModuleType("app.integrations.rss_client")
+    rss_mod.RSSClient = lambda: _FakeRSSClient([])  # type: ignore[attr-defined]
+    yt_mod = ModuleType("app.integrations.youtube_client")
+    yt_mod.YouTubeClient = _FakeYTClient  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "app.integrations", pkg)
+    monkeypatch.setitem(sys.modules, "app.integrations.rss_client", rss_mod)
+    monkeypatch.setitem(sys.modules, "app.integrations.youtube_client", yt_mod)
+    monkeypatch.setattr("app.db.base.SessionLocal", lambda: session)
+    monkeypatch.setattr(checkpoint_worker, "IngestionBudgetRepository", _FakeBudgetRepo)
+    monkeypatch.setattr(checkpoint_worker, "claim_lease", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(checkpoint_worker, "release_lease", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(checkpoint_worker.settings, "YT_REEL_UPLOADS_API_ENABLED", True)
+    monkeypatch.setattr(
+        checkpoint_worker,
+        "_insert_content_items_postgres",
+        lambda _db, *, values: len(values),
+    )
+
+    result = checkpoint_worker.process_progress_row_batch(
+        row_id=1,
+        day_utc=datetime.utcnow().date(),
+        redis_client=object(),
+        owner_token="t",
+        ttl_ms=1000,
+        batch_size=1,
+        retry_base_seconds=1,
+        retry_max_seconds=10,
+    )
+
+    assert result["status"] == "ok"
+    assert result["inserted"] == 1
+    assert calls == {"uploads": 0, "rss": 1}
 
 
 def test_worker_coerces_empty_article_image_to_none(monkeypatch):

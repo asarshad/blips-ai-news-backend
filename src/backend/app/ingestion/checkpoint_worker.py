@@ -328,22 +328,6 @@ def process_progress_row_batch(
                 cfg.content_format.value if cfg.content_format else "None",
             )
 
-            max_videos = int(os.getenv("YT_VIDEOS_PER_CHANNEL", "30"))
-            entries = yt._fetch_channel_with_config(cfg, max_videos=max_videos)  # noqa: SLF001
-            if not entries:
-                logger.info("YT fetch: no entries from %s", progress.feed_name)
-                return {"row_id": row_id, "status": "no_entries", "inserted": 0, "attempted": 0}
-
-            # Debug: log is_short for each entry
-            shorts_count = sum(1 for e in entries if e.is_short)
-            logger.info(
-                "YT fetch entries: channel=%s total=%d shorts=%d longs=%d",
-                progress.feed_name,
-                len(entries),
-                shorts_count,
-                len(entries) - shorts_count,
-            )
-
             want_reel = progress.source_type == "youtube_reel"
             lookback_hours = int(
                 getattr(cfg, "fresh_published_hours", None) or settings.YT_CURATED_LOOKBACK_HOURS
@@ -351,6 +335,54 @@ def process_progress_row_batch(
             lookback_cutoff = datetime.utcnow() - timedelta(hours=lookback_hours)
 
             remaining = max(0, int(progress.target) - int(progress.items_ingested))
+            new_window = min(batch_size, max(1, remaining))
+            multiplier = max(1, _int_env("INGESTION_CANDIDATE_MULTIPLIER", 5))
+            candidate_limit = max(new_window, batch_size * multiplier)
+            max_videos = max(
+                candidate_limit,
+                int(os.getenv("YT_VIDEOS_PER_CHANNEL", str(settings.YT_VIDEOS_PER_CHANNEL))),
+            )
+
+            fetch_telemetry: dict[str, object] = {
+                "fetch_strategy": "rss",
+                "playlist_pages_fetched": 0,
+                "video_ids_hydrated": 0,
+                "raw_entries": 0,
+                "classified_reels": 0,
+                "quota_units_requested": 0,
+            }
+            if want_reel and settings.YT_REEL_UPLOADS_API_ENABLED:
+                entries, fetch_telemetry = yt.fetch_recent_reel_uploads(
+                    cfg,
+                    max_entries=candidate_limit,
+                )
+            else:
+                entries = yt._fetch_channel_with_config(cfg, max_videos=max_videos)  # noqa: SLF001
+                fetch_telemetry["raw_entries"] = len(entries)
+                fetch_telemetry["classified_reels"] = len(
+                    [entry for entry in entries if _youtube_entry_is_reel(entry)]
+                )
+
+            if not entries:
+                logger.info(
+                    "YT fetch: no entries from %s (strategy=%s)",
+                    progress.feed_name,
+                    fetch_telemetry.get("fetch_strategy", "rss"),
+                )
+                return {"row_id": row_id, "status": "no_entries", "inserted": 0, "attempted": 0}
+
+            shorts_count = sum(1 for e in entries if _youtube_entry_is_reel(e))
+            logger.info(
+                "YT fetch entries: channel=%s strategy=%s total=%d shorts=%d longs=%d pages=%s hydrated=%s quota_units=%s",
+                progress.feed_name,
+                fetch_telemetry.get("fetch_strategy", "rss"),
+                len(entries),
+                shorts_count,
+                len(entries) - shorts_count,
+                fetch_telemetry.get("playlist_pages_fetched", 0),
+                fetch_telemetry.get("video_ids_hydrated", 0),
+                fetch_telemetry.get("quota_units_requested", 0),
+            )
 
             budget_type = ContentType.REEL if want_reel else ContentType.VIDEO
             reserved = budget_repo.reserve(
@@ -365,18 +397,15 @@ def process_progress_row_batch(
                     "attempted": 0,
                 }
 
-            new_window = min(batch_size, max(1, remaining))
-            multiplier = max(1, _int_env("INGESTION_CANDIDATE_MULTIPLIER", 5))
-            candidate_limit = max(new_window, batch_size * multiplier)
-
             logger.info(
-                "YT processing: feed=%s want_reel=%s reserved=%d new_window=%d candidate_limit=%d entries=%d",
+                "YT processing: feed=%s want_reel=%s reserved=%d new_window=%d candidate_limit=%d entries=%d strategy=%s",
                 progress.feed_name,
                 want_reel,
                 reserved,
                 new_window,
                 candidate_limit,
                 len(entries),
+                fetch_telemetry.get("fetch_strategy", "rss"),
             )
 
             values: List[dict] = []
@@ -499,13 +528,22 @@ def process_progress_row_batch(
 
             # Debug logging for video/reel ingestion
             logger.info(
-                "YT ingestion: type=%s feed=%s entries=%d values=%d want_reel=%s reserved=%d skipped=%s",
+                "YT ingestion: type=%s feed=%s entries=%d values=%d want_reel=%s reserved=%d fetch_strategy=%s playlist_pages=%s hydrated=%s raw_entries=%s classified_reels=%s accepted_reels=%s skipped_non_english=%s skipped_outside_lookback=%s quota_units_requested=%s skipped=%s",
                 progress.source_type,
                 progress.feed_name,
                 len(entries),
                 len(values),
                 want_reel,
                 reserved,
+                fetch_telemetry.get("fetch_strategy", "rss"),
+                fetch_telemetry.get("playlist_pages_fetched", 0),
+                fetch_telemetry.get("video_ids_hydrated", 0),
+                fetch_telemetry.get("raw_entries", len(entries)),
+                fetch_telemetry.get("classified_reels", shorts_count),
+                len(values) if want_reel else 0,
+                skipped_reasons.get("non_english", 0),
+                skipped_reasons.get("outside_lookback", 0),
+                fetch_telemetry.get("quota_units_requested", 0),
                 skipped_reasons,
             )
 

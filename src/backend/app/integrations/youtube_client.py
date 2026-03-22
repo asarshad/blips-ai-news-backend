@@ -30,8 +30,11 @@ from app.integrations.youtube_channels import (
     get_long_form_channels,
     get_shorts_channels,
 )
+from app.models.content import ContentType
+from app.video_surface_rules import classify_video_like_item
 
 logger = get_logger(__name__)
+_MISSING = object()
 
 
 # Extended category keywords for video classification
@@ -270,6 +273,8 @@ class YouTubeClient:
     Uses role-based channel configuration for balanced content ingestion.
     Supports separate pipelines for long-form videos and shorts/reels.
     """
+
+    _uploads_playlist_cache: Dict[str, tuple[float, Optional[str]]] = {}
 
     def __init__(
         self,
@@ -616,6 +621,264 @@ class YouTubeClient:
         logger.info(f"Fetched {len(shorts)} shorts/reels")
         return shorts
 
+    def fetch_recent_reel_uploads(
+        self,
+        config: ChannelConfig,
+        *,
+        max_entries: int,
+    ) -> tuple[List[VideoEntry], Dict[str, int | str]]:
+        """Fetch a deeper newest-first curated reel window via uploads playlist."""
+        telemetry: Dict[str, int | str] = {
+            "fetch_strategy": "uploads_api",
+            "playlist_pages_fetched": 0,
+            "video_ids_hydrated": 0,
+            "raw_entries": 0,
+            "classified_reels": 0,
+            "quota_units_requested": 0,
+        }
+        api_key = self._youtube_api_key()
+        if not api_key:
+            fallback_entries = self._fetch_channel_with_config(config, max_entries)
+            telemetry.update(
+                {
+                    "fetch_strategy": "rss_fallback",
+                    "raw_entries": len(fallback_entries),
+                    "classified_reels": len(
+                        [
+                            entry
+                            for entry in fallback_entries
+                            if classify_video_like_item(entry, allow_is_short_hint=True)
+                            == ContentType.REEL
+                        ]
+                    ),
+                }
+            )
+            return fallback_entries, telemetry
+
+        playlist_id, playlist_quota_requested = self._resolve_uploads_playlist_id(config.channel_id)
+        telemetry["quota_units_requested"] = int(telemetry["quota_units_requested"]) + int(
+            playlist_quota_requested
+        )
+        if not playlist_id:
+            fallback_entries = self._fetch_channel_with_config(config, max_entries)
+            telemetry.update(
+                {
+                    "fetch_strategy": "rss_fallback",
+                    "raw_entries": len(fallback_entries),
+                    "classified_reels": len(
+                        [
+                            entry
+                            for entry in fallback_entries
+                            if classify_video_like_item(entry, allow_is_short_hint=True)
+                            == ContentType.REEL
+                        ]
+                    ),
+                }
+            )
+            return fallback_entries, telemetry
+
+        playlist_video_ids, pages_fetched, page_quota_requested = (
+            self._fetch_uploads_playlist_video_ids(
+                playlist_id,
+                max_entries=max_entries,
+            )
+        )
+        telemetry["playlist_pages_fetched"] = pages_fetched
+        telemetry["quota_units_requested"] = int(telemetry["quota_units_requested"]) + int(
+            page_quota_requested
+        )
+        if playlist_video_ids is None:
+            fallback_entries = self._fetch_channel_with_config(config, max_entries)
+            telemetry.update(
+                {
+                    "fetch_strategy": "rss_fallback",
+                    "raw_entries": len(fallback_entries),
+                    "classified_reels": len(
+                        [
+                            entry
+                            for entry in fallback_entries
+                            if classify_video_like_item(entry, allow_is_short_hint=True)
+                            == ContentType.REEL
+                        ]
+                    ),
+                }
+            )
+            return fallback_entries, telemetry
+        if not playlist_video_ids:
+            return [], telemetry
+
+        entries, hydration_quota_requested = self._hydrate_curated_upload_entries(
+            video_ids=playlist_video_ids,
+            config=config,
+            surface="reels",
+        )
+        if entries is None:
+            fallback_entries = self._fetch_channel_with_config(config, max_entries)
+            telemetry.update(
+                {
+                    "fetch_strategy": "rss_fallback",
+                    "raw_entries": len(fallback_entries),
+                    "classified_reels": len(
+                        [
+                            entry
+                            for entry in fallback_entries
+                            if classify_video_like_item(entry, allow_is_short_hint=True)
+                            == ContentType.REEL
+                        ]
+                    ),
+                }
+            )
+            return fallback_entries, telemetry
+
+        telemetry["video_ids_hydrated"] = len(entries)
+        telemetry["raw_entries"] = len(entries)
+        telemetry["classified_reels"] = len(
+            [
+                entry
+                for entry in entries
+                if classify_video_like_item(entry, allow_is_short_hint=True) == ContentType.REEL
+            ]
+        )
+        telemetry["quota_units_requested"] = int(telemetry["quota_units_requested"]) + int(
+            hydration_quota_requested
+        )
+        return entries, telemetry
+
+    def _uploads_playlist_cache_ttl_seconds(self) -> int:
+        return max(1, int(settings.YT_UPLOADS_PLAYLIST_CACHE_TTL_SECONDS))
+
+    def _get_cached_uploads_playlist_id(self, channel_id: str) -> Optional[str] | object:
+        cached = self._uploads_playlist_cache.get(channel_id)
+        if not cached:
+            return _MISSING
+        expires_at, playlist_id = cached
+        if expires_at <= time.time():
+            self._uploads_playlist_cache.pop(channel_id, None)
+            return _MISSING
+        return playlist_id
+
+    def _set_cached_uploads_playlist_id(self, channel_id: str, playlist_id: Optional[str]) -> None:
+        expires_at = time.time() + self._uploads_playlist_cache_ttl_seconds()
+        self._uploads_playlist_cache[channel_id] = (expires_at, playlist_id)
+
+    def _resolve_uploads_playlist_id(self, channel_id: str) -> tuple[Optional[str], int]:
+        cached = self._get_cached_uploads_playlist_id(channel_id)
+        if cached is not _MISSING:
+            return cached, 0
+
+        data = self._youtube_api_json(
+            "channels",
+            params={"part": "contentDetails", "id": channel_id},
+            quota_units=1,
+            timeout=10,
+            operation=f"uploads playlist lookup for {channel_id}",
+        )
+        if not data:
+            return None, 1
+
+        playlist_id = None
+        items = data.get("items", [])
+        if items:
+            related = items[0].get("contentDetails", {}).get("relatedPlaylists", {})
+            playlist_id = related.get("uploads")
+        self._set_cached_uploads_playlist_id(channel_id, playlist_id)
+        return playlist_id, 1
+
+    def _fetch_uploads_playlist_video_ids(
+        self,
+        playlist_id: str,
+        *,
+        max_entries: int,
+    ) -> tuple[Optional[List[str]], int, int]:
+        max_pages = max(1, int(settings.YT_REEL_UPLOADS_MAX_PAGES))
+        page_size = min(50, max(1, int(settings.YT_REEL_UPLOADS_PAGE_SIZE)))
+        quota_units_requested = 0
+        pages_fetched = 0
+        video_ids: List[str] = []
+        seen_ids: set[str] = set()
+        page_token: Optional[str] = None
+
+        for _ in range(max_pages):
+            params: Dict[str, Any] = {
+                "part": "snippet,contentDetails",
+                "playlistId": playlist_id,
+                "maxResults": page_size,
+            }
+            if page_token:
+                params["pageToken"] = page_token
+
+            data = self._youtube_api_json(
+                "playlistItems",
+                params=params,
+                quota_units=1,
+                timeout=10,
+                operation=f"uploads playlist head scan for {playlist_id}",
+            )
+            quota_units_requested += 1
+            if not data:
+                return None, pages_fetched, quota_units_requested
+
+            pages_fetched += 1
+            for item in data.get("items", []):
+                video_id = item.get("contentDetails", {}).get("videoId") or item.get(
+                    "snippet", {}
+                ).get("resourceId", {}).get("videoId")
+                if not video_id or video_id in seen_ids:
+                    continue
+                seen_ids.add(video_id)
+                video_ids.append(video_id)
+                if len(video_ids) >= max_entries:
+                    return video_ids, pages_fetched, quota_units_requested
+
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+
+        return video_ids, pages_fetched, quota_units_requested
+
+    def _hydrate_curated_upload_entries(
+        self,
+        *,
+        video_ids: List[str],
+        config: ChannelConfig,
+        surface: str,
+    ) -> tuple[Optional[List[VideoEntry]], int]:
+        if not video_ids:
+            return [], 0
+
+        unique_ids = list(dict.fromkeys(video_ids))
+        quota_units_requested = 0
+        entries: List[VideoEntry] = []
+
+        for start in range(0, len(unique_ids), 50):
+            chunk = unique_ids[start : start + 50]
+            data = self._youtube_api_json(
+                "videos",
+                params={
+                    "part": "snippet,contentDetails,statistics,liveStreamingDetails,status",
+                    "id": ",".join(chunk),
+                },
+                quota_units=1,
+                timeout=10,
+                operation=f"curated reel hydration for {config.name} ({len(chunk)} ids)",
+            )
+            quota_units_requested += 1
+            if not data:
+                return None, quota_units_requested
+
+            for item in data.get("items", []):
+                entry = self._entry_from_api_item(
+                    item,
+                    acquisition_lane="curated",
+                    query_label=None,
+                    region=None,
+                    surface=surface,
+                )
+                if entry:
+                    entries.append(entry)
+
+        return entries, quota_units_requested
+
     def fetch_search_candidates(
         self,
         query: str,
@@ -836,14 +1099,29 @@ class YouTubeClient:
         comment_count = self._safe_int(statistics.get("commentCount"))
 
         channel_cfg = get_channel_by_id(channel_id) if channel_id else None
-        short_max_seconds = int(os.getenv("YT_SHORT_MAX_SECONDS", "120"))
-        title_lower = title.lower()
-        title_has_shorts_tag = "#shorts" in title_lower or "#short" in title_lower
-        channel_is_shorts = channel_cfg and channel_cfg.content_format == ContentFormat.SHORTS
-        duration_allows_short = duration_seconds is None or duration_seconds <= short_max_seconds
-        permalink_short = duration_allows_short and self.is_youtube_short(video_id)
-        is_short = bool(
-            duration_allows_short and (permalink_short or title_has_shorts_tag or channel_is_shorts)
+        duration_allows_reel = (
+            duration_seconds is None or duration_seconds <= settings.REEL_MAX_DURATION_SECONDS
+        )
+        permalink_short = duration_allows_reel and self.is_youtube_short(video_id)
+        watch_url = f"https://www.youtube.com/watch?v={video_id}"
+        provisional_entry = VideoEntry(
+            title=title,
+            video_url=f"https://www.youtube.com/shorts/{video_id}"
+            if permalink_short
+            else watch_url,
+            thumbnail_url=self.get_thumbnail_url(video_id),
+            summary=summary,
+            source=channel_name,
+            category=self._categorize_video(title, summary),
+            video_id=video_id,
+            channel_id=channel_id,
+            content_format=channel_cfg.content_format if channel_cfg else ContentFormat.LONG_FORM,
+            is_short=permalink_short,
+            duration_seconds=duration_seconds,
+        )
+        is_short = (
+            classify_video_like_item(provisional_entry, allow_is_short_hint=True)
+            == ContentType.REEL
         )
         content_format = ContentFormat.SHORTS if is_short else ContentFormat.LONG_FORM
         channel_role = (
@@ -866,11 +1144,7 @@ class YouTubeClient:
             role=channel_role,
         )
 
-        video_url = (
-            f"https://www.youtube.com/shorts/{video_id}"
-            if is_short
-            else f"https://www.youtube.com/watch?v={video_id}"
-        )
+        video_url = f"https://www.youtube.com/shorts/{video_id}" if permalink_short else watch_url
         return VideoEntry(
             title=title,
             video_url=video_url,
