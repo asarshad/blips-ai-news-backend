@@ -13,6 +13,7 @@ import time
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.feature_flags import feature_flags
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
@@ -38,12 +39,14 @@ def process_ai_summaries():
 
     db = SessionLocal()
     try:
+        from app.article_hydration import ArticleHydrationService, bounded_article_summary_text
         from app.integrations.llm_client import LLMClient
         from app.models.content import ContentType
         from app.repositories.content_repo import ContentItemRepository
 
         content_repo = ContentItemRepository(db)
         llm_client = LLMClient()
+        article_hydrator = ArticleHydrationService(llm_client=llm_client)
 
         if not llm_client.is_configured():
             logger.warning(
@@ -52,6 +55,16 @@ def process_ai_summaries():
             return
 
         items = content_repo.get_unprocessed_by_ai(limit=MAX_ITEMS_PER_RUN, hours_back=168)
+        remaining_slots = max(0, MAX_ITEMS_PER_RUN - len(items))
+        if remaining_slots:
+            items.extend(
+                content_repo.get_articles_with_short_summaries(
+                    limit=remaining_slots,
+                    hours_back=168,
+                    max_words=settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS,
+                )
+            )
+
         if not items:
             logger.info("[ai_retry] No items need processing")
             return
@@ -73,10 +86,20 @@ def process_ai_summaries():
                 text = item.content_text or item.description or item.title
 
                 if item.type == ContentType.ARTICLE:
-                    result = llm_client.summarize_article(item.title, text)
-                    summary = result.summary
-                    topics = result.tags if result.tags else item.topics
-                    starters = result.conversation_starters
+                    item.ai_processed = False
+                    item.summary = None
+
+                    summary_input = bounded_article_summary_text(text)
+                    if not summary_input:
+                        stats.items_failed += 1
+                        stats.errors.append(f"Empty summary input: {item.title[:50]}")
+                        continue
+
+                    article_hydrator.populate_article_summary(item)
+                    article_hydrator.refresh_article_annotations(item)
+                    summary = item.summary
+                    topics = item.topics
+                    starters = item.conversation_starters
                 else:
                     result = llm_client.summarize_video(item.title, text)
                     summary = result.summary
@@ -87,7 +110,6 @@ def process_ai_summaries():
 
                 if summary and len(summary.strip()) > 50:
                     content_repo.mark_ai_processed(item.id, summary=summary, topics=topics)
-                    # Persist starters from the same LLM call when available
                     if starters and not item.conversation_starters:
                         item.conversation_starters = starters
                         db.commit()
@@ -103,7 +125,6 @@ def process_ai_summaries():
                 stats.errors.append(f"{item.title[:50]}: {str(e)}")
                 continue
 
-        # Second pass: generate conversation starters for items that have summaries but no starters
         _backfill_starters(db, llm_client, stats)
 
     except Exception as e:
@@ -115,7 +136,6 @@ def process_ai_summaries():
         stats.log_summary()
 
 
-# Backward-compatible alias so the scheduler job keeps working.
 retry_ai_processing = process_ai_summaries
 
 
@@ -131,7 +151,6 @@ def _backfill_starters(db: Session, llm_client, stats) -> None:
     if not llm_client.is_configured():
         return
 
-    # Find items with summaries but no conversation_starters (limit to avoid LLM cost spikes)
     items = (
         db.query(ContentItem)
         .filter(
