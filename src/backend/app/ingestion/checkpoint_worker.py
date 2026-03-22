@@ -9,12 +9,13 @@ from typing import Dict, List, Optional
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from app.article_hydration import ArticleHydrationService
 from app.core.config import settings
 from app.core.curation import review_queue_target_status
 from app.core.logging import get_logger
 from app.ingestion.canonical import canonical_key_for_article, canonical_key_for_youtube
 from app.ingestion.checkpoint_locks import pg_advisory_unlock, try_pg_advisory_lock
-from app.ingestion.extractors import extract_entities, extract_source, extract_topics
+from app.ingestion.extractors import extract_entities, extract_topics
 from app.ingestion.language_filter import is_english
 from app.ingestion.leases import claim_lease, lease_key, release_lease
 from app.ingestion.url_normalizer import normalize_url
@@ -60,6 +61,77 @@ def _youtube_entry_is_reel(entry) -> bool:
     return classify_video_like_item(entry, allow_is_short_hint=True) == ContentType.REEL
 
 
+def _build_rss_article_value(
+    entry,
+    *,
+    source_url: str,
+    day_utc: date,
+    review_queue_status,
+    article_hydrator: ArticleHydrationService,
+) -> dict:
+    """Build a content_items insert payload for an RSS article."""
+    prepared = article_hydrator.prepare_rss_article(
+        source_url=source_url,
+        title=entry.title,
+        description=entry.content,
+        image_url=getattr(entry, "image_url", None),
+        published_at=entry.published_date,
+        include_text=False,
+    )
+    stub = article_hydrator.build_article_stub(
+        source_url=source_url,
+        title=prepared.title,
+        canonical_url=prepared.canonical_url,
+        published_at=prepared.published_at,
+        description=prepared.description,
+        content_text=prepared.content_text,
+        image_url=prepared.image_url,
+        topics=prepared.topics,
+        entities=prepared.entities,
+        curation_status=review_queue_status,
+        discovered_via="rss_ingestion",
+    )
+
+    return {
+        "type": stub.type,
+        "curation_status": stub.curation_status,
+        "discovered_via": stub.discovered_via,
+        "source": stub.source,
+        "source_url": stub.source_url,
+        "canonical_url": stub.canonical_url,
+        "canonical_key": stub.canonical_key
+        or canonical_key_for_article(
+            canonical_url=prepared.canonical_url,
+            source_url=source_url,
+        ),
+        "ingestion_day": day_utc,
+        "is_suppressed": False,
+        "signal_hits": 0,
+        "published_at": stub.published_at,
+        "title": stub.title,
+        "description": stub.description,
+        "content_text": stub.content_text,
+        "image_url": stub.image_url,
+        "video_url": stub.video_url,
+        "summary": stub.summary,
+        "ai_processed": stub.ai_processed,
+        "topics": stub.topics or [],
+        "entities": stub.entities or [],
+        "quality_score": stub.quality_score,
+        "trend_score": stub.trend_score,
+        "recency_score": stub.recency_score,
+        "diversity_boost": 0.0,
+        "global_score": stub.global_score,
+        "cluster_id": None,
+        "is_cluster_canonical": 0,
+        "simhash": None,
+        "dedupe_key": None,
+        "duration_seconds": None,
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+    }
+
+
 def _insert_content_items_postgres(db: Session, *, values: List[dict]) -> int:
     if not values:
         return 0
@@ -95,6 +167,7 @@ def process_progress_row_batch(
     db = SessionLocal()
     repo = IngestionProgressRepository(db)
     budget_repo = IngestionBudgetRepository(db)
+    article_hydrator = ArticleHydrationService()
 
     rss = RSSClient()
     yt = YouTubeClient()
@@ -190,7 +263,7 @@ def process_progress_row_batch(
             multiplier = max(1, _int_env("INGESTION_CANDIDATE_MULTIPLIER", 5))
             candidate_limit = max(new_window, batch_size * multiplier)
 
-            values: List[dict] = []
+            candidate_entries: List[tuple[object, str]] = []
             last_scanned_cursor: Optional[str] = progress.last_item_cursor
 
             def _add_entry(e) -> None:
@@ -207,55 +280,14 @@ def process_progress_row_batch(
                 if not source_url:
                     return
 
-                source = extract_source(source_url)
-                topics = extract_topics(e.title, (e.content or "")[:500])
-                entities = extract_entities(e.title, "")
-
-                values.append(
-                    {
-                        "type": ContentType.ARTICLE,
-                        "curation_status": review_queue_status,
-                        "discovered_via": "rss_ingestion",
-                        "source": source,
-                        "source_url": source_url,
-                        "canonical_url": source_url,
-                        "canonical_key": canonical_key_for_article(
-                            canonical_url=source_url, source_url=source_url
-                        ),
-                        "ingestion_day": day_utc,
-                        "is_suppressed": False,
-                        "signal_hits": 0,
-                        "published_at": e.published_date or datetime.utcnow(),
-                        "title": e.title,
-                        "description": (e.content or "")[:500] if e.content else None,
-                        "content_text": (e.content or "")[:8000] if e.content else None,
-                        "image_url": (e.image_url or None),
-                        "video_url": None,
-                        "summary": None,
-                        "ai_processed": False,
-                        "topics": topics or [],
-                        "entities": entities or [],
-                        "quality_score": 0.5,
-                        "trend_score": 0.0,
-                        "recency_score": 1.0,
-                        "diversity_boost": 0.0,
-                        "global_score": 0.0,
-                        "cluster_id": None,
-                        "is_cluster_canonical": 0,
-                        "simhash": None,
-                        "dedupe_key": None,
-                        "duration_seconds": None,
-                        "created_at": datetime.utcnow(),
-                        "updated_at": datetime.utcnow(),
-                    }
-                )
+                candidate_entries.append((e, source_url))
 
             for entry in entries:
-                if len(values) >= new_window:
+                if len(candidate_entries) >= new_window:
                     break
                 _add_entry(entry)
 
-            if len(values) < candidate_limit:
+            if len(candidate_entries) < candidate_limit:
                 start_idx = -1
                 if progress.last_item_cursor:
                     for i, e in enumerate(entries):
@@ -265,7 +297,7 @@ def process_progress_row_batch(
                 if start_idx < 0:
                     start_idx = new_window - 1
                 for e in entries[start_idx + 1 :]:
-                    if len(values) >= candidate_limit:
+                    if len(candidate_entries) >= candidate_limit:
                         break
                     _add_entry(e)
 
@@ -276,12 +308,25 @@ def process_progress_row_batch(
                 attempted = 0
                 remaining_slots = int(reserved)
                 idx = 0
-                while remaining_slots > 0 and idx < len(values):
-                    chunk = values[idx : idx + remaining_slots]
+                while remaining_slots > 0 and idx < len(candidate_entries):
+                    chunk = candidate_entries[idx : idx + remaining_slots]
                     if not chunk:
                         break
-                    attempted += len(chunk)
-                    ins = _insert_content_items_postgres(db, values=chunk)
+                    chunk_values = [
+                        _build_rss_article_value(
+                            entry,
+                            source_url=source_url,
+                            day_utc=day_utc,
+                            review_queue_status=review_queue_status,
+                            article_hydrator=article_hydrator,
+                        )
+                        for entry, source_url in chunk
+                    ]
+                    if not chunk_values:
+                        idx += len(chunk)
+                        continue
+                    attempted += len(chunk_values)
+                    ins = _insert_content_items_postgres(db, values=chunk_values)
                     inserted += int(ins)
                     remaining_slots -= int(ins)
                     idx += len(chunk)
@@ -291,7 +336,7 @@ def process_progress_row_batch(
                     content_type=ContentType.ARTICLE,
                     reserved_taken=reserved,
                     inserted=inserted,
-                    seen=len(values),
+                    seen=len(candidate_entries),
                     suppressed=max(0, attempted - inserted),
                     attempts=attempted,
                 )

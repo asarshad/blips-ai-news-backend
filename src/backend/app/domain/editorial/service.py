@@ -13,11 +13,11 @@ from typing import Optional
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.article_hydration import ArticleHydrationService, build_pending_article_title
+from app.article_hydration import ArticleHydrationService
 from app.core.logging import get_logger
 from app.ingestion.canonical import canonical_key_for_article
 from app.ingestion.url_normalizer import normalize_url
-from app.models.content import ContentItem, ContentType
+from app.models.content import ContentItem
 from app.repositories.editorial_repo import EditorialRepository
 
 logger = get_logger(__name__)
@@ -96,23 +96,16 @@ class EditorialService:
             )
 
         # ── Create stub content item ──────────────────────────────────
-        ckey = canonical_key_for_article(canonical_url=None, source_url=normalized)
-
-        stub = ContentItem(
-            type=ContentType.ARTICLE,  # default; enrichment may reclassify
-            source=_extract_domain(normalized),
+        now = datetime.now(tz=None)
+        stub = self._get_article_hydrator().build_article_stub(
             source_url=normalized,
-            canonical_url=normalized,
-            canonical_key=ckey,
-            published_at=datetime.now(tz=None),
-            title=build_pending_article_title(normalized),
-            ai_processed=False,
+            published_at=now,
             manual_added=True,
             added_by=actor,
-            added_at=datetime.now(tz=None),
+            added_at=now,
             editorial_boost=importance_level,
             quality_score=0.5,
-            recency_score=1.0,
+            discovered_via="manual",
         )
 
         self.db.add(stub)

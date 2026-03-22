@@ -73,6 +73,20 @@ def _resolve_ingestion_minutes() -> int:
     return 15
 
 
+def _resolve_backfill_hours() -> int:
+    """Resolve the recurring backfill cadence with a safe default."""
+    raw = os.getenv("BACKFILL_INTERVAL_HOURS")
+    if raw is not None:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            logger.warning(
+                "Invalid BACKFILL_INTERVAL_HOURS=%r; defaulting to 6 hours",
+                raw,
+            )
+    return 6
+
+
 def init_scheduler() -> Optional[BackgroundScheduler]:
     """
     Initialize and start the background scheduler.
@@ -87,6 +101,7 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
         fetch_minutes = _resolve_ingestion_minutes()
         fetch_trigger = IntervalTrigger(minutes=fetch_minutes)
         fetch_human = f"{fetch_minutes} minutes"
+        backfill_hours = _resolve_backfill_hours()
 
         # Add job for news and video fetching
         scheduler.add_job(
@@ -154,6 +169,17 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             misfire_grace_time=3600,
         )
 
+        # Revisit older content so recoverable article images do not linger blank.
+        scheduler.add_job(
+            run_backfill_job,
+            IntervalTrigger(hours=backfill_hours),
+            id="backfill_job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=1800,
+        )
+
         # Add ingestion health check (every 30 minutes)
         scheduler.add_job(
             check_ingestion_health,
@@ -192,7 +218,7 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
         logger.info(f"Started background scheduler - fetching news every {fetch_human}")
         logger.info(
             "Curation jobs: scoring (hourly), clustering (15min), decay (daily), "
-            "AI retry (15min), cleanup (daily), health (30min), "
+            f"AI retry (15min), cleanup (daily), backfill ({backfill_hours}h), health (30min), "
             f"signals ({signal_minutes}min), promotion (30min)"
         )
 
@@ -206,6 +232,7 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
 __all__ = [
     "init_scheduler",
     "_resolve_ingestion_minutes",
+    "_resolve_backfill_hours",
     "fetch_and_process_news",
     "run_scoring_job",
     "run_clustering_job",

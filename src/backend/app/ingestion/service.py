@@ -17,9 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.article_hydration import (
-    bounded_article_summary_text,
-    display_article_title,
-    normalize_article_summary_output,
+    ArticleHydrationService,
 )
 from app.clustering.dedupe import compute_dedupe_key, compute_title_simhash
 from app.clustering.service import ClusteringService
@@ -27,11 +25,6 @@ from app.core.config import get_settings
 from app.core.curation import review_queue_target_status
 from app.core.logging import get_logger
 from app.extraction.metrics import extraction_metrics
-from app.extraction.pipeline import (
-    ExtractionResult,
-    RSSEntryData,
-    run_extraction,
-)
 from app.ingestion.extractors import extract_entities, extract_source, extract_topics
 from app.ingestion.language_filter import detect_language, is_english
 from app.ingestion.url_normalizer import normalize_url
@@ -112,6 +105,7 @@ class IngestionPipeline:
         self.rss_client = rss_client or RSSClient()
         self.youtube_client = youtube_client or YouTubeClient()
         self.llm_client = llm_client or LLMClient()
+        self.article_hydrator = ArticleHydrationService(llm_client=self.llm_client)
 
     def _maybe_refresh_existing_article_metadata(
         self,
@@ -121,51 +115,12 @@ class IngestionPipeline:
         rss_image_url: Optional[str],
     ) -> bool:
         """Backfill missing or suspicious image/canonical metadata for existing articles."""
-        from app.extraction.metadata import is_probably_generic_image_url
-
-        current_image_url = (existing_item.image_url or "").strip()
-        needs_image = not current_image_url or is_probably_generic_image_url(current_image_url)
-        needs_canonical = not (existing_item.canonical_url or "").strip()
-        if not needs_image and not needs_canonical:
+        if not self.article_hydrator.refresh_existing_article_metadata(
+            existing_item,
+            source_url=source_url,
+            rss_image_url=rss_image_url,
+        ):
             return False
-
-        from app.extraction.normalize import validate_image_url
-        from app.services.article_image_service import fetch_article_page_metadata
-
-        refreshed_image = (
-            validate_image_url(rss_image_url) if needs_image and rss_image_url else None
-        )
-        refreshed_canonical = None
-        should_compare_page_image = needs_image and (
-            is_probably_generic_image_url(current_image_url)
-            or (refreshed_image is not None and is_probably_generic_image_url(refreshed_image))
-        )
-
-        if source_url and (needs_canonical or not refreshed_image or should_compare_page_image):
-            metadata = fetch_article_page_metadata(source_url)
-            if metadata is not None:
-                if needs_image and (
-                    (not refreshed_image and metadata.image_url)
-                    or (
-                        refreshed_image
-                        and current_image_url
-                        and is_probably_generic_image_url(current_image_url)
-                        and metadata.image_url
-                        and metadata.image_url != current_image_url
-                    )
-                ):
-                    refreshed_image = metadata.image_url
-                if needs_canonical and metadata.canonical_url:
-                    refreshed_canonical = metadata.canonical_url
-
-        if not refreshed_image and not refreshed_canonical:
-            return False
-
-        if refreshed_image:
-            existing_item.image_url = refreshed_image
-        if refreshed_canonical:
-            existing_item.canonical_url = refreshed_canonical
-        existing_item.updated_at = datetime.utcnow()
 
         try:
             self.db.add(existing_item)
@@ -262,116 +217,72 @@ class IngestionPipeline:
             return None
 
         # ── Content extraction pipeline ───────────────────────────────────
-        extraction: Optional[ExtractionResult] = None
         extraction_enabled = getattr(settings, "EXTRACTION_ENABLED", True)
+        article_url = normalized_url or entry.url
+        include_text = bool(extraction_enabled and article_url)
+        prepared = None
 
-        if extraction_enabled and normalized_url:
-            try:
-                rss_data = RSSEntryData(
-                    title=entry.title,
-                    description=entry.content,
-                    image_url=entry.image_url,
-                    published_date=entry.published_date,
-                )
-                extraction = run_extraction(normalized_url, rss_entry=rss_data)
-
-                # Record metrics
-                feed_name = getattr(entry, "feed_name", "") or source
-                extraction_metrics.record(extraction, source_name=feed_name)
-
-                # Use canonical_url for stronger dedup if available
-                if extraction.canonical_url and extraction.canonical_url != normalized_url:
-                    existing_canon = self.content_repo.get_by_canonical_url(
-                        extraction.canonical_url
-                    )
-                    if existing_canon:
-                        self._maybe_refresh_existing_article_metadata(
-                            existing_canon,
-                            source_url=extraction.canonical_url or normalized_url,
-                            rss_image_url=extraction.image_url or entry.image_url,
-                        )
-                        logger.debug(f"Article already ingested (canonical_url): {entry.title}")
-                        return None
-            except Exception as exc:
-                logger.warning(f"Extraction failed for {entry.title}, using RSS data: {exc}")
-                extraction = None
-
-        # Determine best content for summarization
-        article_text = None
-        if extraction and extraction.main_text:
-            article_text = extraction.main_text
-        elif extraction and extraction.excerpt_fallback:
-            article_text = extraction.excerpt_fallback
-        elif entry.content:
-            article_text = entry.content
-
-        # Determine final image (validated absolute URL or None)
-        final_image_url: Optional[str] = None
-        if extraction:
-            final_image_url = extraction.image_url  # Already validated & absolute or None
-        elif entry.image_url:
-            from app.extraction.normalize import validate_image_url
-
-            final_image_url = validate_image_url(entry.image_url)
-
-        # Determine canonical_url
-        final_canonical_url = None
-        if extraction and extraction.canonical_url:
-            final_canonical_url = extraction.canonical_url
-
-        # Determine published_at
-        final_published_at = entry.published_date or datetime.utcnow()
-        if extraction and extraction.published_at:
-            final_published_at = extraction.published_at
-
-        # Generate AI summary + conversation starters in one LLM call
-        summary = None
-        ai_processed = False
-        inline_starters = None
         try:
-            summary_input = bounded_article_summary_text(article_text)
-            if self.llm_client.is_configured() and summary_input:
-                result = self.llm_client.summarize_article(
-                    display_article_title(entry.title, normalized_url),
-                    summary_input,
-                )
-                summary = normalize_article_summary_output(result.summary)
-                inline_starters = result.conversation_starters
-                ai_processed = bool(summary and len(summary.strip()) > 50)
+            prepared = self.article_hydrator.prepare_rss_article(
+                source_url=article_url,
+                title=entry.title,
+                description=entry.content,
+                image_url=entry.image_url,
+                published_at=entry.published_date,
+                include_text=include_text,
+            )
+        except Exception as exc:
+            logger.warning(f"Extraction failed for {entry.title}, using RSS data: {exc}")
+            prepared = self.article_hydrator.prepare_rss_article(
+                source_url=article_url,
+                title=entry.title,
+                description=entry.content,
+                image_url=entry.image_url,
+                published_at=entry.published_date,
+                include_text=False,
+            )
+
+        extraction = prepared.extraction
+        if extraction is not None:
+            feed_name = getattr(entry, "feed_name", "") or source
+            extraction_metrics.record(extraction, source_name=feed_name)
+
+            canonical_url = (prepared.canonical_url or "").strip()
+            if canonical_url and canonical_url != article_url:
+                existing_canon = self.content_repo.get_by_canonical_url(canonical_url)
+                if existing_canon:
+                    self._maybe_refresh_existing_article_metadata(
+                        existing_canon,
+                        source_url=canonical_url or article_url,
+                        rss_image_url=(prepared.image_url or entry.image_url),
+                    )
+                    logger.debug(f"Article already ingested (canonical_url): {entry.title}")
+                    return None
+
+        content_item = self.article_hydrator.build_article_stub(
+            source_url=prepared.source_url,
+            title=prepared.title,
+            canonical_url=prepared.canonical_url,
+            published_at=prepared.published_at,
+            description=prepared.description,
+            content_text=prepared.content_text,
+            image_url=prepared.image_url,
+            topics=prepared.topics,
+            entities=prepared.entities,
+        )
+        content_item.dedupe_key = dedupe_key
+        content_item.simhash = compute_title_simhash(prepared.title)
+        content_item.language = detected_lang or "en"
+
+        try:
+            self.article_hydrator.populate_article_summary(content_item)
         except Exception as e:
             logger.warning(f"Failed to summarize article {entry.title}: {e}")
-
-        topics = extract_topics(
-            entry.title, summary or (article_text[:500] if article_text else "")
-        )
-        entities = extract_entities(entry.title, summary or "")
-
-        final_title = extraction.title if extraction and extraction.title else entry.title
-        content_item = ContentItem(
-            type=ContentType.ARTICLE,
-            source=source,
-            source_url=normalized_url or entry.url,
-            canonical_url=final_canonical_url,
-            published_at=final_published_at,
-            title=final_title,
-            description=entry.content[:500] if entry.content else None,
-            content_text=article_text[:8000] if article_text else None,
-            summary=summary,
-            image_url=final_image_url,  # Validated: absolute URL or None, never empty string
-            video_url=None,
-            duration_seconds=None,
-            topics=topics,
-            entities=entities,
-            dedupe_key=dedupe_key,
-            simhash=compute_title_simhash(final_title),
-            ai_processed=ai_processed,
-            conversation_starters=inline_starters,
-            language=detected_lang or "en",
-        )
+        self.article_hydrator.refresh_article_annotations(content_item)
 
         # Apply quality scoring with role-based modifiers
         # Use base_quality_weight from feed config if available, else compute from source
-        base_quality = entry.base_quality_weight or compute_source_weight(source)
+        base_quality = entry.base_quality_weight or compute_source_weight(prepared.source)
 
         # Apply quality tier modifier
         quality_modifier = 1.0
@@ -407,7 +318,7 @@ class IngestionPipeline:
         if entry.feed_role:
             role_info = f" [{entry.feed_role.value}]"
 
-        status = "with AI summary" if ai_processed else "without AI summary"
+        status = "with AI summary" if content_item.ai_processed else "without AI summary"
         logger.info(f"Ingested article{role_info} {status}: {entry.title} -> {content_item.id}")
         return content_item
 

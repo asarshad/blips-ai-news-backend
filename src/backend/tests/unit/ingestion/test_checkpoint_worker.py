@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from types import ModuleType, SimpleNamespace
 
+import pytest
+
 from app.ingestion import checkpoint_worker
 from app.integrations.youtube_channels import ContentFormat
 
@@ -110,6 +112,15 @@ class _YTEntry:
         self.source_status = "core"
         self.duration_seconds = 42 if is_short else 480
         self.format_fit_score = 1.0
+
+
+@pytest.fixture(autouse=True)
+def _stub_rss_article_metadata(monkeypatch):
+    monkeypatch.setattr(
+        checkpoint_worker.ArticleHydrationService,
+        "fetch_article_page_metadata",
+        staticmethod(lambda *_args, **_kwargs: None),
+    )
 
 
 def test_youtube_entry_is_reel_for_134_second_shorts_url():
@@ -456,6 +467,77 @@ def test_worker_coerces_empty_article_image_to_none(monkeypatch):
     assert result["status"] == "ok"
     assert result["inserted"] == 1
     assert captured_values[0]["image_url"] is None
+
+
+def test_worker_enriches_missing_rss_article_image_from_page_metadata(monkeypatch):
+    entry = _Entry("https://example.com/missing-image")
+    progress = _Progress(
+        id=1,
+        day_utc=None,
+        source_type="rss",
+        feed_name="feed1",
+        target=1,
+        items_ingested=0,
+        items_attempted=0,
+        status="running",
+        last_item_cursor=None,
+    )
+    session = _FakeSession(progress)
+
+    pkg = ModuleType("app.integrations")
+    pkg.__path__ = []
+    rss_mod = ModuleType("app.integrations.rss_client")
+    rss_mod.RSSClient = lambda: _FakeRSSClient([entry])  # type: ignore[attr-defined]
+    yt_mod = ModuleType("app.integrations.youtube_client")
+    yt_mod.YouTubeClient = lambda: None  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "app.integrations", pkg)
+    monkeypatch.setitem(sys.modules, "app.integrations.rss_client", rss_mod)
+    monkeypatch.setitem(sys.modules, "app.integrations.youtube_client", yt_mod)
+    monkeypatch.setattr("app.db.base.SessionLocal", lambda: session)
+    monkeypatch.setattr(checkpoint_worker, "IngestionBudgetRepository", _FakeBudgetRepo)
+    monkeypatch.setattr(checkpoint_worker, "claim_lease", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(checkpoint_worker, "release_lease", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        checkpoint_worker.ArticleHydrationService,
+        "fetch_article_page_metadata",
+        staticmethod(
+            lambda *_args, **_kwargs: SimpleNamespace(
+                title="Recovered title",
+                canonical_url="https://example.com/canonical-article",
+                image_url="https://cdn.example.com/hero.png",
+            )
+        ),
+    )
+
+    captured_values = []
+
+    def _capture_insert(_db, *, values):
+        captured_values.extend(values)
+        return len(values)
+
+    monkeypatch.setattr(checkpoint_worker, "_insert_content_items_postgres", _capture_insert)
+
+    result = checkpoint_worker.process_progress_row_batch(
+        row_id=1,
+        day_utc=datetime.utcnow().date(),
+        redis_client=object(),
+        owner_token="t",
+        ttl_ms=1000,
+        batch_size=1,
+        retry_base_seconds=1,
+        retry_max_seconds=10,
+    )
+
+    assert result["status"] == "ok"
+    assert result["inserted"] == 1
+    assert captured_values[0]["title"] == "Recovered title"
+    assert captured_values[0]["canonical_url"] == "https://example.com/canonical-article"
+    assert captured_values[0]["canonical_key"] == checkpoint_worker.canonical_key_for_article(
+        canonical_url="https://example.com/canonical-article",
+        source_url="https://example.com/missing-image",
+    )
+    assert captured_values[0]["image_url"] == "https://cdn.example.com/hero.png"
 
 
 def test_worker_failure_schedules_retry_with_backoff_and_rolls_back(monkeypatch):

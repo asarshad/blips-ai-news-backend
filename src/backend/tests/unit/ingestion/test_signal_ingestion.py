@@ -376,6 +376,12 @@ class TestRunSignalIngestion:
         mock_db, patches, _cr, _sr = _patch_orchestrator(hn_top=[sample])
         mock_hydrator = MagicMock()
         mock_hydrator.needs_hydration.return_value = True
+        real_stub = _build_candidate_stub(
+            "https://example.com/brand-new-article",
+            sample,
+            ContentType.ARTICLE,
+        )
+        mock_hydrator.build_article_stub.return_value = real_stub
 
         def _fill_stub(stub):
             stub.canonical_url = "https://example.com/brand-new-article/"

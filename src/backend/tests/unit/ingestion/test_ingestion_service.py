@@ -2,7 +2,6 @@ from unittest.mock import MagicMock
 
 from app.ingestion import service as ingestion_service
 from app.models.content import ContentType
-from app.services import article_image_service
 
 
 def test_run_video_discovery_ingestion_uses_pipeline(monkeypatch):
@@ -98,7 +97,9 @@ def test_ingest_rss_entry_refreshes_existing_duplicate_image_from_page_metadata(
         canonical_url="https://example.com/canonical-story",
     )
     monkeypatch.setattr(
-        article_image_service, "fetch_article_page_metadata", lambda source_url: meta
+        pipeline.article_hydrator,
+        "fetch_article_page_metadata",
+        lambda source_url: meta,
     )
 
     result = pipeline.ingest_rss_entry(entry)
@@ -125,7 +126,11 @@ def test_ingest_rss_entry_refreshes_duplicate_from_rss_image_without_fetch(monke
         fetch_calls.append(source_url)
         return None
 
-    monkeypatch.setattr(article_image_service, "fetch_article_page_metadata", _unexpected_fetch)
+    monkeypatch.setattr(
+        pipeline.article_hydrator,
+        "fetch_article_page_metadata",
+        _unexpected_fetch,
+    )
 
     result = pipeline.ingest_rss_entry(entry)
 

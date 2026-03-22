@@ -145,8 +145,7 @@ def test_fetch_article_page_metadata_uses_final_fetched_url_for_relative_assets(
 </html>"""
 
     monkeypatch.setattr(
-        article_image_service,
-        "fetch_url",
+        "app.extraction.fetcher.fetch_url",
         lambda article_url: FetchResult(
             url="https://www.example.com/story/final",
             status_code=200,

@@ -129,58 +129,70 @@ def _build_candidate_stub(
     url: str,
     item: SignalItem,
     content_type: ContentType,
+    *,
+    article_hydrator: Optional[ArticleHydrationService] = None,
 ) -> ContentItem:
     """Construct a minimal CANDIDATE ContentItem stub for a new signal URL.
 
     The stub is deliberately thin – only the fields needed for the
     promotion scorer and extraction pipeline are populated.
     """
-    from app.ingestion.canonical import canonical_key_for_article, canonical_key_for_youtube
-    from app.ingestion.extractors import extract_source, extract_topics
-
-    source = extract_source(url)
-    topics: list = extract_topics(item.raw_title or "", "") if item.raw_title else []
     domain_policy = get_domain_policy(url)
-
-    if content_type == ContentType.VIDEO:
-        yt_vid = extract_youtube_video_id(url)
-        ckey = canonical_key_for_youtube(video_id=yt_vid, source_url=url, video_url=url)
-    else:
-        ckey = canonical_key_for_article(canonical_url=url, source_url=url)
-
     discovered_via = _SIGNAL_SOURCE_LABELS.get(item.signal_source, "signal")
 
-    stub = ContentItem(
-        type=content_type,
-        source=source,
+    if content_type == ContentType.VIDEO:
+        from app.ingestion.canonical import canonical_key_for_youtube
+        from app.ingestion.extractors import extract_source, extract_topics
+
+        source = extract_source(url)
+        topics: list = extract_topics(item.raw_title or "", "") if item.raw_title else []
+        yt_vid = extract_youtube_video_id(url)
+        ckey = canonical_key_for_youtube(video_id=yt_vid, source_url=url, video_url=url)
+        return ContentItem(
+            type=content_type,
+            source=source,
+            source_url=url,
+            canonical_url=url,
+            canonical_key=ckey,
+            published_at=datetime.utcnow(),
+            ingestion_day=date.today(),
+            title=(item.raw_title or url)[:1000],
+            candidate_first_seen_at=datetime.utcnow(),
+            candidate_signal_source=item.signal_source.value,
+            candidate_raw_title=(item.raw_title or url)[:1000],
+            description=None,
+            content_text=None,
+            summary=None,
+            image_url=None,
+            video_url=url,
+            topics=topics,
+            entities=[],
+            dedupe_key=None,
+            ai_processed=False,
+            language="en",
+            quality_score=domain_policy.quality_weight,
+            recency_score=1.0,
+            trend_score=0.0,
+            global_score=0.0,
+            curation_status=review_queue_target_status(),
+            discovered_via=discovered_via,
+            signal_hits=1,
+        )
+
+    hydrator = article_hydrator or ArticleHydrationService()
+    stub = hydrator.build_article_stub(
         source_url=url,
-        canonical_url=url,
-        canonical_key=ckey,
-        published_at=datetime.utcnow(),
-        ingestion_day=date.today(),
         title=(item.raw_title or url)[:1000],
-        candidate_first_seen_at=datetime.utcnow(),
-        candidate_signal_source=item.signal_source.value,
-        candidate_raw_title=(item.raw_title or url)[:1000],
-        description=None,
-        content_text=None,
-        summary=None,
-        image_url=None,
-        video_url=url if content_type == ContentType.VIDEO else None,
-        topics=topics,
-        entities=[],
-        dedupe_key=None,
-        ai_processed=False,
-        language="en",
-        # Seed with policy tier weight so promotion has better priors.
-        quality_score=domain_policy.quality_weight,
-        recency_score=1.0,
-        trend_score=0.0,
-        global_score=0.0,
+        published_at=datetime.utcnow(),
         curation_status=review_queue_target_status(),
         discovered_via=discovered_via,
         signal_hits=1,
+        quality_score=domain_policy.quality_weight,
+        candidate_first_seen_at=datetime.utcnow(),
+        candidate_signal_source=item.signal_source.value,
+        candidate_raw_title=(item.raw_title or url)[:1000],
     )
+    stub.ingestion_day = date.today()
     return stub
 
 
@@ -347,7 +359,12 @@ def run_signal_ingestion(
                     continue
 
                 content_type = _detect_content_type(canonical)
-                stub = _build_candidate_stub(canonical, item, content_type)
+                stub = _build_candidate_stub(
+                    canonical,
+                    item,
+                    content_type,
+                    article_hydrator=article_hydrator,
+                )
                 db.add(stub)
                 db.flush()
 

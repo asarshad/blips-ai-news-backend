@@ -10,6 +10,7 @@ Verifies that:
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
@@ -98,6 +99,22 @@ def _make_pipeline(metrics: Optional[ExtractionMetrics] = None):
     return pipeline
 
 
+def _prepared_article(entry: MagicMock, *, content_text: Optional[str] = None):
+    return SimpleNamespace(
+        source_url=entry.url,
+        canonical_url=entry.url,
+        title=entry.title,
+        description=entry.content[:500] if entry.content else None,
+        content_text=content_text if content_text is not None else (entry.content or None),
+        image_url=entry.image_url,
+        published_at=entry.published_date,
+        source="example.com",
+        topics=[],
+        entities=[],
+        extraction=None,
+    )
+
+
 # ── RSS ingestion language tests ─────────────────────────────────────────────
 
 
@@ -112,19 +129,16 @@ class TestRssIngestionLanguageFilter:
             content="The model demonstrates significant advances in logic and coding tasks.",
         )
 
-        # Patch extraction pipeline to return quickly
-        with patch("app.ingestion.service.run_extraction") as mock_extract:
-            mock_result = MagicMock()
-            mock_result.main_text = "Full article text here."
-            mock_result.title = entry.title
-            mock_result.image_url = None
-            mock_result.canonical_url = None
-            mock_result.published_at = None
-            mock_result.excerpt_fallback = None
-            mock_extract.return_value = mock_result
-
-            with patch("app.ingestion.service.extraction_metrics"):
-                pipeline.ingest_rss_entry(entry)
+        with patch.object(
+            pipeline.article_hydrator,
+            "prepare_rss_article",
+            return_value=_prepared_article(entry, content_text="Full article text here."),
+        ):
+            with patch.object(
+                pipeline.article_hydrator, "populate_article_summary", return_value=False
+            ):
+                with patch("app.ingestion.service.extraction_metrics"):
+                    pipeline.ingest_rss_entry(entry)
 
         # The ContentItem was added to the DB session
         assert pipeline.db.add.called
@@ -144,13 +158,13 @@ class TestRssIngestionLanguageFilter:
             ),
         )
 
-        with patch("app.ingestion.service.run_extraction") as mock_extract:
+        with patch.object(pipeline.article_hydrator, "prepare_rss_article") as mock_prepare:
             with patch("app.ingestion.service.extraction_metrics") as mock_metrics:
                 with caplog.at_level(logging.INFO, logger="app.ingestion.service"):
                     result = pipeline.ingest_rss_entry(entry)
 
         assert result is None
-        mock_extract.assert_not_called()  # Rejected before extraction
+        mock_prepare.assert_not_called()  # Rejected before extraction
         mock_metrics.record_language_filtered.assert_called_once()
 
     def test_short_title_passes_as_safe_default(self):
@@ -158,18 +172,16 @@ class TestRssIngestionLanguageFilter:
         pipeline = _make_pipeline()
         entry = _make_feed_entry(title="AI")  # Well under _MIN_DETECT_LENGTH
 
-        with patch("app.ingestion.service.run_extraction") as mock_extract:
-            mock_result = MagicMock()
-            mock_result.main_text = None
-            mock_result.title = entry.title
-            mock_result.image_url = None
-            mock_result.canonical_url = None
-            mock_result.published_at = None
-            mock_result.excerpt_fallback = None
-            mock_extract.return_value = mock_result
-
-            with patch("app.ingestion.service.extraction_metrics"):
-                pipeline.ingest_rss_entry(entry)
+        with patch.object(
+            pipeline.article_hydrator,
+            "prepare_rss_article",
+            return_value=_prepared_article(entry, content_text=None),
+        ):
+            with patch.object(
+                pipeline.article_hydrator, "populate_article_summary", return_value=False
+            ):
+                with patch("app.ingestion.service.extraction_metrics"):
+                    pipeline.ingest_rss_entry(entry)
 
         # Short text → safe default → should reach DB add
         assert pipeline.db.add.called
@@ -185,11 +197,11 @@ class TestRssIngestionLanguageFilter:
             content="Un análisis detallado del procesador Intel con benchmarks extensivos.",
         )
 
-        with patch("app.ingestion.service.run_extraction") as mock_extract:
+        with patch.object(pipeline.article_hydrator, "prepare_rss_article") as mock_prepare:
             with patch("app.ingestion.service.extraction_metrics"):
                 pipeline.ingest_rss_entry(entry)
 
-        mock_extract.assert_not_called()
+        mock_prepare.assert_not_called()
 
     def test_language_filter_before_llm(self):
         """LLM summarization must NOT be called for non-English content."""
@@ -200,10 +212,11 @@ class TestRssIngestionLanguageFilter:
             content="Los investigadores presentaron resultados sorprendentes del modelo.",
         )
 
-        with patch("app.ingestion.service.run_extraction"):
+        with patch.object(pipeline.article_hydrator, "prepare_rss_article") as mock_prepare:
             with patch("app.ingestion.service.extraction_metrics"):
                 pipeline.ingest_rss_entry(entry)
 
+        mock_prepare.assert_not_called()
         pipeline.llm_client.summarize_article.assert_not_called()
 
     def test_article_summary_skips_text_below_min_word_bound(self):
@@ -215,16 +228,11 @@ class TestRssIngestionLanguageFilter:
             content="Short body",
         )
 
-        with patch("app.ingestion.service.run_extraction") as mock_extract:
-            mock_result = MagicMock()
-            mock_result.main_text = "brief update " * 20
-            mock_result.title = entry.title
-            mock_result.image_url = None
-            mock_result.canonical_url = None
-            mock_result.published_at = None
-            mock_result.excerpt_fallback = None
-            mock_extract.return_value = mock_result
-
+        with patch.object(
+            pipeline.article_hydrator,
+            "prepare_rss_article",
+            return_value=_prepared_article(entry, content_text="brief update " * 20),
+        ):
             with (
                 patch("app.ingestion.service.extraction_metrics"),
                 patch("app.ingestion.service.is_english", return_value=True),
@@ -245,16 +253,11 @@ class TestRssIngestionLanguageFilter:
         settings = get_settings()
         long_text = " ".join(["token"] * (settings.ARTICLE_SUMMARY_MAX_WORDS + 75))
 
-        with patch("app.ingestion.service.run_extraction") as mock_extract:
-            mock_result = MagicMock()
-            mock_result.main_text = long_text
-            mock_result.title = entry.title
-            mock_result.image_url = None
-            mock_result.canonical_url = None
-            mock_result.published_at = None
-            mock_result.excerpt_fallback = None
-            mock_extract.return_value = mock_result
-
+        with patch.object(
+            pipeline.article_hydrator,
+            "prepare_rss_article",
+            return_value=_prepared_article(entry, content_text=long_text),
+        ):
             with (
                 patch("app.ingestion.service.extraction_metrics"),
                 patch("app.ingestion.service.is_english", return_value=True),
