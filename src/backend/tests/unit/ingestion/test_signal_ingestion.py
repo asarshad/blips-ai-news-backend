@@ -365,6 +365,57 @@ class TestRunSignalIngestion:
         assert result.stubs_created == 3
         assert result.stubs_skipped == 2
 
+    def test_auto_approved_article_stub_is_hydrated_before_commit(self, monkeypatch):
+        monkeypatch.setattr(settings, "AUTO_APPROVE_REVIEW_CONTENT", True)
+        sample = SignalItem(
+            raw_url="https://example.com/brand-new-article",
+            signal_source=SignalSource.HN_TOP,
+            raw_title="Brand New Story",
+            signal_score=150.0,
+        )
+        mock_db, patches, _cr, _sr = _patch_orchestrator(hn_top=[sample])
+        mock_hydrator = MagicMock()
+        mock_hydrator.needs_hydration.return_value = True
+
+        def _fill_stub(stub):
+            stub.canonical_url = "https://example.com/brand-new-article/"
+            stub.image_url = "https://cdn.example.com/hero.jpg"
+            stub.content_text = "Hydrated article text " * 50
+            stub.summary = "Hydrated summary " * 6
+            stub.ai_processed = True
+
+        mock_hydrator.hydrate_article_candidate.side_effect = _fill_stub
+
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+            patches[7],
+            patch(
+                "app.ingestion.signal_ingestion.ArticleHydrationService",
+                return_value=mock_hydrator,
+            ),
+        ):
+            result = run_signal_ingestion(mock_db)
+
+        assert result.stubs_created == 1
+        created_stubs = [
+            c.args[0]
+            for c in mock_db.add.call_args_list
+            if c.args and isinstance(c.args[0], ContentItem)
+        ]
+        assert len(created_stubs) == 1
+        stub = created_stubs[0]
+        assert stub.curation_status == ContentStatus.PROMOTED
+        assert stub.image_url == "https://cdn.example.com/hero.jpg"
+        assert stub.summary.startswith("Hydrated summary")
+        assert stub.ai_processed is True
+        mock_hydrator.hydrate_article_candidate.assert_called_once_with(stub)
+
     def test_fetch_error_recorded_but_continues(self):
         mock_db, patches, _cr, _sr = _patch_orchestrator()
         with (

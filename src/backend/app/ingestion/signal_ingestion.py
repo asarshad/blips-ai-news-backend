@@ -30,6 +30,7 @@ from typing import Dict, List, Optional
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.article_hydration import ArticleHydrationService
 from app.config.source_tiering import get_domain_policy, is_allowed_domain
 from app.core.curation import review_queue_target_status
 from app.ingestion.canonical import canonical_key_for_article, extract_youtube_video_id
@@ -40,7 +41,7 @@ from app.ingestion.signals.hacker_news import fetch_hn_best, fetch_hn_top
 from app.ingestion.signals.youtube_trending import fetch_yt_trending
 from app.ingestion.url_normalizer import normalize_url
 from app.models.candidate_audit import CandidateAuditEvent
-from app.models.content import ContentItem, ContentType
+from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.signal import SignalSource
 from app.repositories.content_repo import ContentItemRepository
 from app.repositories.signal_repo import SignalURLRepository
@@ -241,6 +242,7 @@ def run_signal_ingestion(
     result = SignalIngestionResult()
     content_repo = ContentItemRepository(db)
     signal_repo = SignalURLRepository(db)
+    article_hydrator = ArticleHydrationService()
 
     # ── 1. Collect raw signal items ───────────────────────────────────────
     all_items: List[SignalItem] = []
@@ -348,6 +350,13 @@ def run_signal_ingestion(
                 stub = _build_candidate_stub(canonical, item, content_type)
                 db.add(stub)
                 db.flush()
+
+                if (
+                    stub.curation_status == ContentStatus.PROMOTED
+                    and content_type == ContentType.ARTICLE
+                    and article_hydrator.needs_hydration(stub)
+                ):
+                    article_hydrator.hydrate_article_candidate(stub)
 
                 signal_repo.mark_ingested(signal_row, stub.id)
                 stubs_this_run += 1

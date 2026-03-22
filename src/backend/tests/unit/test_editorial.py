@@ -23,6 +23,7 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from app.article_hydration import ArticleHydrationService
 from app.domain.editorial.service import EditorialService, _extract_domain
 from app.models.content import ContentStatus, ContentType
 from app.ranking.global_score import (
@@ -159,7 +160,7 @@ class TestEditorialServiceApproval:
         svc = EditorialService.__new__(EditorialService)
         svc.db = MagicMock()
         svc.repo = repo_mock
-        svc._llm_client = None
+        svc._article_hydrator = None
         return svc
 
     def test_approve_hydrates_article_candidate_before_promoting(self):
@@ -184,7 +185,8 @@ class TestEditorialServiceApproval:
         repo.approve.return_value = item
 
         svc = self._make_service(repo)
-        svc._run_article_extraction = MagicMock(
+        hydrator = ArticleHydrationService()
+        hydrator.run_article_extraction = MagicMock(
             return_value=SimpleNamespace(
                 canonical_url="https://www.apple.com/newsroom/2026/03/story/",
                 title="Apple launches new AI features",
@@ -195,7 +197,7 @@ class TestEditorialServiceApproval:
                 excerpt_fallback=None,
             )
         )
-        svc._summarize_article = MagicMock(
+        hydrator.summarize_article = MagicMock(
             return_value=SimpleNamespace(
                 summary=(
                     "Apple introduced a broad set of AI features across its devices, with "
@@ -207,6 +209,7 @@ class TestEditorialServiceApproval:
                 },
             )
         )
+        svc._article_hydrator = hydrator
 
         result = svc.approve_content(10, actor="reviewer", note="Looks good")
 
@@ -235,12 +238,14 @@ class TestEditorialServiceApproval:
         repo.promote.return_value = item
 
         svc = self._make_service(repo)
-        svc._hydrate_article_candidate = MagicMock()
+        hydrator = MagicMock()
+        hydrator.needs_hydration.return_value = True
+        svc._article_hydrator = hydrator
 
         result = svc.promote_content(14, actor="reviewer")
 
         assert result is item
-        svc._hydrate_article_candidate.assert_called_once_with(item)
+        hydrator.hydrate_article_candidate.assert_called_once_with(item)
         repo.promote.assert_called_once_with(14, actor="reviewer")
 
     def test_approve_skips_llm_when_item_is_already_processed(self):
@@ -263,7 +268,8 @@ class TestEditorialServiceApproval:
         repo.approve.return_value = item
 
         svc = self._make_service(repo)
-        svc._run_article_extraction = MagicMock(
+        hydrator = ArticleHydrationService()
+        hydrator.run_article_extraction = MagicMock(
             return_value=SimpleNamespace(
                 canonical_url="https://www.reuters.com/technology/story",
                 title="Updated Reuters article title",
@@ -273,14 +279,15 @@ class TestEditorialServiceApproval:
                 excerpt_fallback=None,
             )
         )
-        svc._summarize_article = MagicMock()
+        hydrator.summarize_article = MagicMock()
+        svc._article_hydrator = hydrator
 
         result = svc.approve_content(11, actor="reviewer")
 
         assert result is item
         assert item.image_url == "https://www.reuters.com/resizer/story-hero.jpg"
         assert item.summary == "A complete existing summary that is already long enough to keep."
-        svc._summarize_article.assert_not_called()
+        hydrator.summarize_article.assert_not_called()
 
     def test_approve_still_promotes_when_hydration_fails(self):
         repo = MagicMock()
@@ -294,7 +301,10 @@ class TestEditorialServiceApproval:
         repo.approve.return_value = item
 
         svc = self._make_service(repo)
-        svc._hydrate_article_candidate = MagicMock(side_effect=RuntimeError("fetch failed"))
+        hydrator = MagicMock()
+        hydrator.needs_hydration.return_value = True
+        hydrator.hydrate_article_candidate.side_effect = RuntimeError("fetch failed")
+        svc._article_hydrator = hydrator
 
         result = svc.approve_content(12, actor="reviewer")
 
@@ -317,13 +327,15 @@ class TestEditorialServiceApproval:
         repo.approve.return_value = item
 
         svc = self._make_service(repo)
-        svc._run_article_extraction = MagicMock(return_value=None)
-        svc._summarize_article = MagicMock()
+        hydrator = ArticleHydrationService()
+        hydrator.run_article_extraction = MagicMock(return_value=None)
+        hydrator.summarize_article = MagicMock()
+        svc._article_hydrator = hydrator
 
         result = svc.approve_content(13, actor="reviewer")
 
         assert result is item
-        svc._summarize_article.assert_not_called()
+        hydrator.summarize_article.assert_not_called()
         repo.approve.assert_called_once_with(13, actor="reviewer", note=None)
 
 

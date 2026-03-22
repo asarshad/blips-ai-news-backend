@@ -8,14 +8,14 @@ and is therefore unit-testable without a database.
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional
+from typing import Optional
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.article_hydration import ArticleHydrationService
 from app.core.logging import get_logger
 from app.ingestion.canonical import canonical_key_for_article
-from app.ingestion.extractors import extract_entities, extract_source, extract_topics
 from app.ingestion.url_normalizer import normalize_url
 from app.models.content import ContentItem, ContentType
 from app.repositories.editorial_repo import EditorialRepository
@@ -47,7 +47,7 @@ class EditorialService:
     def __init__(self, db: Session, repo: Optional[EditorialRepository] = None):
         self.db = db
         self.repo = repo or EditorialRepository(db)
-        self._llm_client: Optional[Any] = None
+        self._article_hydrator: Optional[ArticleHydrationService] = None
 
     # ------------------------------------------------------------------
     # Manual URL submission
@@ -202,14 +202,12 @@ class EditorialService:
 
     def _hydrate_for_approval(self, item: ContentItem) -> None:
         """Best-effort enrichment before a candidate becomes feed-visible."""
-        if item.type != ContentType.ARTICLE:
-            return
-
-        if not self._needs_article_hydration(item):
+        hydrator = self._get_article_hydrator()
+        if not hydrator.needs_hydration(item):
             return
 
         try:
-            self._hydrate_article_candidate(item)
+            hydrator.hydrate_article_candidate(item)
         except Exception as exc:
             logger.warning(
                 "Editorial approval hydration failed for %s: %s",
@@ -217,142 +215,11 @@ class EditorialService:
                 exc,
             )
 
-    def _hydrate_article_candidate(self, item: ContentItem) -> None:
-        """Apply extraction, image recovery, and summary generation to an article candidate."""
-        extraction = self._run_article_extraction(item)
-
-        if extraction is not None:
-            extracted_title = (getattr(extraction, "title", None) or "").strip()
-            if extracted_title:
-                item.title = extracted_title
-
-            extracted_canonical = (getattr(extraction, "canonical_url", None) or "").strip()
-            if extracted_canonical:
-                item.canonical_url = extracted_canonical
-
-            extracted_published_at = getattr(extraction, "published_at", None)
-            if extracted_published_at is not None:
-                item.published_at = extracted_published_at
-
-            extracted_text = getattr(extraction, "main_text", None) or getattr(
-                extraction, "excerpt_fallback", None
-            )
-            if extracted_text:
-                item.content_text = extracted_text[:8000]
-
-            extracted_image = (getattr(extraction, "image_url", None) or "").strip()
-            if self._should_replace_article_image(item.image_url, extracted_image):
-                item.image_url = extracted_image
-
-        source_url = (item.canonical_url or item.source_url or "").strip()
-        if source_url:
-            item.source = extract_source(source_url)
-
-        if not (item.ai_processed and (item.summary or "").strip()):
-            article_text = (item.content_text or item.description or "").strip()
-            if not article_text and not _looks_like_pending_title(item.title):
-                article_text = (item.title or "").strip()
-            if article_text:
-                summary_result = self._summarize_article(item, article_text)
-                summary = (getattr(summary_result, "summary", None) or "").strip()
-                if summary and len(summary) > 50:
-                    item.summary = summary
-                    item.ai_processed = True
-                    starters = getattr(summary_result, "conversation_starters", None)
-                    if starters:
-                        item.conversation_starters = starters
-
-        topic_seed = (item.summary or item.content_text or item.description or "").strip()
-        refreshed_topics = extract_topics(item.title or "", topic_seed)
-        refreshed_entities = extract_entities(item.title or "", item.summary or topic_seed)
-        if refreshed_topics or not item.topics:
-            item.topics = refreshed_topics
-        if refreshed_entities or not item.entities:
-            item.entities = refreshed_entities
-
-    def _run_article_extraction(self, item: ContentItem):
-        """Execute the shared extraction pipeline using current item fields as fallback."""
-        from app.extraction.pipeline import RSSEntryData, run_extraction
-
-        article_url = (item.canonical_url or item.source_url or "").strip()
-        if not article_url:
-            return None
-
-        return run_extraction(
-            article_url,
-            rss_entry=RSSEntryData(
-                title=None if _looks_like_pending_title(item.title) else item.title,
-                description=item.description,
-                image_url=item.image_url,
-                published_date=item.published_at,
-            ),
-        )
-
-    def _summarize_article(self, item: ContentItem, article_text: str):
-        """Return a best-effort article summary result, or None when unavailable."""
-        llm_client = self._get_llm_client()
-        if llm_client is None:
-            return None
-        return llm_client.summarize_article(
-            item.title or item.source_url or "Untitled", article_text
-        )
-
-    def _get_llm_client(self):
-        """Lazily construct the shared LLM client used during approval hydration."""
-        if self._llm_client is False:
-            return None
-        if self._llm_client is not None:
-            return self._llm_client
-
-        from app.integrations.llm_client import LLMClient
-
-        client = LLMClient()
-        if not client.is_configured():
-            self._llm_client = False
-            return None
-
-        self._llm_client = client
-        return client
-
-    @staticmethod
-    def _needs_article_hydration(item: ContentItem) -> bool:
-        """Return True when an article still looks like an unhydrated candidate."""
-        from app.extraction.metadata import is_probably_generic_image_url
-
-        title = (item.title or "").strip()
-        image_url = (item.image_url or "").strip()
-        return any(
-            (
-                _looks_like_pending_title(title),
-                not (item.canonical_url or "").strip(),
-                not (item.content_text or "").strip(),
-                not (item.summary or "").strip(),
-                not bool(item.ai_processed),
-                not image_url,
-                bool(image_url) and is_probably_generic_image_url(image_url),
-            )
-        )
-
-    @staticmethod
-    def _should_replace_article_image(
-        existing_image_url: Optional[str], candidate_image_url: Optional[str]
-    ) -> bool:
-        """Prefer real editorial images and avoid filling blanks with generic placeholders."""
-        from app.extraction.metadata import is_probably_generic_image_url
-
-        candidate = (candidate_image_url or "").strip()
-        if not candidate:
-            return False
-
-        existing = (existing_image_url or "").strip()
-        candidate_is_generic = is_probably_generic_image_url(candidate)
-        if not existing:
-            return not candidate_is_generic
-        if existing == candidate:
-            return False
-        if is_probably_generic_image_url(existing) and not candidate_is_generic:
-            return True
-        return False
+    def _get_article_hydrator(self) -> ArticleHydrationService:
+        """Lazily construct the shared hydrator used by editorial actions."""
+        if self._article_hydrator is None:
+            self._article_hydrator = ArticleHydrationService()
+        return self._article_hydrator
 
 
 # ---------------------------------------------------------------------------
@@ -373,8 +240,3 @@ def _extract_domain(url: str) -> str:
         return host
     except Exception:
         return "unknown"
-
-
-def _looks_like_pending_title(title: Optional[str]) -> bool:
-    """Return True when a title still looks like an unhydrated editorial stub."""
-    return (title or "").strip().lower().startswith("[pending]")
