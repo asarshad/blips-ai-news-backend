@@ -9,6 +9,7 @@ Every test here is tied to a specific root cause that was discovered
 during incident response.  If these tests break, the incidents are back.
 """
 
+from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # Incident 1 — Articles ai_processed gate
@@ -62,6 +63,29 @@ class TestArticlesDiagnosticHeaders:
             "Diagnostic headers must be set BEFORE the 404 is raised, "
             "otherwise response headers are lost on error"
         )
+
+    def test_article_serializer_hides_pending_url_titles(self):
+        from app.api.routes.articles import _content_item_to_article_schema
+
+        item = type(
+            "Item",
+            (),
+            {
+                "id": 1,
+                "title": "[pending] https://bloomberg.com/news/articles/2026-03-21/openai-plans",
+                "canonical_url": None,
+                "source_url": "https://bloomberg.com/news/articles/2026-03-21/openai-plans",
+                "summary": "OpenAI plans to hire more people.",
+                "image_url": None,
+                "published_at": datetime(2026, 3, 22, 0, 0, 0),
+                "created_at": datetime(2026, 3, 22, 0, 0, 0),
+                "topics": ["openai"],
+            },
+        )()
+
+        payload = _content_item_to_article_schema(item)
+
+        assert payload["title"] == "OpenAI Plans"
 
 
 # ---------------------------------------------------------------------------

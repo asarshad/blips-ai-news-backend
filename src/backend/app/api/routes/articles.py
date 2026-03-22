@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.api.feed_headers import FeedMetadata, compute_feed_version
+from app.article_hydration import display_article_title
 from app.core.config import settings
 from app.core.dependencies import get_db
 from app.core.exceptions import not_found_exception
@@ -45,7 +46,7 @@ def _content_item_to_article_schema(item) -> dict:
 
     return {
         "id": item.id,
-        "title": item.title,
+        "title": display_article_title(item.title, item.canonical_url or item.source_url),
         "source_url": item.source_url,
         "summary": summary,
         "image_url": item.image_url or None,  # coerce empty string to null
