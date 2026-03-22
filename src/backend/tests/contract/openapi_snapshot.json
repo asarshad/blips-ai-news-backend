@@ -1737,6 +1737,56 @@
             "description": "Organic content ID (mutually exclusive with ad_id).",
             "title": "Content Id"
           },
+          "count": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional counter payload for aggregated analytics events.",
+            "title": "Count"
+          },
+          "event_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional named analytics event such as 'new_content_available'.",
+            "title": "Event Name"
+          },
+          "feed_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Feed version associated with the analytics event.",
+            "title": "Feed Version"
+          },
+          "freshness_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional freshness tier for the referenced content.",
+            "title": "Freshness Tier"
+          },
           "item_type": {
             "description": "Discriminator: 'ARTICLE', 'VIDEO', 'REEL', or 'AD'.",
             "title": "Item Type",
@@ -1994,6 +2044,28 @@
       "PlaylistItem": {
         "description": "Single item in playlist response.",
         "properties": {
+          "added_age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Added Age Seconds"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
           "cluster_id": {
             "anyOf": [
               {
@@ -2022,6 +2094,17 @@
             ],
             "title": "Conversation Starters"
           },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
           "description": {
             "anyOf": [
               {
@@ -2044,12 +2127,45 @@
             ],
             "title": "Duration"
           },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
           "entities": {
             "items": {
               "type": "string"
             },
             "title": "Entities",
             "type": "array"
+          },
+          "freshness_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freshness Reason"
+          },
+          "freshness_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freshness Tier"
           },
           "global_score": {
             "anyOf": [
@@ -2077,6 +2193,17 @@
             ],
             "title": "Image Url"
           },
+          "published_age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Age Seconds"
+          },
           "published_at": {
             "anyOf": [
               {
@@ -2087,6 +2214,17 @@
               }
             ],
             "title": "Published At"
+          },
+          "read_time_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read Time Minutes"
           },
           "source": {
             "title": "Source",
@@ -2113,6 +2251,17 @@
               }
             ],
             "title": "Summary"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
           },
           "title": {
             "title": "Title",
@@ -2175,9 +2324,31 @@
             ],
             "title": "Cursor"
           },
+          "feed_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feed Version"
+          },
           "has_more": {
             "title": "Has More",
             "type": "boolean"
+          },
+          "inventory_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inventory State"
           },
           "items": {
             "items": {
@@ -2185,6 +2356,44 @@
             },
             "title": "Items",
             "type": "array"
+          },
+          "newest_created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Newest Created At"
+          },
+          "newest_published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Newest Published At"
+          },
+          "remaining_count": {
+            "default": 0,
+            "title": "Remaining Count",
+            "type": "integer"
+          },
+          "served_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Served At"
           },
           "session_id": {
             "title": "Session Id",
@@ -6881,6 +7090,48 @@
         ]
       }
     },
+    "/api/v1/events/track": {
+      "post": {
+        "description": "Record a generic freshness or product analytics event.",
+        "operationId": "record_named_event_api_v1_events_track_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record a named analytics event",
+        "tags": [
+          "events"
+        ]
+      }
+    },
     "/api/v1/inventory/health": {
       "get": {
         "description": "Get overall inventory health across all surfaces.\n\nReturns tier counts, freshness metrics, and health status for:\n- Articles\n- Videos\n- Reels\n\nAlso includes the two-tier pipeline summary (CANDIDATE vs PROMOTED counts\nand newest timestamps per type) for operational visibility.\n\nIncludes top-up priority if any surface is below threshold.\nThis endpoint is cached (60s TTL) and does not trigger ingestion.",
@@ -7110,6 +7361,66 @@
           }
         },
         "summary": "Get Extraction Samples",
+        "tags": [
+          "metrics",
+          "metrics"
+        ]
+      }
+    },
+    "/api/v1/metrics/freshness": {
+      "get": {
+        "description": "Get freshness analytics across serving, engagement, and top-up behavior.",
+        "operationId": "get_freshness_metrics_api_v1_metrics_freshness_get",
+        "parameters": [
+          {
+            "description": "Look-back window in hours",
+            "in": "query",
+            "name": "hours",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "description": "Look-back window in hours",
+              "maximum": 168,
+              "minimum": 1,
+              "title": "Hours",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Freshness Metrics Api V1 Metrics Freshness Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Freshness Metrics",
         "tags": [
           "metrics",
           "metrics"
@@ -8047,7 +8358,7 @@
     },
     "/api/v1/videos/recent": {
       "get": {
-        "description": "Get the most recent videos using tiered freshness strategy.\n\nReturns a blend of:\n- Tier A (Fresh): videos published within the rolling 7-day curated window\n- Tier B (Backfill): videos added recently but published earlier\n- Tier C (Evergreen): older high-quality videos\n\nEach video includes freshness_tier, published_age_seconds, and added_age_seconds.\nResults are diversity-mixed to ensure varied source distribution.",
+        "description": "Get the most recent videos using tiered freshness strategy.\n\nReturns a blend of:\n- Tier A (Fresh): videos published within the rolling 72-hour window\n- Tier B (Backfill): videos added recently but published earlier\n- Tier C (Evergreen): older high-quality videos\n\nEach video includes freshness_tier, published_age_seconds, and added_age_seconds.\nResults are diversity-mixed to ensure varied source distribution.",
         "operationId": "get_recent_videos_api_v1_videos_recent_get",
         "parameters": [
           {

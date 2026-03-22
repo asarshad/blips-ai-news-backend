@@ -7,17 +7,20 @@ Endpoints:
 - GET /session/playlist-stats: Get playlist generation stats (internal ops)
 """
 
+from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional
 
 import redis
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.api.feed_headers import FeedMetadata
 from app.core.auth import require_admin_key
 from app.core.dependencies import get_db, get_redis
 from app.core.logging import get_logger
+from app.db.base import SessionLocal
 from app.models.content import ContentType, EventType, InteractionEvent, UserPreference, UserProfile
 from app.models.usage import Usage
 from app.repositories.content_repo import ContentItemRepository
@@ -26,10 +29,12 @@ from app.repositories.user_repo import (
     UserPreferenceRepository,
     UserProfileRepository,
 )
+from app.services.freshness_metrics_service import record_feed_served
 from app.services.inventory_service import Surface
 from app.services.personalization_service import PersonalizationService
 from app.services.playlist_service import PlaylistService
 from app.services.tiered_feed_service import invalidate_tiered_feed_cache
+from app.services.topup_service import check_and_trigger_topup
 from app.video_surface_rules import effective_content_type
 
 logger = get_logger(__name__)
@@ -102,6 +107,15 @@ class PlaylistItem(BaseModel):
     topics: List[str]
     entities: List[str]
     published_at: Optional[str]
+    created_at: Optional[str] = None
+    freshness_tier: Optional[str] = None
+    freshness_reason: Optional[str] = None
+    published_age_seconds: Optional[int] = None
+    added_age_seconds: Optional[int] = None
+    read_time_minutes: Optional[int] = None
+    duration_seconds: Optional[int] = None
+    thumbnail_url: Optional[str] = None
+    category: Optional[str] = None
     global_score: Optional[float]
     cluster_id: Optional[str]
     conversation_starters: Optional[Dict[str, List[str]]] = None
@@ -115,6 +129,12 @@ class PlaylistResponse(BaseModel):
     cursor: Optional[int]
     has_more: bool
     total_items: int
+    inventory_state: Optional[str] = None
+    served_at: Optional[str] = None
+    feed_version: Optional[str] = None
+    newest_published_at: Optional[str] = None
+    newest_created_at: Optional[str] = None
+    remaining_count: int = 0
 
 
 # ============================================================================
@@ -175,12 +195,14 @@ def _tiered_surfaces_for_interaction(content_item, event_type: EventType) -> Lis
 
 @router.get("/playlist", response_model=PlaylistResponse)
 def get_playlist(
+    response: Response,
     type: ContentTypeParam = Query(..., description="Content type"),
     size: int = Query(50, ge=10, le=100, description="Items per request"),
     session_id: Optional[str] = Query(None, description="Session ID for continuity"),
     cursor: Optional[int] = Query(None, ge=0, description="Cursor position to continue from"),
     refresh: bool = Query(False, description="Force refresh playlist (new session)"),
     device_id: str = Depends(get_device_id),
+    db: Session = Depends(get_db),
     playlist_service: PlaylistService = Depends(get_playlist_service),
 ):
     """
@@ -199,6 +221,9 @@ def get_playlist(
     # Map string enum to model enum
     content_type = ContentType(type.value)
 
+    # Trigger background top-up when inventory is thin.
+    check_and_trigger_topup(db, SessionLocal)
+
     # Get playlist with session support
     result = playlist_service.get_playlist(
         device_id=device_id,
@@ -209,12 +234,48 @@ def get_playlist(
         force_refresh=refresh,
     )
 
+    generated_at = (
+        datetime.fromisoformat(result["served_at"])
+        if result.get("served_at")
+        else datetime.utcnow()
+    )
+
+    FeedMetadata(
+        generated_at=generated_at,
+        source=result.get("source", "db"),
+        cache_key=result.get("cache_key"),
+        cache_hit=bool(result.get("cache_hit", False)),
+        items=result["items"],
+        surface={
+            ContentType.ARTICLE: "articles",
+            ContentType.VIDEO: "videos",
+            ContentType.REEL: "reels",
+        }[content_type],
+        feed_version=result.get("feed_version"),
+    ).add_headers(response)
+    record_feed_served(
+        surface={
+            ContentType.ARTICLE: "articles",
+            ContentType.VIDEO: "videos",
+            ContentType.REEL: "reels",
+        }[content_type],
+        feed_version=result.get("feed_version"),
+        inventory_state=result.get("inventory_state"),
+        items=result["items"],
+    )
+
     return PlaylistResponse(
         items=result["items"],
         session_id=result["session_id"],
         cursor=result["cursor"],
         has_more=result["has_more"],
         total_items=result["total_items"],
+        inventory_state=result.get("inventory_state"),
+        served_at=result.get("served_at"),
+        feed_version=result.get("feed_version"),
+        newest_published_at=result.get("newest_published_at"),
+        newest_created_at=result.get("newest_created_at"),
+        remaining_count=int(result.get("remaining_count", 0) or 0),
     )
 
 

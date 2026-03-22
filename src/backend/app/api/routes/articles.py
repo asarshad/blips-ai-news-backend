@@ -21,6 +21,7 @@ from app.repositories.content_repo import ContentItemRepository
 from app.repositories.user_repo import UserCategorySelectionRepository
 from app.schemas.article import ArticleWithConversation
 from app.services.ad_mixer import inject_ads
+from app.services.freshness_metrics_service import record_feed_served
 from app.services.inventory_service import Surface
 from app.services.tiered_feed_service import (
     get_cached_tiered_feed,
@@ -147,11 +148,25 @@ def get_recent_articles(
     mixed, ads_injected = inject_ads(articles, placement_id="feed_fullpage")
     response.headers["X-Ads-Injected"] = str(ads_injected)
     response.headers["X-Ads-Frequency"] = str(settings.ADS_FEED_FREQUENCY)
+    newest_published_at, newest_created_at = feed_meta.get_newest_dates()
+    inventory_state = "healthy" if articles else "warming_up"
+    record_feed_served(
+        surface="articles",
+        feed_version=feed_meta.feed_version,
+        inventory_state=inventory_state,
+        items=articles,
+    )
 
     return {
         "articles": mixed,
         "has_more": has_more,
         "page": page,
+        "served_at": meta.generated_at.isoformat(),
+        "inventory_state": inventory_state,
+        "feed_version": feed_meta.feed_version,
+        "newest_published_at": newest_published_at,
+        "newest_created_at": newest_created_at,
+        "remaining_count": getattr(meta, "remaining_window_count", 0),
     }
 
 

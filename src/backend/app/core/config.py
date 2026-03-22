@@ -154,8 +154,8 @@ class Settings(BaseSettings):
     ARTICLES_BACKFILL_CREATED_HOURS: int = 24
     ARTICLES_EVERGREEN_MAX_DAYS: int = 14
 
-    # Videos: rank within a rolling 7-day curated pool
-    VIDEOS_FRESH_PUBLISHED_HOURS: int = 168
+    # Videos: fresh for 72 hours, then eligible for recent-ingest backfill
+    VIDEOS_FRESH_PUBLISHED_HOURS: int = 72
     VIDEOS_BACKFILL_CREATED_HOURS: int = 72
     VIDEOS_EVERGREEN_MAX_DAYS: int = 30
     VIDEOS_REFRESH_PUBLISHED_HOURS: int = 36

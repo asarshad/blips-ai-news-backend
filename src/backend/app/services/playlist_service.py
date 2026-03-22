@@ -18,19 +18,26 @@ import hashlib
 import json
 import uuid
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.core.config import get_settings
+from app.core.feature_flags import FeatureFlags
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentType, EventType
+from app.ranking.feed_score import rerank_feed
 from app.repositories.content_repo import ContentItemRepository
 from app.repositories.user_repo import (
     InteractionEventRepository,
+    UserCategorySelectionRepository,
     UserPreferenceRepository,
     UserProfileRepository,
 )
+from app.services.feed_version import compute_feed_version
+from app.services.inventory_service import Surface
 from app.services.multi_factor_ranking_service import MultiFactorRankingService
 from app.services.personalization_service import PersonalizationService
+from app.services.tiered_feed_service import get_cached_tiered_feed
 from app.services.video_duration_hydration import hydrate_missing_video_durations
 from app.video_surface_rules import effective_content_type, has_explicit_shorts_url
 
@@ -83,6 +90,22 @@ PLAYLIST_CACHE_TTL_SECONDS = 300  # 5 minutes
 PLAYLIST_CACHE_PREFIX = "playlist:"
 VIDEO_REEL_PLAYLIST_CACHE_PREFIX = "playlist:video-reel-v3:"
 SESSION_SNAPSHOT_TTL_SECONDS = 3600  # 1 hour for session snapshots
+
+
+def _surface_for_content_type(content_type: ContentType) -> Surface:
+    return {
+        ContentType.ARTICLE: Surface.ARTICLES,
+        ContentType.VIDEO: Surface.VIDEOS,
+        ContentType.REEL: Surface.REELS,
+    }[content_type]
+
+
+def _playlist_inventory_state(*, item_count: int, remaining_count: int, offset: int) -> str:
+    if item_count == 0:
+        return "caught_up" if offset > 0 and remaining_count == 0 else "warming_up"
+    if remaining_count == 0:
+        return "caught_up"
+    return "healthy"
 
 
 class PlaylistService:
@@ -151,52 +174,70 @@ class PlaylistService:
         # Get or generate session snapshot
         cache_key = self._get_session_cache_key(device_id, content_type, session_id)
 
-        playlist = None
+        snapshot = None
         if self.redis:
-            playlist = self._get_from_cache(cache_key)
-            if playlist and not self._is_cache_compatible(playlist, content_type):
+            cached = self._get_from_cache(cache_key)
+            snapshot = self._snapshot_from_cached_payload(
+                cached,
+                content_type=content_type,
+                cache_key=cache_key,
+            )
+            if snapshot is None and cached:
                 logger.info(
                     "Discarding stale session playlist cache for %s; incompatible payload",
                     content_type.value,
                 )
-                playlist = None
 
-        if not playlist:
-            # Generate new playlist snapshot
-            playlist_items = self._generate_playlist_items(
-                device_id, content_type, MAX_PLAYLIST_SIZE
-            )
-
-            if playlist_items and len(playlist_items) < MIN_PLAYLIST_SIZE:
-                logger.info(
-                    "Fresh playlist for %s too small (%s items) - topping up from historical window",
-                    content_type.value,
-                    len(playlist_items),
-                )
-                playlist_items = self._top_up_items_with_historical(
-                    device_id=device_id,
-                    content_type=content_type,
-                    selected_items=playlist_items,
-                    target_size=MAX_PLAYLIST_SIZE,
+        if not snapshot:
+            if self._supports_tiered_snapshots():
+                snapshot = self._generate_tiered_snapshot(device_id, content_type)
+            else:
+                playlist_items = self._generate_playlist_items(
+                    device_id, content_type, MAX_PLAYLIST_SIZE
                 )
 
-            duration_overrides = self._hydrate_duration_overrides(playlist_items)
-            playlist = [
-                self._format_item(item, duration_overrides=duration_overrides)
-                for item in playlist_items
-            ]
+                if playlist_items and len(playlist_items) < MIN_PLAYLIST_SIZE:
+                    logger.info(
+                        "Fresh playlist for %s too small (%s items) - topping up from historical window",
+                        content_type.value,
+                        len(playlist_items),
+                    )
+                    playlist_items = self._top_up_items_with_historical(
+                        device_id=device_id,
+                        content_type=content_type,
+                        selected_items=playlist_items,
+                        target_size=MAX_PLAYLIST_SIZE,
+                    )
 
-            # If no new approved content is available, keep serving the prior feed.
-            if not playlist:
-                playlist = self._load_fallback_playlist(device_id, content_type)
+                duration_overrides = self._hydrate_duration_overrides(playlist_items)
+                playlist = [
+                    self._format_item(item, duration_overrides=duration_overrides)
+                    for item in playlist_items
+                ]
+                snapshot = self._snapshot_from_items(
+                    playlist,
+                    generated_at=datetime.utcnow(),
+                    inventory_state=_playlist_inventory_state(
+                        item_count=len(playlist),
+                        remaining_count=0,
+                        offset=0,
+                    ),
+                    source="db",
+                    cache_key=cache_key,
+                    cache_hit=False,
+                )
+
+            if not snapshot["items"]:
+                snapshot = self._load_fallback_snapshot(device_id, content_type)
 
             # Cache the session snapshot + latest fallback snapshot
-            if self.redis and playlist:
-                self._set_session_cache(cache_key, playlist)
-                self._set_cache(self._get_cache_key(device_id, content_type), playlist)
+            if self.redis and snapshot["items"]:
+                self._set_session_cache(cache_key, snapshot)
+                self._set_cache(self._get_cache_key(device_id, content_type), snapshot)
 
         # Cursor-based pagination
         start_cursor = cursor or 0
+        playlist = snapshot["items"]
         items = playlist[start_cursor : start_cursor + size]
         next_cursor = start_cursor + len(items) if len(items) > 0 else None
         has_more = start_cursor + len(items) < len(playlist)
@@ -207,7 +248,188 @@ class PlaylistService:
             "cursor": next_cursor,
             "has_more": has_more,
             "total_items": len(playlist),
+            "inventory_state": snapshot.get("inventory_state"),
+            "feed_version": snapshot.get("feed_version"),
+            "served_at": snapshot.get("generated_at"),
+            "newest_published_at": snapshot.get("newest_published_at"),
+            "newest_created_at": snapshot.get("newest_created_at"),
+            "remaining_count": snapshot.get("remaining_count", 0),
+            "source": snapshot.get("source", "db"),
+            "cache_key": snapshot.get("cache_key", cache_key),
+            "cache_hit": bool(snapshot.get("cache_hit", False)),
         }
+
+    def _supports_tiered_snapshots(self) -> bool:
+        if not isinstance(self.content_repo, ContentItemRepository):
+            return False
+        db = getattr(self.content_repo, "db", None)
+        return db is not None and hasattr(db, "query")
+
+    def _generate_tiered_snapshot(
+        self, device_id: str, content_type: ContentType
+    ) -> Dict[str, Any]:
+        db = self.content_repo.db
+        surface = _surface_for_content_type(content_type)
+        hybrid_video_rerank = content_type in (
+            ContentType.VIDEO,
+            ContentType.REEL,
+        ) and FeatureFlags().is_enabled("video_hybrid_rerank")
+        items, _has_more, meta = get_cached_tiered_feed(
+            db,
+            surface,
+            limit=MAX_PLAYLIST_SIZE,
+            offset=0,
+            require_ai_processed=content_type == ContentType.ARTICLE,
+            hybrid_video_rerank=hybrid_video_rerank,
+            device_id=device_id,
+        )
+
+        if items:
+            category_repo = UserCategorySelectionRepository(db)
+            selected_categories = category_repo.get_selected_categories(device_id)
+            total_learned_weight = category_repo.get_total_learned_weight(device_id)
+            if selected_categories:
+                items = rerank_feed(
+                    items=items,
+                    selected_categories=selected_categories,
+                    total_learned_weight=total_learned_weight,
+                    window_size=max(len(items), 1),
+                )
+
+        return self._snapshot_from_items(
+            items,
+            generated_at=meta.generated_at,
+            inventory_state=_playlist_inventory_state(
+                item_count=len(items),
+                remaining_count=meta.remaining_window_count,
+                offset=0,
+            ),
+            source=meta.source,
+            cache_key=meta.cache_key,
+            cache_hit=meta.cache_hit,
+            remaining_count=meta.remaining_window_count,
+        )
+
+    def _snapshot_from_items(
+        self,
+        items: List[Dict[str, Any]],
+        *,
+        generated_at: datetime,
+        inventory_state: str,
+        source: str,
+        cache_key: Optional[str] = None,
+        cache_hit: bool = False,
+        remaining_count: int = 0,
+    ) -> Dict[str, Any]:
+        newest_published_at, newest_created_at = self._newest_dates(items)
+        return {
+            "items": items,
+            "generated_at": generated_at.isoformat(),
+            "inventory_state": inventory_state,
+            "feed_version": compute_feed_version(items, generated_at),
+            "newest_published_at": newest_published_at,
+            "newest_created_at": newest_created_at,
+            "remaining_count": remaining_count,
+            "source": source,
+            "cache_key": cache_key,
+            "cache_hit": cache_hit,
+        }
+
+    def _snapshot_from_cached_payload(
+        self,
+        payload: Any,
+        *,
+        content_type: ContentType,
+        cache_key: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        if payload is None:
+            return None
+
+        if isinstance(payload, dict):
+            items = payload.get("items")
+            if not isinstance(items, list) or not self._is_cache_compatible(items, content_type):
+                return None
+            generated_at_raw = payload.get("generated_at")
+            try:
+                generated_at = (
+                    datetime.fromisoformat(generated_at_raw)
+                    if isinstance(generated_at_raw, str) and generated_at_raw
+                    else datetime.utcnow()
+                )
+            except ValueError:
+                generated_at = datetime.utcnow()
+            snapshot = dict(payload)
+            snapshot.setdefault("generated_at", generated_at.isoformat())
+            snapshot.setdefault(
+                "inventory_state",
+                _playlist_inventory_state(
+                    item_count=len(items),
+                    remaining_count=int(payload.get("remaining_count", 0) or 0),
+                    offset=0,
+                ),
+            )
+            snapshot.setdefault("feed_version", compute_feed_version(items, generated_at))
+            newest_published_at, newest_created_at = self._newest_dates(items)
+            snapshot.setdefault("newest_published_at", newest_published_at)
+            snapshot.setdefault("newest_created_at", newest_created_at)
+            snapshot["cache_key"] = cache_key or snapshot.get("cache_key")
+            snapshot["cache_hit"] = True
+            snapshot.setdefault("source", "redis")
+            return snapshot
+
+        if isinstance(payload, list) and self._is_cache_compatible(payload, content_type):
+            return self._snapshot_from_items(
+                payload,
+                generated_at=datetime.utcnow(),
+                inventory_state=_playlist_inventory_state(
+                    item_count=len(payload),
+                    remaining_count=0,
+                    offset=0,
+                ),
+                source="redis",
+                cache_key=cache_key,
+                cache_hit=True,
+            )
+
+        return None
+
+    def _load_fallback_snapshot(self, device_id: str, content_type: ContentType) -> Dict[str, Any]:
+        if self.redis:
+            cache_key = self._get_cache_key(device_id, content_type)
+            cached = self._get_from_cache(cache_key)
+            snapshot = self._snapshot_from_cached_payload(
+                cached,
+                content_type=content_type,
+                cache_key=cache_key,
+            )
+            if snapshot is not None:
+                logger.info("Serving cached fallback playlist for %s", content_type.value)
+                return snapshot
+
+        playlist = self._load_fallback_playlist(device_id, content_type)
+        return self._snapshot_from_items(
+            playlist,
+            generated_at=datetime.utcnow(),
+            inventory_state=_playlist_inventory_state(
+                item_count=len(playlist),
+                remaining_count=0,
+                offset=0,
+            ),
+            source="db",
+            cache_hit=False,
+        )
+
+    def _newest_dates(self, items: List[Dict[str, Any]]) -> Tuple[Optional[str], Optional[str]]:
+        newest_published_at = None
+        newest_created_at = None
+        for item in items:
+            published_at = item.get("published_at")
+            created_at = item.get("created_at")
+            if published_at and (newest_published_at is None or published_at > newest_published_at):
+                newest_published_at = published_at
+            if created_at and (newest_created_at is None or created_at > newest_created_at):
+                newest_created_at = created_at
+        return newest_published_at, newest_created_at
 
     def _generate_playlist(
         self, device_id: str, content_type: ContentType, size: int
@@ -319,9 +541,13 @@ class PlaylistService:
         if self.redis:
             cache_key = self._get_cache_key(device_id, content_type)
             cached = self._get_from_cache(cache_key)
-            if cached and self._is_cache_compatible(cached, content_type):
+            if isinstance(cached, dict) and isinstance(cached.get("items"), list):
+                cached_items = cached["items"]
+            else:
+                cached_items = cached
+            if cached_items and self._is_cache_compatible(cached_items, content_type):
                 logger.info("Serving cached fallback playlist for %s", content_type.value)
-                return cached
+                return cached_items
             if cached:
                 logger.info(
                     "Discarding stale fallback playlist cache for %s; incompatible payload",
@@ -636,9 +862,22 @@ class PlaylistService:
             "image_url": item.image_url,
             "video_url": item.video_url,
             "duration": duration_seconds,
+            "duration_seconds": duration_seconds,
+            "thumbnail_url": item.image_url,
+            "category": item.topics[0] if item.topics else None,
             "topics": item.topics or [],
             "entities": item.entities or [],
             "published_at": item.published_at.isoformat() if item.published_at else None,
+            "created_at": item.created_at.isoformat()
+            if getattr(item, "created_at", None)
+            else None,
+            "freshness_tier": None,
+            "freshness_reason": None,
+            "published_age_seconds": None,
+            "added_age_seconds": None,
+            "read_time_minutes": max(1, len(item.summary or "") // 200)
+            if item_type == ContentType.ARTICLE
+            else None,
             "global_score": item.global_score,
             "cluster_id": item.cluster_id,
             "conversation_starters": item.conversation_starters,
@@ -697,7 +936,7 @@ class PlaylistService:
             return VIDEO_REEL_PLAYLIST_CACHE_PREFIX
         return PLAYLIST_CACHE_PREFIX
 
-    def _get_from_cache(self, key: str) -> Optional[List[Dict]]:
+    def _get_from_cache(self, key: str) -> Optional[Any]:
         """Get playlist from Redis cache."""
         try:
             data = self.redis.get(key)
@@ -707,14 +946,14 @@ class PlaylistService:
             logger.warning(f"Cache get error: {e}")
         return None
 
-    def _set_cache(self, key: str, playlist: List[Dict]):
+    def _set_cache(self, key: str, playlist: Any):
         """Set playlist in Redis cache (short TTL for legacy)."""
         try:
             self.redis.setex(key, PLAYLIST_CACHE_TTL_SECONDS, json.dumps(playlist))
         except Exception as e:
             logger.warning(f"Cache set error: {e}")
 
-    def _set_session_cache(self, key: str, playlist: List[Dict]):
+    def _set_session_cache(self, key: str, playlist: Any):
         """Set session snapshot in Redis cache (longer TTL)."""
         try:
             self.redis.setex(key, SESSION_SNAPSHOT_TTL_SECONDS, json.dumps(playlist))

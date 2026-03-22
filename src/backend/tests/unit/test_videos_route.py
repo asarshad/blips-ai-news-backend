@@ -72,6 +72,7 @@ def test_get_recent_videos_surfaces_promoted_items_without_ai_gate(monkeypatch):
     assert captured["device_id"] == "device-12345678"
     assert result["items"][0]["title"] == "Fresh promoted video"
     assert result["inventory_state"] == "caught_up"
+    assert result["window_days"] == 3
     assert response.headers["X-Test-Feed"] == "1"
 
 
@@ -213,3 +214,4 @@ def test_get_reels_passes_hybrid_rerank_flag(monkeypatch):
     assert captured["hybrid_video_rerank"] is True
     assert captured["device_id"] == "device-reels"
     assert result["inventory_state"] == "warming_up"
+    assert result["window_days"] == 7

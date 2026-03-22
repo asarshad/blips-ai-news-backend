@@ -1,6 +1,4 @@
-"""
-Pydantic schemas for analytics events (impression / click).
-"""
+"""Pydantic schemas for analytics and freshness events."""
 
 from typing import Optional
 
@@ -50,6 +48,24 @@ class EventPayload(BaseModel):
     load_status: Optional[str] = Field(
         default=None,
         description="Load result for ad lifecycle events, e.g. 'loaded' or 'failed'.",
+    )
+    event_name: Optional[str] = Field(
+        default=None,
+        description="Optional named analytics event such as 'new_content_available'.",
+    )
+    count: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=1000,
+        description="Optional counter payload for aggregated analytics events.",
+    )
+    feed_version: Optional[str] = Field(
+        default=None,
+        description="Feed version associated with the analytics event.",
+    )
+    freshness_tier: Optional[str] = Field(
+        default=None,
+        description="Optional freshness tier for the referenced content.",
     )
 
 

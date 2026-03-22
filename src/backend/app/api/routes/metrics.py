@@ -22,6 +22,7 @@ from app.models.ingestion_progress import IngestionProgress
 from app.models.source import SourceDailyStat
 from app.services.ai_metrics import compute_ai_feed_metrics
 from app.services.feed_health import compute_inventory_health
+from app.services.freshness_metrics_service import compute_freshness_metrics
 from app.services.video_metrics_service import (
     compute_video_lane_metrics,
     compute_video_source_metrics,
@@ -551,6 +552,19 @@ def get_signal_metrics(
             "error": str(exc),
             "as_of": datetime.now(timezone.utc).isoformat(),
         }
+
+
+@router.get("/freshness", dependencies=[Depends(require_admin_key)])
+def get_freshness_metrics(
+    hours: int = Query(24, ge=1, le=168, description="Look-back window in hours"),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Get freshness analytics across serving, engagement, and top-up behavior."""
+    try:
+        return compute_freshness_metrics(db, hours=hours)
+    except Exception as exc:
+        logger.error("Error getting freshness metrics: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/video-supply", dependencies=[Depends(require_admin_key)])

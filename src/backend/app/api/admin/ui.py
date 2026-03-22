@@ -1461,7 +1461,7 @@ def ui_dashboard(
             </div>
           </div>
           ''',
-            subtitle="The selected day still matters for editorial operations even though video and reel serving now uses a rolling 7-day inventory model.",
+            subtitle="The selected day still matters for editorial operations even though video and reel serving now uses rolling freshness and reservoir windows.",
             tone="green",
         )
     }

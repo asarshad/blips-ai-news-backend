@@ -17,6 +17,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.services.freshness_metrics_service import (
+    record_topup_completed,
+    record_topup_triggered,
+)
 from app.services.inventory_service import (
     InventoryHealth,
     get_cached_inventory_health,
@@ -123,6 +127,7 @@ def trigger_topup_async(db_factory, priority_surfaces: list = None):
 
     _last_topup_trigger = now
     logger.info(f"Triggering async top-up for surfaces: {priority_surfaces or 'all'}")
+    record_topup_triggered(priority_surfaces)
 
     # Start background thread
     thread = threading.Thread(
@@ -190,6 +195,11 @@ def _run_topup(db_factory, priority_surfaces: list = None):
 
             elapsed = (datetime.utcnow() - start).total_seconds()
             logger.info(f"Top-up finished: {cycles} cycles in {elapsed:.1f}s")
+            record_topup_completed(
+                priority_surfaces=priority_surfaces,
+                duration_seconds=elapsed,
+                cycles=cycles,
+            )
 
         finally:
             db.close()

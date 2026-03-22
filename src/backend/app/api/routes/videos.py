@@ -20,6 +20,7 @@ from app.models.content import ContentType
 from app.repositories.content_repo import ContentItemRepository
 from app.schemas.video import Video as VideoSchema
 from app.services.ad_mixer import inject_ads
+from app.services.freshness_metrics_service import record_feed_served
 from app.services.inventory_service import Surface
 from app.services.tiered_feed_service import get_cached_tiered_feed
 from app.services.topup_service import check_and_trigger_topup
@@ -62,7 +63,8 @@ def _cursor_to_offset(cursor: Optional[str], limit: int, page: Optional[int]) ->
     return 0
 
 
-FEED_WINDOW_DAYS = 7
+VIDEOS_WINDOW_DAYS = max(1, settings.VIDEOS_FRESH_PUBLISHED_HOURS // 24)
+REELS_WINDOW_DAYS = max(1, settings.REELS_FRESH_PUBLISHED_HOURS // 24)
 
 
 def _inventory_state(*, item_count: int, remaining_count: int, offset: int) -> str:
@@ -88,7 +90,7 @@ def get_recent_videos(
     Get the most recent videos using tiered freshness strategy.
 
     Returns a blend of:
-    - Tier A (Fresh): videos published within the rolling 7-day curated window
+    - Tier A (Fresh): videos published within the rolling 72-hour window
     - Tier B (Backfill): videos added recently but published earlier
     - Tier C (Evergreen): older high-quality videos
 
@@ -136,24 +138,46 @@ def get_recent_videos(
             feed_version=compute_feed_version(videos, meta.generated_at),
         )
         feed_meta.add_headers(response)
+    else:
+        feed_meta = FeedMetadata(
+            generated_at=meta.generated_at,
+            source=meta.source,
+            cache_key=meta.cache_key,
+            cache_hit=meta.cache_hit,
+            items=videos,
+            surface="videos",
+            tier_config=meta.tier_config,
+            feed_version=compute_feed_version(videos, meta.generated_at),
+        )
 
     # Ad injection (noop when ADS_ENABLED is false)
     mixed, ads_injected = inject_ads(videos, placement_id="feed_fullpage")
     if response:
         response.headers["X-Ads-Injected"] = str(ads_injected)
         response.headers["X-Ads-Frequency"] = str(settings.ADS_FEED_FREQUENCY)
+    inventory_state = _inventory_state(
+        item_count=len(mixed),
+        remaining_count=getattr(meta, "remaining_window_count", 0),
+        offset=offset,
+    )
+    newest_published_at, newest_created_at = feed_meta.get_newest_dates()
+    record_feed_served(
+        surface="videos",
+        feed_version=feed_meta.feed_version,
+        inventory_state=inventory_state,
+        items=videos,
+    )
 
     return {
         "items": mixed,
         "next_cursor": str(offset + limit) if has_more else None,
         "has_more": has_more,
         "served_at": meta.generated_at.isoformat(),
-        "inventory_state": _inventory_state(
-            item_count=len(mixed),
-            remaining_count=getattr(meta, "remaining_window_count", 0),
-            offset=offset,
-        ),
-        "window_days": FEED_WINDOW_DAYS,
+        "inventory_state": inventory_state,
+        "feed_version": feed_meta.feed_version,
+        "newest_published_at": newest_published_at,
+        "newest_created_at": newest_created_at,
+        "window_days": VIDEOS_WINDOW_DAYS,
         "remaining_count": getattr(meta, "remaining_window_count", 0),
     }
 
@@ -219,18 +243,41 @@ def get_reels(
             feed_version=compute_feed_version(videos, meta.generated_at),
         )
         feed_meta.add_headers(response)
+    else:
+        feed_meta = FeedMetadata(
+            generated_at=meta.generated_at,
+            source=meta.source,
+            cache_key=meta.cache_key,
+            cache_hit=meta.cache_hit,
+            items=videos,
+            surface="reels",
+            tier_config=meta.tier_config,
+            feed_version=compute_feed_version(videos, meta.generated_at),
+        )
+
+    inventory_state = _inventory_state(
+        item_count=len(videos),
+        remaining_count=getattr(meta, "remaining_window_count", 0),
+        offset=offset,
+    )
+    newest_published_at, newest_created_at = feed_meta.get_newest_dates()
+    record_feed_served(
+        surface="reels",
+        feed_version=feed_meta.feed_version,
+        inventory_state=inventory_state,
+        items=videos,
+    )
 
     return {
         "items": videos,
         "next_cursor": str(offset + limit) if has_more else None,
         "has_more": has_more,
         "served_at": meta.generated_at.isoformat(),
-        "inventory_state": _inventory_state(
-            item_count=len(videos),
-            remaining_count=getattr(meta, "remaining_window_count", 0),
-            offset=offset,
-        ),
-        "window_days": FEED_WINDOW_DAYS,
+        "inventory_state": inventory_state,
+        "feed_version": feed_meta.feed_version,
+        "newest_published_at": newest_published_at,
+        "newest_created_at": newest_created_at,
+        "window_days": REELS_WINDOW_DAYS,
         "remaining_count": getattr(meta, "remaining_window_count", 0),
     }
 

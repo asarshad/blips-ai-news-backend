@@ -157,12 +157,12 @@ class TestSurfaceConfig:
         assert cfg["reservoir"] == 250
 
     def test_videos_config(self):
-        """Videos now use the same 7-day curated window as reels."""
+        """Videos use a shorter fresh window than reels."""
         from app.services.inventory_service import _get_surface_config
 
         cfg = _get_surface_config(Surface.VIDEOS)
 
-        assert cfg["fresh_hours"] == 168
+        assert cfg["fresh_hours"] == 72
         assert cfg["evergreen_days"] > 14
 
     def test_reels_config(self):

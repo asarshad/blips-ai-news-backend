@@ -93,6 +93,12 @@ class SurfaceHealth:
     recent_refresh_count: int = 0
     recent_refresh_threshold: int = 0
     refresh_window_hours: int = 0
+    newest_published_at: Optional[str] = None
+    newest_created_at: Optional[str] = None
+    fresh_count: int = 0
+    total_reservoir_size: int = 0
+    stale_ratio: float = 0.0
+    source_diversity: Dict[str, Any] = field(default_factory=dict)
     is_healthy: bool = True
     issues: List[str] = field(default_factory=list)
 
@@ -103,11 +109,17 @@ class SurfaceHealth:
             "newest_item_age_seconds": self.newest_item_age_seconds,
             "oldest_tier_a_age_seconds": self.oldest_tier_a_age_seconds,
             "reservoir_count": self.reservoir_count,
+            "fresh_count": self.fresh_count,
+            "total_reservoir_size": self.total_reservoir_size,
             "min_fresh_threshold": self.min_fresh_threshold,
             "recent_refresh_count": self.recent_refresh_count,
             "recent_refresh_threshold": self.recent_refresh_threshold,
             "refresh_window_hours": self.refresh_window_hours,
             "reservoir_threshold": self.reservoir_threshold,
+            "newest_published_at": self.newest_published_at,
+            "newest_created_at": self.newest_created_at,
+            "stale_ratio": self.stale_ratio,
+            "source_diversity": self.source_diversity,
             "is_healthy": self.is_healthy,
             "issues": self.issues,
             "source_distribution": self.source_distribution.to_dict(),
@@ -303,6 +315,15 @@ def compute_surface_health(
     )
     newest_age = int((now - newest).total_seconds()) if newest else None
 
+    newest_created = (
+        apply_content_policy(
+            db.query(func.max(ContentItem.created_at)).select_from(ContentItem),
+            content_type=content_type,
+        )
+        .filter(base_filter, reservoir_filter)
+        .scalar()
+    )
+
     # Oldest Tier A item age
     oldest_tier_a = (
         apply_content_policy(
@@ -325,6 +346,20 @@ def compute_surface_health(
     source_distribution = SourceDistribution(
         counts={row[0] or "Unknown": row[1] for row in source_dist_rows}
     )
+    unique_sources = len(source_distribution.counts)
+    dominant_source = None
+    dominant_source_share_percent = 0.0
+    if source_distribution.counts:
+        dominant_source, dominant_source_count = max(
+            source_distribution.counts.items(),
+            key=lambda item: item[1],
+        )
+        dominant_source_share_percent = round(
+            dominant_source_count / max(reservoir_count, 1) * 100,
+            2,
+        )
+
+    stale_ratio = round(max(reservoir_count - tier_a_count, 0) / max(reservoir_count, 1), 3)
 
     # Evaluate health and issues
     issues = []
@@ -361,6 +396,16 @@ def compute_surface_health(
         recent_refresh_threshold=cfg.get("min_refresh", cfg["min_fresh"]),
         refresh_window_hours=cfg.get("refresh_hours", cfg["fresh_hours"]),
         reservoir_threshold=cfg["reservoir"],
+        newest_published_at=newest.isoformat() if newest else None,
+        newest_created_at=newest_created.isoformat() if newest_created else None,
+        fresh_count=tier_a_count,
+        total_reservoir_size=reservoir_count,
+        stale_ratio=stale_ratio,
+        source_diversity={
+            "unique_sources": unique_sources,
+            "dominant_source": dominant_source,
+            "dominant_share_percent": dominant_source_share_percent,
+        },
         source_distribution=source_distribution,
         is_healthy=is_healthy,
         issues=issues,

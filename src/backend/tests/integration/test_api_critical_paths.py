@@ -103,6 +103,8 @@ class TestContentEndpoints:
             assert "items" in data
             assert "session_id" in data
             assert "has_more" in data
+            assert "feed_version" in data
+            assert "inventory_state" in data
 
 
 class TestInventoryEndpoints:
