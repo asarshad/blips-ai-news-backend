@@ -90,7 +90,7 @@ class TestVideosFeedAiProcessed:
         return_pos = source.index("return {")
         assert header_pos < return_pos
         assert "raise HTTPException(status_code=404" not in source
-        assert '"inventory_state": _inventory_state' in source
+        assert '"inventory_state": inventory_state' in source
 
 
 # ---------------------------------------------------------------------------

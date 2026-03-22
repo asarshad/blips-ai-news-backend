@@ -60,7 +60,7 @@ def test_inventory_state_flags_recent_refresh_gap():
 
 
 def test_surface_windows_follow_curated_weekly_model():
-    assert _surface_window_hours("videos") == 168
+    assert _surface_window_hours("videos") == 72
     assert _surface_window_hours("reels") == 168
 
 

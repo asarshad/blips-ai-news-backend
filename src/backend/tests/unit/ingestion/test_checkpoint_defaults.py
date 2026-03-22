@@ -279,7 +279,10 @@ def test_fresh_promoted_count_uses_surface_age_filters_for_video_fresh_window(mo
 
 def test_should_fill_surface_when_recent_video_refresh_is_stale(monkeypatch):
     counts = {
-        (ContentType.VIDEO, 168): 79,
+        (
+            ContentType.VIDEO,
+            checkpoint_defaults.settings.VIDEOS_FRESH_PUBLISHED_HOURS,
+        ): 79,
         (ContentType.VIDEO, checkpoint_defaults.settings.VIDEOS_REFRESH_PUBLISHED_HOURS): 0,
     }
 
