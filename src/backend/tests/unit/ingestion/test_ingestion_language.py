@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
+from app.core.config import get_settings
 from app.extraction.metrics import ExtractionMetrics
 from app.models.content import ContentType
 
@@ -203,6 +204,65 @@ class TestRssIngestionLanguageFilter:
                 pipeline.ingest_rss_entry(entry)
 
         pipeline.llm_client.summarize_article.assert_not_called()
+
+    def test_article_summary_skips_text_below_min_word_bound(self):
+        """Very short article bodies should not trigger AI summarization."""
+        pipeline = _make_pipeline()
+        pipeline.llm_client.is_configured.return_value = True
+        entry = _make_feed_entry(
+            title="OpenAI adds a small settings tweak",
+            content="Short body",
+        )
+
+        with patch("app.ingestion.service.run_extraction") as mock_extract:
+            mock_result = MagicMock()
+            mock_result.main_text = "brief update " * 20
+            mock_result.title = entry.title
+            mock_result.image_url = None
+            mock_result.canonical_url = None
+            mock_result.published_at = None
+            mock_result.excerpt_fallback = None
+            mock_extract.return_value = mock_result
+
+            with (
+                patch("app.ingestion.service.extraction_metrics"),
+                patch("app.ingestion.service.is_english", return_value=True),
+            ):
+                pipeline.ingest_rss_entry(entry)
+
+        pipeline.llm_client.summarize_article.assert_not_called()
+
+    def test_article_summary_truncates_text_above_max_word_bound(self):
+        """Very long article bodies should be clipped before sending to the LLM."""
+        pipeline = _make_pipeline()
+        pipeline.llm_client.is_configured.return_value = True
+        pipeline.llm_client.summarize_article.return_value = MagicMock(
+            summary="A bounded summary that is comfortably above fifty characters long.",
+            conversation_starters=None,
+        )
+        entry = _make_feed_entry(title="OpenAI expands developer tooling", content="Long body")
+        settings = get_settings()
+        long_text = " ".join(["token"] * (settings.ARTICLE_SUMMARY_MAX_WORDS + 75))
+
+        with patch("app.ingestion.service.run_extraction") as mock_extract:
+            mock_result = MagicMock()
+            mock_result.main_text = long_text
+            mock_result.title = entry.title
+            mock_result.image_url = None
+            mock_result.canonical_url = None
+            mock_result.published_at = None
+            mock_result.excerpt_fallback = None
+            mock_extract.return_value = mock_result
+
+            with (
+                patch("app.ingestion.service.extraction_metrics"),
+                patch("app.ingestion.service.is_english", return_value=True),
+            ):
+                pipeline.ingest_rss_entry(entry)
+
+        assert pipeline.llm_client.summarize_article.called
+        summary_input = pipeline.llm_client.summarize_article.call_args.args[1]
+        assert len(summary_input.split()) == settings.ARTICLE_SUMMARY_MAX_WORDS
 
 
 # ── YouTube ingestion language tests ─────────────────────────────────────────

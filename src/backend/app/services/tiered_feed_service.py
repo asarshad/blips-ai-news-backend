@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from sqlalchemy import and_, desc, func, or_
 from sqlalchemy.orm import Session
 
+from app.article_hydration import display_article_title
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentStatus, ContentType, EventType
@@ -532,7 +533,12 @@ def tiered_item_to_dict(
     # Base fields (backward compatible)
     result = {
         "id": item.id,
-        "title": item.title,
+        "title": display_article_title(
+            item.title,
+            getattr(item, "canonical_url", None) or item.source_url,
+        )
+        if item_type == ContentType.ARTICLE
+        else item.title,
         "source_url": item.source_url,
         "summary": summary,
         "image_url": item.image_url or None,  # coerce empty string to null
@@ -587,6 +593,32 @@ def tiered_item_to_dict(
         }
 
     return result
+
+
+def _normalize_cached_article_titles(
+    items: List[Dict[str, Any]],
+    surface: Surface,
+) -> List[Dict[str, Any]]:
+    """Patch cached article payloads so pending placeholders do not leak into the UI."""
+    if surface != Surface.ARTICLES:
+        return items
+
+    normalized: List[Dict[str, Any]] = []
+    mutated = False
+    for item in items:
+        current_title = item.get("title")
+        if not current_title:
+            normalized.append(item)
+            continue
+        display_title = display_article_title(current_title, item.get("source_url"))
+        if display_title != current_title:
+            updated = dict(item)
+            updated["title"] = display_title
+            normalized.append(updated)
+            mutated = True
+        else:
+            normalized.append(item)
+    return normalized if mutated else items
 
 
 def get_cached_tiered_feed(
@@ -652,7 +684,11 @@ def get_cached_tiered_feed(
                     surface=surface.value,
                 )
                 meta.remaining_window_count = int(data.get("remaining_window_count", 0) or 0)
-                return data["items"], data["has_more"], meta
+                return (
+                    _normalize_cached_article_titles(data["items"], surface),
+                    data["has_more"],
+                    meta,
+                )
         except Exception as e:
             logger.debug(f"Cache read failed: {e}")
 

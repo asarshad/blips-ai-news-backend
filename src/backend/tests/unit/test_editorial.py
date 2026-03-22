@@ -137,6 +137,10 @@ class TestEditorialServiceSubmit:
         db.add.assert_called_once()
         repo.log_add_action.assert_called_once()
 
+        created = db.add.call_args.args[0]
+        assert created.title == "[pending] Post 1"
+        assert "https://" not in created.title
+
     def test_submit_rolls_back_on_integrity_error(self):
         repo = MagicMock()
         existing = FakeContentItem(id=77, editorial_boost=0)
@@ -289,6 +293,47 @@ class TestEditorialServiceApproval:
         assert item.summary == "A complete existing summary that is already long enough to keep."
         hydrator.summarize_article.assert_not_called()
 
+    def test_approve_uses_url_fallback_title_when_extraction_has_no_title(self):
+        repo = MagicMock()
+        item = FakeContentItem(
+            id=15,
+            type=ContentType.ARTICLE,
+            source_url="https://www.bloomberg.com/news/articles/2026-03-21/openai-plans-to-nearly-double-its-headcount-this-year",
+            title="[pending] Article pending enrichment",
+            content_text=None,
+            summary=None,
+            ai_processed=False,
+        )
+        repo.get_content_by_id.return_value = item
+        repo.approve.return_value = item
+
+        svc = self._make_service(repo)
+        hydrator = ArticleHydrationService()
+        hydrator.run_article_extraction = MagicMock(
+            return_value=SimpleNamespace(
+                canonical_url=item.source_url,
+                title=None,
+                published_at=None,
+                image_url=None,
+                main_text="OpenAI is planning a large hiring push across research and product teams. "
+                * 40,
+                excerpt_fallback=None,
+            )
+        )
+        hydrator.summarize_article = MagicMock(
+            return_value=SimpleNamespace(
+                summary="OpenAI is preparing a major hiring expansion to support broader AI research and product development.",
+                conversation_starters=None,
+            )
+        )
+        svc._article_hydrator = hydrator
+
+        result = svc.approve_content(15, actor="reviewer")
+
+        assert result is item
+        assert item.title == "OpenAI Plans To Nearly Double Its Headcount This Year"
+        repo.approve.assert_called_once_with(15, actor="reviewer", note=None)
+
     def test_approve_still_promotes_when_hydration_fails(self):
         repo = MagicMock()
         item = FakeContentItem(
@@ -337,6 +382,41 @@ class TestEditorialServiceApproval:
         assert result is item
         hydrator.summarize_article.assert_not_called()
         repo.approve.assert_called_once_with(13, actor="reviewer", note=None)
+
+    def test_approve_does_not_summarize_short_article_text(self):
+        repo = MagicMock()
+        item = FakeContentItem(
+            id=16,
+            type=ContentType.ARTICLE,
+            source_url="https://example.com/story",
+            title="[pending] Story",
+            content_text=None,
+            description=None,
+            summary=None,
+            ai_processed=False,
+        )
+        repo.get_content_by_id.return_value = item
+        repo.approve.return_value = item
+
+        svc = self._make_service(repo)
+        hydrator = ArticleHydrationService()
+        hydrator.run_article_extraction = MagicMock(
+            return_value=SimpleNamespace(
+                canonical_url=item.source_url,
+                title="Example story",
+                published_at=None,
+                image_url=None,
+                main_text="Tiny article. " * 20,
+                excerpt_fallback=None,
+            )
+        )
+        hydrator.summarize_article = MagicMock()
+        svc._article_hydrator = hydrator
+
+        result = svc.approve_content(16, actor="reviewer")
+
+        assert result is item
+        hydrator.summarize_article.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

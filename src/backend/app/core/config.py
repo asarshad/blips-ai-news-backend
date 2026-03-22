@@ -182,6 +182,8 @@ class Settings(BaseSettings):
     EXTRACTION_DOMAIN_MIN_INTERVAL: float = 1.0  # seconds between requests to same domain
     EXTRACTION_MIN_TEXT_WORDS: int = 100  # minimum words for "good" text
     EXTRACTION_IDEAL_TEXT_WORDS: int = 300  # word count for 1.0 quality score
+    ARTICLE_SUMMARY_MIN_WORDS: int = 120  # skip LLM summary for thin article text
+    ARTICLE_SUMMARY_MAX_WORDS: int = 1200  # clip very long article text before summarizing
     SOURCE_HEALTH_DEGRADED_THRESHOLD: float = 0.3  # below this, mark source degraded
 
     # Minimum fresh counts per surface (triggers top-up if below)

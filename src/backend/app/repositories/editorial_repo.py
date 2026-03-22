@@ -31,6 +31,7 @@ class EditorialRepository:
         *,
         day: Optional[date] = None,
         content_type: Optional[str] = None,
+        search_text: Optional[str] = None,
         source: Optional[str] = None,
         suppressed: Optional[bool] = None,
         manual_added: Optional[bool] = None,
@@ -61,6 +62,19 @@ class EditorialRepository:
             ct = content_type.upper()
             if ct in ContentType.__members__:
                 query = query.filter(ContentItem.type == ContentType[ct])
+
+        if search_text is not None and search_text.strip():
+            pattern = f"%{search_text.strip()}%"
+            query = query.filter(
+                or_(
+                    ContentItem.title.ilike(pattern),
+                    ContentItem.summary.ilike(pattern),
+                    ContentItem.description.ilike(pattern),
+                    ContentItem.source_url.ilike(pattern),
+                    ContentItem.canonical_url.ilike(pattern),
+                    ContentItem.source.ilike(pattern),
+                )
+            )
 
         if source is not None:
             query = query.filter(ContentItem.source.ilike(f"%{source}%"))

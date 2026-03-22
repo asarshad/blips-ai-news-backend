@@ -82,3 +82,18 @@ def test_list_content_has_image_false_filters_blank_or_null_image_urls():
     assert "image_url" in rendered
     assert "length" in rendered.lower()
     assert "= :length_" in rendered or "= :param_" in rendered
+
+
+def test_list_content_search_text_filters_title_summary_and_url():
+    session = MagicMock()
+    repo = EditorialRepository(session)
+    query = _make_query_chain(session)
+
+    repo.list_content(search_text="openai", page=1, page_size=50)
+
+    assert query.filter.call_count == 1
+    rendered = str(query.filter.call_args_list[0].args[0]).lower()
+    assert "title" in rendered
+    assert "summary" in rendered
+    assert "description" in rendered
+    assert "source_url" in rendered

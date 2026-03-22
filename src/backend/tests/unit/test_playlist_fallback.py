@@ -42,6 +42,17 @@ class _RankingStub:
         return float(item.id) + float(personalization_score)
 
 
+class _MemoryRedis:
+    def __init__(self):
+        self._values = {}
+
+    def get(self, key):
+        return self._values.get(key)
+
+    def setex(self, key, ttl, value):  # noqa: ARG002
+        self._values[key] = value
+
+
 def test_get_playlist_falls_back_to_cached_snapshot_when_no_new_candidates():
     content_repo = MagicMock()
     content_repo.get_items_for_playlist.return_value = []
@@ -256,6 +267,109 @@ def test_get_playlist_discards_stale_cached_snapshot_missing_conversation_starte
     assert result["items"][0]["id"] == 10
     assert result["items"][0]["conversation_starters"]["starters"] == ["Question for 10?"]
     assert redis.setex.called
+
+
+def test_get_playlist_extends_session_snapshot_beyond_initial_100_items(monkeypatch):
+    content_repo = MagicMock()
+    content_repo.db = MagicMock()
+    content_repo.db.query = MagicMock()
+
+    personalization = MagicMock()
+    personalization.compute_personalization_score.return_value = 0.1
+
+    from app.services import playlist_service as playlist_service_module
+
+    calls = []
+
+    def _fake_get_cached_tiered_feed(
+        db,  # noqa: ARG001
+        surface,  # noqa: ARG001
+        limit,
+        offset,
+        require_ai_processed,  # noqa: ARG001
+        hybrid_video_rerank,  # noqa: ARG001
+        device_id,  # noqa: ARG001
+    ):
+        calls.append((limit, offset))
+        if offset == 0:
+            items = [
+                {
+                    "id": idx,
+                    "type": "ARTICLE",
+                    "conversation_starters": {"starters": [], "fallback": []},
+                }
+                for idx in range(1, 101)
+            ]
+            meta = SimpleNamespace(
+                generated_at=datetime.now(timezone.utc),
+                source="db",
+                cache_key="tiered:articles:0",
+                cache_hit=False,
+                remaining_window_count=60,
+            )
+            return items, True, meta
+        if offset == 100:
+            items = [
+                {
+                    "id": idx,
+                    "type": "ARTICLE",
+                    "conversation_starters": {"starters": [], "fallback": []},
+                }
+                for idx in range(101, 151)
+            ]
+            meta = SimpleNamespace(
+                generated_at=datetime.now(timezone.utc),
+                source="db",
+                cache_key="tiered:articles:100",
+                cache_hit=False,
+                remaining_window_count=10,
+            )
+            return items, False, meta
+        raise AssertionError(f"unexpected offset {offset}")
+
+    monkeypatch.setattr(
+        playlist_service_module, "get_cached_tiered_feed", _fake_get_cached_tiered_feed
+    )
+
+    service = PlaylistService(
+        content_repo=content_repo,
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=personalization,
+        redis_client=_MemoryRedis(),
+    )
+    service._supports_tiered_snapshots = lambda: True
+
+    first_page = service.get_playlist("device-extend", ContentType.ARTICLE, size=50)
+    second_page = service.get_playlist(
+        "device-extend",
+        ContentType.ARTICLE,
+        size=50,
+        session_id=first_page["session_id"],
+        cursor=50,
+    )
+    third_page = service.get_playlist(
+        "device-extend",
+        ContentType.ARTICLE,
+        size=20,
+        session_id=first_page["session_id"],
+        cursor=100,
+    )
+    final_page = service.get_playlist(
+        "device-extend",
+        ContentType.ARTICLE,
+        size=30,
+        session_id=first_page["session_id"],
+        cursor=120,
+    )
+
+    assert first_page["has_more"] is True
+    assert second_page["has_more"] is True
+    assert third_page["has_more"] is True
+    assert final_page["has_more"] is False
+    assert third_page["total_items"] == 150
+    assert [item["id"] for item in third_page["items"]] == list(range(101, 121))
+    assert calls == [(100, 0), (100, 100)]
 
 
 def test_get_playlist_discards_stale_video_cache_containing_shorts_url():

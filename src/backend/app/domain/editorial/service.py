@@ -13,7 +13,7 @@ from typing import Optional
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.article_hydration import ArticleHydrationService
+from app.article_hydration import ArticleHydrationService, build_pending_article_title
 from app.core.logging import get_logger
 from app.ingestion.canonical import canonical_key_for_article
 from app.ingestion.url_normalizer import normalize_url
@@ -105,7 +105,7 @@ class EditorialService:
             canonical_url=normalized,
             canonical_key=ckey,
             published_at=datetime.now(tz=None),
-            title=f"[pending] {normalized}",
+            title=build_pending_article_title(normalized),
             ai_processed=False,
             manual_added=True,
             added_by=actor,

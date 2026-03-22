@@ -21,6 +21,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from app.article_hydration import display_article_title
 from app.core.config import get_settings
 from app.core.feature_flags import FeatureFlags
 from app.core.logging import get_logger
@@ -237,10 +238,19 @@ class PlaylistService:
 
         # Cursor-based pagination
         start_cursor = cursor or 0
+        snapshot = self._ensure_snapshot_depth(
+            device_id=device_id,
+            content_type=content_type,
+            snapshot=snapshot,
+            required_count=start_cursor + size,
+            cache_key=cache_key,
+        )
         playlist = snapshot["items"]
         items = playlist[start_cursor : start_cursor + size]
         next_cursor = start_cursor + len(items) if len(items) > 0 else None
-        has_more = start_cursor + len(items) < len(playlist)
+        has_more = (start_cursor + len(items) < len(playlist)) or bool(
+            snapshot.get("has_more", False)
+        )
 
         return {
             "items": items,
@@ -308,6 +318,7 @@ class PlaylistService:
             cache_key=meta.cache_key,
             cache_hit=meta.cache_hit,
             remaining_count=meta.remaining_window_count,
+            has_more=_has_more,
         )
 
     def _snapshot_from_items(
@@ -320,6 +331,7 @@ class PlaylistService:
         cache_key: Optional[str] = None,
         cache_hit: bool = False,
         remaining_count: int = 0,
+        has_more: bool = False,
     ) -> Dict[str, Any]:
         newest_published_at, newest_created_at = self._newest_dates(items)
         return {
@@ -330,6 +342,7 @@ class PlaylistService:
             "newest_published_at": newest_published_at,
             "newest_created_at": newest_created_at,
             "remaining_count": remaining_count,
+            "has_more": has_more,
             "source": source,
             "cache_key": cache_key,
             "cache_hit": cache_hit,
@@ -349,6 +362,7 @@ class PlaylistService:
             items = payload.get("items")
             if not isinstance(items, list) or not self._is_cache_compatible(items, content_type):
                 return None
+            items = self._normalize_cached_article_titles(items, content_type)
             generated_at_raw = payload.get("generated_at")
             try:
                 generated_at = (
@@ -359,6 +373,7 @@ class PlaylistService:
             except ValueError:
                 generated_at = datetime.utcnow()
             snapshot = dict(payload)
+            snapshot["items"] = items
             snapshot.setdefault("generated_at", generated_at.isoformat())
             snapshot.setdefault(
                 "inventory_state",
@@ -367,6 +382,11 @@ class PlaylistService:
                     remaining_count=int(payload.get("remaining_count", 0) or 0),
                     offset=0,
                 ),
+            )
+            snapshot.setdefault(
+                "has_more",
+                bool(payload.get("has_more", False))
+                or bool(int(payload.get("remaining_count", 0) or 0) > 0),
             )
             snapshot.setdefault("feed_version", compute_feed_version(items, generated_at))
             newest_published_at, newest_created_at = self._newest_dates(items)
@@ -378,6 +398,7 @@ class PlaylistService:
             return snapshot
 
         if isinstance(payload, list) and self._is_cache_compatible(payload, content_type):
+            payload = self._normalize_cached_article_titles(payload, content_type)
             return self._snapshot_from_items(
                 payload,
                 generated_at=datetime.utcnow(),
@@ -389,9 +410,36 @@ class PlaylistService:
                 source="redis",
                 cache_key=cache_key,
                 cache_hit=True,
+                has_more=False,
             )
 
         return None
+
+    def _normalize_cached_article_titles(
+        self,
+        items: List[Dict[str, Any]],
+        content_type: ContentType,
+    ) -> List[Dict[str, Any]]:
+        """Apply article title compatibility fixes to cached serialized payloads."""
+        if content_type != ContentType.ARTICLE:
+            return items
+
+        normalized: List[Dict[str, Any]] = []
+        mutated = False
+        for item in items:
+            current_title = item.get("title")
+            if not current_title:
+                normalized.append(item)
+                continue
+            display_title = display_article_title(current_title, item.get("source_url"))
+            if display_title != current_title:
+                updated = dict(item)
+                updated["title"] = display_title
+                normalized.append(updated)
+                mutated = True
+            else:
+                normalized.append(item)
+        return normalized if mutated else items
 
     def _load_fallback_snapshot(self, device_id: str, content_type: ContentType) -> Dict[str, Any]:
         if self.redis:
@@ -417,7 +465,71 @@ class PlaylistService:
             ),
             source="db",
             cache_hit=False,
+            has_more=False,
         )
+
+    def _ensure_snapshot_depth(
+        self,
+        *,
+        device_id: str,
+        content_type: ContentType,
+        snapshot: Dict[str, Any],
+        required_count: int,
+        cache_key: str,
+    ) -> Dict[str, Any]:
+        """Extend finite session snapshots when the client scrolls past the initial materialized head."""
+        if required_count <= len(snapshot.get("items", [])):
+            return snapshot
+        if not self._supports_tiered_snapshots():
+            return snapshot
+        if not bool(snapshot.get("has_more", False)):
+            return snapshot
+
+        db = self.content_repo.db
+        surface = _surface_for_content_type(content_type)
+        hybrid_video_rerank = content_type in (
+            ContentType.VIDEO,
+            ContentType.REEL,
+        ) and FeatureFlags().is_enabled("video_hybrid_rerank")
+        expanded_items = list(snapshot.get("items", []))
+        has_more = bool(snapshot.get("has_more", False))
+        remaining_count = int(snapshot.get("remaining_count", 0) or 0)
+        offset = len(expanded_items)
+
+        while required_count > len(expanded_items) and has_more:
+            next_items, next_has_more, meta = get_cached_tiered_feed(
+                db,
+                surface,
+                limit=MAX_PLAYLIST_SIZE,
+                offset=offset,
+                require_ai_processed=content_type == ContentType.ARTICLE,
+                hybrid_video_rerank=hybrid_video_rerank,
+                device_id=device_id,
+            )
+            if not next_items:
+                has_more = False
+                remaining_count = 0
+                break
+            expanded_items.extend(next_items)
+            offset = len(expanded_items)
+            has_more = next_has_more
+            remaining_count = meta.remaining_window_count
+
+        if len(expanded_items) == len(snapshot.get("items", [])):
+            return snapshot
+
+        updated_snapshot = dict(snapshot)
+        updated_snapshot["items"] = expanded_items
+        updated_snapshot["remaining_count"] = remaining_count
+        updated_snapshot["has_more"] = has_more
+        updated_snapshot["inventory_state"] = _playlist_inventory_state(
+            item_count=len(expanded_items),
+            remaining_count=remaining_count,
+            offset=0,
+        )
+        if self.redis:
+            self._set_session_cache(cache_key, updated_snapshot)
+        return updated_snapshot
 
     def _newest_dates(self, items: List[Dict[str, Any]]) -> Tuple[Optional[str], Optional[str]]:
         newest_published_at = None
@@ -856,7 +968,12 @@ class PlaylistService:
             "type": item_type.value,
             "source": item.source,
             "source_url": item.source_url,
-            "title": item.title,
+            "title": display_article_title(
+                item.title,
+                getattr(item, "canonical_url", None) or item.source_url,
+            )
+            if item_type == ContentType.ARTICLE
+            else item.title,
             "description": item.description,
             "summary": item.summary,
             "image_url": item.image_url,

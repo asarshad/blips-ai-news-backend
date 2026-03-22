@@ -104,6 +104,7 @@ def test_content_list_maps_missing_image_filter(monkeypatch):
     response = admin_ui.ui_content_list(
         day=None,
         type="ARTICLE",
+        q="openai",
         source=None,
         suppressed=None,
         manual_added=None,
@@ -118,11 +119,15 @@ def test_content_list_maps_missing_image_filter(monkeypatch):
 
     assert _FakeContentRepo.last_list_args is not None
     assert _FakeContentRepo.last_list_args["content_type"] == "ARTICLE"
+    assert _FakeContentRepo.last_list_args["search_text"] == "openai"
     assert _FakeContentRepo.last_list_args["has_image"] is False
     assert _FakeContentRepo.last_list_args["curation_status"] == "PROMOTED"
 
     html = response.body.decode("utf-8")
+    assert 'name="q"' in html
+    assert "title, URL, summary" in html
     assert 'name="has_image"' in html
     assert "Missing" in html
     assert "Present" in html
     assert "has_image=false" in html
+    assert "q=openai" in html

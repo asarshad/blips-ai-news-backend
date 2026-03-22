@@ -37,6 +37,7 @@ from fastapi import APIRouter, Cookie, Depends, Form, Header, HTTPException, Que
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
+from app.article_hydration import display_article_title
 from app.core.auth import (
     build_admin_ui_session_token,
     is_admin_key_configured,
@@ -2616,6 +2617,7 @@ def ui_review_bulk_action(
 def ui_content_list(
     day: Optional[str] = Query(None),
     type: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
     suppressed: Optional[str] = Query(None),
     manual_added: Optional[str] = Query(None),
@@ -2659,6 +2661,7 @@ def ui_content_list(
     items, total = repo.list_content(
         day=parsed_day,
         content_type=type,
+        search_text=q,
         source=source,
         suppressed=supp,
         manual_added=manual,
@@ -2675,8 +2678,10 @@ def ui_content_list(
             "page": page,
             "day": day or "",
             "type": type or "",
+            "q": q or "",
             "source": source or "",
             "suppressed": suppressed or "",
+            "manual_added": manual_added or "",
             "has_image": has_image or "",
             "curation_status": curation_status or "",
             "sort_by": sort_by,
@@ -2685,6 +2690,10 @@ def ui_content_list(
 
     rows_html = ""
     for i in items:
+        visible_title = display_article_title(
+            getattr(i, "title", None),
+            getattr(i, "canonical_url", None) or getattr(i, "source_url", None),
+        )
         cs = getattr(i, "curation_status", None)
         if i.is_suppressed:
             row_bg = "bg-red-50"
@@ -2737,7 +2746,7 @@ def ui_content_list(
         <tr class="{row_bg} hover:brightness-95 border-b border-gray-100">
           <td class="px-3 py-2 text-sm text-gray-500">{i.id}</td>
           <td class="px-3 py-2 text-sm max-w-xs">
-            <a href="/api/v1/admin/ui/detail/{i.id}?key={admin_key}" class="text-blue-600 hover:underline font-medium">{_esc((i.title or "")[:65])}</a>
+            <a href="/api/v1/admin/ui/detail/{i.id}?key={admin_key}" class="text-blue-600 hover:underline font-medium">{_esc(visible_title[:65])}</a>
           </td>
           <td class="px-3 py-2 text-xs text-gray-600">{i.type.value if i.type else ""}</td>
           <td class="px-3 py-2 text-xs text-gray-600 truncate max-w-[90px]">{_esc(i.source or "")}</td>
@@ -2765,7 +2774,7 @@ def ui_content_list(
 
     filter_form = f"""
     <div class="glass-panel rounded-[1.5rem] p-4 mb-4">
-      <form method="get" action="/api/v1/admin/ui/content" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 items-end">
+      <form method="get" action="/api/v1/admin/ui/content" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-3 items-end">
         <input type="hidden" name="key" value="{admin_key}">
         <div>
           <label class="block text-xs text-gray-500 mb-1">Day</label>
@@ -2778,6 +2787,10 @@ def ui_content_list(
         <div>
           <label class="block text-xs text-gray-500 mb-1">Curation</label>
           {_sel("curation_status", curation_status or "", [("", "All"), ("PROMOTED", "Promoted"), ("CANDIDATE", "Candidate")])}
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Search</label>
+          <input type="text" name="q" value="{_esc(q or "")}" placeholder="title, URL, summary..." class="w-full rounded border-gray-300 text-sm px-2 py-1">
         </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Source</label>
@@ -2808,8 +2821,10 @@ def ui_content_list(
                 "page": p,
                 "day": day or "",
                 "type": type or "",
+                "q": q or "",
                 "source": source or "",
                 "suppressed": suppressed or "",
+                "manual_added": manual_added or "",
                 "has_image": has_image or "",
                 "curation_status": curation_status or "",
                 "sort_by": sort_by,
@@ -2875,6 +2890,10 @@ def ui_content_detail(
     item = repo.get_content_by_id(content_id)
     if not item:
         return _base("<h2 class='text-xl font-bold text-gray-800'>Not found</h2>", key=admin_key)
+    visible_title = display_article_title(
+        getattr(item, "title", None),
+        getattr(item, "canonical_url", None) or getattr(item, "source_url", None),
+    )
 
     actions = repo.get_actions_for_content(content_id, limit=30)
 
@@ -2998,7 +3017,7 @@ def ui_content_detail(
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div class="glass-panel lg:col-span-2 rounded-[1.5rem]">
         <div class="p-5 border-b border-gray-100">
-          <h1 class="text-xl font-bold text-gray-900 leading-snug">{_esc((item.title or "")[:120])}</h1>
+          <h1 class="text-xl font-bold text-gray-900 leading-snug">{_esc(visible_title[:120])}</h1>
           <div class="mt-2 flex flex-wrap gap-1">{badges}</div>
         </div>
         <table class="w-full">

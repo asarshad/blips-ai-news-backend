@@ -16,6 +16,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.article_hydration import bounded_article_summary_text, display_article_title
 from app.clustering.dedupe import compute_dedupe_key, compute_title_simhash
 from app.clustering.service import ClusteringService
 from app.core.config import get_settings
@@ -324,8 +325,12 @@ class IngestionPipeline:
         ai_processed = False
         inline_starters = None
         try:
-            if self.llm_client.is_configured() and article_text:
-                result = self.llm_client.summarize_article(entry.title, article_text)
+            summary_input = bounded_article_summary_text(article_text)
+            if self.llm_client.is_configured() and summary_input:
+                result = self.llm_client.summarize_article(
+                    display_article_title(entry.title, normalized_url),
+                    summary_input,
+                )
                 summary = result.summary
                 inline_starters = result.conversation_starters
                 ai_processed = bool(summary and len(summary.strip()) > 50)
