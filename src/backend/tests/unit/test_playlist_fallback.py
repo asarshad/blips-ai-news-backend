@@ -200,6 +200,23 @@ def test_format_item_coerces_missing_source_to_unknown():
     assert formatted["source"] == "Unknown"
 
 
+def test_format_item_coerces_object_entities_to_string_terms():
+    service = PlaylistService(
+        content_repo=MagicMock(),
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=MagicMock(),
+        redis_client=None,
+    )
+
+    item = _item(71)
+    item.entities = [{"name": "OpenAI", "type": "ORG"}, {"value": "Sam Altman"}]
+
+    formatted = service._format_item(item)
+
+    assert formatted["entities"] == ["OpenAI", "Sam Altman"]
+
+
 def test_format_item_uses_effective_reel_type_for_explicit_shorts_video():
     service = PlaylistService(
         content_repo=MagicMock(),

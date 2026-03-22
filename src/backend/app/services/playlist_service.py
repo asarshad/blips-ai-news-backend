@@ -109,6 +109,24 @@ def _playlist_inventory_state(*, item_count: int, remaining_count: int, offset: 
     return "healthy"
 
 
+def _string_terms(values: Any) -> List[str]:
+    """Coerce mixed metadata arrays into plain string terms for API responses."""
+    if not values:
+        return []
+
+    terms: List[str] = []
+    for value in values:
+        if isinstance(value, str):
+            cleaned = value.strip()
+        elif isinstance(value, dict):
+            cleaned = str(value.get("name") or value.get("value") or "").strip()
+        else:
+            cleaned = str(value).strip()
+        if cleaned:
+            terms.append(cleaned)
+    return terms
+
+
 class PlaylistService:
     """
     Service for generating and caching session playlists.
@@ -963,6 +981,8 @@ class PlaylistService:
             if duration_overrides and item.id in duration_overrides
             else item.duration_seconds
         )
+        topics = _string_terms(item.topics)
+        entities = _string_terms(item.entities)
         return {
             "id": item.id,
             "type": item_type.value,
@@ -981,9 +1001,9 @@ class PlaylistService:
             "duration": duration_seconds,
             "duration_seconds": duration_seconds,
             "thumbnail_url": item.image_url,
-            "category": item.topics[0] if item.topics else None,
-            "topics": item.topics or [],
-            "entities": item.entities or [],
+            "category": topics[0] if topics else None,
+            "topics": topics,
+            "entities": entities,
             "published_at": item.published_at.isoformat() if item.published_at else None,
             "created_at": item.created_at.isoformat()
             if getattr(item, "created_at", None)
