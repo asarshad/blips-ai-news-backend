@@ -127,6 +127,50 @@ def _string_terms(values: Any) -> List[str]:
     return terms
 
 
+def _optional_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_conversation_starters(value: Any, item: ContentItem) -> Dict[str, List[str]]:
+    default_fallback = [
+        "What are the main points of this?",
+        "Can you summarize this for me?",
+        "What should I know about this topic?",
+    ]
+    if not isinstance(value, dict):
+        return {"starters": [], "fallback": default_fallback}
+
+    starters = _string_terms(value.get("starters"))[:3]
+    fallback = _string_terms(value.get("fallback"))[:3]
+    if not fallback:
+        fallback = default_fallback
+    return {
+        "starters": starters,
+        "fallback": fallback,
+    }
+
+
 class PlaylistService:
     """
     Service for generating and caching session playlists.
@@ -986,21 +1030,23 @@ class PlaylistService:
         return {
             "id": item.id,
             "type": item_type.value,
-            "source": item.source or "Unknown",
-            "source_url": item.source_url,
-            "title": display_article_title(
-                item.title,
-                getattr(item, "canonical_url", None) or item.source_url,
+            "source": _optional_text(item.source) or "Unknown",
+            "source_url": _optional_text(item.source_url),
+            "title": _optional_text(
+                display_article_title(
+                    item.title,
+                    getattr(item, "canonical_url", None) or item.source_url,
+                )
             )
             if item_type == ContentType.ARTICLE
-            else item.title,
-            "description": item.description,
-            "summary": item.summary,
-            "image_url": item.image_url,
-            "video_url": item.video_url,
-            "duration": duration_seconds,
-            "duration_seconds": duration_seconds,
-            "thumbnail_url": item.image_url,
+            else (_optional_text(item.title) or "Untitled"),
+            "description": _optional_text(item.description),
+            "summary": _optional_text(item.summary),
+            "image_url": _optional_text(item.image_url),
+            "video_url": _optional_text(item.video_url),
+            "duration": _optional_int(duration_seconds),
+            "duration_seconds": _optional_int(duration_seconds),
+            "thumbnail_url": _optional_text(item.image_url),
             "category": topics[0] if topics else None,
             "topics": topics,
             "entities": entities,
@@ -1015,9 +1061,12 @@ class PlaylistService:
             "read_time_minutes": max(1, len(item.summary or "") // 200)
             if item_type == ContentType.ARTICLE
             else None,
-            "global_score": item.global_score,
-            "cluster_id": item.cluster_id,
-            "conversation_starters": item.conversation_starters,
+            "global_score": _optional_float(item.global_score),
+            "cluster_id": _optional_text(item.cluster_id),
+            "conversation_starters": _normalize_conversation_starters(
+                item.conversation_starters,
+                item,
+            ),
         }
 
     def _is_cache_compatible(self, playlist: List[Dict], content_type: ContentType) -> bool:

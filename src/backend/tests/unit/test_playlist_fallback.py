@@ -4,6 +4,7 @@ from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from app.api.routes.session import PlaylistItem
 from app.models.content import ContentType
 from app.services.playlist_service import (
     FALLBACK_CONTENT_AGE_HOURS,
@@ -215,6 +216,34 @@ def test_format_item_coerces_object_entities_to_string_terms():
     formatted = service._format_item(item)
 
     assert formatted["entities"] == ["OpenAI", "Sam Altman"]
+
+
+def test_format_item_normalizes_payload_for_session_response_model():
+    service = PlaylistService(
+        content_repo=MagicMock(),
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=MagicMock(),
+        redis_client=None,
+    )
+
+    item = _item(72)
+    item.source = None
+    item.title = None
+    item.entities = [{"name": "OpenAI"}]
+    item.global_score = "0.42"
+    item.cluster_id = 123
+    item.conversation_starters = {"starters": "bad-shape", "fallback": ["Fallback?"]}
+
+    formatted = service._format_item(item)
+    payload = PlaylistItem.model_validate(formatted).model_dump()
+
+    assert payload["source"] == "Unknown"
+    assert payload["title"] == "Article from example.com"
+    assert payload["entities"] == ["OpenAI"]
+    assert payload["global_score"] == 0.42
+    assert payload["cluster_id"] == "123"
+    assert payload["conversation_starters"]["fallback"] == ["Fallback?"]
 
 
 def test_format_item_uses_effective_reel_type_for_explicit_shorts_video():
