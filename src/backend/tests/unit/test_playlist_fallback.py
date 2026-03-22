@@ -358,7 +358,9 @@ def test_get_playlist_extends_session_snapshot_beyond_initial_100_items(monkeypa
             items = [
                 {
                     "id": idx,
-                    "type": "ARTICLE",
+                    "title": f"Tiered item {idx}",
+                    "source": "Tiered Source",
+                    "source_url": f"https://example.com/{idx}",
                     "conversation_starters": {"starters": [], "fallback": []},
                 }
                 for idx in range(1, 101)
@@ -375,7 +377,9 @@ def test_get_playlist_extends_session_snapshot_beyond_initial_100_items(monkeypa
             items = [
                 {
                     "id": idx,
-                    "type": "ARTICLE",
+                    "title": f"Tiered item {idx}",
+                    "source": "Tiered Source",
+                    "source_url": f"https://example.com/{idx}",
                     "conversation_starters": {"starters": [], "fallback": []},
                 }
                 for idx in range(101, 151)
@@ -432,7 +436,64 @@ def test_get_playlist_extends_session_snapshot_beyond_initial_100_items(monkeypa
     assert final_page["has_more"] is False
     assert third_page["total_items"] == 150
     assert [item["id"] for item in third_page["items"]] == list(range(101, 121))
+    assert all(item["type"] == ContentType.ARTICLE.value for item in third_page["items"])
     assert calls == [(100, 0), (100, 100)]
+
+
+def test_tiered_article_snapshot_items_are_normalized_for_session_schema(monkeypatch):
+    content_repo = MagicMock()
+    content_repo.db = MagicMock()
+    content_repo.db.query = MagicMock()
+
+    service = PlaylistService(
+        content_repo=content_repo,
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=MagicMock(),
+        redis_client=_MemoryRedis(),
+    )
+    service._supports_tiered_snapshots = lambda: True
+
+    from app.services import playlist_service as playlist_service_module
+
+    def _fake_get_cached_tiered_feed(*args, **kwargs):  # noqa: ARG001
+        items = [
+            {
+                "id": 501,
+                "title": "[pending] https://example.com/posts/openai-rollout",
+                "source": None,
+                "source_url": "https://example.com/posts/openai-rollout",
+                "summary": "Summary",
+                "topics": [{"name": "AI"}],
+                "entities": [{"name": "OpenAI"}],
+                "global_score": "0.7",
+                "published_at": "2026-03-22T00:00:00",
+                "created_at": "2026-03-22T00:00:01",
+            }
+        ]
+        meta = SimpleNamespace(
+            generated_at=datetime.now(timezone.utc),
+            source="db",
+            cache_key="tiered:articles:0",
+            cache_hit=False,
+            remaining_window_count=0,
+        )
+        return items, False, meta
+
+    monkeypatch.setattr(
+        playlist_service_module,
+        "get_cached_tiered_feed",
+        _fake_get_cached_tiered_feed,
+    )
+
+    result = service.get_playlist("device-tiered-shape", ContentType.ARTICLE, size=20)
+    payload = PlaylistItem.model_validate(result["items"][0]).model_dump()
+
+    assert payload["type"] == ContentType.ARTICLE.value
+    assert payload["source"] == "Unknown"
+    assert payload["title"] == "OpenAI Rollout"
+    assert payload["topics"] == ["AI"]
+    assert payload["entities"] == ["OpenAI"]
 
 
 def test_get_playlist_discards_stale_video_cache_containing_shorts_url():

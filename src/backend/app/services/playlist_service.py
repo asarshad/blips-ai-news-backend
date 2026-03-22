@@ -152,7 +152,7 @@ def _optional_float(value: Any) -> Optional[float]:
         return None
 
 
-def _normalize_conversation_starters(value: Any, item: ContentItem) -> Dict[str, List[str]]:
+def _normalize_conversation_starters(value: Any) -> Dict[str, List[str]]:
     default_fallback = [
         "What are the main points of this?",
         "Can you summarize this for me?",
@@ -346,7 +346,7 @@ class PlaylistService:
             ContentType.VIDEO,
             ContentType.REEL,
         ) and FeatureFlags().is_enabled("video_hybrid_rerank")
-        items, _has_more, meta = get_cached_tiered_feed(
+        raw_items, _has_more, meta = get_cached_tiered_feed(
             db,
             surface,
             limit=MAX_PLAYLIST_SIZE,
@@ -355,6 +355,7 @@ class PlaylistService:
             hybrid_video_rerank=hybrid_video_rerank,
             device_id=device_id,
         )
+        items = [self._normalize_tiered_item(item, content_type) for item in raw_items]
 
         if items:
             category_repo = UserCategorySelectionRepository(db)
@@ -572,7 +573,9 @@ class PlaylistService:
                 has_more = False
                 remaining_count = 0
                 break
-            expanded_items.extend(next_items)
+            expanded_items.extend(
+                self._normalize_tiered_item(item, content_type) for item in next_items
+            )
             offset = len(expanded_items)
             has_more = next_has_more
             remaining_count = meta.remaining_window_count
@@ -1063,11 +1066,62 @@ class PlaylistService:
             else None,
             "global_score": _optional_float(item.global_score),
             "cluster_id": _optional_text(item.cluster_id),
-            "conversation_starters": _normalize_conversation_starters(
-                item.conversation_starters,
-                item,
-            ),
+            "conversation_starters": _normalize_conversation_starters(item.conversation_starters),
         }
+
+    def _normalize_tiered_item(
+        self,
+        item: Dict[str, Any],
+        content_type: ContentType,
+    ) -> Dict[str, Any]:
+        normalized = dict(item)
+        topics = _string_terms(normalized.get("topics"))
+        entities = _string_terms(normalized.get("entities"))
+        source_url = _optional_text(normalized.get("source_url"))
+        raw_title = _optional_text(normalized.get("title"))
+        title = (
+            _optional_text(display_article_title(raw_title, source_url)) or "Untitled article"
+            if content_type == ContentType.ARTICLE
+            else (raw_title or "Untitled")
+        )
+
+        normalized.update(
+            {
+                "type": normalized.get("type") or content_type.value,
+                "source": _optional_text(normalized.get("source")) or "Unknown",
+                "source_url": source_url,
+                "title": title,
+                "description": _optional_text(normalized.get("description")),
+                "summary": _optional_text(normalized.get("summary")),
+                "image_url": _optional_text(normalized.get("image_url")),
+                "video_url": _optional_text(normalized.get("video_url")),
+                "duration": _optional_int(
+                    normalized.get("duration", normalized.get("duration_seconds"))
+                ),
+                "duration_seconds": _optional_int(
+                    normalized.get("duration_seconds", normalized.get("duration"))
+                ),
+                "thumbnail_url": _optional_text(normalized.get("thumbnail_url"))
+                or _optional_text(normalized.get("image_url")),
+                "category": _optional_text(normalized.get("category"))
+                or (topics[0] if topics else None),
+                "topics": topics,
+                "entities": entities,
+                "published_at": _optional_text(normalized.get("published_at")),
+                "created_at": _optional_text(normalized.get("created_at")),
+                "freshness_tier": _optional_text(normalized.get("freshness_tier")),
+                "freshness_reason": _optional_text(normalized.get("freshness_reason")),
+                "published_age_seconds": _optional_int(normalized.get("published_age_seconds")),
+                "added_age_seconds": _optional_int(normalized.get("added_age_seconds")),
+                "read_time_minutes": _optional_int(normalized.get("read_time_minutes")),
+                "global_score": _optional_float(normalized.get("global_score")),
+                "cluster_id": _optional_text(normalized.get("cluster_id")),
+                "conversation_starters": _normalize_conversation_starters(
+                    normalized.get("conversation_starters")
+                ),
+            }
+        )
+        return normalized
 
     def _is_cache_compatible(self, playlist: List[Dict], content_type: ContentType) -> bool:
         """Reject cached playlist snapshots whose payload no longer matches serving rules."""
