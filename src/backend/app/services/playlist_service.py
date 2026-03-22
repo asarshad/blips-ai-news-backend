@@ -966,7 +966,7 @@ class PlaylistService:
         return {
             "id": item.id,
             "type": item_type.value,
-            "source": item.source,
+            "source": item.source or "Unknown",
             "source_url": item.source_url,
             "title": display_article_title(
                 item.title,

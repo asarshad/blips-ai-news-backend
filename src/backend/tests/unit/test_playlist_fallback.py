@@ -183,6 +183,23 @@ def test_format_item_includes_conversation_starters():
     }
 
 
+def test_format_item_coerces_missing_source_to_unknown():
+    service = PlaylistService(
+        content_repo=MagicMock(),
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=MagicMock(),
+        redis_client=None,
+    )
+
+    item = _item(70)
+    item.source = None
+
+    formatted = service._format_item(item)
+
+    assert formatted["source"] == "Unknown"
+
+
 def test_format_item_uses_effective_reel_type_for_explicit_shorts_video():
     service = PlaylistService(
         content_repo=MagicMock(),
