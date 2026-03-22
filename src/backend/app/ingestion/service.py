@@ -16,7 +16,11 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.article_hydration import bounded_article_summary_text, display_article_title
+from app.article_hydration import (
+    bounded_article_summary_text,
+    display_article_title,
+    normalize_article_summary_output,
+)
 from app.clustering.dedupe import compute_dedupe_key, compute_title_simhash
 from app.clustering.service import ClusteringService
 from app.core.config import get_settings
@@ -331,7 +335,7 @@ class IngestionPipeline:
                     display_article_title(entry.title, normalized_url),
                     summary_input,
                 )
-                summary = result.summary
+                summary = normalize_article_summary_output(result.summary)
                 inline_starters = result.conversation_starters
                 ai_processed = bool(summary and len(summary.strip()) > 50)
         except Exception as e:

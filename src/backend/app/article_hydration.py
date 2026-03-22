@@ -114,6 +114,23 @@ def bounded_article_summary_text(article_text: Optional[str]) -> Optional[str]:
     return " ".join(words[:max_words])
 
 
+def normalize_article_summary_output(summary_text: Optional[str]) -> Optional[str]:
+    """Normalize generated article summaries while enforcing the max output bound."""
+    cleaned = " ".join((summary_text or "").split()).strip()
+    if not cleaned:
+        return None
+
+    max_words = max(1, int(settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS))
+    words = cleaned.split()
+    if len(words) <= max_words:
+        return cleaned
+
+    trimmed = " ".join(words[:max_words]).rstrip(" ,;:-")
+    if trimmed and trimmed[-1] not in ".!?":
+        trimmed += "..."
+    return trimmed
+
+
 class ArticleHydrationService:
     """Best-effort extraction + summary hydration for article items."""
 
@@ -181,7 +198,7 @@ class ArticleHydrationService:
             summary_input = bounded_article_summary_text(article_text)
             if summary_input:
                 summary_result = self.summarize_article(item, summary_input)
-                summary = (getattr(summary_result, "summary", None) or "").strip()
+                summary = normalize_article_summary_output(getattr(summary_result, "summary", None))
                 if summary and len(summary) > 50:
                     item.summary = summary
                     item.ai_processed = True

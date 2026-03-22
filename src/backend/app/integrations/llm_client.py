@@ -457,7 +457,7 @@ Article Content: {truncated_content}
 
 Perform ALL three tasks below in a single response.
 
-Task 1: Write a concise summary of this tech article in at most 85 words. Keep it informative and engaging.
+Task 1: Write a concise summary of this tech article in between {settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS} and {settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words. Keep it informative and engaging. If the first draft would be shorter, add concrete factual detail from the article until it reaches at least {settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS} words. Never exceed {settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words.
 
 Task 2: Generate 3-5 relevant tags for this article. Tags should be lowercase, single words or hyphenated phrases.
 

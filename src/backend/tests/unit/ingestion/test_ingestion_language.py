@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
+from app.article_hydration import normalize_article_summary_output
 from app.core.config import get_settings
 from app.extraction.metrics import ExtractionMetrics
 from app.models.content import ContentType
@@ -263,6 +264,19 @@ class TestRssIngestionLanguageFilter:
         assert pipeline.llm_client.summarize_article.called
         summary_input = pipeline.llm_client.summarize_article.call_args.args[1]
         assert len(summary_input.split()) == settings.ARTICLE_SUMMARY_MAX_WORDS
+
+    def test_generated_article_summary_is_trimmed_to_output_cap(self):
+        """Overlong generated article summaries should be clipped before storage."""
+        settings = get_settings()
+        long_summary = " ".join(
+            [f"token{i}" for i in range(settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS + 12)]
+        )
+
+        normalized = normalize_article_summary_output(long_summary)
+
+        assert normalized is not None
+        assert len(normalized.split()) == settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS
+        assert normalized.endswith("...")
 
 
 # ── YouTube ingestion language tests ─────────────────────────────────────────
