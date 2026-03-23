@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any, Optional
 from urllib.parse import unquote, urlparse
 
+from app.article_image_selection import ArticleImageCandidate, select_best_article_image
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.ingestion.canonical import canonical_key_for_article
@@ -264,7 +265,9 @@ class ArticleHydrationService:
             title=(title or "").strip() or build_pending_article_title(normalized_source_url),
             description=normalized_description[:500] or None,
             content_text=normalized_description[:8000] or None,
-            image_url=self.normalize_article_image(image_url),
+            image_url=select_best_article_image(
+                [ArticleImageCandidate(url=image_url, source="rss")]
+            ),
             published_at=published_at or datetime.utcnow(),
             source=extract_source(normalized_source_url),
             topics=[],
@@ -300,22 +303,28 @@ class ArticleHydrationService:
                     prepared.published_at = extracted_published_at
                 if extracted_text:
                     prepared.content_text = extracted_text[:8000]
-                if self.should_replace_article_image(prepared.image_url, extracted_image):
-                    prepared.image_url = extracted_image
+                prepared.image_url = select_best_article_image(
+                    [
+                        ArticleImageCandidate(url=prepared.image_url, source="rss"),
+                        ArticleImageCandidate(url=extracted_image, source="extraction"),
+                    ]
+                )
         else:
             metadata = self.fetch_article_page_metadata(normalized_source_url)
             if metadata is not None:
                 extracted_title = (getattr(metadata, "title", None) or "").strip()
                 extracted_canonical = (getattr(metadata, "canonical_url", None) or "").strip()
-                extracted_image = self.normalize_article_image(
-                    (getattr(metadata, "image_url", None) or "").strip()
-                )
+                extracted_image = (getattr(metadata, "image_url", None) or "").strip()
                 if extracted_title:
                     prepared.title = extracted_title
                 if extracted_canonical:
                     prepared.canonical_url = extracted_canonical
-                if extracted_image:
-                    prepared.image_url = extracted_image
+                prepared.image_url = select_best_article_image(
+                    [
+                        ArticleImageCandidate(url=prepared.image_url, source="rss"),
+                        ArticleImageCandidate(url=extracted_image, source="page_metadata"),
+                    ]
+                )
 
         prepared.source = extract_source(prepared.canonical_url or prepared.source_url)
         topic_seed = (prepared.content_text or prepared.description or prepared.title or "").strip()
@@ -335,8 +344,14 @@ class ArticleHydrationService:
             item.description = prepared.description
         if prepared.content_text:
             item.content_text = prepared.content_text[:8000]
-        if self.should_replace_article_image(item.image_url, prepared.image_url):
-            item.image_url = prepared.image_url
+        selected_image = select_best_article_image(
+            [
+                ArticleImageCandidate(url=item.image_url, source="existing"),
+                ArticleImageCandidate(url=prepared.image_url, source="prepared"),
+            ]
+        )
+        if selected_image and selected_image != (item.image_url or "").strip():
+            item.image_url = selected_image
         if prepared.source:
             item.source = prepared.source
         if prepared.topics and not item.topics:
@@ -444,8 +459,14 @@ class ArticleHydrationService:
                 item.content_text = extracted_text[:8000]
 
             extracted_image = (getattr(extraction, "image_url", None) or "").strip()
-            if self.should_replace_article_image(item.image_url, extracted_image):
-                item.image_url = extracted_image
+            selected_image = select_best_article_image(
+                [
+                    ArticleImageCandidate(url=item.image_url, source="existing"),
+                    ArticleImageCandidate(url=extracted_image, source="extraction"),
+                ]
+            )
+            if selected_image and selected_image != (item.image_url or "").strip():
+                item.image_url = selected_image
 
         self.refresh_article_identity(item)
         self.populate_article_summary(item)
@@ -493,14 +514,16 @@ class ArticleHydrationService:
         *,
         source_url: Optional[str],
         rss_image_url: Optional[str] = None,
+        force_reconcile_image: bool = False,
     ) -> bool:
         """Refresh missing or suspicious image/canonical metadata on an existing article."""
         from app.extraction.metadata import is_probably_generic_image_url
-        from app.extraction.normalize import is_suspicious_image_url, validate_image_url
+        from app.extraction.normalize import is_suspicious_image_url
 
         current_image_url = (item.image_url or "").strip()
         needs_image = (
-            not current_image_url
+            force_reconcile_image
+            or not current_image_url
             or is_probably_generic_image_url(current_image_url)
             or is_suspicious_image_url(current_image_url)
         )
@@ -508,28 +531,27 @@ class ArticleHydrationService:
         if not needs_image and not needs_canonical:
             return False
 
-        refreshed_image = None
-        if rss_image_url:
-            refreshed_image = self.normalize_article_image(validate_image_url(rss_image_url))
-
-        if source_url and (
-            needs_canonical
-            or not refreshed_image
-            or (current_image_url and is_probably_generic_image_url(current_image_url))
-            or (current_image_url and is_suspicious_image_url(current_image_url))
-        ):
+        metadata = None
+        if source_url:
             metadata = self.fetch_article_page_metadata(source_url)
-            if metadata is not None:
-                metadata_image = (getattr(metadata, "image_url", None) or "").strip()
-                if self.should_replace_article_image(
-                    refreshed_image or current_image_url, metadata_image
-                ):
-                    refreshed_image = metadata_image
-                if needs_canonical and metadata.canonical_url:
-                    item.canonical_url = metadata.canonical_url
+            if metadata is not None and needs_canonical and metadata.canonical_url:
+                item.canonical_url = metadata.canonical_url
+
+        refreshed_image = select_best_article_image(
+            [
+                ArticleImageCandidate(url=item.image_url, source="existing"),
+                ArticleImageCandidate(url=rss_image_url, source="rss"),
+                ArticleImageCandidate(
+                    url=(getattr(metadata, "image_url", None) or "").strip()
+                    if metadata is not None
+                    else None,
+                    source="page_metadata",
+                ),
+            ]
+        )
 
         changed = False
-        if self.should_replace_article_image(item.image_url, refreshed_image):
+        if refreshed_image and refreshed_image != current_image_url:
             item.image_url = refreshed_image
             changed = True
         if needs_canonical and (item.canonical_url or "").strip():
@@ -573,12 +595,9 @@ class ArticleHydrationService:
     @classmethod
     def normalize_article_image(cls, candidate_image_url: Optional[str]) -> Optional[str]:
         """Return a validated editorial image URL or None."""
-        from app.extraction.normalize import validate_image_url
-
-        candidate = validate_image_url(candidate_image_url)
-        if cls.should_replace_article_image(None, candidate):
-            return candidate
-        return None
+        return select_best_article_image(
+            [ArticleImageCandidate(url=candidate_image_url, source="direct")]
+        )
 
     def summarize_article(self, item: ContentItem, article_text: str):
         """Return a best-effort summary result, or None when the LLM is unavailable."""
@@ -609,28 +628,19 @@ class ArticleHydrationService:
 
     @staticmethod
     def should_replace_article_image(
-        existing_image_url: Optional[str], candidate_image_url: Optional[str]
+        existing_image_url: Optional[str],
+        candidate_image_url: Optional[str],
+        *,
+        candidate_source: str = "direct",
     ) -> bool:
         """Prefer real editorial images and avoid filling blanks with generic placeholders."""
-        from app.extraction.metadata import is_probably_generic_image_url
-        from app.extraction.normalize import is_suspicious_image_url
-
-        candidate = (candidate_image_url or "").strip()
-        if not candidate:
-            return False
-
-        existing = (existing_image_url or "").strip()
-        candidate_is_generic = is_probably_generic_image_url(candidate)
-        candidate_is_suspicious = is_suspicious_image_url(candidate)
-        if not existing:
-            return not candidate_is_generic and not candidate_is_suspicious
-        if existing == candidate:
-            return False
-        if is_suspicious_image_url(existing) and not candidate_is_suspicious:
-            return True
-        if is_probably_generic_image_url(existing) and not candidate_is_generic:
-            return True
-        return False
+        selected_image = select_best_article_image(
+            [
+                ArticleImageCandidate(url=existing_image_url, source="existing"),
+                ArticleImageCandidate(url=candidate_image_url, source=candidate_source),
+            ]
+        )
+        return bool(selected_image and selected_image != (existing_image_url or "").strip())
 
 
 def looks_like_pending_title(title: Optional[str]) -> bool:

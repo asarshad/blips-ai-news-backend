@@ -73,6 +73,37 @@ def test_prepare_rss_article_prefers_page_metadata_image_over_rss_image(monkeypa
     assert prepared.image_url == "https://cdn.example.com/page-hero.jpg"
 
 
+def test_refresh_existing_article_metadata_prefers_page_metadata_over_rss_image(monkeypatch):
+    hydrator = ArticleHydrationService()
+    item = hydrator.build_article_stub(
+        source_url="https://example.com/story",
+        title="Recovered title",
+        image_url="https://cdn.example.com/stale-rss-image.jpg",
+    )
+    item.canonical_url = "https://example.com/story"
+
+    monkeypatch.setattr(
+        hydrator,
+        "fetch_article_page_metadata",
+        lambda article_url: SimpleNamespace(
+            title="Recovered title",
+            canonical_url=f"{article_url}/canonical",
+            image_url="https://cdn.example.com/page-hero.jpg",
+        ),
+    )
+
+    changed = hydrator.refresh_existing_article_metadata(
+        item,
+        source_url="https://example.com/story",
+        rss_image_url="https://cdn.example.com/rss-image.jpg",
+        force_reconcile_image=True,
+    )
+
+    assert changed is True
+    assert item.image_url == "https://cdn.example.com/page-hero.jpg"
+    assert item.canonical_url == "https://example.com/story"
+
+
 def test_populate_article_summary_sets_summary_topics_and_starters():
     hydrator = ArticleHydrationService()
     item = hydrator.build_article_stub(

@@ -111,7 +111,32 @@ def test_ingest_rss_entry_refreshes_existing_duplicate_image_from_page_metadata(
     pipeline.db.refresh.assert_called_once_with(existing)
 
 
-def test_ingest_rss_entry_refreshes_duplicate_from_rss_image_without_fetch(monkeypatch):
+def test_ingest_rss_entry_refreshes_duplicate_image_using_shared_selector(monkeypatch):
+    pipeline = _make_pipeline()
+    existing = MagicMock()
+    existing.image_url = "https://cdn.example.com/stale-rss-image.jpg"
+    existing.canonical_url = "https://example.com/story"
+    pipeline.content_repo.get_by_source_url.return_value = existing
+
+    entry = _make_entry(image_url="https://cdn.example.com/rss-hero.jpg")
+
+    monkeypatch.setattr(
+        pipeline.article_hydrator,
+        "fetch_article_page_metadata",
+        lambda source_url: MagicMock(
+            image_url="https://cdn.example.com/page-hero.jpg",
+            canonical_url=source_url,
+        ),
+    )
+
+    result = pipeline.ingest_rss_entry(entry)
+
+    assert result is None
+    assert existing.image_url == "https://cdn.example.com/page-hero.jpg"
+    pipeline.db.commit.assert_called_once()
+
+
+def test_ingest_rss_entry_refreshes_duplicate_from_rss_image_when_metadata_missing(monkeypatch):
     pipeline = _make_pipeline()
     existing = MagicMock()
     existing.image_url = None
@@ -120,21 +145,14 @@ def test_ingest_rss_entry_refreshes_duplicate_from_rss_image_without_fetch(monke
 
     entry = _make_entry(image_url="https://cdn.example.com/rss-hero.jpg")
 
-    fetch_calls = []
-
-    def _unexpected_fetch(source_url):
-        fetch_calls.append(source_url)
-        return None
-
     monkeypatch.setattr(
         pipeline.article_hydrator,
         "fetch_article_page_metadata",
-        _unexpected_fetch,
+        lambda _source_url: None,
     )
 
     result = pipeline.ingest_rss_entry(entry)
 
     assert result is None
     assert existing.image_url == "https://cdn.example.com/rss-hero.jpg"
-    assert fetch_calls == []
     pipeline.db.commit.assert_called_once()

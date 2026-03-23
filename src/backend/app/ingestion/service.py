@@ -119,6 +119,7 @@ class IngestionPipeline:
             existing_item,
             source_url=source_url,
             rss_image_url=rss_image_url,
+            force_reconcile_image=True,
         ):
             return False
 
