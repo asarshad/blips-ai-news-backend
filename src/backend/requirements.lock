@@ -19,7 +19,7 @@ distro==1.9.0
 eval_type_backport==0.3.1
 fastapi==0.135.1
 feedparser==6.0.12
-firebase-admin==7.4.0
+firebase-admin==7.3.0
 gunicorn==25.1.0
 h11==0.16.0
 htmldate==1.9.4
