@@ -6,6 +6,7 @@ over generic social/share art when the body exposes a stronger candidate.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse
@@ -107,6 +108,13 @@ _NON_EDITORIAL_CONTEXT_KEYWORDS = (
     "byline",
     "thumbnail",
     "thumb",
+    "loop-card",
+    "card-block",
+    "storycard",
+    "rightrail",
+    "stayconnected",
+    "footer__storycard",
+    "footer-story-card",
 )
 _EDITORIAL_CONTEXT_KEYWORDS = (
     "hero",
@@ -120,7 +128,32 @@ _EDITORIAL_CONTEXT_KEYWORDS = (
     "post_image",
     "story-image",
     "story_image",
-    "wp-post-image",
+    "featured-image",
+    "featured_image",
+    "post-featured-image",
+    "post_featured_image",
+    "wp-block-post-featured-image",
+    "contentarticleheader__image",
+)
+
+_STRONG_EDITORIAL_CONTEXT_KEYWORDS = (
+    "featured-image",
+    "featured_image",
+    "post-featured-image",
+    "post_featured_image",
+    "wp-block-post-featured-image",
+    "contentarticleheader__image",
+)
+
+_SRCSET_CANDIDATE_RE = re.compile(
+    r"""
+    (?:^|,\s*)            # Candidate boundary
+    (?P<url>\S+?)         # URL token (may contain commas in query params)
+    \s+
+    (?P<descriptor>\d+(?:\.\d+)?[wx])
+    (?=\s*(?:,|$))
+    """,
+    re.VERBOSE,
 )
 
 
@@ -419,6 +452,23 @@ def _best_srcset_candidate(srcset: str) -> Optional[str]:
     """Return the largest-width candidate from an srcset string."""
     best_url = None
     best_width = -1
+
+    matches = list(_SRCSET_CANDIDATE_RE.finditer(str(srcset)))
+    if matches:
+        for match in matches:
+            candidate_url = match.group("url").strip()
+            descriptor = match.group("descriptor").strip().lower()
+            width = 0
+            if descriptor.endswith("w"):
+                try:
+                    width = int(float(descriptor[:-1]))
+                except ValueError:
+                    width = 0
+            if width >= best_width:
+                best_width = width
+                best_url = candidate_url
+        return best_url
+
     for part in str(srcset).split(","):
         chunk = part.strip()
         if not chunk:
@@ -455,7 +505,23 @@ def _looks_like_editorial_image(tag, candidate_url: str) -> bool:
             ],
         )
     ).lower()
-    if any(keyword in haystack for keyword in _NON_EDITORIAL_CONTEXT_KEYWORDS):
+    strong_editorial_context = any(
+        keyword in haystack for keyword in _STRONG_EDITORIAL_CONTEXT_KEYWORDS
+    )
+    non_editorial_hits = [
+        keyword for keyword in _NON_EDITORIAL_CONTEXT_KEYWORDS if keyword in haystack
+    ]
+    if non_editorial_hits:
+        benign_thumbnail_hits = {
+            keyword for keyword in non_editorial_hits if keyword in {"thumb", "thumbnail"}
+        }
+        if not strong_editorial_context or len(benign_thumbnail_hits) != len(non_editorial_hits):
+            return False
+    if "post-thumbnail" in haystack and strong_editorial_context:
+        non_editorial_hits = [
+            keyword for keyword in non_editorial_hits if keyword not in {"thumb", "thumbnail"}
+        ]
+    if non_editorial_hits:
         return False
     if is_probably_generic_image_url(candidate_url) and not any(
         keyword in haystack for keyword in _EDITORIAL_CONTEXT_KEYWORDS

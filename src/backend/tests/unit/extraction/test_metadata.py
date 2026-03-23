@@ -217,6 +217,66 @@ class TestImageExtraction:
         assert meta.image_url == "https://example.com/images/hero-1600.jpg"
         assert meta.image_source == "body"
 
+    def test_body_image_keeps_featured_image_over_related_loop_cards(self):
+        html = """<!DOCTYPE html>
+<html>
+  <head><title>Featured Article</title></head>
+  <body>
+    <article>
+      <figure class="wp-block-post-featured-image">
+        <img
+          src="/images/featured.jpg"
+          width="1024"
+          height="683"
+          class="attachment-post-thumbnail size-post-thumbnail wp-post-image"
+          alt="Primary feature image"
+        />
+      </figure>
+      <figure class="loop-card__figure">
+        <img
+          src="/images/related-1.jpg"
+          width="488"
+          height="375"
+          class="attachment-card-block-16x9 size-card-block-16x9 wp-post-image"
+          alt="Related story image"
+        />
+      </figure>
+      <figure class="loop-card__figure">
+        <img
+          src="/images/related-2.jpg"
+          width="666"
+          height="375"
+          class="attachment-card-block-16x9 size-card-block-16x9 wp-post-image"
+          alt="Another related story image"
+        />
+      </figure>
+    </article>
+  </body>
+</html>"""
+        meta = extract_metadata(html, "https://example.com/story")
+        assert meta.image_url == "https://example.com/images/featured.jpg"
+        assert meta.image_source == "body"
+
+    def test_body_image_srcset_handles_query_param_commas(self):
+        html = """<!DOCTYPE html>
+<html>
+  <head><title>Srcset commas</title></head>
+  <body>
+    <article>
+      <div class="contentArticleHeader__image">
+        <img
+          src="https://cdn.example.com/hero.jpg"
+          srcset="https://cdn.example.com/hero.jpg?fit=720,480 720w,https://cdn.example.com/hero.jpg?fit=1456,818 1456w,https://cdn.example.com/hero.jpg?fit=2252,1266 2252w"
+          alt="Lead illustration"
+        />
+      </div>
+    </article>
+  </body>
+</html>"""
+        meta = extract_metadata(html, "https://example.com/story")
+        assert meta.image_url == "https://cdn.example.com/hero.jpg?fit=2252,1266"
+        assert meta.image_source == "body"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Published date

@@ -302,17 +302,19 @@ class ArticleHydrationService:
                     prepared.content_text = extracted_text[:8000]
                 if self.should_replace_article_image(prepared.image_url, extracted_image):
                     prepared.image_url = extracted_image
-        elif prepared.image_url is None:
+        else:
             metadata = self.fetch_article_page_metadata(normalized_source_url)
             if metadata is not None:
                 extracted_title = (getattr(metadata, "title", None) or "").strip()
                 extracted_canonical = (getattr(metadata, "canonical_url", None) or "").strip()
-                extracted_image = (getattr(metadata, "image_url", None) or "").strip()
+                extracted_image = self.normalize_article_image(
+                    (getattr(metadata, "image_url", None) or "").strip()
+                )
                 if extracted_title:
                     prepared.title = extracted_title
                 if extracted_canonical:
                     prepared.canonical_url = extracted_canonical
-                if self.should_replace_article_image(prepared.image_url, extracted_image):
+                if extracted_image:
                     prepared.image_url = extracted_image
 
         prepared.source = extract_source(prepared.canonical_url or prepared.source_url)

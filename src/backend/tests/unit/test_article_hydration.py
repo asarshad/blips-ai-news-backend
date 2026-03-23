@@ -47,6 +47,32 @@ def test_prepare_rss_article_uses_page_metadata_when_image_missing(monkeypatch):
     assert prepared.content_text == "RSS body"
 
 
+def test_prepare_rss_article_prefers_page_metadata_image_over_rss_image(monkeypatch):
+    hydrator = ArticleHydrationService()
+    monkeypatch.setattr(
+        hydrator,
+        "fetch_article_page_metadata",
+        lambda article_url: SimpleNamespace(
+            title="Recovered title",
+            canonical_url=f"{article_url}/canonical",
+            image_url="https://cdn.example.com/page-hero.jpg",
+        ),
+    )
+
+    prepared = hydrator.prepare_rss_article(
+        source_url="https://example.com/story",
+        title="RSS title",
+        description="RSS body",
+        image_url="https://cdn.example.com/rss-image.jpg",
+        published_at=None,
+        include_text=False,
+    )
+
+    assert prepared.title == "Recovered title"
+    assert prepared.canonical_url == "https://example.com/story/canonical"
+    assert prepared.image_url == "https://cdn.example.com/page-hero.jpg"
+
+
 def test_populate_article_summary_sets_summary_topics_and_starters():
     hydrator = ArticleHydrationService()
     item = hydrator.build_article_stub(
