@@ -227,6 +227,17 @@ class Settings(BaseSettings):
     ADS_REELS_FREQUENCY: int = 0
     ADS_REELS_FIRST_SLOT_AFTER: int = 0
 
+    # ------------------------------------------------------------------
+    # Runtime mobile push config (Redis override + env fallback)
+    # ------------------------------------------------------------------
+    PUSH_RUNTIME_ENABLED: bool = False
+    PUSH_MODE: str = "manual"
+    PUSH_CONFIG_TTL_SECONDS: int = 300
+
+    # Firebase Admin service account (configure one source only)
+    FIREBASE_SERVICE_ACCOUNT_JSON: str = ""
+    FIREBASE_SERVICE_ACCOUNT_FILE: str = ""
+
     # Top-up controls
     TOPUP_LOCK_TTL_SECONDS: int = 120
     TOPUP_MAX_RUNTIME_SECONDS: int = 300

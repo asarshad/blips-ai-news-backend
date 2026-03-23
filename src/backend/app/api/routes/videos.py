@@ -20,6 +20,7 @@ from app.models.content import ContentType
 from app.repositories.content_repo import ContentItemRepository
 from app.schemas.video import Video as VideoSchema
 from app.services.ad_mixer import inject_ads
+from app.services.content_payloads import content_item_to_video_payload
 from app.services.freshness_metrics_service import record_feed_served
 from app.services.inventory_service import Surface
 from app.services.tiered_feed_service import get_cached_tiered_feed
@@ -36,19 +37,7 @@ def get_content_repo(db: Session = Depends(get_db)) -> ContentItemRepository:
 
 def _content_item_to_video_schema(item) -> dict:
     """Convert ContentItem to Video schema format (backward compatible)."""
-    return {
-        "id": item.id,
-        "title": item.title,
-        "summary": item.summary or "",
-        "video_url": item.video_url or item.source_url,
-        "source_url": item.source_url,
-        "thumbnail_url": item.image_url or None,  # coerce empty string to null
-        "source": item.source or "YouTube",
-        "category": (item.topics[0] if item.topics else "Technology"),
-        "duration_seconds": item.duration_seconds,
-        "hot_score": int(item.global_score * 100) if item.global_score else 0,
-        "created_at": item.created_at.isoformat() if item.created_at else None,
-    }
+    return content_item_to_video_payload(item)
 
 
 def _cursor_to_offset(cursor: Optional[str], limit: int, page: Optional[int]) -> int:

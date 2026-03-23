@@ -725,6 +725,7 @@ class PromotionResult:
 
     candidates_evaluated: int = 0
     promoted_count: int = 0
+    promoted_ids: List[int] = field(default_factory=list)
     already_promoted_rescored: int = 0
     errors: List[str] = field(default_factory=list)
 
@@ -993,13 +994,14 @@ class PromotionService:
 
             for content_type in (ContentType.ARTICLE, ContentType.VIDEO, ContentType.REEL):
                 try:
-                    promoted, evaluated, rescored = self._promote_type(
+                    promoted, evaluated, rescored, promoted_ids = self._promote_type(
                         content_type,
                         cluster_sizes,
                         story_topic_counts=story_topic_counts,
                         story_entity_counts=story_entity_counts,
                     )
                     result.promoted_count += promoted
+                    result.promoted_ids.extend(promoted_ids)
                     result.candidates_evaluated += evaluated
                     result.already_promoted_rescored += rescored
                 except Exception as exc:
@@ -1038,10 +1040,10 @@ class PromotionService:
         *,
         story_topic_counts: Optional[Dict[str, int]] = None,
         story_entity_counts: Optional[Dict[str, int]] = None,
-    ) -> Tuple[int, int, int]:
+    ) -> Tuple[int, int, int, List[int]]:
         """Score and promote CANDIDATEs for a single content type.
 
-        Returns (promoted_count, evaluated_count, rescored_promoted_count).
+        Returns (promoted_count, evaluated_count, rescored_promoted_count, promoted_ids).
         """
         candidates = self._get_candidates(content_type)
         evaluated = len(candidates)
@@ -1095,6 +1097,7 @@ class PromotionService:
         scored.sort(key=lambda t: t[0], reverse=True)
 
         promoted = 0
+        promoted_ids: List[int] = []
         for s, item, block_reason, channel_config, source_profile in scored:
             if promoted >= config.top_n_per_type:
                 break
@@ -1118,6 +1121,7 @@ class PromotionService:
                     continue
             item.curation_status = ContentStatus.PROMOTED
             promoted += 1
+            promoted_ids.append(int(item.id))
             promoted_channel_counts[channel_key] = promoted_channel_counts.get(channel_key, 0) + 1
 
         rescored = self._rescore_promoted(
@@ -1137,7 +1141,7 @@ class PromotionService:
             promoted,
             config.min_score,
         )
-        return promoted, evaluated, rescored
+        return promoted, evaluated, rescored, promoted_ids
 
     def _promotion_reason(
         self,

@@ -30,7 +30,7 @@ from __future__ import annotations
 import math
 from collections import Counter
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse
 
 from fastapi import APIRouter, Cookie, Depends, Form, Header, HTTPException, Query
@@ -45,10 +45,20 @@ from app.core.auth import (
     is_valid_admin_ui_session,
 )
 from app.core.config import settings
-from app.core.dependencies import get_db
+from app.core.dependencies import get_db, get_redis
 from app.domain.editorial.service import EditorialService
+from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.push import PushSendLog
 from app.repositories.editorial_repo import EditorialRepository
+from app.schemas.push import PushMode, PushRuntimeConfigPatch
+from app.services.push_config_service import PushConfigService
+from app.services.push_service import (
+    PushNotificationError,
+    PushNotificationService,
+    create_push_messaging_client,
+)
 from app.services.tiered_feed_service import invalidate_tiered_feed_cache
+from app.video_surface_rules import effective_content_type
 
 # ---------------------------------------------------------------------------
 # Auth
@@ -472,6 +482,108 @@ def _summarize_feed_window(
         ),
         "sample_items": combined[:6],
     }
+
+
+def _redirect_to_ui(
+    *,
+    admin_key: str,
+    fallback_path: str,
+    flash: str,
+    next_url: Optional[str] = None,
+    referer: Optional[str] = None,
+) -> RedirectResponse:
+    target = _resolve_ui_url(
+        admin_key=admin_key,
+        fallback_path=fallback_path,
+        next_url=next_url,
+        referer=referer,
+    )
+    return RedirectResponse(_add_flash(target, flash), status_code=303)
+
+
+def _is_push_eligible_for_ui(item: ContentItem) -> bool:
+    if item.curation_status != ContentStatus.PROMOTED or item.is_suppressed:
+        return False
+    return effective_content_type(item) in {ContentType.ARTICLE, ContentType.VIDEO}
+
+
+def _push_log_summaries(db: Session, content_ids: list[int]) -> dict[int, dict[str, Any]]:
+    if not content_ids:
+        return {}
+
+    logs = (
+        db.query(PushSendLog)
+        .filter(PushSendLog.content_item_id.in_(content_ids))
+        .order_by(PushSendLog.content_item_id.asc(), PushSendLog.created_at.desc())
+        .all()
+    )
+
+    summaries: dict[int, dict[str, Any]] = {}
+    for log in logs:
+        summary = summaries.setdefault(
+            log.content_item_id,
+            {
+                "total": 0,
+                "manual": 0,
+                "auto": 0,
+                "last": None,
+            },
+        )
+        summary["total"] += 1
+        if log.mode == PushMode.manual.value:
+            summary["manual"] += 1
+        elif log.mode == PushMode.auto_all.value:
+            summary["auto"] += 1
+        if summary["last"] is None:
+            summary["last"] = log
+
+    return summaries
+
+
+def _push_summary_markup(summary: dict[str, Any] | None, *, eligible: bool) -> str:
+    if not summary:
+        return _badge("push ready", "blue") if eligible else _badge("push n/a", "gray")
+
+    last = summary.get("last")
+    if not isinstance(last, PushSendLog):
+        return _badge("push n/a", "gray")
+
+    if last.failure_count and not last.success_count:
+        last_tone = "red"
+    elif last.mode == PushMode.auto_all.value:
+        last_tone = "purple"
+    else:
+        last_tone = "blue"
+
+    timestamp = last.created_at.strftime("%m-%d %H:%M") if last.created_at else "—"
+    badges = " ".join(
+        [
+            _badge(f"{summary['total']} sent", "blue"),
+            _badge(f"last {last.mode}", last_tone),
+        ]
+    )
+    if last.invalid_token_count:
+        badges += " " + _badge(f"{last.invalid_token_count} invalid", "red")
+    return f'{badges}<div class="mt-1 text-[11px] text-slate-500">Last {timestamp}</div>'
+
+
+def _push_send_button(
+    *,
+    content_id: int,
+    admin_key: str,
+    next_path: str,
+    compact: bool = False,
+) -> str:
+    button_cls = (
+        "w-full px-3 py-1.5 bg-sky-600 text-white text-sm rounded hover:bg-sky-700"
+        if not compact
+        else "px-2 py-1 text-xs bg-sky-600 text-white rounded hover:bg-sky-700"
+    )
+    return f"""
+    <form method="post" action="/api/v1/admin/ui/push/send/{content_id}?key={admin_key}">
+      <input type="hidden" name="next" value="{_esc(next_path)}">
+      <button type="submit" class="{button_cls}">Send push now</button>
+    </form>"""
 
 
 # ---------------------------------------------------------------------------
@@ -2629,8 +2741,6 @@ def ui_content_list(
     db: Session = Depends(get_db),
     admin_key: str = Depends(_require_admin_ui_auth),
 ):
-    from app.models.content import ContentStatus
-
     repo = EditorialRepository(db)
 
     parsed_day = None
@@ -2687,6 +2797,66 @@ def ui_content_list(
             "sort_by": sort_by,
         }
     )
+    push_config_service = PushConfigService(redis_client=get_redis())
+    push_config, push_source = push_config_service.get_raw_config()
+    push_client = create_push_messaging_client()
+    push_provider_ready = push_client.is_available
+    push_provider_error = push_client.availability_error
+    push_mode_tone = {
+        PushMode.disabled: "gray",
+        PushMode.manual: "blue",
+        PushMode.auto_all: "purple",
+    }.get(push_config.mode, "gray")
+    push_mode_options = "".join(
+        f'<option value="{mode.value}" {"selected" if push_config.mode == mode else ""}>'
+        f"{mode.value}</option>"
+        for mode in PushMode
+    )
+    push_enabled_checked = "checked" if push_config.enabled else ""
+    push_summaries = _push_log_summaries(db, [item.id for item in items])
+    push_runtime_panel = f"""
+    <div class="glass-panel rounded-[1.5rem] p-4 mb-4">
+      <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600">Push runtime</h2>
+          <p class="mt-1 text-sm text-slate-500">
+            Control delivery mode for article and video notifications.
+          </p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            {_badge("enabled" if push_config.enabled else "disabled", "green" if push_config.enabled else "red")}
+            {_badge(f"mode {push_config.mode.value}", push_mode_tone)}
+            {_badge("provider ready" if push_provider_ready else "provider unavailable", "green" if push_provider_ready else "red")}
+            {_badge(f"source {push_source}", "gray")}
+            {_badge(f"ttl {push_config.config_ttl_seconds}s", "gray")}
+          </div>
+          {f'<p class="mt-3 text-xs text-rose-700">{_esc(push_provider_error)}</p>' if push_provider_error else ""}
+        </div>
+        <div class="w-full max-w-xl space-y-3">
+          <form method="post" action="/api/v1/admin/ui/push/config?key={admin_key}" class="grid gap-3 rounded-2xl border border-slate-200 bg-white/70 p-3 sm:grid-cols-[auto,1fr,auto] sm:items-end">
+            <input type="hidden" name="next" value="{content_next}">
+            <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <input type="checkbox" name="enabled" value="true" {push_enabled_checked} class="rounded border-slate-300 text-sky-600 focus:ring-sky-500">
+              Enabled
+            </label>
+            <label class="block text-sm">
+              <span class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Mode</span>
+              <select name="mode" class="w-full rounded border border-slate-300 px-3 py-2 text-sm">
+                {push_mode_options}
+              </select>
+            </label>
+            <button type="submit" class="rounded bg-slate-950 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+              Save push config
+            </button>
+          </form>
+          <form method="post" action="/api/v1/admin/ui/push/config/reset?key={admin_key}" class="flex justify-end">
+            <input type="hidden" name="next" value="{content_next}">
+            <button type="submit" class="rounded border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Reset to defaults
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>"""
 
     rows_html = ""
     for i in items:
@@ -2721,6 +2891,22 @@ def ui_content_list(
         score = f"{i.promotion_score:.3f}" if getattr(i, "promotion_score", None) else "—"
         disc = _esc(getattr(i, "discovered_via", None) or "—")
         hits = str(getattr(i, "signal_hits", 0) or 0)
+        push_eligible = _is_push_eligible_for_ui(i)
+        push_summary_html = _push_summary_markup(
+            push_summaries.get(i.id),
+            eligible=push_eligible,
+        )
+        push_reason = ""
+        if not push_eligible:
+            effective_type = effective_content_type(i)
+            if effective_type == ContentType.REEL:
+                push_reason = "Reels never send."
+            elif cs != ContentStatus.PROMOTED:
+                push_reason = "Promote first to send."
+            elif i.is_suppressed:
+                push_reason = "Unsuppress to send."
+            else:
+                push_reason = "Not eligible."
         if cs == ContentStatus.CANDIDATE:
             actions_html = f"""
             <div class="flex gap-1">
@@ -2735,12 +2921,19 @@ def ui_content_list(
               </a>
             </div>"""
         else:
-            actions_html = (
+            open_button = (
                 f'<a href="/api/v1/admin/ui/detail/{i.id}?key={admin_key}" '
-                'class="px-2 py-1 text-xs bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50">'
+                'class="inline-flex items-center justify-center px-2 py-1 text-xs '
+                'bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50">'
                 "Open"
                 "</a>"
             )
+            push_button = (
+                f"<div>{_push_send_button(content_id=i.id, admin_key=admin_key, next_path=content_next, compact=True)}</div>"
+                if push_eligible
+                else ""
+            )
+            actions_html = f'<div class="flex flex-col gap-1">{open_button}{push_button}</div>'
 
         rows_html += f"""
         <tr class="{row_bg} hover:brightness-95 border-b border-gray-100">
@@ -2752,6 +2945,12 @@ def ui_content_list(
           <td class="px-3 py-2 text-xs text-gray-600 truncate max-w-[90px]">{_esc(i.source or "")}</td>
           <td class="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{pub}</td>
           <td class="px-3 py-2">{badges}</td>
+          <td class="px-3 py-2 text-xs text-gray-500">
+            <div class="max-w-[180px]">
+              {push_summary_html}
+              {f'<div class="mt-1 text-[11px] text-slate-500">{_esc(push_reason)}</div>' if push_reason else ""}
+            </div>
+          </td>
           <td class="px-3 py-2 text-xs font-mono text-gray-600">{score}</td>
           <td class="px-3 py-2 text-xs text-gray-500">{disc}</td>
           <td class="px-3 py-2 text-xs text-gray-500">{hits}</td>
@@ -2760,7 +2959,7 @@ def ui_content_list(
 
     if not rows_html:
         rows_html = (
-            '<tr><td colspan="10" class="px-3 py-6 text-center text-sm text-gray-400">'
+            '<tr><td colspan="11" class="px-3 py-6 text-center text-sm text-gray-400">'
             "No content found for current filters."
             "</td></tr>"
         )
@@ -2840,13 +3039,14 @@ def ui_content_list(
 
     flash_html = ""
     if flash:
-        flash_html = (
-            f'<div class="mb-4 p-3 bg-green-100 text-green-800 rounded text-sm">{_esc(flash)}</div>'
-        )
+        is_err = "error" in flash.lower() or "failed" in flash.lower()
+        cls = "bg-red-100 text-red-800" if is_err else "bg-green-100 text-green-800"
+        flash_html = f'<div class="mb-4 p-3 {cls} rounded text-sm">{_esc(flash)}</div>'
 
     body = f"""
     <h1 class="text-2xl font-bold text-gray-900 mb-4">Content</h1>
     {flash_html}
+    {push_runtime_panel}
     {filter_form}
     <div class="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">{pagination}</div>
     <div class="table-shell glass-panel">
@@ -2859,6 +3059,7 @@ def ui_content_list(
             <th class="px-3 py-3 text-left">Source</th>
             <th class="px-3 py-3 text-left">Published</th>
             <th class="px-3 py-3 text-left">Status</th>
+            <th class="px-3 py-3 text-left">Push</th>
             <th class="px-3 py-3 text-left">Promo score</th>
             <th class="px-3 py-3 text-left">Discovered via</th>
             <th class="px-3 py-3 text-left">Hits</th>
@@ -2884,8 +3085,6 @@ def ui_content_detail(
     db: Session = Depends(get_db),
     admin_key: str = Depends(_require_admin_ui_auth),
 ):
-    from app.models.content import ContentStatus
-
     repo = EditorialRepository(db)
     item = repo.get_content_by_id(content_id)
     if not item:
@@ -2896,6 +3095,19 @@ def ui_content_detail(
     )
 
     actions = repo.get_actions_for_content(content_id, limit=30)
+    push_config_service = PushConfigService(redis_client=get_redis())
+    push_config, _push_source = push_config_service.get_raw_config()
+    push_client = create_push_messaging_client()
+    push_provider_ready = push_client.is_available
+    push_provider_error = push_client.availability_error
+    push_summary = _push_log_summaries(db, [content_id]).get(content_id)
+    push_logs = (
+        db.query(PushSendLog)
+        .filter(PushSendLog.content_item_id == content_id)
+        .order_by(PushSendLog.created_at.desc())
+        .limit(12)
+        .all()
+    )
 
     flash_html = ""
     if flash:
@@ -2997,6 +3209,33 @@ def ui_content_detail(
         f'<option value="{lvl}" {"selected" if (item.editorial_boost or 0) == lvl else ""}>{lvl}</option>'
         for lvl in range(4)
     )
+    push_eligible = _is_push_eligible_for_ui(item)
+    push_reason = ""
+    if not push_eligible:
+        effective_type = effective_content_type(item)
+        if effective_type == ContentType.REEL:
+            push_reason = "Reels are excluded from push delivery."
+        elif cs != ContentStatus.PROMOTED:
+            push_reason = "Promote this item before sending a push."
+        elif item.is_suppressed:
+            push_reason = "Unsuppress this item before sending a push."
+        else:
+            push_reason = "This item is not currently eligible for push delivery."
+
+    push_log_rows = ""
+    for log in push_logs:
+        ts = log.created_at.strftime("%Y-%m-%d %H:%M") if log.created_at else "—"
+        delivered = f"{log.success_count}/{log.audience_count}"
+        failures = str(log.failure_count or 0)
+        invalid = str(log.invalid_token_count or 0)
+        push_log_rows += f"""<tr class="border-b border-slate-100">
+          <td class="px-3 py-2 text-xs whitespace-nowrap text-slate-500">{ts}</td>
+          <td class="px-3 py-2">{_badge(log.mode, "purple" if log.mode == PushMode.auto_all.value else "blue")}</td>
+          <td class="px-3 py-2 text-xs text-slate-600">{_esc(log.actor or "—")}</td>
+          <td class="px-3 py-2 text-xs text-slate-600">{_esc(delivered)}</td>
+          <td class="px-3 py-2 text-xs text-slate-600">{_esc(failures)}</td>
+          <td class="px-3 py-2 text-xs text-slate-600">{_esc(invalid)}</td>
+        </tr>"""
 
     actions_rows = ""
     for a in actions:
@@ -3088,6 +3327,37 @@ def ui_content_detail(
               Save note
             </button>
           </form>
+        </div>
+        <div class="glass-panel rounded-[1.5rem] p-5">
+          <div class="flex items-center justify-between gap-3">
+            <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide">Push delivery</h3>
+            {_badge(push_config.mode.value, "purple" if push_config.mode == PushMode.auto_all else "blue" if push_config.mode == PushMode.manual else "gray")}
+          </div>
+          <div class="mt-3 flex flex-wrap gap-2">
+            {_badge("enabled" if push_config.enabled else "disabled", "green" if push_config.enabled else "red")}
+            {_badge("provider ready" if push_provider_ready else "provider unavailable", "green" if push_provider_ready else "red")}
+          </div>
+          <div class="mt-3 text-xs text-slate-500">
+            {_push_summary_markup(push_summary, eligible=push_eligible)}
+          </div>
+          {f'<p class="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">{_esc(push_provider_error)}</p>' if push_provider_error else ""}
+          {f'<p class="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800">{_esc(push_reason)}</p>' if push_reason else ""}
+          {f'<div class="mt-3">{_push_send_button(content_id=content_id, admin_key=admin_key, next_path=detail_next)}</div>' if push_eligible else ""}
+          <div class="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+            <table class="min-w-full">
+              <thead class="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th class="px-3 py-2 text-left">Time</th>
+                  <th class="px-3 py-2 text-left">Mode</th>
+                  <th class="px-3 py-2 text-left">Actor</th>
+                  <th class="px-3 py-2 text-left">Delivered</th>
+                  <th class="px-3 py-2 text-left">Failed</th>
+                  <th class="px-3 py-2 text-left">Invalid</th>
+                </tr>
+              </thead>
+              <tbody>{push_log_rows or '<tr><td colspan="6" class="px-3 py-4 text-center text-sm text-slate-400">No push sends yet</td></tr>'}</tbody>
+            </table>
+          </div>
         </div>
         <div class="glass-panel rounded-[1.5rem] p-5">
           <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Visibility</h3>
@@ -3194,6 +3464,112 @@ def ui_submit_url(
     return RedirectResponse(
         _add_flash("/api/v1/admin/ui/submit", msg),
         status_code=303,
+    )
+
+
+@router.post("/push/config")
+def ui_update_push_config(
+    enabled: str = Form(""),
+    mode: str = Form(PushMode.manual.value),
+    next_path: str = Form("/api/v1/admin/ui/content", alias="next"),
+    key: str = Form(""),
+    referer: Optional[str] = Header(None, alias="Referer"),
+    admin_key: str = Depends(_require_admin_ui_auth),
+    redis_client=Depends(get_redis),
+):
+    try:
+        push_mode = PushMode(mode)
+    except ValueError:
+        return _redirect_to_ui(
+            admin_key=admin_key,
+            fallback_path="/api/v1/admin/ui/content",
+            flash="Error: invalid push mode",
+            next_url=next_path,
+            referer=referer,
+        )
+
+    push_config_service = PushConfigService(redis_client=redis_client)
+    try:
+        push_config_service.update_config(
+            PushRuntimeConfigPatch(
+                enabled=enabled == "true",
+                mode=push_mode,
+            )
+        )
+    except RuntimeError as exc:
+        return _redirect_to_ui(
+            admin_key=admin_key,
+            fallback_path="/api/v1/admin/ui/content",
+            flash=f"Error: {exc}",
+            next_url=next_path,
+            referer=referer,
+        )
+
+    return _redirect_to_ui(
+        admin_key=admin_key,
+        fallback_path="/api/v1/admin/ui/content",
+        flash=f"Push config updated to {push_mode.value}",
+        next_url=next_path,
+        referer=referer,
+    )
+
+
+@router.post("/push/config/reset")
+def ui_reset_push_config(
+    next_path: str = Form("/api/v1/admin/ui/content", alias="next"),
+    key: str = Form(""),
+    referer: Optional[str] = Header(None, alias="Referer"),
+    admin_key: str = Depends(_require_admin_ui_auth),
+    redis_client=Depends(get_redis),
+):
+    push_config_service = PushConfigService(redis_client=redis_client)
+    try:
+        config = push_config_service.reset_config()
+    except RuntimeError as exc:
+        return _redirect_to_ui(
+            admin_key=admin_key,
+            fallback_path="/api/v1/admin/ui/content",
+            flash=f"Error: {exc}",
+            next_url=next_path,
+            referer=referer,
+        )
+
+    return _redirect_to_ui(
+        admin_key=admin_key,
+        fallback_path="/api/v1/admin/ui/content",
+        flash=f"Push config reset to {config.mode.value}",
+        next_url=next_path,
+        referer=referer,
+    )
+
+
+@router.post("/push/send/{content_id}")
+def ui_send_push_now(
+    content_id: int,
+    next_path: str = Form("", alias="next"),
+    key: str = Form(""),
+    referer: Optional[str] = Header(None, alias="Referer"),
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_ui_auth),
+):
+    service = PushNotificationService(db=db)
+    try:
+        result = service.send_manual(content_id=content_id, actor=ACTOR)
+    except PushNotificationError as exc:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash=f"Error: {exc}",
+            next_url=next_path,
+            referer=referer,
+        )
+
+    return _redirect_after_action(
+        content_id=content_id,
+        admin_key=admin_key,
+        flash=result.message,
+        next_url=next_path,
+        referer=referer,
     )
 
 

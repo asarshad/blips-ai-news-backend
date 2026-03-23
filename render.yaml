@@ -69,6 +69,8 @@ projects:
                 sync: false
               - key: LLM_PROVIDER
                 sync: false
+              - key: FIREBASE_SERVICE_ACCOUNT_JSON
+                sync: false
               - key: ENV
                 value: "dev"
               - key: LOG_LEVEL
@@ -95,6 +97,12 @@ projects:
                 value: "10"
               - key: LLM_DAILY_COST_CEILING
                 value: "2.0"
+              - key: PUSH_RUNTIME_ENABLED
+                value: "true"
+              - key: PUSH_MODE
+                value: "manual"
+              - key: PUSH_CONFIG_TTL_SECONDS
+                value: "300"
 
           # ── Dev Redis ─────────────────────────────────────────────────────
           - type: redis
@@ -158,6 +166,8 @@ projects:
                 sync: false
               - key: LLM_PROVIDER
                 sync: false
+              - key: FIREBASE_SERVICE_ACCOUNT_JSON
+                sync: false
               - key: ENV
                 sync: false             # Set to "prod" in dashboard
               - key: LOG_LEVEL
@@ -186,6 +196,12 @@ projects:
                 value: "5.0"
               - key: MAX_ITEMS_PER_RUN
                 value: "100"
+              - key: PUSH_RUNTIME_ENABLED
+                value: "true"
+              - key: PUSH_MODE
+                value: "manual"
+              - key: PUSH_CONFIG_TTL_SECONDS
+                value: "300"
 
           # ── Prod Worker (Background Jobs) ─────────────────────────────────
           # Runs APScheduler: ingestion, scoring, clustering, cleanup, AI retry.
@@ -220,6 +236,8 @@ projects:
                 sync: false
               - key: LLM_PROVIDER
                 sync: false
+              - key: FIREBASE_SERVICE_ACCOUNT_JSON
+                sync: false
               - key: ENV
                 sync: false
               - key: LOG_LEVEL
@@ -238,6 +256,12 @@ projects:
                 value: "4"
               - key: NEWS_FETCH_INTERVAL_MINUTES
                 value: "30"
+              - key: PUSH_RUNTIME_ENABLED
+                value: "true"
+              - key: PUSH_MODE
+                value: "manual"
+              - key: PUSH_CONFIG_TTL_SECONDS
+                value: "300"
               - key: MAX_ITEMS_PER_RUN
                 value: "100"
               - key: INGEST_UNTIL_TARGETS

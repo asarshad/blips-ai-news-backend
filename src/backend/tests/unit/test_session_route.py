@@ -93,3 +93,61 @@ def test_record_interaction_invalidates_tiered_cache_for_fast_skip(monkeypatch):
     assert response.success is True
     assert playlist_invalidations == ["device-abcdefgh"]
     assert invalidations == [("reels", "device-abcdefgh")]
+
+
+class _CountDeleteQuery:
+    def __init__(self, *, count_value: int = 0, delete_value: int = 0):
+        self._count_value = count_value
+        self._delete_value = delete_value
+
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def count(self):
+        return self._count_value
+
+    def delete(self, **_kwargs):
+        return self._delete_value
+
+
+class _DeleteMyDataDB:
+    def __init__(self):
+        self.committed = False
+        self.rolled_back = False
+
+    def query(self, model):
+        if model is session_module.PushSubscription:
+            return _CountDeleteQuery(count_value=2)
+        if model is session_module.Usage:
+            return _CountDeleteQuery(delete_value=3)
+        if model is session_module.InteractionEvent:
+            return _CountDeleteQuery(delete_value=4)
+        if model is session_module.UserPreference:
+            return _CountDeleteQuery(delete_value=5)
+        if model is session_module.UserProfile:
+            return _CountDeleteQuery(delete_value=1)
+        raise AssertionError(f"Unexpected model queried: {model}")
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
+
+
+def test_delete_my_data_reports_push_subscriptions_and_total_rows():
+    db = _DeleteMyDataDB()
+
+    response = session_module.delete_my_data(device_id="device-12345678", db=db)
+
+    assert db.committed is True
+    assert db.rolled_back is False
+    assert response.success is True
+    assert response.deleted == {
+        "push_subscriptions": 2,
+        "usage": 3,
+        "interaction_events": 4,
+        "user_preferences": 5,
+        "user_profiles": 1,
+    }
+    assert response.message == "Deleted 15 records across 5 tables."

@@ -22,6 +22,7 @@ from app.core.dependencies import get_db, get_redis
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.models.content import ContentType, EventType, InteractionEvent, UserPreference, UserProfile
+from app.models.push import PushSubscription
 from app.models.usage import Usage
 from app.repositories.content_repo import ContentItemRepository
 from app.repositories.user_repo import (
@@ -388,6 +389,10 @@ def delete_my_data(
     counts: dict[str, int] = {}
 
     try:
+        counts["push_subscriptions"] = (
+            db.query(PushSubscription).filter(PushSubscription.device_id == device_id).count()
+        )
+
         counts["usage"] = (
             db.query(Usage).filter(Usage.device_id == device_id).delete(synchronize_session=False)
         )

@@ -11,6 +11,7 @@ from app.models.content import (
 from app.models.conversation import Conversation
 from app.models.editorial import EditorialAction
 from app.models.ingestion_progress import IngestionProgress
+from app.models.push import PushSendLog, PushSubscription
 from app.models.usage import Usage
 from app.models.video_source import VideoDiscoveryRun, VideoSourceProfile
 
@@ -26,6 +27,8 @@ __all__ = [
     "PrefType",
     "InteractionEvent",
     "EventType",
+    "PushSubscription",
+    "PushSendLog",
     "IngestionProgress",
     "EditorialAction",
     "VideoSourceProfile",

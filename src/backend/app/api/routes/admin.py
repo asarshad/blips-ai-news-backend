@@ -8,14 +8,22 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.core.auth import require_admin_key
-from app.core.dependencies import get_redis
+from app.core.dependencies import get_db, get_redis
 from app.core.feature_flags import FeatureFlags, get_feature_flags
 from app.core.logging import get_logger
 from app.core.youtube_quota import YouTubeQuotaBudget
 from app.schemas.ads import AdsConfigAdminResponse, AdsRuntimeConfigPatch
+from app.schemas.push import PushConfigAdminResponse, PushRuntimeConfigPatch, PushSendResponse
 from app.services.ad_config_service import AdConfigService
+from app.services.push_config_service import PushConfigService
+from app.services.push_service import (
+    PushNotificationError,
+    PushNotificationService,
+    create_push_messaging_client,
+)
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(require_admin_key)])
@@ -24,6 +32,16 @@ router = APIRouter(dependencies=[Depends(require_admin_key)])
 def get_ad_config_service(redis_client=Depends(get_redis)) -> AdConfigService:
     """Provide the runtime ad config service."""
     return AdConfigService(redis_client=redis_client)
+
+
+def get_push_config_service(redis_client=Depends(get_redis)) -> PushConfigService:
+    """Provide the runtime push config service."""
+    return PushConfigService(redis_client=redis_client)
+
+
+def _push_provider_ready() -> bool:
+    """Return whether the configured push transport is usable."""
+    return create_push_messaging_client().is_available
 
 
 class FeatureFlagUpdate(BaseModel):
@@ -76,6 +94,69 @@ def reset_ads_config(
 
     logger.info("Runtime ads config reset to defaults")
     return AdsConfigAdminResponse(ads=config, source="default")
+
+
+@router.get("/push/config", response_model=PushConfigAdminResponse)
+def get_push_config(
+    push_config_service: PushConfigService = Depends(get_push_config_service),
+):
+    """Return the raw runtime push config and provider status."""
+    config, source = push_config_service.get_raw_config()
+    return PushConfigAdminResponse(
+        push=config,
+        source=source,
+        provider_ready=_push_provider_ready(),
+    )
+
+
+@router.patch("/push/config", response_model=PushConfigAdminResponse)
+def patch_push_config(
+    update: PushRuntimeConfigPatch,
+    push_config_service: PushConfigService = Depends(get_push_config_service),
+):
+    """Update runtime push config with a partial patch."""
+    try:
+        config = push_config_service.update_config(update)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    logger.info("Runtime push config updated")
+    return PushConfigAdminResponse(
+        push=config,
+        source="redis",
+        provider_ready=_push_provider_ready(),
+    )
+
+
+@router.delete("/push/config", response_model=PushConfigAdminResponse)
+def reset_push_config(
+    push_config_service: PushConfigService = Depends(get_push_config_service),
+):
+    """Reset runtime push config to environment defaults."""
+    try:
+        config = push_config_service.reset_config()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    logger.info("Runtime push config reset to defaults")
+    return PushConfigAdminResponse(
+        push=config,
+        source="default",
+        provider_ready=_push_provider_ready(),
+    )
+
+
+@router.post("/push/send/{content_id}", response_model=PushSendResponse)
+def send_push_now(
+    content_id: int,
+    db: Session = Depends(get_db),
+):
+    """Manually send a push notification for a promoted article/video."""
+    try:
+        service = PushNotificationService(db=db)
+        return service.send_manual(content_id=content_id, actor="admin")
+    except PushNotificationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/flags", response_model=Dict[str, Any])

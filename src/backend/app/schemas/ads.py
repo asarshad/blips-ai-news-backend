@@ -4,6 +4,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from app.schemas.push import PushClientConfig
+
 # ---------------------------------------------------------------------------
 # Ad tracking / metadata sub-models
 # ---------------------------------------------------------------------------
@@ -148,3 +150,4 @@ class AppConfigResponse(BaseModel):
     """Top-level response for GET /config."""
 
     ads: AdsClientConfig = Field(default_factory=AdsClientConfig)
+    push: PushClientConfig = Field(default_factory=PushClientConfig)

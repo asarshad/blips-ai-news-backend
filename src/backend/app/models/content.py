@@ -238,6 +238,11 @@ class ContentItem(Base):
     conversations = relationship(
         "Conversation", back_populates="content_item", cascade="all, delete-orphan"
     )
+    push_send_logs = relationship(
+        "PushSendLog",
+        back_populates="content_item",
+        cascade="all, delete-orphan",
+    )
 
     # Composite indexes for efficient queries
     __table_args__ = (
@@ -280,6 +285,11 @@ class UserProfile(Base):
         back_populates="profile",
         cascade="all, delete-orphan",
         uselist=False,
+    )
+    push_subscriptions = relationship(
+        "PushSubscription",
+        back_populates="profile",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self):

@@ -19,6 +19,7 @@ from app.ingestion.canonical import canonical_key_for_article
 from app.ingestion.url_normalizer import normalize_url
 from app.models.content import ContentItem
 from app.repositories.editorial_repo import EditorialRepository
+from app.services.push_service import PushNotificationService
 
 logger = get_logger(__name__)
 
@@ -186,12 +187,25 @@ class EditorialService:
             return None
 
         self._hydrate_for_approval(item)
-        return self.repo.approve_and_publish(
+        published = self.repo.approve_and_publish(
             content_id=content_id,
             actor=actor,
             boost_level=boost_level,
             note=note,
         )
+        if published is not None:
+            try:
+                PushNotificationService(db=self.db).send_auto_for_content_ids(
+                    [published.id],
+                    actor=f"editorial:{actor}",
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Auto push after editorial publish failed for content %s: %s",
+                    published.id,
+                    exc,
+                )
+        return published
 
     def _hydrate_for_approval(self, item: ContentItem) -> None:
         """Best-effort enrichment before a candidate becomes feed-visible."""

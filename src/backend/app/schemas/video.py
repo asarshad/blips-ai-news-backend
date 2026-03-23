@@ -22,7 +22,14 @@ class VideoCreate(VideoBase):
 
 class Video(VideoBase):
     id: int
+    type: str = "VIDEO"
     created_at: datetime
+    published_at: Optional[datetime] = None
+    freshness_tier: Optional[str] = None
+    freshness_reason: Optional[str] = None
+    published_age_seconds: Optional[int] = None
+    added_age_seconds: Optional[int] = None
+    conversation_starters: Optional[dict[str, List[str]]] = None
 
     model_config = {"from_attributes": True}
 

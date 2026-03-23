@@ -10,7 +10,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.api.feed_headers import FeedMetadata, compute_feed_version
-from app.article_hydration import display_article_title
 from app.core.config import settings
 from app.core.dependencies import get_db
 from app.core.exceptions import not_found_exception
@@ -22,6 +21,7 @@ from app.repositories.content_repo import ContentItemRepository
 from app.repositories.user_repo import UserCategorySelectionRepository
 from app.schemas.article import ArticleWithConversation
 from app.services.ad_mixer import inject_ads
+from app.services.content_payloads import content_item_to_article_payload
 from app.services.freshness_metrics_service import record_feed_served
 from app.services.inventory_service import Surface
 from app.services.tiered_feed_service import (
@@ -40,21 +40,7 @@ def get_content_repo(db: Session = Depends(get_db)) -> ContentItemRepository:
 
 def _content_item_to_article_schema(item) -> dict:
     """Convert ContentItem to Article schema format."""
-    # Extract tags from topics
-    tags = [{"name": topic} for topic in (item.topics or [])]
-    summary = item.summary or ""
-
-    return {
-        "id": item.id,
-        "title": display_article_title(item.title, item.canonical_url or item.source_url),
-        "source_url": item.source_url,
-        "summary": summary,
-        "image_url": item.image_url or None,  # coerce empty string to null
-        "published_date": item.published_at.date() if item.published_at else None,
-        "created_at": item.created_at,
-        "read_time_minutes": max(1, len(summary) // 200) if summary else 1,
-        "tags": tags,
-    }
+    return content_item_to_article_payload(item)
 
 
 @router.get("/recent", response_model=Dict[str, Any])

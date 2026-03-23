@@ -49,3 +49,13 @@ def test_runtime_ads_defaults_support_backend_controlled_surfaces():
     assert settings.ADS_REELS_ENABLED is False
     assert settings.ADS_REELS_FREQUENCY == 0
     assert settings.ADS_REELS_FIRST_SLOT_AFTER == 0
+
+
+def test_runtime_push_defaults_support_backend_control():
+    settings = Settings()
+
+    assert settings.PUSH_RUNTIME_ENABLED is False
+    assert settings.PUSH_MODE == "manual"
+    assert settings.PUSH_CONFIG_TTL_SECONDS == 300
+    assert settings.FIREBASE_SERVICE_ACCOUNT_JSON == ""
+    assert settings.FIREBASE_SERVICE_ACCOUNT_FILE == ""
