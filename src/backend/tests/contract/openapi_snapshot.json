@@ -290,6 +290,9 @@
         "properties": {
           "ads": {
             "$ref": "#/components/schemas/AdsClientConfig"
+          },
+          "push": {
+            "$ref": "#/components/schemas/PushClientConfig"
           }
         },
         "title": "AppConfigResponse",
@@ -372,6 +375,34 @@
       },
       "ArticleWithConversation": {
         "properties": {
+          "added_age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Added Age Seconds"
+          },
+          "conversation_starters": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Starters"
+          },
           "conversations": {
             "default": [],
             "items": {
@@ -384,6 +415,28 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "freshness_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freshness Reason"
+          },
+          "freshness_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freshness Tier"
           },
           "id": {
             "title": "Id",
@@ -399,6 +452,29 @@
               }
             ],
             "title": "Image Url"
+          },
+          "published_age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Age Seconds"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
           },
           "published_date": {
             "anyOf": [
@@ -416,6 +492,17 @@
             "default": 1,
             "title": "Read Time Minutes",
             "type": "integer"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
           },
           "source_url": {
             "title": "Source Url",
@@ -435,6 +522,11 @@
           },
           "title": {
             "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "default": "ARTICLE",
+            "title": "Type",
             "type": "string"
           }
         },
@@ -650,6 +742,22 @@
         "title": "Body_ui_request_changes_api_v1_admin_ui_action__content_id__request_changes_post",
         "type": "object"
       },
+      "Body_ui_reset_push_config_api_v1_admin_ui_push_config_reset_post": {
+        "properties": {
+          "key": {
+            "default": "",
+            "title": "Key",
+            "type": "string"
+          },
+          "next": {
+            "default": "/api/v1/admin/ui/content",
+            "title": "Next",
+            "type": "string"
+          }
+        },
+        "title": "Body_ui_reset_push_config_api_v1_admin_ui_push_config_reset_post",
+        "type": "object"
+      },
       "Body_ui_review_bulk_action_api_v1_admin_ui_review_bulk_action_post": {
         "properties": {
           "action": {
@@ -686,6 +794,22 @@
           "action"
         ],
         "title": "Body_ui_review_bulk_action_api_v1_admin_ui_review_bulk_action_post",
+        "type": "object"
+      },
+      "Body_ui_send_push_now_api_v1_admin_ui_push_send__content_id__post": {
+        "properties": {
+          "key": {
+            "default": "",
+            "title": "Key",
+            "type": "string"
+          },
+          "next": {
+            "default": "",
+            "title": "Next",
+            "type": "string"
+          }
+        },
+        "title": "Body_ui_send_push_now_api_v1_admin_ui_push_send__content_id__post",
         "type": "object"
       },
       "Body_ui_submit_url_api_v1_admin_ui_submit_post": {
@@ -741,6 +865,32 @@
           }
         },
         "title": "Body_ui_unsuppress_api_v1_admin_ui_action__content_id__unsuppress_post",
+        "type": "object"
+      },
+      "Body_ui_update_push_config_api_v1_admin_ui_push_config_post": {
+        "properties": {
+          "enabled": {
+            "default": "",
+            "title": "Enabled",
+            "type": "string"
+          },
+          "key": {
+            "default": "",
+            "title": "Key",
+            "type": "string"
+          },
+          "mode": {
+            "default": "manual",
+            "title": "Mode",
+            "type": "string"
+          },
+          "next": {
+            "default": "/api/v1/admin/ui/content",
+            "title": "Next",
+            "type": "string"
+          }
+        },
+        "title": "Body_ui_update_push_config_api_v1_admin_ui_push_config_post",
         "type": "object"
       },
       "BoostRequest": {
@@ -2437,6 +2587,265 @@
         "title": "PromoteResponse",
         "type": "object"
       },
+      "PushClientConfig": {
+        "description": "Effective client-facing push config.",
+        "properties": {
+          "config_ttl_seconds": {
+            "default": 300,
+            "minimum": 1.0,
+            "title": "Config Ttl Seconds",
+            "type": "integer"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/PushMode",
+            "default": "manual"
+          }
+        },
+        "title": "PushClientConfig",
+        "type": "object"
+      },
+      "PushConfigAdminResponse": {
+        "description": "Admin response for runtime push config.",
+        "properties": {
+          "provider_ready": {
+            "title": "Provider Ready",
+            "type": "boolean"
+          },
+          "push": {
+            "$ref": "#/components/schemas/PushRuntimeConfig"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "push",
+          "source",
+          "provider_ready"
+        ],
+        "title": "PushConfigAdminResponse",
+        "type": "object"
+      },
+      "PushMode": {
+        "description": "Runtime delivery modes for push notifications.",
+        "enum": [
+          "disabled",
+          "manual",
+          "auto_all"
+        ],
+        "title": "PushMode",
+        "type": "string"
+      },
+      "PushRuntimeConfig": {
+        "description": "Operator-controlled runtime push config.",
+        "properties": {
+          "config_ttl_seconds": {
+            "default": 300,
+            "minimum": 1.0,
+            "title": "Config Ttl Seconds",
+            "type": "integer"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/PushMode",
+            "default": "manual"
+          }
+        },
+        "title": "PushRuntimeConfig",
+        "type": "object"
+      },
+      "PushRuntimeConfigPatch": {
+        "additionalProperties": false,
+        "description": "Partial runtime push config patch.",
+        "properties": {
+          "config_ttl_seconds": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Ttl Seconds"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PushMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "PushRuntimeConfigPatch",
+        "type": "object"
+      },
+      "PushSendResponse": {
+        "description": "Push send response for admin/manual or auto delivery.",
+        "properties": {
+          "audience_count": {
+            "title": "Audience Count",
+            "type": "integer"
+          },
+          "content_id": {
+            "title": "Content Id",
+            "type": "integer"
+          },
+          "failure_count": {
+            "title": "Failure Count",
+            "type": "integer"
+          },
+          "invalid_token_count": {
+            "default": 0,
+            "title": "Invalid Token Count",
+            "type": "integer"
+          },
+          "log_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Id"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "skipped": {
+            "default": false,
+            "title": "Skipped",
+            "type": "boolean"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "success_count": {
+            "title": "Success Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "success",
+          "content_id",
+          "mode",
+          "audience_count",
+          "success_count",
+          "failure_count",
+          "message"
+        ],
+        "title": "PushSendResponse",
+        "type": "object"
+      },
+      "PushSubscriptionDeleteRequest": {
+        "description": "Device push token removal request.",
+        "properties": {
+          "token": {
+            "maxLength": 4096,
+            "minLength": 16,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "PushSubscriptionDeleteRequest",
+        "type": "object"
+      },
+      "PushSubscriptionResponse": {
+        "description": "Push subscription mutation response.",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Platform"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "active",
+          "token"
+        ],
+        "title": "PushSubscriptionResponse",
+        "type": "object"
+      },
+      "PushSubscriptionUpsertRequest": {
+        "description": "Device push token registration request.",
+        "properties": {
+          "platform": {
+            "enum": [
+              "android",
+              "ios"
+            ],
+            "title": "Platform",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 4096,
+            "minLength": 16,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "platform"
+        ],
+        "title": "PushSubscriptionUpsertRequest",
+        "type": "object"
+      },
       "ReviewActionRequest": {
         "properties": {
           "note": {
@@ -2700,10 +3109,38 @@
       },
       "Video": {
         "properties": {
+          "added_age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Added Age Seconds"
+          },
           "category": {
             "default": "Technology",
             "title": "Category",
             "type": "string"
+          },
+          "conversation_starters": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Starters"
           },
           "created_at": {
             "format": "date-time",
@@ -2721,6 +3158,28 @@
             ],
             "title": "Duration Seconds"
           },
+          "freshness_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freshness Reason"
+          },
+          "freshness_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freshness Tier"
+          },
           "hot_score": {
             "anyOf": [
               {
@@ -2736,6 +3195,29 @@
           "id": {
             "title": "Id",
             "type": "integer"
+          },
+          "published_age_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published Age Seconds"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
           },
           "source": {
             "default": "YouTube",
@@ -2763,6 +3245,11 @@
           },
           "title": {
             "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "default": "VIDEO",
+            "title": "Type",
             "type": "string"
           },
           "video_url": {
@@ -4258,6 +4745,193 @@
           }
         },
         "summary": "Cleanup Status",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/push/config": {
+      "delete": {
+        "description": "Reset runtime push config to environment defaults.",
+        "operationId": "reset_push_config_api_v1_admin_push_config_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushConfigAdminResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset Push Config",
+        "tags": [
+          "admin"
+        ]
+      },
+      "get": {
+        "description": "Return the raw runtime push config and provider status.",
+        "operationId": "get_push_config_api_v1_admin_push_config_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushConfigAdminResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Push Config",
+        "tags": [
+          "admin"
+        ]
+      },
+      "patch": {
+        "description": "Update runtime push config with a partial patch.",
+        "operationId": "patch_push_config_api_v1_admin_push_config_patch",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushRuntimeConfigPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushConfigAdminResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Push Config",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/push/send/{content_id}": {
+      "post": {
+        "description": "Manually send a push notification for a promoted article/video.",
+        "operationId": "send_push_now_api_v1_admin_push_send__content_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushSendResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send Push Now",
         "tags": [
           "admin"
         ]
@@ -6090,6 +6764,282 @@
         ]
       }
     },
+    "/api/v1/admin/ui/push/config": {
+      "post": {
+        "operationId": "ui_update_push_config_api_v1_admin_ui_push_config_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Referer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Referer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ui_update_push_config_api_v1_admin_ui_push_config_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Update Push Config",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
+    "/api/v1/admin/ui/push/config/reset": {
+      "post": {
+        "operationId": "ui_reset_push_config_api_v1_admin_ui_push_config_reset_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Referer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Referer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ui_reset_push_config_api_v1_admin_ui_push_config_reset_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Reset Push Config",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
+    "/api/v1/admin/ui/push/send/{content_id}": {
+      "post": {
+        "operationId": "ui_send_push_now_api_v1_admin_ui_push_send__content_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "title": "Content Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Referer",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Referer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Admin-Key"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "blips_admin_session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blips Admin Session"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_ui_send_push_now_api_v1_admin_ui_push_send__content_id__post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ui Send Push Now",
+        "tags": [
+          "admin-ui",
+          "admin-ui"
+        ]
+      }
+    },
     "/api/v1/admin/ui/review": {
       "get": {
         "operationId": "ui_review_queue_api_v1_admin_ui_review_get",
@@ -7791,6 +8741,124 @@
         "tags": [
           "metrics",
           "metrics"
+        ]
+      }
+    },
+    "/api/v1/notifications/subscription": {
+      "delete": {
+        "description": "Delete a device push subscription.",
+        "operationId": "delete_push_subscription_api_v1_notifications_subscription_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Device-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Device-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushSubscriptionDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushSubscriptionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Push Subscription",
+        "tags": [
+          "notifications"
+        ]
+      },
+      "put": {
+        "description": "Create or refresh a device push subscription.",
+        "operationId": "upsert_push_subscription_api_v1_notifications_subscription_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Device-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Device-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushSubscriptionUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushSubscriptionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upsert Push Subscription",
+        "tags": [
+          "notifications"
         ]
       }
     },
