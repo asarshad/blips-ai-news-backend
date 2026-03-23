@@ -37,7 +37,8 @@ projects:
             autoDeployTrigger: commit
             region: oregon
             rootDir: src/backend
-            buildCommand: pip install -r requirements.lock && alembic upgrade head
+            buildCommand: pip install -r requirements.lock
+            preDeployCommand: alembic upgrade head
             startCommand: >-
               gunicorn app.main:app
               --workers 1
@@ -132,8 +133,9 @@ projects:
             autoDeployTrigger: commit
             region: oregon
             rootDir: src/backend
-            buildCommand: pip install -r requirements.lock && alembic upgrade head
+            buildCommand: pip install -r requirements.lock
             startCommand: >-
+              alembic upgrade head &&
               gunicorn app.main:app
               --workers 2
               --worker-class uvicorn.workers.UvicornWorker
