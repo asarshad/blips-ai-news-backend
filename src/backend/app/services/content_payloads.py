@@ -37,26 +37,34 @@ def content_item_to_article_payload(
         surface=Surface.ARTICLES,
         now=now or datetime.utcnow(),
     )
-    summary = item.summary or ""
+    summary = getattr(item, "summary", "") or ""
+    canonical_url = getattr(item, "canonical_url", None)
+    source_url = getattr(item, "source_url", None)
+    image_url = getattr(item, "image_url", None)
+    published_at = getattr(item, "published_at", None)
+    created_at = getattr(item, "created_at", None)
+    topics = getattr(item, "topics", None) or []
+    conversation_starters = getattr(item, "conversation_starters", None)
+    source = getattr(item, "source", "") or ""
 
     return {
         "id": item.id,
         "type": ContentType.ARTICLE.value,
-        "title": display_article_title(item.title, item.canonical_url or item.source_url),
-        "source": item.source or "",
-        "source_url": item.source_url,
+        "title": display_article_title(item.title, canonical_url or source_url),
+        "source": source,
+        "source_url": source_url,
         "summary": summary,
-        "image_url": item.image_url or None,
-        "published_date": item.published_at.date() if item.published_at else None,
-        "published_at": item.published_at,
-        "created_at": item.created_at,
+        "image_url": image_url or None,
+        "published_date": published_at.date() if published_at else None,
+        "published_at": published_at,
+        "created_at": created_at,
         "read_time_minutes": max(1, len(summary) // 200) if summary else 1,
-        "tags": [{"name": topic} for topic in (item.topics or [])],
+        "tags": [{"name": topic} for topic in topics],
         "freshness_tier": freshness["freshness_tier"],
         "freshness_reason": freshness["freshness_reason"],
         "published_age_seconds": freshness["published_age_seconds"],
         "added_age_seconds": freshness["added_age_seconds"],
-        "conversation_starters": item.conversation_starters,
+        "conversation_starters": conversation_starters,
     }
 
 
@@ -67,26 +75,37 @@ def content_item_to_video_payload(
     effective_type = effective_content_type(item)
     surface = Surface.REELS if effective_type == ContentType.REEL else Surface.VIDEOS
     freshness = _compute_freshness(item, surface=surface, now=now or datetime.utcnow())
+    topics = getattr(item, "topics", None) or []
+    summary = getattr(item, "summary", "") or ""
+    image_url = getattr(item, "image_url", None)
+    video_url = getattr(item, "video_url", None)
+    source_url = getattr(item, "source_url", None)
+    source = getattr(item, "source", None) or "YouTube"
+    duration_seconds = getattr(item, "duration_seconds", None)
+    global_score = getattr(item, "global_score", None)
+    created_at = getattr(item, "created_at", None)
+    published_at = getattr(item, "published_at", None)
+    conversation_starters = getattr(item, "conversation_starters", None)
 
     return {
         "id": item.id,
         "type": effective_type.value,
         "title": item.title,
-        "summary": item.summary or "",
-        "video_url": item.video_url or item.source_url,
-        "source_url": item.source_url,
-        "thumbnail_url": item.image_url or None,
-        "source": item.source or "YouTube",
-        "category": (item.topics[0] if item.topics else "Technology"),
-        "duration_seconds": item.duration_seconds,
-        "hot_score": int(item.global_score * 100) if item.global_score else 0,
-        "created_at": item.created_at,
-        "published_at": item.published_at,
+        "summary": summary,
+        "video_url": video_url or source_url,
+        "source_url": source_url,
+        "thumbnail_url": image_url or None,
+        "source": source,
+        "category": (topics[0] if topics else "Technology"),
+        "duration_seconds": duration_seconds,
+        "hot_score": int(global_score * 100) if global_score else 0,
+        "created_at": created_at,
+        "published_at": published_at,
         "freshness_tier": freshness["freshness_tier"],
         "freshness_reason": freshness["freshness_reason"],
         "published_age_seconds": freshness["published_age_seconds"],
         "added_age_seconds": freshness["added_age_seconds"],
-        "conversation_starters": item.conversation_starters,
+        "conversation_starters": conversation_starters,
     }
 
 
