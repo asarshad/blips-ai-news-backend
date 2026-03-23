@@ -108,6 +108,14 @@ class TestImageExtraction:
         assert meta.image_url is None
         assert meta.image_source == "none"
 
+    def test_tracker_beacon_og_image_rejected(self):
+        html = _html_with_head(
+            '<meta property="og:image" content="https://www.google-analytics.com/g/collect?v=2&tid=G-TEST&cid=123" />'
+        )
+        meta = extract_metadata(html, "https://example.com")
+        assert meta.image_url is None
+        assert meta.image_source == "none"
+
     def test_no_image(self):
         html = _html_with_head("<title>No Image</title>")
         meta = extract_metadata(html, "https://example.com")

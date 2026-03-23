@@ -54,6 +54,10 @@ class TestValidateImageUrl:
             validate_image_url("  https://example.com/img.jpg  ") == "https://example.com/img.jpg"
         )
 
+    def test_tracker_beacon_with_collect_path_rejected(self):
+        url = "https://metrics.example.com/g/collect?tid=G-TEST&cid=123&en=page_view"
+        assert validate_image_url(url) is None
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # make_absolute_url

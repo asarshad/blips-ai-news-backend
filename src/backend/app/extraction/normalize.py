@@ -14,12 +14,35 @@ import ipaddress
 import re
 import socket
 from typing import Optional
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 # ── Image URL validation ──────────────────────────────────────────────────────
 
 _INVALID_IMAGE_PREFIXES = ("data:", "blob:", "javascript:", "about:")
 _VALID_SCHEMES = {"http", "https"}
+_TRACKING_IMAGE_HOST_KEYWORDS = (
+    "google-analytics.com",
+    "analytics.google.com",
+    "googletagmanager.com",
+    "doubleclick.net",
+)
+_TRACKING_IMAGE_PATH_KEYWORDS = (
+    "/collect",
+    "/g/collect",
+    "/r/collect",
+    "/pixel",
+    "/beacon",
+)
+_TRACKING_IMAGE_QUERY_KEYS = {
+    "tid",
+    "cid",
+    "gclid",
+    "fbclid",
+    "dclid",
+    "msclkid",
+    "mc_cid",
+    "mc_eid",
+}
 
 
 def validate_image_url(url: Optional[str]) -> Optional[str]:
@@ -30,13 +53,13 @@ def validate_image_url(url: Optional[str]) -> Optional[str]:
     - data:, blob:, javascript: URIs
     - Relative paths (no scheme + netloc)
     - Non-http(s) schemes
+    - Known tracker/beacon URLs mistakenly exposed as image candidates
     """
     if not url or not url.strip():
         return None
 
     url = url.strip()
 
-    # Reject data/blob/javascript URIs
     lowered = url.lower()
     for prefix in _INVALID_IMAGE_PREFIXES:
         if lowered.startswith(prefix):
@@ -45,18 +68,24 @@ def validate_image_url(url: Optional[str]) -> Optional[str]:
     parsed = urlparse(url)
     scheme = parsed.scheme.lower()
 
-    # Must have scheme and netloc
     if not scheme or not parsed.netloc:
         return None
 
     if scheme not in _VALID_SCHEMES:
         return None
 
-    # Reject obviously broken URLs (just a domain, no path)
-    # Allow paths like / for rare favicon fallbacks
+    host = (parsed.hostname or "").lower()
+    path = (parsed.path or "").lower()
+    query_keys = {key.lower() for key in parse_qs(parsed.query).keys()}
+
+    if any(keyword in host for keyword in _TRACKING_IMAGE_HOST_KEYWORDS):
+        return None
+    if any(
+        keyword in path for keyword in _TRACKING_IMAGE_PATH_KEYWORDS
+    ) and query_keys.intersection(_TRACKING_IMAGE_QUERY_KEYS):
+        return None
 
     # SSRF guard: reject private/loopback/link-local hosts
-    host = parsed.hostname or ""
     if host:
         try:
             infos = socket.getaddrinfo(host, None)
