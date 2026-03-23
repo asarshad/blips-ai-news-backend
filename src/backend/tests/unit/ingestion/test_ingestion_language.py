@@ -279,7 +279,7 @@ class TestRssIngestionLanguageFilter:
 
         assert normalized is not None
         assert len(normalized.split()) == settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS
-        assert normalized.endswith("...")
+        assert not normalized.endswith("...")
 
 
 # ── YouTube ingestion language tests ─────────────────────────────────────────

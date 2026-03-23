@@ -128,10 +128,7 @@ def normalize_article_summary_output(summary_text: Optional[str]) -> Optional[st
     if len(words) <= max_words:
         return cleaned
 
-    trimmed = " ".join(words[:max_words]).rstrip(" ,;:-")
-    if trimmed and trimmed[-1] not in ".!?":
-        trimmed += "..."
-    return trimmed
+    return " ".join(words[:max_words]).rstrip(" ,;:-")
 
 
 @dataclass
