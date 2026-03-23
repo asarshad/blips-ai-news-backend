@@ -58,6 +58,13 @@ class ContentStatus(enum.Enum):
     PROMOTED = "PROMOTED"
 
 
+class ContentReadinessStatus(enum.Enum):
+    """Client-delivery readiness for a content item."""
+
+    PENDING = "PENDING"
+    READY = "READY"
+
+
 class PrefType(enum.Enum):
     """Types of user preferences."""
 
@@ -140,6 +147,21 @@ class ContentItem(Base):
         nullable=False,
         default=ContentStatus.PROMOTED,
         server_default="PROMOTED",
+        index=True,
+    )
+    readiness_status = Column(
+        String(32),
+        nullable=False,
+        default=ContentReadinessStatus.PENDING.value,
+        server_default=ContentReadinessStatus.PENDING.value,
+        index=True,
+    )
+    readiness_reason = Column(String(64), nullable=True)
+    ready_at = Column(DateTime, nullable=True, index=True)
+    readiness_updated_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
         index=True,
     )
 
@@ -243,6 +265,11 @@ class ContentItem(Base):
         back_populates="content_item",
         cascade="all, delete-orphan",
     )
+    content_events = relationship(
+        "ContentEventOutbox",
+        back_populates="content_item",
+        cascade="all, delete-orphan",
+    )
 
     # Composite indexes for efficient queries
     __table_args__ = (
@@ -254,6 +281,7 @@ class ContentItem(Base):
         Index("ix_content_type_score", "type", "global_score"),
         # Promotion pipeline: find CANDIDATEs for a given type quickly
         Index("ix_content_curation_type_score", "curation_status", "type", "promotion_score"),
+        Index("ix_content_readiness_type_published", "readiness_status", "type", "published_at"),
     )
 
     def __repr__(self):

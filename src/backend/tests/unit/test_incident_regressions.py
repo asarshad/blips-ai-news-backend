@@ -1,8 +1,7 @@
 """
 Regression tests for the two production incidents:
 
-1. Articles "Content Not Found" — ai_processed=True requirement with
-   summarization disabled in production.
+1. Articles "Content Not Found" — thin content leaking through a bespoke feed gate.
 2. Reels quality — non-short content served on the reels endpoint.
 
 Every test here is tied to a specific root cause that was discovered
@@ -10,33 +9,47 @@ during incident response.  If these tests break, the incidents are back.
 """
 
 from datetime import datetime
+from types import SimpleNamespace
 
 # ---------------------------------------------------------------------------
-# Incident 1 — Articles ai_processed gate
+# Incident 1 — Shared readiness gate
 # ---------------------------------------------------------------------------
 
 
-class TestArticlesFeedAiProcessed:
+class TestArticlesFeedReadiness:
     """
-    POLICY: Summarization is enabled in production.  Articles without
-    AI summaries should not be shown to users.  The user-facing articles
-    feed must filter to ai_processed=True so only summarized content appears.
+    POLICY: feed APIs and push delivery share a single readiness contract.
+    Thin articles must be excluded everywhere until they are card-ready.
     """
 
-    def test_articles_recent_requires_ai_processed(self):
-        """
-        The /articles/recent endpoint must filter on ai_processed=True
-        so only articles with AI summaries are shown.
-        """
+    def test_article_without_summary_is_not_ready(self):
+        from app.models.content import ContentReadinessStatus, ContentStatus, ContentType
+        from app.services.content_readiness import evaluate_content_readiness
+
+        item = SimpleNamespace(
+            id=1,
+            type=ContentType.ARTICLE,
+            curation_status=ContentStatus.PROMOTED,
+            is_suppressed=False,
+            promotion_reason=None,
+            source_url="https://example.com/article",
+            canonical_url="https://example.com/article",
+            ai_processed=False,
+            summary=None,
+        )
+
+        decision = evaluate_content_readiness(item)
+
+        assert decision.status == ContentReadinessStatus.PENDING
+        assert decision.reason == "awaiting_ai_processing"
+
+    def test_recent_articles_route_no_longer_has_a_bespoke_ai_flag(self):
         import inspect
 
         from app.api.routes.articles import get_recent_articles
 
         source = inspect.getsource(get_recent_articles)
-        assert "require_ai_processed=True" in source, (
-            "get_recent_articles must use require_ai_processed=True "
-            "to hide articles without AI summaries"
-        )
+        assert "require_ai_processed" not in source
 
 
 class TestArticlesDiagnosticHeaders:
@@ -89,20 +102,32 @@ class TestArticlesDiagnosticHeaders:
 
 
 # ---------------------------------------------------------------------------
-# Incident 1b — Videos feed same risk
+# Incident 1b — Videos share the same readiness contract
 # ---------------------------------------------------------------------------
 
 
-class TestVideosFeedAiProcessed:
-    """Videos must surface immediately after promotion; AI enrichment is asynchronous."""
+class TestVideosFeedReadiness:
+    """Videos remain visible immediately, but via readiness rather than a route flag."""
 
-    def test_videos_recent_does_not_wait_for_ai_processed(self):
-        import inspect
+    def test_video_with_title_and_url_is_ready_without_summary(self):
+        from app.models.content import ContentReadinessStatus, ContentStatus, ContentType
+        from app.services.content_readiness import evaluate_content_readiness
 
-        from app.api.routes.videos import get_recent_videos
+        item = SimpleNamespace(
+            id=2,
+            type=ContentType.VIDEO,
+            curation_status=ContentStatus.PROMOTED,
+            is_suppressed=False,
+            promotion_reason=None,
+            title="Fresh promoted video",
+            source_url="https://www.youtube.com/watch?v=test123",
+            video_url="https://www.youtube.com/watch?v=test123",
+        )
 
-        source = inspect.getsource(get_recent_videos)
-        assert "require_ai_processed=False" in source
+        decision = evaluate_content_readiness(item)
+
+        assert decision.status == ContentReadinessStatus.READY
+        assert decision.reason == "video_ready"
 
     def test_videos_returns_cursor_envelope_instead_of_404(self):
         import inspect
@@ -207,20 +232,20 @@ class TestReelClassificationIngestion:
 
 
 # ---------------------------------------------------------------------------
-# Reels endpoint still uses require_ai_processed=False (no regression)
+# Reels endpoint no longer carries a bespoke AI gate (no regression)
 # ---------------------------------------------------------------------------
 
 
 class TestReelsEndpointConfig:
-    """Ensure the reels endpoint does not regress to requiring ai_processed."""
+    """Ensure the reels endpoint stays on the shared readiness contract."""
 
-    def test_reels_endpoint_does_not_require_ai(self):
+    def test_reels_endpoint_has_no_bespoke_ai_flag(self):
         import inspect
 
         from app.api.routes.videos import get_reels
 
         source = inspect.getsource(get_reels)
-        assert "require_ai_processed=False" in source
+        assert "require_ai_processed" not in source
 
 
 # ---------------------------------------------------------------------------

@@ -61,14 +61,12 @@ def test_cache_key_separates_hybrid_video_rerank_variants():
         surface=SimpleNamespace(value="videos"),
         limit=20,
         offset=0,
-        require_ai=False,
         hybrid_video_rerank=False,
     )
     hybrid_key = _cache_key(
         surface=SimpleNamespace(value="videos"),
         limit=20,
         offset=0,
-        require_ai=False,
         hybrid_video_rerank=True,
     )
 
@@ -82,7 +80,6 @@ def test_cache_key_includes_device_hash_when_personalized():
         surface=SimpleNamespace(value="videos"),
         limit=20,
         offset=0,
-        require_ai=False,
         hybrid_video_rerank=False,
         device_id="device-12345678",
     )
@@ -181,7 +178,6 @@ def test_get_tiered_feed_applies_hybrid_rerank_to_reels_when_enabled(monkeypatch
         limit=2,
         offset=0,
         now=now,
-        require_ai_processed=False,
         hybrid_video_rerank=True,
     )
 
@@ -283,7 +279,6 @@ def test_get_tiered_feed_filters_recent_negative_feedback(monkeypatch):
         limit=5,
         offset=0,
         now=now,
-        require_ai_processed=False,
         hybrid_video_rerank=False,
         device_id="device-12345678",
     )
@@ -345,7 +340,6 @@ def test_get_cached_tiered_feed_hydrates_missing_video_durations(monkeypatch):
         surface=Surface.VIDEOS,
         limit=20,
         offset=0,
-        require_ai_processed=False,
     )
 
     assert items[0]["duration_seconds"] == 915

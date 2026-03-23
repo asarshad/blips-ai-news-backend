@@ -9528,7 +9528,7 @@
     },
     "/api/v1/videos/reels": {
       "get": {
-        "description": "Get the most recent reels (short videos) using tiered freshness strategy.\n\nReturns a blend of:\n- Tier A (Fresh): reels published within rolling window (7 days)\n- Tier B (Backfill): reels added recently but published earlier\n- Tier C (Evergreen): older high-quality reels\n\nREELs don't require AI summaries.\nResults are diversity-mixed to ensure varied source distribution.",
+        "description": "Get the most recent reels (short videos) using tiered freshness strategy.\n\nReturns a blend of:\n- Tier A (Fresh): reels published within rolling window (7 days)\n- Tier B (Backfill): reels added recently but published earlier\n- Tier C (Evergreen): older high-quality reels\n\nReels use the same shared readiness contract as the rest of the feed.\nResults are diversity-mixed to ensure varied source distribution.",
         "operationId": "get_reels_api_v1_videos_reels_get",
         "parameters": [
           {

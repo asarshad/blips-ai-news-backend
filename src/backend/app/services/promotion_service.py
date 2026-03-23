@@ -49,6 +49,7 @@ from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.video_source import VideoSourceProfile
 from app.ranking.quality import compute_source_weight
 from app.repositories.video_source_repo import VideoSourceProfileRepository
+from app.services.content_readiness import sync_content_readiness
 from app.services.video_content_policy import apply_content_policy
 
 logger = get_logger(__name__)
@@ -970,6 +971,7 @@ class PromotionService:
                     item.promotion_reason = f"{item.promotion_reason}|preserved=editorial_override"
                 else:
                     item.curation_status = ContentStatus.CANDIDATE
+            sync_content_readiness(self.db, item)
             count += 1
         return count
 
@@ -1120,6 +1122,7 @@ class PromotionService:
                     item.promotion_reason = f"{item.promotion_reason}|blocked=daily_reel_cap"
                     continue
             item.curation_status = ContentStatus.PROMOTED
+            sync_content_readiness(self.db, item)
             promoted += 1
             promoted_ids.append(int(item.id))
             promoted_channel_counts[channel_key] = promoted_channel_counts.get(channel_key, 0) + 1

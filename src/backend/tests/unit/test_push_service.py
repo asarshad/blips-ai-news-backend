@@ -5,7 +5,11 @@ from unittest.mock import MagicMock
 
 from app.models.content import ContentStatus, ContentType
 from app.schemas.push import PushMode, PushRuntimeConfig, PushSendResponse
-from app.services.push_service import PushNotificationError, PushNotificationService
+from app.services.push_service import (
+    PushNotificationError,
+    PushNotificationService,
+    evaluate_push_eligibility,
+)
 
 
 class _FakeConfigService:
@@ -84,6 +88,11 @@ def test_send_auto_deduplicates_ids_and_skips_non_eligible(monkeypatch):
         is_suppressed=False,
         type=ContentType.ARTICLE,
         title="Eligible",
+        source_url="https://example.com/eligible",
+        canonical_url="https://example.com/eligible",
+        ai_processed=True,
+        summary="A ready summary that makes this article card-ready.",
+        promotion_reason=None,
     )
     candidate = SimpleNamespace(
         id=2,
@@ -91,6 +100,11 @@ def test_send_auto_deduplicates_ids_and_skips_non_eligible(monkeypatch):
         is_suppressed=False,
         type=ContentType.ARTICLE,
         title="Candidate",
+        source_url="https://example.com/candidate",
+        canonical_url="https://example.com/candidate",
+        ai_processed=False,
+        summary=None,
+        promotion_reason=None,
     )
     reel = SimpleNamespace(
         id=3,
@@ -100,6 +114,8 @@ def test_send_auto_deduplicates_ids_and_skips_non_eligible(monkeypatch):
         title="Reel",
         duration_seconds=30,
         source_url="https://www.youtube.com/shorts/abc123",
+        video_url="https://www.youtube.com/shorts/abc123",
+        promotion_reason=None,
     )
     db = _FakeDBForAuto([eligible, candidate, reel])
     service = PushNotificationService(
@@ -133,3 +149,23 @@ def test_send_auto_deduplicates_ids_and_skips_non_eligible(monkeypatch):
     assert len(results) == 1
     assert results[0].content_id == 1
     assert calls == [(1, "auto_all", "scheduler:promotion", "auto:1")]
+
+
+def test_evaluate_push_eligibility_rejects_thin_promoted_article():
+    thin_article = SimpleNamespace(
+        id=77,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        type=ContentType.ARTICLE,
+        title="Thin article",
+        source_url="https://example.com/thin",
+        canonical_url="https://example.com/thin",
+        ai_processed=False,
+        summary=None,
+        promotion_reason=None,
+    )
+
+    decision = evaluate_push_eligibility(thin_article)
+
+    assert decision.eligible is False
+    assert decision.reason == "awaiting_ai_processing"

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.editorial import EditorialAction
+from app.services.content_readiness import sync_content_readiness
 
 
 class EditorialRepository:
@@ -258,6 +259,7 @@ class EditorialRepository:
         if item.is_suppressed:
             return item  # idempotent
         item.is_suppressed = True
+        sync_content_readiness(self.db, item)
         item.last_modified_by = actor
         item.last_modified_at = datetime.now(tz=None)
         self._log_action(
@@ -278,6 +280,7 @@ class EditorialRepository:
         if not item.is_suppressed:
             return item  # idempotent
         item.is_suppressed = False
+        sync_content_readiness(self.db, item)
         item.last_modified_by = actor
         item.last_modified_at = datetime.now(tz=None)
         self._log_action(
@@ -300,6 +303,7 @@ class EditorialRepository:
         if old_status == ContentStatus.PROMOTED:
             return item  # idempotent
         item.curation_status = ContentStatus.PROMOTED
+        sync_content_readiness(self.db, item)
         item.last_modified_by = actor
         item.last_modified_at = datetime.now(tz=None)
         self._log_action(
@@ -322,6 +326,7 @@ class EditorialRepository:
         if old_status == ContentStatus.CANDIDATE:
             return item  # idempotent
         item.curation_status = ContentStatus.CANDIDATE
+        sync_content_readiness(self.db, item)
         item.last_modified_by = actor
         item.last_modified_at = datetime.now(tz=None)
         self._log_action(
@@ -359,6 +364,7 @@ class EditorialRepository:
             item.curation_status = curation_status
         if suppressed is not None:
             item.is_suppressed = suppressed
+        sync_content_readiness(self.db, item)
 
         item.last_modified_by = actor
         item.last_modified_at = datetime.now(tz=None)
@@ -427,6 +433,7 @@ class EditorialRepository:
         item.is_suppressed = False
         item.published_at = now
         item.editorial_boost = max(item.editorial_boost or 0, int(boost_level))
+        sync_content_readiness(self.db, item, now=now)
         item.last_modified_by = actor
         item.last_modified_at = now
 

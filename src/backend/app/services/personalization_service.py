@@ -42,7 +42,22 @@ EVENT_WEIGHTS = {
     EventType.SAVE: 5,
     EventType.CHAT_START: 6,
     EventType.CHAT_MESSAGE: 1,
+    EventType.VIDEO_IMPRESSION: 0,
+    EventType.VIDEO_START: 0.5,
+    EventType.VIDEO_3S: 1,
+    EventType.VIDEO_50PCT: 2,
+    EventType.VIDEO_95PCT: 3,
+    EventType.VIDEO_SKIP_LT_2S: -1,
+    EventType.VIDEO_SAVE: 5,
+    EventType.VIDEO_SHARE: 5,
+    EventType.LESS_FROM_CREATOR: -5,
+    EventType.CAUGHT_UP: 0,
 }
+
+_missing_event_weights = set(EventType) - set(EVENT_WEIGHTS)
+if _missing_event_weights:
+    missing = ", ".join(sorted(event_type.value for event_type in _missing_event_weights))
+    raise RuntimeError(f"Missing personalization event weights for: {missing}")
 
 # Chat message cap per content item per day
 CHAT_MESSAGE_CAP_PER_CONTENT = 10

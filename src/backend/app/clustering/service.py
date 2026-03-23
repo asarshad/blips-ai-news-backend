@@ -9,7 +9,11 @@ import uuid
 from typing import Dict, List, Optional
 
 from app.clustering.dedupe import is_near_duplicate_simhash
-from app.clustering.similarity import compute_similarity
+from app.clustering.similarity import (
+    compute_entity_overlap,
+    compute_similarity,
+    compute_title_similarity,
+)
 from app.config.clustering import clustering_config
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentType
@@ -163,6 +167,28 @@ class ClusteringService:
     def _add_to_cluster(self, item: ContentItem, cluster_id: str) -> None:
         """Add an item to an existing cluster."""
         self.content_repo.set_cluster(item.id, cluster_id, is_canonical=False)
+
+    @staticmethod
+    def _entity_overlap(entities1: List, entities2: List) -> float:
+        """Backward-compatible wrapper for legacy unit tests."""
+        return compute_entity_overlap(entities1, entities2)
+
+    @staticmethod
+    def _title_similarity(title1: str, title2: str) -> float:
+        """Backward-compatible wrapper for legacy unit tests."""
+        return compute_title_similarity(title1, title2)
+
+    @staticmethod
+    def _compute_similarity(item1: ContentItem, item2: ContentItem) -> float:
+        """Backward-compatible wrapper for legacy unit tests."""
+        return compute_similarity(
+            item1_entities=item1.entities or [],
+            item1_title=item1.title,
+            item1_topics=item1.topics or [],
+            item2_entities=item2.entities or [],
+            item2_title=item2.title,
+            item2_topics=item2.topics or [],
+        )
 
     def _update_canonical_items(self) -> None:
         """

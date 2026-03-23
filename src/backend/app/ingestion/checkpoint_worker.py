@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import date, datetime, timedelta
+from types import SimpleNamespace
 from typing import Dict, List, Optional
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -22,6 +23,7 @@ from app.ingestion.url_normalizer import normalize_url
 from app.models.content import ContentItem, ContentType
 from app.repositories.ingestion_budget_repo import IngestionBudgetRepository
 from app.repositories.ingestion_progress_repo import IngestionProgressRepository
+from app.services.content_readiness import evaluate_content_readiness, queue_content_ready_event
 from app.video_surface_rules import classify_video_like_item
 
 logger = get_logger(__name__)
@@ -108,6 +110,10 @@ def _build_rss_article_value(
         "is_suppressed": False,
         "signal_hits": 0,
         "published_at": stub.published_at,
+        "readiness_status": stub.readiness_status,
+        "readiness_reason": stub.readiness_reason,
+        "ready_at": stub.ready_at,
+        "readiness_updated_at": stub.readiness_updated_at,
         "title": stub.title,
         "description": stub.description,
         "content_text": stub.content_text,
@@ -132,9 +138,9 @@ def _build_rss_article_value(
     }
 
 
-def _insert_content_items_postgres(db: Session, *, values: List[dict]) -> int:
+def _insert_content_items_postgres(db: Session, *, values: List[dict]) -> list[int]:
     if not values:
-        return 0
+        return []
 
     stmt = (
         pg_insert(ContentItem)
@@ -144,7 +150,28 @@ def _insert_content_items_postgres(db: Session, *, values: List[dict]) -> int:
         .returning(ContentItem.id)
     )
     rows = db.execute(stmt).fetchall()
-    return len(rows)
+    return [int(row[0]) for row in rows]
+
+
+def _normalize_insert_result(
+    insert_result: int | List[int] | tuple[int, ...] | None,
+) -> tuple[list[int], int]:
+    """Accept legacy count-only stubs as well as the real inserted-id list."""
+    if insert_result is None:
+        return [], 0
+    if isinstance(insert_result, int):
+        return [], max(0, int(insert_result))
+
+    inserted_ids = [int(item) for item in insert_result]
+    return inserted_ids, len(inserted_ids)
+
+
+def _queue_ready_events_for_inserted_ids(db: Session, *, inserted_ids: List[int]) -> None:
+    if not inserted_ids:
+        return
+    items = db.query(ContentItem).filter(ContentItem.id.in_(inserted_ids)).all()
+    for item in items:
+        queue_content_ready_event(db, item)
 
 
 def process_progress_row_batch(
@@ -326,7 +353,9 @@ def process_progress_row_batch(
                         idx += len(chunk)
                         continue
                     attempted += len(chunk_values)
-                    ins = _insert_content_items_postgres(db, values=chunk_values)
+                    insert_result = _insert_content_items_postgres(db, values=chunk_values)
+                    inserted_ids, ins = _normalize_insert_result(insert_result)
+                    _queue_ready_events_for_inserted_ids(db, inserted_ids=inserted_ids)
                     inserted += int(ins)
                     remaining_slots -= int(ins)
                     idx += len(chunk)
@@ -499,56 +528,62 @@ def process_progress_row_batch(
                     skipped_reasons["no_source_url"] += 1
                     return
 
-                values.append(
-                    {
-                        "type": ContentType.REEL if is_reel else ContentType.VIDEO,
-                        "curation_status": review_queue_status,
-                        "discovered_via": f"yt_{getattr(e, 'acquisition_lane', 'curated')}",
-                        "source": e.source or "YouTube",
-                        "source_url": source_url,
-                        "canonical_url": source_url,
-                        "channel_id": getattr(e, "channel_id", None),
-                        "canonical_key": canonical_key_for_youtube(
-                            video_id=getattr(e, "video_id", None),
-                            source_url=source_url,
-                            video_url=source_url,
-                        ),
-                        "ingestion_day": day_utc,
-                        "is_suppressed": False,
-                        "signal_hits": 0,
-                        "published_at": published_at or datetime.utcnow(),
-                        "title": e.title,
-                        "description": (e.summary or "")[:500] if e.summary else None,
-                        "content_text": None,
-                        "image_url": e.thumbnail_url,
-                        "video_url": source_url,
-                        "summary": None,
-                        "ai_processed": False,
-                        "topics": extract_topics(e.title, (e.summary or "")[:500]) or [],
-                        "entities": extract_entities(e.title, (e.summary or "")[:500]) or [],
-                        "quality_score": 0.5,
-                        "trend_score": 0.0,
-                        "recency_score": 1.0,
-                        "diversity_boost": 0.0,
-                        "global_score": 0.0,
-                        "acquisition_lane": getattr(e, "acquisition_lane", "curated"),
-                        "source_status": getattr(e, "source_status", None),
-                        "view_count_snapshot": getattr(e, "view_count", None),
-                        "engagement_snapshot": {
-                            "likes": getattr(e, "like_count", None),
-                            "comments": getattr(e, "comment_count", None),
-                        },
-                        "views_per_hour": getattr(e, "views_per_hour", None),
-                        "format_fit_score": getattr(e, "format_fit_score", None),
-                        "cluster_id": None,
-                        "is_cluster_canonical": 0,
-                        "simhash": None,
-                        "dedupe_key": f"yt:{e.video_id}" if e.video_id else None,
-                        "duration_seconds": getattr(e, "duration_seconds", None),
-                        "created_at": datetime.utcnow(),
-                        "updated_at": datetime.utcnow(),
-                    }
+                payload = {
+                    "type": ContentType.REEL if is_reel else ContentType.VIDEO,
+                    "curation_status": review_queue_status,
+                    "discovered_via": f"yt_{getattr(e, 'acquisition_lane', 'curated')}",
+                    "source": e.source or "YouTube",
+                    "source_url": source_url,
+                    "canonical_url": source_url,
+                    "channel_id": getattr(e, "channel_id", None),
+                    "canonical_key": canonical_key_for_youtube(
+                        video_id=getattr(e, "video_id", None),
+                        source_url=source_url,
+                        video_url=source_url,
+                    ),
+                    "ingestion_day": day_utc,
+                    "is_suppressed": False,
+                    "signal_hits": 0,
+                    "published_at": published_at or datetime.utcnow(),
+                    "title": e.title,
+                    "description": (e.summary or "")[:500] if e.summary else None,
+                    "content_text": None,
+                    "image_url": e.thumbnail_url,
+                    "video_url": source_url,
+                    "summary": None,
+                    "ai_processed": False,
+                    "topics": extract_topics(e.title, (e.summary or "")[:500]) or [],
+                    "entities": extract_entities(e.title, (e.summary or "")[:500]) or [],
+                    "quality_score": 0.5,
+                    "trend_score": 0.0,
+                    "recency_score": 1.0,
+                    "diversity_boost": 0.0,
+                    "global_score": 0.0,
+                    "acquisition_lane": getattr(e, "acquisition_lane", "curated"),
+                    "source_status": getattr(e, "source_status", None),
+                    "view_count_snapshot": getattr(e, "view_count", None),
+                    "engagement_snapshot": {
+                        "likes": getattr(e, "like_count", None),
+                        "comments": getattr(e, "comment_count", None),
+                    },
+                    "views_per_hour": getattr(e, "views_per_hour", None),
+                    "format_fit_score": getattr(e, "format_fit_score", None),
+                    "cluster_id": None,
+                    "is_cluster_canonical": 0,
+                    "simhash": None,
+                    "dedupe_key": f"yt:{e.video_id}" if e.video_id else None,
+                    "duration_seconds": getattr(e, "duration_seconds", None),
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow(),
+                }
+                readiness = evaluate_content_readiness(SimpleNamespace(**payload))
+                payload["readiness_status"] = readiness.status.value
+                payload["readiness_reason"] = readiness.reason
+                payload["ready_at"] = (
+                    payload["created_at"] if readiness.status.value == "READY" else None
                 )
+                payload["readiness_updated_at"] = payload["created_at"]
+                values.append(payload)
 
             for entry in entries:
                 if len(values) >= new_window:
@@ -602,7 +637,9 @@ def process_progress_row_batch(
                     if not chunk:
                         break
                     attempted += len(chunk)
-                    ins = _insert_content_items_postgres(db, values=chunk)
+                    insert_result = _insert_content_items_postgres(db, values=chunk)
+                    inserted_ids, ins = _normalize_insert_result(insert_result)
+                    _queue_ready_events_for_inserted_ids(db, inserted_ids=inserted_ids)
                     inserted += int(ins)
                     remaining_slots -= int(ins)
                     idx += len(chunk)

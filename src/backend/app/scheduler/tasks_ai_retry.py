@@ -126,6 +126,9 @@ def process_ai_summaries():
                 continue
 
         _backfill_starters(db, llm_client, stats)
+        from app.scheduler.tasks_content_events import run_content_event_dispatch_job
+
+        run_content_event_dispatch_job()
 
     except Exception as e:
         stats.errors.append(str(e))

@@ -8,6 +8,7 @@ This is a thin service that coordinates the scoring modules.
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
+from app.config.scoring import get_engagement_weight
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentType
 from app.ranking.diversity import compute_diversity_boost, compute_topic_distribution
@@ -176,6 +177,29 @@ class ScoringService:
             "global": global_score,
         }
 
+    def _compute_quality_score(self, item: ContentItem) -> float:
+        """Backward-compatible wrapper for unit tests and legacy callers."""
+        return compute_quality_score(
+            source=item.source or "",
+            title=item.title,
+            summary=item.summary,
+            description=item.description,
+            image_url=item.image_url,
+            topics=item.topics,
+            entities=item.entities,
+        )
+
+    def _compute_recency_score(self, item: ContentItem) -> float:
+        """Backward-compatible wrapper for unit tests and legacy callers."""
+        return compute_recency_score(published_at=item.published_at or datetime.now(timezone.utc))
+
+    def _compute_trend_score(self, item: ContentItem) -> float:
+        """Backward-compatible wrapper for unit tests and legacy callers."""
+        return compute_trend_score(
+            cluster_size=self._get_cluster_size(item.cluster_id),
+            engagement_events=self._get_engagement_events(item.id),
+        )
+
     def _compute_topic_distributions(
         self,
         hours_back: int,
@@ -208,20 +232,43 @@ class ScoringService:
     def _get_engagement_events(self, content_id: int) -> List[Dict]:
         """Get recent engagement events for content."""
         try:
-            events = self.interaction_repo.get_events_for_content(
-                content_id=content_id,
-                hours_back=24,
-            )
-            return [{"type": e.event_type, "weight": 1} for e in events]
+            if hasattr(self.interaction_repo, "get_events_for_content"):
+                events = self.interaction_repo.get_events_for_content(
+                    content_id=content_id,
+                    hours_back=24,
+                )
+                return [{"type": e.event_type, "weight": 1} for e in events]
+            if hasattr(self.interaction_repo, "count_events_by_type"):
+                counts = self.interaction_repo.count_events_by_type(
+                    content_id=content_id,
+                    hours_back=24,
+                )
+                return [
+                    {
+                        "weight": get_engagement_weight(
+                            event_type.value.lower()
+                            if hasattr(event_type, "value")
+                            else str(event_type).lower()
+                        )
+                        * int(count or 0)
+                    }
+                    for event_type, count in (counts or {}).items()
+                    if int(count or 0) > 0
+                ]
         except Exception:
-            return []
+            pass
+        return []
 
     def _get_cluster_size(self, cluster_id: Optional[str]) -> int:
         """Get size of content cluster."""
         if not cluster_id:
-            return 1
+            return 0
 
         try:
-            return self.content_repo.get_cluster_size(cluster_id)
+            if hasattr(self.content_repo, "get_cluster_size"):
+                return self.content_repo.get_cluster_size(cluster_id)
+            if hasattr(self.content_repo, "get_cluster_item_count"):
+                return self.content_repo.get_cluster_item_count(cluster_id)
         except Exception:
-            return 1
+            pass
+        return 0

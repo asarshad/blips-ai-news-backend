@@ -18,6 +18,7 @@ from app.core.logging import get_logger
 from app.ingestion.canonical import canonical_key_for_article
 from app.ingestion.extractors import extract_entities, extract_source, extract_topics
 from app.models.content import ContentItem, ContentType
+from app.services.content_readiness import seed_content_readiness
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -244,6 +245,7 @@ class ArticleHydrationService:
         )
         if curation_status is not None:
             stub.curation_status = curation_status
+        seed_content_readiness(stub)
         return stub
 
     def prepare_rss_article(

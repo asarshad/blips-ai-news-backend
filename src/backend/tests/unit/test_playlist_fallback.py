@@ -137,7 +137,7 @@ def test_get_playlist_expands_to_historical_window_when_recent_inventory_empty()
 
 
 def test_top_up_items_with_historical_fills_short_playlist():
-    def _get_items_for_playlist(*, content_type, hours_back, limit, ai_processed_only=True):  # noqa: ARG001
+    def _get_items_for_playlist(*, content_type, hours_back, limit):  # noqa: ARG001
         if hours_back == FALLBACK_CONTENT_AGE_HOURS:
             return [_item(2), _item(3), _item(4), _item(5)]
         return []
@@ -349,7 +349,6 @@ def test_get_playlist_extends_session_snapshot_beyond_initial_100_items(monkeypa
         surface,  # noqa: ARG001
         limit,
         offset,
-        require_ai_processed,  # noqa: ARG001
         hybrid_video_rerank,  # noqa: ARG001
         device_id,  # noqa: ARG001
     ):

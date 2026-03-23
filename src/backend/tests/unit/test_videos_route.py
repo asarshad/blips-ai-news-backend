@@ -3,12 +3,14 @@ from __future__ import annotations
 from datetime import datetime
 from types import SimpleNamespace
 
-from fastapi import Response
+import pytest
+from fastapi import HTTPException, Response
 
 from app.api.routes import videos as videos_module
+from app.models.content import ContentStatus, ContentType
 
 
-def test_get_recent_videos_surfaces_promoted_items_without_ai_gate(monkeypatch):
+def test_get_recent_videos_uses_shared_readiness_gate(monkeypatch):
     captured = {}
 
     def _fake_feed(
@@ -17,14 +19,12 @@ def test_get_recent_videos_surfaces_promoted_items_without_ai_gate(monkeypatch):
         *,
         limit,
         offset,
-        require_ai_processed,
         hybrid_video_rerank,
         device_id=None,
     ):
         captured["surface"] = surface
         captured["limit"] = limit
         captured["offset"] = offset
-        captured["require_ai_processed"] = require_ai_processed
         captured["hybrid_video_rerank"] = hybrid_video_rerank
         captured["device_id"] = device_id
         meta = SimpleNamespace(
@@ -67,7 +67,6 @@ def test_get_recent_videos_surfaces_promoted_items_without_ai_gate(monkeypatch):
         flags=SimpleNamespace(is_enabled=lambda name: name == "videos"),
     )
 
-    assert captured["require_ai_processed"] is False
     assert captured["hybrid_video_rerank"] is False
     assert captured["device_id"] == "device-12345678"
     assert result["items"][0]["title"] == "Fresh promoted video"
@@ -85,7 +84,6 @@ def test_get_recent_videos_passes_hybrid_rerank_flag(monkeypatch):
         *,
         limit,
         offset,
-        require_ai_processed,
         hybrid_video_rerank,
         device_id=None,
     ):
@@ -128,7 +126,6 @@ def test_get_recent_videos_uses_remaining_window_count_for_caught_up(monkeypatch
         *,
         limit,
         offset,
-        require_ai_processed,
         hybrid_video_rerank,
         device_id=None,
     ):
@@ -180,7 +177,6 @@ def test_get_reels_passes_hybrid_rerank_flag(monkeypatch):
         *,
         limit,
         offset,
-        require_ai_processed,
         hybrid_video_rerank,
         device_id=None,
     ):
@@ -215,3 +211,24 @@ def test_get_reels_passes_hybrid_rerank_flag(monkeypatch):
     assert captured["device_id"] == "device-reels"
     assert result["inventory_state"] == "warming_up"
     assert result["window_days"] == 7
+
+
+def test_get_video_rejects_unready_video():
+    item = SimpleNamespace(
+        id=91,
+        type=ContentType.VIDEO,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        promotion_reason=None,
+        title="Thin video",
+        source_url=None,
+        video_url=None,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        videos_module.get_video(
+            video_id=91,
+            content_repo=SimpleNamespace(get_by_id=lambda _video_id: item),
+        )
+
+    assert exc_info.value.status_code == 404

@@ -45,6 +45,11 @@ from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.signal import SignalSource
 from app.repositories.content_repo import ContentItemRepository
 from app.repositories.signal_repo import SignalURLRepository
+from app.services.content_readiness import (
+    queue_content_ready_event,
+    seed_content_readiness,
+    sync_content_readiness,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +153,7 @@ def _build_candidate_stub(
         topics: list = extract_topics(item.raw_title or "", "") if item.raw_title else []
         yt_vid = extract_youtube_video_id(url)
         ckey = canonical_key_for_youtube(video_id=yt_vid, source_url=url, video_url=url)
-        return ContentItem(
+        stub = ContentItem(
             type=content_type,
             source=source,
             source_url=url,
@@ -178,6 +183,8 @@ def _build_candidate_stub(
             discovered_via=discovered_via,
             signal_hits=1,
         )
+        seed_content_readiness(stub)
+        return stub
 
     hydrator = article_hydrator or ArticleHydrationService()
     stub = hydrator.build_article_stub(
@@ -193,6 +200,7 @@ def _build_candidate_stub(
         candidate_raw_title=(item.raw_title or url)[:1000],
     )
     stub.ingestion_day = date.today()
+    seed_content_readiness(stub)
     return stub
 
 
@@ -374,6 +382,8 @@ def run_signal_ingestion(
                     and article_hydrator.needs_hydration(stub)
                 ):
                     article_hydrator.hydrate_article_candidate(stub)
+                sync_content_readiness(db, stub, emit_ready_event=False)
+                queue_content_ready_event(db, stub)
 
                 signal_repo.mark_ingested(signal_row, stub.id)
                 stubs_this_run += 1

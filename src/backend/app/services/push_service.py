@@ -13,13 +13,14 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.dependencies import get_redis
 from app.core.logging import get_logger
-from app.models.content import ContentItem, ContentStatus, ContentType, UserProfile
+from app.models.content import ContentItem, ContentReadinessStatus, ContentType, UserProfile
 from app.models.push import PushSendLog, PushSubscription
 from app.schemas.push import PushMode, PushSendResponse
 from app.services.content_payloads import (
     effective_content_type_value,
     effective_notification_surface,
 )
+from app.services.content_readiness import evaluate_content_readiness, surface_name_for_content_type
 from app.services.push_config_service import PushConfigService
 from app.video_surface_rules import effective_content_type
 
@@ -37,6 +38,16 @@ class PushDeliveryResult:
     success_count: int
     failure_count: int
     invalid_tokens: list[str]
+
+
+@dataclass(frozen=True)
+class PushEligibilityDecision:
+    """Shared push eligibility evaluation for operators and delivery paths."""
+
+    eligible: bool
+    effective_type: ContentType
+    surface: str | None
+    reason: str
 
 
 class PushMessagingClient(Protocol):
@@ -173,6 +184,42 @@ class FirebasePushMessagingClient:
 def create_push_messaging_client() -> PushMessagingClient:
     """Build the default push messaging client."""
     return FirebasePushMessagingClient()
+
+
+def evaluate_push_eligibility(item: ContentItem) -> PushEligibilityDecision:
+    """Return whether the item can be delivered via push."""
+    effective_type = effective_content_type(item)
+    if effective_type == ContentType.REEL:
+        return PushEligibilityDecision(
+            eligible=False,
+            effective_type=effective_type,
+            surface=None,
+            reason="reels_excluded",
+        )
+    if effective_type not in {ContentType.ARTICLE, ContentType.VIDEO}:
+        return PushEligibilityDecision(
+            eligible=False,
+            effective_type=effective_type,
+            surface=None,
+            reason="unsupported_type",
+        )
+
+    surface = surface_name_for_content_type(effective_type)
+    readiness = evaluate_content_readiness(item)
+    if readiness.status != ContentReadinessStatus.READY or surface not in readiness.surfaces:
+        return PushEligibilityDecision(
+            eligible=False,
+            effective_type=effective_type,
+            surface=surface,
+            reason=readiness.reason,
+        )
+
+    return PushEligibilityDecision(
+        eligible=True,
+        effective_type=effective_type,
+        surface=surface,
+        reason="push_ready",
+    )
 
 
 class PushNotificationService:
@@ -415,16 +462,14 @@ class PushNotificationService:
             raise PushNotificationError("Content item not found")
         if not self._is_push_eligible_item(item):
             raise PushNotificationError(
-                "Only promoted, non-suppressed articles and videos can be sent as push notifications"
+                "Only ready articles and videos can be sent as push notifications"
             )
         if not allow_repeated_manual and self._has_auto_send_log(item.id):
             raise PushNotificationError("Automatic push already sent for this content item")
         return item
 
     def _is_push_eligible_item(self, item: ContentItem) -> bool:
-        if item.curation_status != ContentStatus.PROMOTED or item.is_suppressed:
-            return False
-        return effective_content_type(item) in {ContentType.ARTICLE, ContentType.VIDEO}
+        return evaluate_push_eligibility(item).eligible
 
     def _has_auto_send_log(self, content_id: int) -> bool:
         return (

@@ -351,7 +351,6 @@ class PlaylistService:
             surface,
             limit=MAX_PLAYLIST_SIZE,
             offset=0,
-            require_ai_processed=content_type == ContentType.ARTICLE,
             hybrid_video_rerank=hybrid_video_rerank,
             device_id=device_id,
         )
@@ -565,7 +564,6 @@ class PlaylistService:
                 surface,
                 limit=MAX_PLAYLIST_SIZE,
                 offset=offset,
-                require_ai_processed=content_type == ContentType.ARTICLE,
                 hybrid_video_rerank=hybrid_video_rerank,
                 device_id=device_id,
             )

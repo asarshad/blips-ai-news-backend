@@ -28,19 +28,16 @@ from sqlalchemy.orm import Session
 from app.article_hydration import display_article_title
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.models.content import ContentItem, ContentStatus, ContentType, EventType
+from app.models.content import ContentItem, ContentType, EventType
 from app.repositories.user_repo import InteractionEventRepository
+from app.services.content_readiness import ready_content_filter
 from app.services.diversity_mixer import enforce_channel_caps, mix_feed
 from app.services.inventory_service import FreshnessTier, Surface, _get_surface_config
 from app.services.video_content_policy import apply_content_policy
 from app.services.video_duration_hydration import hydrate_missing_video_durations
 from app.services.video_hybrid_rerank import rerank_video_candidates
 from app.video_age_policy import build_surface_age_filters, make_default_policy
-from app.video_surface_rules import (
-    effective_content_type,
-    surface_content_filter,
-    visible_promotion_filter,
-)
+from app.video_surface_rules import effective_content_type
 
 logger = get_logger(__name__)
 
@@ -94,14 +91,12 @@ def _cache_key(
     surface: Surface,
     limit: int,
     offset: int,
-    require_ai: bool,
     hybrid_video_rerank: bool,
     device_id: Optional[str] = None,
 ) -> str:
     """Generate cache key for tiered feed."""
     base_key = (
-        f"blips:tiered_feed:{surface.value}:l{limit}:o{offset}:ai{int(require_ai)}:"
-        f"hybrid{int(hybrid_video_rerank)}"
+        f"blips:tiered_feed:{surface.value}:l{limit}:o{offset}:hybrid{int(hybrid_video_rerank)}"
     )
     if not device_id:
         return base_key
@@ -232,7 +227,6 @@ def get_tiered_feed(
     limit: int = 20,
     offset: int = 0,
     now: Optional[datetime] = None,
-    require_ai_processed: bool = True,
     hybrid_video_rerank: bool = False,
     device_id: Optional[str] = None,
 ) -> Tuple[List[TieredItem], bool, int]:
@@ -251,8 +245,6 @@ def get_tiered_feed(
         limit: Number of items to return
         offset: Pagination offset
         now: Current time (for testing)
-        require_ai_processed: Filter to AI-processed content (default True for articles/videos)
-
     Returns:
         Tuple of (tiered items, has_more, remaining_window_count)
     """
@@ -265,15 +257,7 @@ def get_tiered_feed(
     evergreen_cutoff = now - timedelta(days=cfg["evergreen_days"])
 
     # Base filter
-    base_filter = and_(
-        surface_content_filter(surface.value),
-        visible_promotion_filter(),
-        ContentItem.is_suppressed.is_(False),
-        ContentItem.curation_status == ContentStatus.PROMOTED,
-    )
-
-    if require_ai_processed:
-        base_filter = and_(base_filter, ContentItem.ai_processed.is_(True))
+    base_filter = ready_content_filter(surface.value)
 
     # Defense-in-depth: for REELS, enforce max duration at query level.
     # Some items slip through ingestion classification (e.g. is_short metadata
@@ -626,7 +610,6 @@ def get_cached_tiered_feed(
     surface: Surface,
     limit: int = 20,
     offset: int = 0,
-    require_ai_processed: bool = True,
     hybrid_video_rerank: bool = False,
     device_id: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], bool, FeedResponseMeta]:
@@ -641,8 +624,6 @@ def get_cached_tiered_feed(
         surface: Which surface to query
         limit: Number of items to return
         offset: Pagination offset
-        require_ai_processed: Filter to AI-processed content
-
     Returns:
         Tuple of (list of item dicts, has_more, metadata)
     """
@@ -651,7 +632,6 @@ def get_cached_tiered_feed(
         surface,
         limit,
         offset,
-        require_ai_processed,
         hybrid_video_rerank,
         device_id,
     )
@@ -699,7 +679,6 @@ def get_cached_tiered_feed(
         surface,
         limit=limit,
         offset=offset,
-        require_ai_processed=require_ai_processed,
         hybrid_video_rerank=hybrid_video_rerank,
         device_id=device_id,
     )

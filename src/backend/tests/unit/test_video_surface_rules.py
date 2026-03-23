@@ -5,7 +5,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 
-from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.content import ContentItem, ContentReadinessStatus, ContentStatus, ContentType
 from app.repositories.content_repo import ContentItemRepository
 from app.video_surface_rules import (
     effective_content_type,
@@ -36,8 +36,12 @@ def _make_item(
         published_at=now,
         title=title,
         curation_status=ContentStatus.PROMOTED,
+        readiness_status=ContentReadinessStatus.READY.value,
+        readiness_reason="video_ready" if item_type != ContentType.REEL else "reel_ready",
         is_suppressed=False,
         created_at=now,
+        ready_at=now,
+        readiness_updated_at=now,
         updated_at=now,
     )
 
@@ -138,7 +142,6 @@ def test_get_items_for_playlist_respects_video_reel_surface_split():
             content_type=ContentType.VIDEO,
             hours_back=72,
             limit=50,
-            ai_processed_only=False,
         )
     }
     reel_titles = {
@@ -147,7 +150,6 @@ def test_get_items_for_playlist_respects_video_reel_surface_split():
             content_type=ContentType.REEL,
             hours_back=72,
             limit=50,
-            ai_processed_only=False,
         )
     }
 
@@ -218,7 +220,6 @@ def test_get_items_for_playlist_excludes_blocked_promoted_items():
             content_type=ContentType.VIDEO,
             hours_back=72,
             limit=50,
-            ai_processed_only=False,
         )
     }
 

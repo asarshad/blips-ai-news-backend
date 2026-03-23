@@ -201,7 +201,7 @@ class TestPromotionGate:
         mock_db.query.return_value = query_mock
 
         repo = ContentItemRepository(mock_db)
-        results = repo.get_by_type(ContentType.ARTICLE, limit=10, ai_processed_only=False)
+        results = repo.get_by_type(ContentType.ARTICLE, limit=10)
 
         assert all(r.curation_status == ContentStatus.PROMOTED for r in results)
         assert candidate not in results
@@ -220,7 +220,7 @@ class TestPromotionGate:
         mock_db.query.return_value = query_mock
 
         repo = ContentItemRepository(mock_db)
-        results = repo.get_by_type(ContentType.ARTICLE, limit=50, ai_processed_only=False)
+        results = repo.get_by_type(ContentType.ARTICLE, limit=50)
 
         assert results == []
 

@@ -12,7 +12,11 @@ from sqlalchemy.orm import Session
 
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.repositories.base import BaseRepository
-from app.video_surface_rules import surface_content_filter, visible_promotion_filter
+from app.services.content_readiness import (
+    ready_content_filter,
+    surface_name_for_content_type,
+    sync_content_readiness,
+)
 
 # Items with language=NULL are legacy rows inserted before language detection
 # was added. Treat them as English to avoid breaking the feed for existing data.
@@ -66,38 +70,29 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         limit: int = 50,
         offset: int = 0,
         hours_back: int = 72,
-        ai_processed_only: bool = True,
     ) -> List[ContentItem]:
         """
         Get recent content items of a specific type.
 
-        Only PROMOTED items are returned – CANDIDATE items are hidden from
-        the default feed until they pass the quality gate.
+        Only client-ready items are returned. Promotion is necessary, but the
+        shared readiness contract is the actual delivery gate.
 
         Args:
             content_type: ARTICLE, VIDEO, or REEL
             limit: Maximum number of items
             offset: Pagination offset
             hours_back: Only include items from the last N hours
-            ai_processed_only: Only return AI-processed content (default True)
-
         Returns:
             List of content items ordered by global_score
         """
-        from app.models.content import ContentStatus
-
         cutoff = datetime.utcnow() - timedelta(hours=hours_back)
+        surface_name = surface_name_for_content_type(content_type)
 
         query = self.db.query(ContentItem).filter(
-            ContentItem.type == content_type,
+            ready_content_filter(surface_name),
             ContentItem.published_at >= cutoff,
-            ContentItem.is_suppressed.is_(False),
-            ContentItem.curation_status == ContentStatus.PROMOTED,
             _ENGLISH_FILTER,
         )
-
-        if ai_processed_only:
-            query = query.filter(ContentItem.ai_processed.is_(True))
 
         return (
             query.order_by(desc(ContentItem.global_score), desc(ContentItem.published_at))
@@ -186,18 +181,18 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         Returns:
             True if update succeeded
         """
-        update_dict = {
-            ContentItem.ai_processed: True,
-            ContentItem.summary: summary,
-            ContentItem.updated_at: datetime.utcnow(),
-        }
+        item = self.db.query(ContentItem).filter(ContentItem.id == item_id).first()
+        if item is None:
+            return False
 
+        item.ai_processed = True
+        item.summary = summary
+        item.updated_at = datetime.utcnow()
         if topics is not None:
-            update_dict[ContentItem.topics] = topics
-
-        result = self.db.query(ContentItem).filter(ContentItem.id == item_id).update(update_dict)
+            item.topics = topics
+        sync_content_readiness(self.db, item)
         self.db.commit()
-        return result > 0
+        return True
 
     def get_unclustered(self, hours_back: int = 48, limit: int = 500) -> List[ContentItem]:
         """Get content items without a cluster_id within the time window."""
@@ -297,7 +292,6 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         hours_back: int = 72,
         limit: int = 100,
         exclude_cluster_ids: Optional[List[str]] = None,
-        ai_processed_only: bool = True,
     ) -> List[ContentItem]:
         """
         Get content items for playlist generation.
@@ -310,30 +304,17 @@ class ContentItemRepository(BaseRepository[ContentItem]):
             hours_back: Time window in hours
             limit: Maximum items to return
             exclude_cluster_ids: Cluster IDs to exclude
-            ai_processed_only: Only return AI-processed content (default True)
         """
         cutoff = datetime.utcnow() - timedelta(hours=hours_back)
-
-        type_filter = ContentItem.type == content_type
-        if content_type == ContentType.VIDEO:
-            type_filter = surface_content_filter("videos")
-        elif content_type == ContentType.REEL:
-            type_filter = surface_content_filter("reels")
+        surface_name = surface_name_for_content_type(content_type)
 
         query = self.db.query(ContentItem).filter(
-            type_filter,
-            visible_promotion_filter(),
+            ready_content_filter(surface_name),
             ContentItem.published_at >= cutoff,
-            ContentItem.is_suppressed.is_(False),
-            ContentItem.curation_status == ContentStatus.PROMOTED,
             # Include canonical items OR items without clusters
             or_(ContentItem.cluster_id.is_(None), ContentItem.is_cluster_canonical == 1),
             _ENGLISH_FILTER,
         )
-
-        # Filter for AI-processed content only (unless explicitly disabled)
-        if ai_processed_only:
-            query = query.filter(ContentItem.ai_processed.is_(True))
 
         if exclude_cluster_ids:
             query = query.filter(~ContentItem.cluster_id.in_(exclude_cluster_ids))

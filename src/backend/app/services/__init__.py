@@ -10,15 +10,7 @@ NOTE: Scoring, Clustering, and Ingestion have been moved to dedicated modules:
 - app.ingestion - Ingestion pipeline (direct RSS/YouTube fetching)
 """
 
-from app.clustering import ClusteringService
-
-# Re-export from new locations for backward compatibility
-from app.ranking import ScoringService
-from app.services.ai_chat import AiChatService
-from app.services.multi_factor_ranking_service import MultiFactorRankingService
-from app.services.quota_manager import QuotaManager
-from app.services.source_quality_service import SourceQualityService
-from app.services.tiered_feed_service import get_tiered_feed, invalidate_tiered_feed_cache
+from importlib import import_module
 
 __all__ = [
     "AiChatService",
@@ -35,14 +27,32 @@ __all__ = [
 ]
 
 
+_LAZY_EXPORTS = {
+    "AiChatService": ("app.services.ai_chat", "AiChatService"),
+    "QuotaManager": ("app.services.quota_manager", "QuotaManager"),
+    "MultiFactorRankingService": (
+        "app.services.multi_factor_ranking_service",
+        "MultiFactorRankingService",
+    ),
+    "SourceQualityService": ("app.services.source_quality_service", "SourceQualityService"),
+    "ScoringService": ("app.ranking", "ScoringService"),
+    "ClusteringService": ("app.clustering", "ClusteringService"),
+    "IngestionPipeline": ("app.ingestion", "IngestionPipeline"),
+    "create_ingestion_pipeline": ("app.ingestion", "create_ingestion_pipeline"),
+    "get_tiered_feed": ("app.services.tiered_feed_service", "get_tiered_feed"),
+    "invalidate_tiered_feed_cache": (
+        "app.services.tiered_feed_service",
+        "invalidate_tiered_feed_cache",
+    ),
+}
+
+
 def __getattr__(name):
     """Lazily resolve imports that would otherwise create package cycles."""
-    if name == "IngestionPipeline":
-        from app.ingestion import IngestionPipeline
-
-        return IngestionPipeline
-    if name == "create_ingestion_pipeline":
-        from app.ingestion import create_ingestion_pipeline
-
-        return create_ingestion_pipeline
+    target = _LAZY_EXPORTS.get(name)
+    if target is not None:
+        module_name, attr_name = target
+        value = getattr(import_module(module_name), attr_name)
+        globals()[name] = value
+        return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

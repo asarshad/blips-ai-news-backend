@@ -41,6 +41,7 @@ from app.models.content import ContentItem, ContentStatus, ContentType
 from app.ranking.quality import compute_source_weight
 from app.ranking.service import ScoringService
 from app.repositories.content_repo import ContentItemRepository
+from app.services.content_readiness import queue_content_ready_event, seed_content_readiness
 from app.services.video_discovery_provenance import build_discovered_via
 from app.video_surface_rules import classify_video_like_item
 
@@ -280,6 +281,7 @@ class IngestionPipeline:
         except Exception as e:
             logger.warning(f"Failed to summarize article {entry.title}: {e}")
         self.article_hydrator.refresh_article_annotations(content_item)
+        seed_content_readiness(content_item)
 
         # Apply quality scoring with role-based modifiers
         # Use base_quality_weight from feed config if available, else compute from source
@@ -295,6 +297,8 @@ class IngestionPipeline:
 
         self.db.add(content_item)
         try:
+            self.db.flush()
+            queue_content_ready_event(self.db, content_item)
             self.db.commit()
             self.db.refresh(content_item)
         except IntegrityError:
@@ -481,9 +485,12 @@ class IngestionPipeline:
         base_quality = compute_source_weight(source)
         content_item.quality_score = base_quality * quality_modifier
         content_item.recency_score = 1.0
+        seed_content_readiness(content_item)
 
         self.db.add(content_item)
         try:
+            self.db.flush()
+            queue_content_ready_event(self.db, content_item)
             self.db.commit()
             self.db.refresh(content_item)
         except IntegrityError:

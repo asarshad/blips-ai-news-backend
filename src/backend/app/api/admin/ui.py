@@ -51,14 +51,15 @@ from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.push import PushSendLog
 from app.repositories.editorial_repo import EditorialRepository
 from app.schemas.push import PushMode, PushRuntimeConfigPatch
+from app.services.content_readiness import describe_readiness_reason
 from app.services.push_config_service import PushConfigService
 from app.services.push_service import (
     PushNotificationError,
     PushNotificationService,
     create_push_messaging_client,
+    evaluate_push_eligibility,
 )
 from app.services.tiered_feed_service import invalidate_tiered_feed_cache
-from app.video_surface_rules import effective_content_type
 
 # ---------------------------------------------------------------------------
 # Auth
@@ -501,10 +502,20 @@ def _redirect_to_ui(
     return RedirectResponse(_add_flash(target, flash), status_code=303)
 
 
-def _is_push_eligible_for_ui(item: ContentItem) -> bool:
-    if item.curation_status != ContentStatus.PROMOTED or item.is_suppressed:
-        return False
-    return effective_content_type(item) in {ContentType.ARTICLE, ContentType.VIDEO}
+def _push_ui_reason(reason: str) -> str:
+    if reason == "reels_excluded":
+        return "Reels are excluded from push delivery."
+    if reason == "unsupported_type":
+        return "This item type does not support push delivery."
+    if reason == "push_ready":
+        return ""
+    return describe_readiness_reason(reason)
+
+
+def _readiness_badge(item: ContentItem) -> str:
+    readiness_status = (getattr(item, "readiness_status", "") or "PENDING").strip().upper()
+    tone = "green" if readiness_status == "READY" else "yellow"
+    return _badge(f"ready {readiness_status.lower()}", tone)
 
 
 def _push_log_summaries(db: Session, content_ids: list[int]) -> dict[int, dict[str, Any]]:
@@ -698,7 +709,6 @@ def ui_dashboard(
     from sqlalchemy import and_, func, or_
 
     from app.core.feature_flags import FeatureFlags
-    from app.models.content import ContentItem, ContentStatus, ContentType
     from app.models.signal import SignalURL
     from app.models.video_source import VideoSourceProfile
     from app.services.inventory_service import Surface, get_pipeline_counts
@@ -1144,7 +1154,6 @@ def ui_dashboard(
         Surface.VIDEOS,
         limit=20,
         offset=0,
-        require_ai_processed=False,
         hybrid_video_rerank=hybrid_video_rerank,
     )
     video_page_two, _, video_meta_two = get_cached_tiered_feed(
@@ -1152,7 +1161,6 @@ def ui_dashboard(
         Surface.VIDEOS,
         limit=20,
         offset=20,
-        require_ai_processed=False,
         hybrid_video_rerank=hybrid_video_rerank,
     )
     reel_page_one, _, reel_meta_one = get_cached_tiered_feed(
@@ -1160,7 +1168,6 @@ def ui_dashboard(
         Surface.REELS,
         limit=20,
         offset=0,
-        require_ai_processed=False,
         hybrid_video_rerank=hybrid_video_rerank,
     )
     reel_page_two, _, reel_meta_two = get_cached_tiered_feed(
@@ -1168,7 +1175,6 @@ def ui_dashboard(
         Surface.REELS,
         limit=20,
         offset=20,
-        require_ai_processed=False,
         hybrid_video_rerank=hybrid_video_rerank,
     )
 
@@ -2884,6 +2890,7 @@ def ui_content_list(
             badges += _badge("manual", "blue") + " "
         if (i.editorial_boost or 0) > 0:
             badges += _badge(f"boost {i.editorial_boost}", "purple") + " "
+        badges += _readiness_badge(i) + " "
         if not (getattr(i, "image_url", None) or "").strip():
             badges += _badge("no image", "gray") + " "
 
@@ -2891,22 +2898,13 @@ def ui_content_list(
         score = f"{i.promotion_score:.3f}" if getattr(i, "promotion_score", None) else "—"
         disc = _esc(getattr(i, "discovered_via", None) or "—")
         hits = str(getattr(i, "signal_hits", 0) or 0)
-        push_eligible = _is_push_eligible_for_ui(i)
+        push_eligibility = evaluate_push_eligibility(i)
+        push_eligible = push_eligibility.eligible
         push_summary_html = _push_summary_markup(
             push_summaries.get(i.id),
             eligible=push_eligible,
         )
-        push_reason = ""
-        if not push_eligible:
-            effective_type = effective_content_type(i)
-            if effective_type == ContentType.REEL:
-                push_reason = "Reels never send."
-            elif cs != ContentStatus.PROMOTED:
-                push_reason = "Promote first to send."
-            elif i.is_suppressed:
-                push_reason = "Unsuppress to send."
-            else:
-                push_reason = "Not eligible."
+        push_reason = _push_ui_reason(push_eligibility.reason) if not push_eligible else ""
         if cs == ContentStatus.CANDIDATE:
             actions_html = f"""
             <div class="flex gap-1">
@@ -3209,18 +3207,9 @@ def ui_content_detail(
         f'<option value="{lvl}" {"selected" if (item.editorial_boost or 0) == lvl else ""}>{lvl}</option>'
         for lvl in range(4)
     )
-    push_eligible = _is_push_eligible_for_ui(item)
-    push_reason = ""
-    if not push_eligible:
-        effective_type = effective_content_type(item)
-        if effective_type == ContentType.REEL:
-            push_reason = "Reels are excluded from push delivery."
-        elif cs != ContentStatus.PROMOTED:
-            push_reason = "Promote this item before sending a push."
-        elif item.is_suppressed:
-            push_reason = "Unsuppress this item before sending a push."
-        else:
-            push_reason = "This item is not currently eligible for push delivery."
+    push_eligibility = evaluate_push_eligibility(item)
+    push_eligible = push_eligibility.eligible
+    push_reason = _push_ui_reason(push_eligibility.reason) if not push_eligible else ""
 
     push_log_rows = ""
     for log in push_logs:
@@ -3263,6 +3252,9 @@ def ui_content_detail(
           {_row("ID", str(item.id))}
           {_row("Type", item.type.value if item.type else "—")}
           {_row("Curation status", curation_badge)}
+          {_row("Readiness", _readiness_badge(item))}
+          {_row("Readiness reason", _esc(describe_readiness_reason(getattr(item, "readiness_reason", None))))}
+          {_row("Ready at", item.ready_at.strftime("%Y-%m-%d %H:%M") if getattr(item, "ready_at", None) else "—")}
           {_row("Promotion score", f"{item.promotion_score:.4f}" if getattr(item, "promotion_score", None) else "—")}
           {_row("Discovered via", _esc(getattr(item, "discovered_via", None) or "—"))}
           {_row("Signal hits", str(getattr(item, "signal_hits", 0) or 0))}

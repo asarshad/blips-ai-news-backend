@@ -19,7 +19,7 @@ from app.ingestion.canonical import canonical_key_for_article
 from app.ingestion.url_normalizer import normalize_url
 from app.models.content import ContentItem
 from app.repositories.editorial_repo import EditorialRepository
-from app.services.push_service import PushNotificationService
+from app.scheduler.tasks_content_events import run_content_event_dispatch_job
 
 logger = get_logger(__name__)
 
@@ -156,7 +156,9 @@ class EditorialService:
             return None
 
         self._hydrate_for_approval(item)
-        return self.repo.promote(content_id, actor=actor)
+        promoted = self.repo.promote(content_id, actor=actor)
+        self._dispatch_content_events_best_effort()
+        return promoted
 
     def approve_content(
         self,
@@ -171,7 +173,9 @@ class EditorialService:
             return None
 
         self._hydrate_for_approval(item)
-        return self.repo.approve(content_id, actor=actor, note=note)
+        approved = self.repo.approve(content_id, actor=actor, note=note)
+        self._dispatch_content_events_best_effort()
+        return approved
 
     def approve_and_publish(
         self,
@@ -193,18 +197,7 @@ class EditorialService:
             boost_level=boost_level,
             note=note,
         )
-        if published is not None:
-            try:
-                PushNotificationService(db=self.db).send_auto_for_content_ids(
-                    [published.id],
-                    actor=f"editorial:{actor}",
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Auto push after editorial publish failed for content %s: %s",
-                    published.id,
-                    exc,
-                )
+        self._dispatch_content_events_best_effort()
         return published
 
     def _hydrate_for_approval(self, item: ContentItem) -> None:
@@ -227,6 +220,12 @@ class EditorialService:
         if self._article_hydrator is None:
             self._article_hydrator = ArticleHydrationService()
         return self._article_hydrator
+
+    def _dispatch_content_events_best_effort(self) -> None:
+        try:
+            run_content_event_dispatch_job()
+        except Exception as exc:
+            logger.warning("Content event dispatch failed after editorial action: %s", exc)
 
 
 # ---------------------------------------------------------------------------

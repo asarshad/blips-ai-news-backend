@@ -30,23 +30,19 @@ def run_promotion_job() -> None:
     stats = log_job_start("promotion")
     db = SessionLocal()
     try:
+        from app.scheduler.tasks_content_events import run_content_event_dispatch_job
         from app.services.promotion_service import PromotionService
-        from app.services.push_service import PushNotificationService
 
         svc = PromotionService(db)
         result = svc.run_promotion_job()
-        auto_push_results = PushNotificationService(db=db).send_auto_for_content_ids(
-            result.promoted_ids,
-            actor="scheduler:promotion",
-        )
+        run_content_event_dispatch_job()
 
         stats.items_processed = result.promoted_count
         logger.info(
-            "[promotion] evaluated=%d promoted=%d rescored=%d auto_push=%d errors=%d",
+            "[promotion] evaluated=%d promoted=%d rescored=%d errors=%d",
             result.candidates_evaluated,
             result.promoted_count,
             result.already_promoted_rescored,
-            len([entry for entry in auto_push_results if not entry.skipped]),
             len(result.errors),
         )
         if result.errors:

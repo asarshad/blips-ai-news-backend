@@ -1,6 +1,7 @@
 """Video routes for the REST API.
 
-Updated to serve content from the unified content_items table with AI filtering.
+Serves video and reel payloads from the unified content_items table using the
+shared readiness contract.
 Includes tiered freshness strategy (A/B/C) and diversity mixing.
 """
 
@@ -21,10 +22,12 @@ from app.repositories.content_repo import ContentItemRepository
 from app.schemas.video import Video as VideoSchema
 from app.services.ad_mixer import inject_ads
 from app.services.content_payloads import content_item_to_video_payload
+from app.services.content_readiness import is_ready_for_surface, surface_name_for_item
 from app.services.freshness_metrics_service import record_feed_served
 from app.services.inventory_service import Surface
 from app.services.tiered_feed_service import get_cached_tiered_feed
 from app.services.topup_service import check_and_trigger_topup
+from app.video_surface_rules import effective_content_type
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -96,13 +99,12 @@ def get_recent_videos(
     offset = _cursor_to_offset(cursor, limit, page)
 
     # Use cached tiered feed for better performance.
-    # Videos surface immediately after promotion; AI enrichment backfills later.
+    # The readiness contract defines when a video is safe for client delivery.
     videos, has_more, meta = get_cached_tiered_feed(
         db,
         Surface.VIDEOS,
         limit=limit,
         offset=offset,
-        require_ai_processed=False,
         hybrid_video_rerank=flags.is_enabled("video_hybrid_rerank"),
         device_id=x_device_id,
     )
@@ -189,7 +191,7 @@ def get_reels(
     - Tier B (Backfill): reels added recently but published earlier
     - Tier C (Evergreen): older high-quality reels
 
-    REELs don't require AI summaries.
+    Reels use the same shared readiness contract as the rest of the feed.
     Results are diversity-mixed to ensure varied source distribution.
     """
     # Check reels feature flag
@@ -201,13 +203,12 @@ def get_reels(
 
     offset = _cursor_to_offset(cursor, limit, page)
 
-    # Use cached tiered feed for better performance
+    # Use cached tiered feed for better performance.
     videos, has_more, meta = get_cached_tiered_feed(
         db,
         Surface.REELS,
         limit=limit,
         offset=offset,
-        require_ai_processed=False,  # Reels don't need AI processing
         hybrid_video_rerank=flags.is_enabled("video_hybrid_rerank"),
         device_id=x_device_id,
     )
@@ -275,7 +276,9 @@ def get_reels(
 def get_video(video_id: int, content_repo: ContentItemRepository = Depends(get_content_repo)):
     """Get a specific video by ID."""
     item = content_repo.get_by_id(video_id)
-    if not item or item.type not in (ContentType.VIDEO, ContentType.REEL):
+    if not item or effective_content_type(item) not in (ContentType.VIDEO, ContentType.REEL):
+        raise not_found_exception("Video", video_id)
+    if not is_ready_for_surface(item, surface_name_for_item(item)):
         raise not_found_exception("Video", video_id)
 
     return _content_item_to_video_schema(item)

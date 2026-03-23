@@ -1,6 +1,7 @@
 """Article routes for the REST API.
 
-Updated to serve content from the unified content_items table with AI filtering.
+Serves article payloads from the unified content_items table using the shared
+readiness contract.
 Includes tiered freshness strategy (A/B/C) and diversity mixing.
 """
 
@@ -22,6 +23,7 @@ from app.repositories.user_repo import UserCategorySelectionRepository
 from app.schemas.article import ArticleWithConversation
 from app.services.ad_mixer import inject_ads
 from app.services.content_payloads import content_item_to_article_payload
+from app.services.content_readiness import is_ready_for_surface
 from app.services.freshness_metrics_service import record_feed_served
 from app.services.inventory_service import Surface
 from app.services.tiered_feed_service import (
@@ -75,14 +77,13 @@ def get_recent_articles(
 
     offset = (page - 1) * limit
 
-    # Use cached tiered feed for better performance
-    # Only show articles that have been AI-processed (have summaries)
+    # Use cached tiered feed for better performance.
+    # The readiness contract guarantees article quality here and for push.
     articles, has_more, meta = get_cached_tiered_feed(
         db,
         Surface.ARTICLES,
         limit=limit,
         offset=offset,
-        require_ai_processed=True,
     )
 
     # ── Personalised re-ranking ───────────────────────────────────────────
@@ -162,6 +163,8 @@ def get_article(article_id: int, content_repo: ContentItemRepository = Depends(g
     """Get a specific article by ID, including conversation history."""
     item = content_repo.get_by_id(article_id)
     if not item or item.type != ContentType.ARTICLE:
+        raise not_found_exception("Article", article_id)
+    if not is_ready_for_surface(item, Surface.ARTICLES.value):
         raise not_found_exception("Article", article_id)
 
     article_data = _content_item_to_article_schema(item)
