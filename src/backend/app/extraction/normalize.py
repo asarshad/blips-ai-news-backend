@@ -2,6 +2,7 @@
 
 Functions:
 - validate_image_url:  reject invalid/relative/data/blob URLs → valid absolute or None
+- is_suspicious_image_url: flag low-trust image-like URLs for repair/verification
 - make_absolute_url:   resolve relative URL against a base
 - clean_text:          strip boilerplate, normalize whitespace
 - is_good_text:        heuristic quality check
@@ -42,6 +43,25 @@ _TRACKING_IMAGE_QUERY_KEYS = {
     "msclkid",
     "mc_cid",
     "mc_eid",
+}
+_SUSPICIOUS_IMAGE_PATH_KEYWORDS = (
+    "/analytics",
+    "/tracking",
+    "/pixel",
+    "/beacon",
+    "/event",
+    "/events",
+    "/metrics",
+)
+_SUSPICIOUS_IMAGE_QUERY_KEYS = {
+    "tid",
+    "cid",
+    "event",
+    "event_name",
+    "measurement_id",
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
 }
 
 
@@ -101,6 +121,27 @@ def validate_image_url(url: Optional[str]) -> Optional[str]:
             pass  # DNS failure is fine here — allow and let image load fail naturally
 
     return url
+
+
+def is_suspicious_image_url(url: Optional[str]) -> bool:
+    """Return True when a candidate URL looks image-adjacent but low-trust."""
+    if not url or not url.strip():
+        return False
+
+    parsed = urlparse(url.strip())
+    host = (parsed.hostname or "").lower()
+    path = (parsed.path or "").lower()
+    query_keys = {key.lower() for key in parse_qs(parsed.query).keys()}
+
+    if any(keyword in host for keyword in _TRACKING_IMAGE_HOST_KEYWORDS):
+        return True
+    if any(keyword in path for keyword in _SUSPICIOUS_IMAGE_PATH_KEYWORDS):
+        return True
+    if query_keys.intersection(_SUSPICIOUS_IMAGE_QUERY_KEYS) and not re.search(
+        r"\.(jpg|jpeg|png|webp|gif|avif)$", path
+    ):
+        return True
+    return False
 
 
 def make_absolute_url(url: Optional[str], base_url: str) -> Optional[str]:
@@ -258,6 +299,12 @@ def compute_text_quality_score(text: Optional[str]) -> float:
     total = len(text)
     alnum_score = (alnum / total) if total > 0 else 0.0
     alnum_score = min(1.0, alnum_score / 0.6)  # normalize so 0.6 ratio → 1.0
+
+    # Boilerplate penalty
+    boilerplate_matches = sum(1 for pat in _BOILERPLATE_PATTERNS if pat.search(text))
+    boilerplate_penalty = max(0.0, 1.0 - boilerplate_matches * 0.1)
+
+    return round(wc_score * 0.5 + alnum_score * 0.3 + boilerplate_penalty * 0.2, 3)
 
     # Boilerplate penalty
     boilerplate_matches = sum(1 for pat in _BOILERPLATE_PATTERNS if pat.search(text))

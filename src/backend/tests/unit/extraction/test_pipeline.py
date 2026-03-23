@@ -191,6 +191,8 @@ class TestRunExtractionWithFetch:
         assert result.image_url == "https://cdn.example.com/hero.jpg"
         assert result.image_status == ImageStatus.OK
         assert result.image_source == "og"
+        assert result.image_confidence in {"medium", "high"}
+        assert result.image_suspicious is False
         assert result.published_at is not None
         assert result.published_at.year == 2024
 

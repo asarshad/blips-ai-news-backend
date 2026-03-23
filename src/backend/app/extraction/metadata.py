@@ -13,7 +13,11 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 from app.core.logging import get_logger
-from app.extraction.normalize import make_absolute_url, validate_image_url
+from app.extraction.normalize import (
+    is_suspicious_image_url,
+    make_absolute_url,
+    validate_image_url,
+)
 
 logger = get_logger(__name__)
 
@@ -26,6 +30,8 @@ class PageMetadata:
     title: Optional[str] = None
     image_url: Optional[str] = None
     image_source: str = "none"  # og | twitter | body | rss | none
+    image_confidence: str = "none"  # high | medium | low | none
+    image_suspicious: bool = False
     description: Optional[str] = None
     published_at_str: Optional[str] = None  # raw from meta tags
 
@@ -35,6 +41,7 @@ class _ImageCandidate:
     url: str
     source: str
     score: float
+    suspicious: bool = False
 
 
 _GENERIC_URL_KEYWORDS = (
@@ -182,6 +189,13 @@ def extract_metadata(html: str, source_url: str) -> PageMetadata:
     if best_image:
         meta.image_url = best_image.url
         meta.image_source = best_image.source
+        meta.image_suspicious = best_image.suspicious
+        if best_image.score >= 72:
+            meta.image_confidence = "high"
+        elif best_image.score >= 52:
+            meta.image_confidence = "medium"
+        else:
+            meta.image_confidence = "low"
 
     # ── Published date (best effort from meta tags) ───────────────────────
     for attr_name in [
@@ -267,17 +281,41 @@ def _build_head_image_candidate(
     if not validated:
         return None
 
-    score = 48.0
+    source_host = (urlparse(source_url).hostname or "").lower()
+    candidate_host = (urlparse(validated).hostname or "").lower()
+    score = 56.0
     if source == "og":
-        score += 2.0
-    if not is_probably_generic_image_url(validated):
         score += 8.0
+    elif source == "twitter":
+        score += 2.0
+    if (
+        candidate_host
+        and source_host
+        and (
+            candidate_host == source_host
+            or candidate_host.endswith(f".{source_host}")
+            or source_host.endswith(f".{candidate_host}")
+        )
+    ):
+        score += 10.0
+    elif candidate_host and source_host:
+        score -= 6.0
+    if not is_probably_generic_image_url(validated):
+        score += 6.0
     else:
         score -= 24.0
     if any(keyword in validated.lower() for keyword in _EDITORIAL_URL_KEYWORDS):
         score += 4.0
+    suspicious = is_suspicious_image_url(validated)
+    if suspicious:
+        score -= 30.0
 
-    return _ImageCandidate(url=validated, source=source, score=score)
+    return _ImageCandidate(
+        url=validated,
+        source=source,
+        score=score,
+        suspicious=suspicious,
+    )
 
 
 def _extract_best_editorial_image(
@@ -301,7 +339,12 @@ def _extract_best_editorial_image(
                 continue
             seen_urls.add(validated)
             score = _score_body_image_candidate(tag, validated, position)
-            candidate_obj = _ImageCandidate(url=validated, source=source_label, score=score)
+            candidate_obj = _ImageCandidate(
+                url=validated,
+                source=source_label,
+                score=score,
+                suspicious=is_suspicious_image_url(validated),
+            )
             if best_candidate is None or candidate_obj.score > best_candidate.score:
                 best_candidate = candidate_obj
 
@@ -312,11 +355,17 @@ def _select_best_image_candidate(
     head_candidates: list[_ImageCandidate], body_candidate: Optional[_ImageCandidate]
 ) -> Optional[_ImageCandidate]:
     """Choose the strongest image candidate across metadata and body signals."""
+    if not head_candidates and not body_candidate:
+        return None
+
+    best_head = max(head_candidates, key=lambda candidate: candidate.score, default=None)
+    if body_candidate and best_head:
+        if best_head.source == "og" and best_head.score >= body_candidate.score - 4.0:
+            return best_head
+
     candidates = list(head_candidates)
     if body_candidate:
         candidates.append(body_candidate)
-    if not candidates:
-        return None
 
     candidates.sort(
         key=lambda candidate: (

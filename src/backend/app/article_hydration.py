@@ -497,10 +497,14 @@ class ArticleHydrationService:
     ) -> bool:
         """Refresh missing or suspicious image/canonical metadata on an existing article."""
         from app.extraction.metadata import is_probably_generic_image_url
-        from app.extraction.normalize import validate_image_url
+        from app.extraction.normalize import is_suspicious_image_url, validate_image_url
 
         current_image_url = (item.image_url or "").strip()
-        needs_image = not current_image_url or is_probably_generic_image_url(current_image_url)
+        needs_image = (
+            not current_image_url
+            or is_probably_generic_image_url(current_image_url)
+            or is_suspicious_image_url(current_image_url)
+        )
         needs_canonical = not (item.canonical_url or "").strip()
         if not needs_image and not needs_canonical:
             return False
@@ -513,6 +517,7 @@ class ArticleHydrationService:
             needs_canonical
             or not refreshed_image
             or (current_image_url and is_probably_generic_image_url(current_image_url))
+            or (current_image_url and is_suspicious_image_url(current_image_url))
         ):
             metadata = self.fetch_article_page_metadata(source_url)
             if metadata is not None:
@@ -538,11 +543,15 @@ class ArticleHydrationService:
     def needs_article_metadata_repair(item: ContentItem, *, include_generic: bool) -> bool:
         """Return True when an article should be revisited for metadata repair."""
         from app.extraction.metadata import is_probably_generic_image_url
+        from app.extraction.normalize import is_suspicious_image_url
 
         has_missing_image = not (item.image_url or "").strip()
         has_missing_canonical = not (item.canonical_url or "").strip()
         has_generic_image = include_generic and is_probably_generic_image_url(item.image_url)
-        return has_missing_image or has_missing_canonical or has_generic_image
+        has_suspicious_image = is_suspicious_image_url(item.image_url)
+        return (
+            has_missing_image or has_missing_canonical or has_generic_image or has_suspicious_image
+        )
 
     @staticmethod
     def fetch_article_page_metadata(article_url: str):
@@ -605,6 +614,7 @@ class ArticleHydrationService:
     ) -> bool:
         """Prefer real editorial images and avoid filling blanks with generic placeholders."""
         from app.extraction.metadata import is_probably_generic_image_url
+        from app.extraction.normalize import is_suspicious_image_url
 
         candidate = (candidate_image_url or "").strip()
         if not candidate:
@@ -612,10 +622,13 @@ class ArticleHydrationService:
 
         existing = (existing_image_url or "").strip()
         candidate_is_generic = is_probably_generic_image_url(candidate)
+        candidate_is_suspicious = is_suspicious_image_url(candidate)
         if not existing:
-            return not candidate_is_generic
+            return not candidate_is_generic and not candidate_is_suspicious
         if existing == candidate:
             return False
+        if is_suspicious_image_url(existing) and not candidate_is_suspicious:
+            return True
         if is_probably_generic_image_url(existing) and not candidate_is_generic:
             return True
         return False

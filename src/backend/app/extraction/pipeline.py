@@ -131,6 +131,8 @@ def run_extraction(
             page_title = meta.title
             page_image = meta.image_url
             page_image_source = meta.image_source
+            page_image_confidence = meta.image_confidence
+            page_image_suspicious = meta.image_suspicious
 
             if meta.published_at_str:
                 result.published_at = _try_parse_date(meta.published_at_str)
@@ -150,6 +152,8 @@ def run_extraction(
     if page_image:
         result.image_url = page_image
         result.image_source = page_image_source
+        result.image_confidence = page_image_confidence
+        result.image_suspicious = page_image_suspicious
         result.image_status = ImageStatus.OK
     elif rss.image_url:
         validated = validate_image_url(rss.image_url)

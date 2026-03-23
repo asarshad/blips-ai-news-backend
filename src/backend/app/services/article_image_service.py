@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.article_hydration import ArticleHydrationService
 from app.core.logging import get_logger
 from app.extraction.metadata import PageMetadata, is_probably_generic_image_url
+from app.extraction.normalize import is_suspicious_image_url
 from app.models.content import ContentItem, ContentType
 
 logger = get_logger(__name__)
@@ -54,6 +55,7 @@ def repair_article_image_metadata(
     failures = 0
     filled_missing = 0
     replaced_generic = 0
+    replaced_suspicious = 0
     pending_changes = 0
 
     for item in items:
@@ -61,6 +63,7 @@ def repair_article_image_metadata(
         source_url = item.canonical_url or item.source_url or ""
         was_missing = not (item.image_url or "").strip()
         was_generic = bool(item.image_url) and is_probably_generic_image_url(item.image_url)
+        was_suspicious = bool(item.image_url) and is_suspicious_image_url(item.image_url)
         try:
             changed = hydrator.refresh_existing_article_metadata(item, source_url=source_url)
         except Exception as exc:
@@ -75,6 +78,8 @@ def repair_article_image_metadata(
             filled_missing += 1
         elif was_generic and (item.image_url or "").strip():
             replaced_generic += 1
+        elif was_suspicious and (item.image_url or "").strip():
+            replaced_suspicious += 1
 
         updated += 1
         pending_changes += 1
@@ -92,5 +97,6 @@ def repair_article_image_metadata(
         "failures": failures,
         "filled_missing": filled_missing,
         "replaced_generic": replaced_generic,
+        "replaced_suspicious": replaced_suspicious,
         "lookback_days": lookback_days,
     }

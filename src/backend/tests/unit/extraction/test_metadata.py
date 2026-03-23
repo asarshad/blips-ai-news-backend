@@ -173,6 +173,25 @@ class TestImageExtraction:
         assert meta.image_url == "https://example.com/images/article-hero.jpg"
         assert meta.image_source == "body"
 
+    def test_same_site_og_beats_later_body_inline_image(self):
+        html = """<!DOCTYPE html>
+<html>
+  <head>
+    <title>Strong OG</title>
+    <meta property="og:image" content="https://example.com/images/og-hero.jpg" />
+  </head>
+  <body>
+    <article>
+      <p>Intro paragraph</p>
+      <img src="/images/gallery-01.jpg" width="900" height="600" alt="gallery inline image" />
+    </article>
+  </body>
+</html>"""
+        meta = extract_metadata(html, "https://example.com/story")
+        assert meta.image_url == "https://example.com/images/og-hero.jpg"
+        assert meta.image_source == "og"
+        assert meta.image_confidence == "high"
+
     def test_body_image_uses_picture_source_before_placeholder_src(self):
         html = """<!DOCTYPE html>
 <html>

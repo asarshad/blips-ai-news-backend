@@ -6,6 +6,7 @@ from app.extraction.normalize import (
     clean_text,
     compute_text_quality_score,
     is_good_text,
+    is_suspicious_image_url,
     make_absolute_url,
     validate_image_url,
     word_count,
@@ -57,6 +58,21 @@ class TestValidateImageUrl:
     def test_tracker_beacon_with_collect_path_rejected(self):
         url = "https://metrics.example.com/g/collect?tid=G-TEST&cid=123&en=page_view"
         assert validate_image_url(url) is None
+
+
+class TestSuspiciousImageUrl:
+    def test_tracker_host_flagged(self):
+        assert is_suspicious_image_url("https://www.google-analytics.com/g/collect?tid=G-TEST")
+
+    def test_query_heavy_non_image_path_flagged(self):
+        assert is_suspicious_image_url(
+            "https://cdn.example.com/metrics?utm_source=feed&event_name=view"
+        )
+
+    def test_normal_editorial_image_not_flagged(self):
+        assert not is_suspicious_image_url(
+            "https://platform.theverge.com/wp-content/uploads/sites/2/2026/03/topical-dancer.jpg?w=1200"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -132,6 +132,47 @@ def test_repair_article_image_metadata_replaces_generic_images(monkeypatch):
     assert repaired.image_url == "https://cdn.example.com/article-hero.jpg"
 
 
+def test_repair_article_image_metadata_replaces_suspicious_images(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    ContentItem.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="The Verge",
+        source_url="https://example.com/story",
+        canonical_url="https://example.com/story",
+        image_url="https://metrics.example.com/g/collect?tid=G-TEST&cid=123",
+        published_at=datetime(2026, 3, 20, 10, 0, 0),
+        title="Replaced suspicious image",
+        curation_status=ContentStatus.PROMOTED,
+        created_at=datetime(2026, 3, 20, 10, 5, 0),
+        updated_at=datetime(2026, 3, 20, 10, 5, 0),
+    )
+    db.add(item)
+    db.commit()
+
+    monkeypatch.setattr(
+        article_image_service,
+        "fetch_article_page_metadata",
+        lambda article_url: PageMetadata(
+            canonical_url=article_url,
+            image_url="https://cdn.example.com/article-hero.jpg",
+            image_source="og",
+            image_confidence="high",
+        ),
+    )
+
+    result = article_image_service.repair_article_image_metadata(db, lookback_days=14, limit=50)
+    repaired = db.get(ContentItem, item.id)
+
+    assert result["scanned"] == 1
+    assert result["updated"] == 1
+    assert result["replaced_suspicious"] == 1
+    assert repaired.image_url == "https://cdn.example.com/article-hero.jpg"
+
+
 def test_fetch_article_page_metadata_uses_final_fetched_url_for_relative_assets(monkeypatch):
     from app.extraction.fetcher import FetchResult
 
