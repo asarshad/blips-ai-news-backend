@@ -282,8 +282,8 @@ class TestOpenAIModelPinning:
 class TestSummaryLengthPrompting:
     """Verify summary length is enforced in backend prompts, not the client UI."""
 
-    def test_llm_client_article_summary_prompt_targets_65_to_85_words(self):
-        """Article summaries should request a 65-85 word range from the model."""
+    def test_llm_client_article_summary_prompt_targets_60_to_70_words(self):
+        """Article summaries should request a 60-70 word range from the model."""
         from types import SimpleNamespace
 
         from app.core.config import settings
@@ -323,7 +323,7 @@ class TestSummaryLengthPrompting:
         assert "at most 85 words" in prompt
         assert "exactly 85-90 words" not in prompt
 
-    def test_legacy_openai_client_article_summary_prompt_targets_65_to_85_words(self):
+    def test_legacy_openai_client_article_summary_prompt_targets_60_to_70_words(self):
         """Legacy OpenAIClient should match the same article summary contract."""
         from types import SimpleNamespace
 

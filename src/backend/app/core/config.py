@@ -184,8 +184,8 @@ class Settings(BaseSettings):
     EXTRACTION_IDEAL_TEXT_WORDS: int = 300  # word count for 1.0 quality score
     ARTICLE_SUMMARY_MIN_WORDS: int = 120  # skip LLM summary for thin article text
     ARTICLE_SUMMARY_MAX_WORDS: int = 1200  # clip very long article text before summarizing
-    ARTICLE_SUMMARY_MIN_OUTPUT_WORDS: int = 65  # target minimum words for generated summaries
-    ARTICLE_SUMMARY_MAX_OUTPUT_WORDS: int = 85  # hard cap for generated summaries
+    ARTICLE_SUMMARY_MIN_OUTPUT_WORDS: int = 60  # target minimum words for generated summaries
+    ARTICLE_SUMMARY_MAX_OUTPUT_WORDS: int = 70  # hard cap for generated summaries
     SOURCE_HEALTH_DEGRADED_THRESHOLD: float = 0.3  # below this, mark source degraded
 
     # Minimum fresh counts per surface (triggers top-up if below)
