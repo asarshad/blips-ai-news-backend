@@ -59,3 +59,9 @@ def test_runtime_push_defaults_support_backend_control():
     assert settings.PUSH_CONFIG_TTL_SECONDS == 300
     assert settings.FIREBASE_SERVICE_ACCOUNT_JSON == ""
     assert settings.FIREBASE_SERVICE_ACCOUNT_FILE == ""
+
+
+def test_admin_share_token_defaults_disabled():
+    settings = Settings()
+
+    assert settings.ADMIN_SHARE_TOKEN == ""

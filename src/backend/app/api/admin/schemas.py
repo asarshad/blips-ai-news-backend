@@ -158,6 +158,7 @@ class SubmitURLResponse(BaseModel):
     duplicate: bool = False
     status: str  # "created" | "duplicate_boosted" | "duplicate_exists" | "queued"
     message: str
+    content_type: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

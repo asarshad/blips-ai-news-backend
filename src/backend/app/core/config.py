@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     # Security
     ADMIN_API_KEY: str = ""
+    ADMIN_SHARE_TOKEN: str = ""
     DEBUG_ROUTES_ENABLED: bool = False
     CORS_ORIGINS: str = ""
     DOCS_ENABLED: bool = False

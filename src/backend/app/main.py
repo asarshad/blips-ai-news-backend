@@ -305,7 +305,13 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Admin-Key", "X-Device-ID"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-Admin-Key",
+        "X-Admin-Share-Token",
+        "X-Device-ID",
+    ],
 )
 
 # Rate limiting (per IP)

@@ -1013,6 +1013,43 @@ class YouTubeClient:
 
         return entries
 
+    def resolve_shared_url(
+        self,
+        url: str,
+        *,
+        acquisition_lane: str = "curated",
+    ) -> Optional[VideoEntry]:
+        """Resolve a single shared YouTube URL into an enriched VideoEntry."""
+        video_id = self._extract_video_id(url or "")
+        if not video_id:
+            return None
+
+        surface = "reels" if "/shorts/" in (url or "").lower() else "videos"
+        data = self._youtube_api_json(
+            "videos",
+            params={
+                "part": "snippet,contentDetails,statistics,status",
+                "id": video_id,
+            },
+            quota_units=1,
+            timeout=10,
+            operation=f"manual resolve for {video_id}",
+        )
+        if not data:
+            return None
+
+        items = data.get("items", [])
+        if not items:
+            return None
+
+        return self._entry_from_api_item(
+            items[0],
+            acquisition_lane=acquisition_lane,
+            query_label=None,
+            region=None,
+            surface=surface,
+        )
+
     def fetch_channel_stats(self, channel_ids: List[str]) -> Dict[str, Dict[str, Optional[int]]]:
         """Batch-fetch channel statistics for discovery quality filtering."""
         unique_ids = [channel_id for channel_id in dict.fromkeys(channel_ids) if channel_id]

@@ -3026,6 +3026,17 @@
             ],
             "title": "Content Id"
           },
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type"
+          },
           "duplicate": {
             "default": false,
             "title": "Duplicate",
@@ -4934,6 +4945,60 @@
         "summary": "Send Push Now",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/share-target/submit": {
+      "post": {
+        "description": "Accept a phone share-sheet submission using the scoped admin share token.",
+        "operationId": "submit_share_target_url_api_v1_admin_share_target_submit_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Share-Token",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Share-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitURLRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitURLResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Share Target Url",
+        "tags": [
+          "admin-share-target",
+          "admin-share-target"
         ]
       }
     },

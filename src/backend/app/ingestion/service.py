@@ -81,6 +81,149 @@ def _entry_is_reel(entry: VideoEntry) -> bool:
     return classify_video_like_item(entry, allow_is_short_hint=True) == ContentType.REEL
 
 
+def build_video_content_item_from_entry(
+    entry: VideoEntry,
+    *,
+    youtube_client: YouTubeClient,
+    llm_client: LLMClient,
+    content_type: ContentType = ContentType.VIDEO,
+    curation_status: ContentStatus | None = None,
+    discovered_via: str | None = None,
+    acquisition_lane: str | None = None,
+    source_status: str | None = None,
+    manual_added: bool = False,
+    added_by: str | None = None,
+    added_at: datetime | None = None,
+    editorial_boost: int = 0,
+    skip_language_filter: bool = False,
+) -> Optional[ContentItem]:
+    """Build a normalized video or reel item from a resolved YouTube entry."""
+    duration_seconds = getattr(entry, "duration_seconds", None)
+    if not isinstance(duration_seconds, (int, float)):
+        duration_seconds = None
+    if duration_seconds is None:
+        try:
+            duration_seconds = youtube_client.get_video_duration(entry.video_id)
+        except Exception as exc:
+            logger.warning("Failed to get duration for video %s: %s", entry.title, exc)
+
+    if content_type == ContentType.VIDEO:
+        inferred_type = classify_video_like_item(entry, allow_is_short_hint=True)
+        if inferred_type == ContentType.REEL:
+            content_type = ContentType.REEL
+            logger.info(
+                "Reel classified from durable Shorts signal: %s [%s]",
+                entry.title,
+                entry.video_id,
+            )
+
+    source = entry.source or "YouTube"
+    dedupe_key = (
+        f"yt:{entry.video_id}" if entry.video_id else compute_dedupe_key(entry.title, source)
+    )
+    normalized_video_url = normalize_url(entry.video_url) if entry.video_url else entry.video_url
+
+    detected_lang = None
+    if not skip_language_filter and not is_english(
+        entry.title,
+        entry.summary,
+        channel_language=getattr(entry, "default_language", None),
+    ):
+        detected_lang, _conf = detect_language(entry.title, entry.summary)
+        logger.info(
+            "[language_filter] Skipping non-English video (lang=%s): %s",
+            detected_lang,
+            entry.title[:120],
+        )
+        extraction_metrics.record_language_filtered(detected_lang)
+        return None
+
+    summary = entry.summary
+    ai_processed = False
+    inline_starters = None
+
+    if content_type != ContentType.REEL:
+        try:
+            if llm_client.is_configured() and summary:
+                is_generic = (
+                    "Watch this video" in summary
+                    or "Subscribe" in summary.lower()
+                    or len(summary.strip()) < 50
+                )
+                if is_generic:
+                    transcript = youtube_client.get_transcript(entry.video_id)
+                    if transcript:
+                        summary = transcript[:5000]
+
+                video_result = llm_client.summarize_video(entry.title, summary)
+                ai_summary = video_result.summary
+                inline_starters = video_result.conversation_starters
+                if ai_summary and len(ai_summary.strip()) > 50:
+                    summary = ai_summary
+                    ai_processed = True
+        except Exception as exc:
+            logger.warning("Failed to summarize video %s: %s", entry.title, exc)
+
+    channel_quality_tier = getattr(entry, "quality_tier", None)
+    quality_modifier = 1.0
+    if channel_quality_tier:
+        quality_modifier = get_quality_weight_modifier(channel_quality_tier)
+
+    lane = (acquisition_lane or getattr(entry, "acquisition_lane", "curated") or "curated").strip()
+    resolved_discovered_via = discovered_via or build_discovered_via(
+        lane,
+        getattr(entry, "query_label", None),
+    )
+    resolved_source_status = (
+        source_status if source_status is not None else getattr(entry, "source_status", None)
+    )
+    resolved_status = curation_status or review_queue_target_status()
+
+    topics = extract_topics(entry.title, summary or "")
+    entities = extract_entities(entry.title, summary or "")
+
+    content_item = ContentItem(
+        type=content_type,
+        source=source,
+        source_url=normalized_video_url or entry.video_url,
+        channel_id=getattr(entry, "channel_id", None),
+        published_at=entry.published_at or datetime.utcnow(),
+        title=entry.title,
+        description=summary[:500] if summary else None,
+        summary=summary if content_type != ContentType.REEL else None,
+        image_url=entry.thumbnail_url,
+        video_url=normalized_video_url or entry.video_url,
+        duration_seconds=duration_seconds,
+        topics=topics,
+        entities=entities,
+        dedupe_key=dedupe_key,
+        simhash=compute_title_simhash(entry.title),
+        ai_processed=ai_processed,
+        conversation_starters=inline_starters,
+        language=detected_lang or "en",
+        curation_status=resolved_status,
+        discovered_via=resolved_discovered_via,
+        acquisition_lane=lane,
+        source_status=resolved_source_status,
+        view_count_snapshot=getattr(entry, "view_count", None),
+        engagement_snapshot={
+            "likes": getattr(entry, "like_count", None),
+            "comments": getattr(entry, "comment_count", None),
+        },
+        views_per_hour=getattr(entry, "views_per_hour", None),
+        format_fit_score=getattr(entry, "format_fit_score", None),
+        manual_added=manual_added,
+        added_by=added_by,
+        added_at=added_at,
+        editorial_boost=editorial_boost,
+    )
+    base_quality = compute_source_weight(source)
+    content_item.quality_score = base_quality * quality_modifier
+    content_item.recency_score = 1.0
+    seed_content_readiness(content_item)
+    return content_item
+
+
 class IngestionPipeline:
     """
     Pipeline for ingesting content into the curation system.
@@ -351,33 +494,6 @@ class IngestionPipeline:
         Returns:
             Created ContentItem or None if duplicate
         """
-        # Get video duration
-        duration_seconds = getattr(entry, "duration_seconds", None)
-        if not isinstance(duration_seconds, (int, float)):
-            duration_seconds = None
-        if duration_seconds is None:
-            try:
-                duration_seconds = self.youtube_client.get_video_duration(entry.video_id)
-            except Exception as e:
-                logger.warning(f"Failed to get duration for video {entry.title}: {e}")
-
-        # Classify as REEL only when durable Shorts signals are present.
-        if content_type == ContentType.VIDEO:
-            inferred_type = classify_video_like_item(entry, allow_is_short_hint=True)
-            if inferred_type == ContentType.REEL:
-                content_type = ContentType.REEL
-                logger.info(
-                    "Reel classified from durable Shorts signal: %s [%s]",
-                    entry.title,
-                    entry.video_id,
-                )
-
-        source = entry.source or "YouTube"
-        # YouTube titles repeat frequently (series/weekly formats). Use video_id for stable dedupe.
-        dedupe_key = (
-            f"yt:{entry.video_id}" if entry.video_id else compute_dedupe_key(entry.title, source)
-        )
-
         normalized_video_url = (
             normalize_url(entry.video_url) if entry.video_url else entry.video_url
         )
@@ -389,109 +505,23 @@ class IngestionPipeline:
                 logger.debug(f"Video already ingested (source_url): {entry.title}")
                 return None
 
+        source = entry.source or "YouTube"
+        dedupe_key = (
+            f"yt:{entry.video_id}" if entry.video_id else compute_dedupe_key(entry.title, source)
+        )
         existing = self.content_repo.get_by_dedupe_key(dedupe_key)
         if existing:
             logger.debug(f"Video already ingested: {entry.title}")
             return None
 
-        detected_lang = None
-
-        # Language gate: reject non-English videos before spending LLM tokens
-        if not is_english(
-            entry.title,
-            entry.summary,
-            channel_language=getattr(entry, "default_language", None),
-        ):
-            detected_lang, _conf = detect_language(entry.title, entry.summary)
-            logger.info(
-                "[language_filter] Skipping non-English video (lang=%s): %s",
-                detected_lang,
-                entry.title[:120],
-            )
-            extraction_metrics.record_language_filtered(detected_lang)
-            return None
-
-        # Generate AI summary + conversation starters (skip for reels - metadata only)
-        summary = entry.summary
-        ai_processed = False
-        inline_starters = None
-
-        # Skip AI summarization for REEL content type
-        if content_type == ContentType.REEL:
-            # Reels use metadata only, no summarization
-            ai_processed = False
-        else:
-            try:
-                if self.llm_client.is_configured() and summary:
-                    # Check if summary is generic
-                    is_generic = (
-                        "Watch this video" in summary
-                        or "Subscribe" in summary.lower()
-                        or len(summary.strip()) < 50
-                    )
-                    if is_generic:
-                        # Try to get transcript
-                        transcript = self.youtube_client.get_transcript(entry.video_id)
-                        if transcript:
-                            summary = transcript[:5000]
-
-                    video_result = self.llm_client.summarize_video(entry.title, summary)
-                    ai_summary = video_result.summary
-                    inline_starters = video_result.conversation_starters
-                    if ai_summary and len(ai_summary.strip()) > 50:
-                        summary = ai_summary
-                        ai_processed = True
-            except Exception as e:
-                logger.warning(f"Failed to summarize video {entry.title}: {e}")
-
-        # Apply quality tier modifier from channel config
-        channel_quality_tier = getattr(entry, "quality_tier", None)
-        quality_modifier = 1.0
-        if channel_quality_tier:
-            quality_modifier = get_quality_weight_modifier(channel_quality_tier)
-
-        topics = extract_topics(entry.title, summary or "")
-        entities = extract_entities(entry.title, summary or "")
-
-        content_item = ContentItem(
-            type=content_type,
-            source=source,
-            source_url=normalized_video_url or entry.video_url,
-            channel_id=getattr(entry, "channel_id", None),
-            # Discovery and curated candidates now carry their true publish time.
-            published_at=entry.published_at or datetime.utcnow(),
-            title=entry.title,
-            description=summary[:500] if summary else None,
-            summary=summary if content_type != ContentType.REEL else None,
-            image_url=entry.thumbnail_url,
-            video_url=normalized_video_url or entry.video_url,
-            duration_seconds=duration_seconds,
-            topics=topics,
-            entities=entities,
-            dedupe_key=dedupe_key,
-            simhash=compute_title_simhash(entry.title),
-            ai_processed=ai_processed,
-            conversation_starters=inline_starters,
-            language=detected_lang or "en",
-            curation_status=review_queue_target_status(),
-            discovered_via=build_discovered_via(
-                getattr(entry, "acquisition_lane", "curated"),
-                getattr(entry, "query_label", None),
-            ),
-            acquisition_lane=getattr(entry, "acquisition_lane", "curated"),
-            source_status=getattr(entry, "source_status", None),
-            view_count_snapshot=getattr(entry, "view_count", None),
-            engagement_snapshot={
-                "likes": getattr(entry, "like_count", None),
-                "comments": getattr(entry, "comment_count", None),
-            },
-            views_per_hour=getattr(entry, "views_per_hour", None),
-            format_fit_score=getattr(entry, "format_fit_score", None),
+        content_item = build_video_content_item_from_entry(
+            entry,
+            youtube_client=self.youtube_client,
+            llm_client=self.llm_client,
+            content_type=content_type,
         )
-        base_quality = compute_source_weight(source)
-        content_item.quality_score = base_quality * quality_modifier
-        content_item.recency_score = 1.0
-        seed_content_readiness(content_item)
+        if content_item is None:
+            return None
 
         self.db.add(content_item)
         try:
@@ -521,9 +551,17 @@ class IngestionPipeline:
         if channel_role:
             role_info = f" [{channel_role.value}]"
 
-        status = "with AI summary" if ai_processed else "without AI summary"
+        resolved_type = getattr(content_item, "type", content_type)
+        resolved_type_value = (
+            resolved_type.value if hasattr(resolved_type, "value") else str(resolved_type)
+        )
+        status = (
+            "with AI summary"
+            if getattr(content_item, "ai_processed", False)
+            else "without AI summary"
+        )
         logger.info(
-            f"Ingested {content_type.value}{role_info} {status}: {entry.title} -> {content_item.id}"
+            f"Ingested {resolved_type_value}{role_info} {status}: {entry.title} -> {content_item.id}"
         )
         return content_item
 

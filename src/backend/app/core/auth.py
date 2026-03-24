@@ -28,6 +28,17 @@ def is_valid_admin_key(provided: str | None) -> bool:
     return secrets.compare_digest(provided, configured_key)
 
 
+def is_admin_share_token_configured() -> bool:
+    return bool(settings.ADMIN_SHARE_TOKEN)
+
+
+def is_valid_admin_share_token(provided: str | None) -> bool:
+    configured_token = settings.ADMIN_SHARE_TOKEN
+    if not configured_token or not provided:
+        return False
+    return secrets.compare_digest(provided, configured_token)
+
+
 def build_admin_ui_session_token() -> str:
     configured_key = settings.ADMIN_API_KEY
     if not configured_key:
@@ -79,3 +90,30 @@ def require_admin_key(
         )
 
     return x_admin_key
+
+
+def require_admin_share_token(
+    x_admin_share_token: str = Header(None, alias="X-Admin-Share-Token"),
+) -> str:
+    """FastAPI dependency – enforce the scoped admin share token."""
+    configured_token = settings.ADMIN_SHARE_TOKEN
+
+    if not configured_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Admin share-target endpoint is disabled (ADMIN_SHARE_TOKEN not configured)",
+        )
+
+    if not x_admin_share_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing X-Admin-Share-Token header",
+        )
+
+    if not secrets.compare_digest(x_admin_share_token, configured_token):
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid admin share token",
+        )
+
+    return x_admin_share_token

@@ -270,6 +270,7 @@ def submit_url(
         duplicate=result.duplicate,
         status=result.status,
         message=result.message,
+        content_type=result.content_type,
     )
 
 

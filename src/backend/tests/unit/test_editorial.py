@@ -24,6 +24,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from app.article_hydration import ArticleHydrationService
+from app.domain.editorial import service as editorial_service_module
 from app.domain.editorial.service import EditorialService, _extract_domain
 from app.models.content import ContentStatus, ContentType
 from app.ranking.global_score import (
@@ -90,6 +91,9 @@ class TestEditorialServiceSubmit:
         svc = EditorialService.__new__(EditorialService)
         svc.db = MagicMock()
         svc.repo = repo_mock
+        svc._article_hydrator = None
+        svc._youtube_client = None
+        svc._llm_client = None
         return svc
 
     def test_duplicate_by_source_url_returns_existing(self):
@@ -102,6 +106,7 @@ class TestEditorialServiceSubmit:
         assert result.duplicate is True
         assert result.content_id == 42
         assert result.status == "duplicate_exists"
+        assert result.content_type == "ARTICLE"
 
     def test_duplicate_boosted_when_importance_higher(self):
         repo = MagicMock()
@@ -113,6 +118,7 @@ class TestEditorialServiceSubmit:
         result = svc.submit_url("https://techcrunch.com/article-1", importance_level=2)
         assert result.duplicate is True
         assert result.status == "duplicate_boosted"
+        assert result.content_type == "ARTICLE"
         repo.set_boost.assert_called_once_with(42, 2, "admin")
 
     def test_new_url_creates_stub(self):
@@ -134,12 +140,170 @@ class TestEditorialServiceSubmit:
         assert result.duplicate is False
         assert result.status == "created"
         assert result.content_id == 99
+        assert result.content_type == "ARTICLE"
         db.add.assert_called_once()
         repo.log_add_action.assert_called_once()
 
         created = db.add.call_args.args[0]
         assert created.title == "[pending] Post 1"
         assert "https://" not in created.title
+
+    def test_submit_youtube_watch_url_creates_video_item(self, monkeypatch):
+        repo = MagicMock()
+        repo.get_by_source_url.return_value = None
+        repo.get_by_canonical_key.return_value = None
+        repo.log_add_action.return_value = MagicMock()
+
+        db = MagicMock()
+        svc = EditorialService(db=db, repo=repo)
+        svc._youtube_client = MagicMock()
+        svc._youtube_client.resolve_shared_url.return_value = SimpleNamespace(
+            title="OpenAI demo",
+            video_url="https://www.youtube.com/watch?v=video123",
+        )
+        svc._llm_client = MagicMock()
+
+        def fake_refresh(obj):
+            obj.id = 101
+
+        db.refresh = fake_refresh
+
+        monkeypatch.setattr(
+            editorial_service_module,
+            "build_video_content_item_from_entry",
+            lambda *args, **kwargs: FakeContentItem(
+                type=ContentType.VIDEO,
+                source="YouTube",
+                source_url="https://www.youtube.com/watch?v=video123",
+                canonical_url="https://www.youtube.com/watch?v=video123",
+                video_url="https://www.youtube.com/watch?v=video123",
+                title="OpenAI demo",
+                curation_status=ContentStatus.CANDIDATE,
+            ),
+        )
+
+        result = svc.submit_url(
+            "https://www.youtube.com/watch?v=video123",
+            importance_level=2,
+            actor="ios_shortcut",
+        )
+
+        assert result.duplicate is False
+        assert result.status == "created"
+        assert result.content_id == 101
+        assert result.content_type == "VIDEO"
+
+        created = db.add.call_args.args[0]
+        assert created.type == ContentType.VIDEO
+        assert created.manual_added is True
+        assert created.added_by == "ios_shortcut"
+        assert created.editorial_boost == 2
+        assert created.discovered_via == "manual"
+        assert created.acquisition_lane == "curated"
+        assert created.canonical_key == "video123"
+        assert created.video_url == "https://www.youtube.com/watch?v=video123"
+
+    def test_submit_youtube_shorts_url_creates_reel_item(self, monkeypatch):
+        repo = MagicMock()
+        repo.get_by_source_url.return_value = None
+        repo.get_by_canonical_key.return_value = None
+        repo.log_add_action.return_value = MagicMock()
+
+        db = MagicMock()
+        svc = EditorialService(db=db, repo=repo)
+        svc._youtube_client = MagicMock()
+        svc._youtube_client.resolve_shared_url.return_value = SimpleNamespace(
+            title="Quick tip",
+            video_url="https://www.youtube.com/shorts/reel123",
+        )
+        svc._llm_client = MagicMock()
+
+        def fake_refresh(obj):
+            obj.id = 202
+
+        db.refresh = fake_refresh
+
+        monkeypatch.setattr(
+            editorial_service_module,
+            "build_video_content_item_from_entry",
+            lambda *args, **kwargs: FakeContentItem(
+                type=ContentType.REEL,
+                source="YouTube",
+                source_url="https://www.youtube.com/shorts/reel123",
+                canonical_url="https://www.youtube.com/shorts/reel123",
+                video_url="https://www.youtube.com/shorts/reel123",
+                title="Quick tip",
+                curation_status=ContentStatus.CANDIDATE,
+            ),
+        )
+
+        result = svc.submit_url(
+            "https://www.youtube.com/shorts/reel123",
+            importance_level=1,
+            actor="ios_shortcut",
+        )
+
+        assert result.duplicate is False
+        assert result.status == "created"
+        assert result.content_id == 202
+        assert result.content_type == "REEL"
+
+        created = db.add.call_args.args[0]
+        assert created.type == ContentType.REEL
+        assert created.video_url == "https://www.youtube.com/shorts/reel123"
+        assert created.canonical_key == "reel123"
+
+    def test_submit_youtube_duplicate_by_video_id_boosts_existing(self):
+        repo = MagicMock()
+        existing = FakeContentItem(id=55, editorial_boost=0, type=ContentType.VIDEO)
+        repo.get_by_source_url.return_value = None
+        repo.get_by_canonical_key.return_value = existing
+        repo.set_boost.return_value = existing
+
+        svc = self._make_service(repo)
+
+        result = svc.submit_url("https://www.youtube.com/watch?v=dup123", importance_level=3)
+
+        assert result.duplicate is True
+        assert result.status == "duplicate_boosted"
+        assert result.content_id == 55
+        assert result.content_type == "VIDEO"
+        repo.set_boost.assert_called_once_with(55, 3, "admin")
+
+    def test_submit_youtube_metadata_failure_creates_fallback_stub(self):
+        repo = MagicMock()
+        repo.get_by_source_url.return_value = None
+        repo.get_by_canonical_key.return_value = None
+        repo.log_add_action.return_value = MagicMock()
+
+        db = MagicMock()
+        svc = EditorialService(db=db, repo=repo)
+        svc._youtube_client = MagicMock()
+        svc._youtube_client.resolve_shared_url.return_value = None
+
+        def fake_refresh(obj):
+            obj.id = 303
+
+        db.refresh = fake_refresh
+
+        result = svc.submit_url(
+            "https://www.youtube.com/shorts/fallback123",
+            importance_level=1,
+            actor="ios_shortcut",
+        )
+
+        assert result.duplicate is False
+        assert result.status == "created"
+        assert result.content_id == 303
+        assert result.content_type == "REEL"
+
+        created = db.add.call_args.args[0]
+        assert created.type == ContentType.REEL
+        assert created.title == "[pending] YouTube Short"
+        assert created.video_url == "https://www.youtube.com/shorts/fallback123"
+        assert created.canonical_key == "fallback123"
+        assert created.manual_added is True
+        assert created.added_by == "ios_shortcut"
 
     def test_submit_rolls_back_on_integrity_error(self):
         repo = MagicMock()
@@ -155,6 +319,7 @@ class TestEditorialServiceSubmit:
         assert result.duplicate is True
         assert result.status == "duplicate_exists"
         assert result.content_id == 77
+        assert result.content_type == "ARTICLE"
         db.rollback.assert_called_once()
         repo.log_add_action.assert_not_called()
 
