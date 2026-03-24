@@ -64,7 +64,7 @@ class PushMessagingClient(Protocol):
         *,
         tokens: list[str],
         title: str,
-        body: str,
+        body: str | None,
         data: dict[str, str],
     ) -> PushDeliveryResult: ...
 
@@ -145,7 +145,7 @@ class FirebasePushMessagingClient:
         *,
         tokens: list[str],
         title: str,
-        body: str,
+        body: str | None,
         data: dict[str, str],
     ) -> PushDeliveryResult:
         if not tokens:
@@ -156,7 +156,7 @@ class FirebasePushMessagingClient:
 
         assert self._messaging is not None
         message = self._messaging.MulticastMessage(
-            notification=self._messaging.Notification(title=title, body=body),
+            notification=self._messaging.Notification(title=title, body=body or None),
             data=data,
             tokens=tokens,
         )
@@ -507,6 +507,4 @@ class PushNotificationService:
         }
 
     def _notification_body_for_item(self, item: ContentItem) -> str:
-        kind = "article" if effective_content_type(item) == ContentType.ARTICLE else "video"
-        source = (item.source or "").strip() or "Blips"
-        return f"New {kind} from {source}"
+        return ""
