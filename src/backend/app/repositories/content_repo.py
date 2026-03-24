@@ -169,6 +169,39 @@ class ContentItemRepository(BaseRepository[ContentItem]):
 
         return short_items
 
+    def get_articles_with_long_summaries(
+        self,
+        *,
+        limit: int = 100,
+        hours_back: int | None = None,
+        min_words: int,
+    ) -> List[ContentItem]:
+        """Return promoted article items whose stored summary is longer than the target."""
+        query = self.db.query(ContentItem).filter(
+            ContentItem.type == ContentType.ARTICLE,
+            ContentItem.ai_processed.is_(True),
+            ContentItem.summary.isnot(None),
+            ContentItem.is_suppressed.is_(False),
+            ContentItem.curation_status == ContentStatus.PROMOTED,
+        )
+        if hours_back is not None:
+            cutoff = datetime.utcnow() - timedelta(hours=hours_back)
+            query = query.filter(ContentItem.published_at >= cutoff)
+
+        candidates = (
+            query.order_by(desc(ContentItem.published_at)).limit(max(limit * 5, limit)).all()
+        )
+
+        long_items: List[ContentItem] = []
+        for item in candidates:
+            summary = (item.summary or "").strip()
+            if summary and len(summary.split()) > min_words:
+                long_items.append(item)
+                if len(long_items) >= limit:
+                    break
+
+        return long_items
+
     def mark_ai_processed(self, item_id: int, summary: str, topics: List[str] = None) -> bool:
         """
         Mark a content item as AI processed and update its summary.

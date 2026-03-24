@@ -64,6 +64,15 @@ def process_ai_summaries():
                     max_words=settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS,
                 )
             )
+        remaining_slots = max(0, MAX_ITEMS_PER_RUN - len(items))
+        if remaining_slots:
+            items.extend(
+                content_repo.get_articles_with_long_summaries(
+                    limit=remaining_slots,
+                    hours_back=None,
+                    min_words=settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS,
+                )
+            )
 
         if not items:
             logger.info("[ai_retry] No items need processing")

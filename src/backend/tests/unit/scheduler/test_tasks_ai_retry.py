@@ -36,6 +36,7 @@ def test_process_ai_summaries_uses_article_hydrator_for_articles(monkeypatch):
     )
     repo.get_unprocessed_by_ai.return_value = [item]
     repo.get_articles_with_short_summaries.return_value = []
+    repo.get_articles_with_long_summaries.return_value = []
 
     llm_client = MagicMock()
     llm_client.is_configured.return_value = True
@@ -95,6 +96,7 @@ def test_process_ai_summaries_retries_short_article_summaries(monkeypatch):
     )
     repo.get_unprocessed_by_ai.return_value = []
     repo.get_articles_with_short_summaries.return_value = [item]
+    repo.get_articles_with_long_summaries.return_value = []
 
     llm_client = MagicMock()
     llm_client.is_configured.return_value = True
@@ -134,4 +136,66 @@ def test_process_ai_summaries_retries_short_article_summaries(monkeypatch):
         7,
         summary=item.summary,
         topics=["release", "platform"],
+    )
+
+
+def test_process_ai_summaries_retries_long_article_summaries(monkeypatch):
+    db = MagicMock()
+    repo = MagicMock()
+    item = SimpleNamespace(
+        id=99,
+        type=ContentType.ARTICLE,
+        content_text=("Detailed article text about AI infrastructure and hiring. " * 20),
+        description=None,
+        title="Long summary article",
+        topics=["old-topic"],
+        conversation_starters=None,
+        summary=" ".join(f"word{i}" for i in range(71)),
+        ai_processed=True,
+    )
+    repo.get_unprocessed_by_ai.return_value = []
+    repo.get_articles_with_short_summaries.return_value = []
+    repo.get_articles_with_long_summaries.return_value = [item]
+
+    llm_client = MagicMock()
+    llm_client.is_configured.return_value = True
+
+    hydrator = MagicMock()
+
+    def _populate(target):
+        target.summary = (
+            "OpenAI plans to expand its workforce this year, signaling heavier investment "
+            "in research, product delivery, and go-to-market execution as demand for "
+            "enterprise AI tools keeps rising."
+        )
+        target.topics = ["openai", "hiring"]
+        target.conversation_starters = {
+            "starters": ["Why is OpenAI expanding headcount this quickly?"]
+        }
+        target.ai_processed = True
+        return True
+
+    hydrator.populate_article_summary.side_effect = _populate
+
+    monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
+    monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
+    monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: _FakeStats())
+    monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
+    monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
+    monkeypatch.setattr(
+        "app.article_hydration.ArticleHydrationService",
+        lambda llm_client=None: hydrator,
+    )
+    monkeypatch.setattr(tasks_ai_retry.time, "sleep", lambda *_args, **_kwargs: None)
+
+    tasks_ai_retry.process_ai_summaries()
+
+    assert item.ai_processed is True
+    assert len(item.summary.split()) <= 70
+    hydrator.populate_article_summary.assert_called_once_with(item)
+    repo.mark_ai_processed.assert_called_once_with(
+        99,
+        summary=item.summary,
+        topics=["openai", "hiring"],
     )
