@@ -149,6 +149,7 @@ class EditorialService:
         content_id: int,
         *,
         actor: str = "admin",
+        dispatch_events: bool = True,
     ) -> Optional[ContentItem]:
         """Promote content after best-effort enrichment."""
         item = self.repo.get_content_by_id(content_id)
@@ -157,7 +158,8 @@ class EditorialService:
 
         self._hydrate_for_approval(item)
         promoted = self.repo.promote(content_id, actor=actor)
-        self._dispatch_content_events_best_effort()
+        if dispatch_events:
+            self.dispatch_content_events_best_effort()
         return promoted
 
     def approve_content(
@@ -166,6 +168,7 @@ class EditorialService:
         *,
         actor: str = "admin",
         note: Optional[str] = None,
+        dispatch_events: bool = True,
     ) -> Optional[ContentItem]:
         """Approve content after best-effort enrichment."""
         item = self.repo.get_content_by_id(content_id)
@@ -174,7 +177,8 @@ class EditorialService:
 
         self._hydrate_for_approval(item)
         approved = self.repo.approve(content_id, actor=actor, note=note)
-        self._dispatch_content_events_best_effort()
+        if dispatch_events:
+            self.dispatch_content_events_best_effort()
         return approved
 
     def approve_and_publish(
@@ -184,6 +188,7 @@ class EditorialService:
         actor: str = "admin",
         boost_level: int = 3,
         note: Optional[str] = None,
+        dispatch_events: bool = True,
     ) -> Optional[ContentItem]:
         """Approve content, enrich it, and publish it to the top of the feed."""
         item = self.repo.get_content_by_id(content_id)
@@ -197,7 +202,8 @@ class EditorialService:
             boost_level=boost_level,
             note=note,
         )
-        self._dispatch_content_events_best_effort()
+        if dispatch_events:
+            self.dispatch_content_events_best_effort()
         return published
 
     def _hydrate_for_approval(self, item: ContentItem) -> None:
@@ -221,7 +227,7 @@ class EditorialService:
             self._article_hydrator = ArticleHydrationService()
         return self._article_hydrator
 
-    def _dispatch_content_events_best_effort(self) -> None:
+    def dispatch_content_events_best_effort(self) -> None:
         try:
             run_content_event_dispatch_job()
         except Exception as exc:

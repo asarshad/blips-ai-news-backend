@@ -69,6 +69,7 @@ from app.services.tiered_feed_service import invalidate_tiered_feed_cache
 _ADMIN_UI_COOKIE_NAME = "blips_admin_session"
 _ADMIN_UI_COOKIE_TTL_SECONDS = 8 * 60 * 60
 _ADMIN_UI_PREFIX = "/api/v1/admin/ui"
+_ADMIN_UI_BULK_ACTION_LIMIT = 10
 
 
 def _require_admin_ui_auth(
@@ -2524,11 +2525,14 @@ def ui_review_queue(
       <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h2 class="text-sm font-semibold text-gray-800 uppercase tracking-wide">Bulk actions</h2>
-          <p class="text-xs text-gray-500 mt-1">Select multiple rows and apply one action in a single submission.</p>
+          <p class="text-xs text-gray-500 mt-1">
+            Select multiple rows and apply one action in a single submission.
+            Requests are limited to {_ADMIN_UI_BULK_ACTION_LIMIT} items to avoid timeouts.
+          </p>
           <div class="mt-2 flex flex-wrap items-center gap-2">
             <button type="button" id="bulk-select-page" class="px-2 py-1 text-xs rounded bg-gray-100 text-gray-700 hover:bg-gray-200">Select page</button>
             <button type="button" id="bulk-clear-page" class="px-2 py-1 text-xs rounded bg-gray-100 text-gray-700 hover:bg-gray-200">Clear</button>
-            <span id="bulk-selected-count" class="text-xs text-gray-600">0 selected</span>
+            <span id="bulk-selected-count" class="text-xs text-gray-600">0 selected · max {_ADMIN_UI_BULK_ACTION_LIMIT}</span>
           </div>
         </div>
         <form id="bulk-action-form" method="post" action="/api/v1/admin/ui/review/bulk-action?key={admin_key}" class="grid grid-cols-1 sm:grid-cols-4 gap-2 w-full lg:w-auto">
@@ -2590,6 +2594,7 @@ def ui_review_queue(
         const selectedCount = document.getElementById("bulk-selected-count");
         const bulkForm = document.getElementById("bulk-action-form");
         const bulkIdsInput = document.getElementById("bulk-content-ids");
+        const bulkLimit = {_ADMIN_UI_BULK_ACTION_LIMIT};
 
         const interactiveSelector = "a,button,input,select,textarea,label,form";
         document.querySelectorAll("[data-detail-href]").forEach((row) => {{
@@ -2605,21 +2610,30 @@ def ui_review_queue(
         }});
 
         const visibleCheckboxes = () => checkboxes.filter((cb) => cb.offsetParent !== null);
+        const applySelectionLimit = () => {{
+          const selected = visibleCheckboxes().filter((cb) => cb.checked);
+          selected.slice(bulkLimit).forEach((cb) => {{
+            cb.checked = false;
+          }});
+        }};
         const updateSelectionUi = () => {{
+          applySelectionLimit();
           const activeCheckboxes = visibleCheckboxes();
           const selected = activeCheckboxes.filter((cb) => cb.checked).length;
+          const selectableCount = Math.min(activeCheckboxes.length, bulkLimit);
           if (selectedCount) {{
-            selectedCount.textContent = `${{selected}} selected`;
+            selectedCount.textContent = `${{selected}} selected · max ${{bulkLimit}}`;
           }}
           if (selectAll) {{
-            selectAll.checked = selected > 0 && selected === activeCheckboxes.length;
+            selectAll.checked = selectableCount > 0 && selected === selectableCount;
+            selectAll.indeterminate = selected > 0 && selected < selectableCount;
           }}
         }};
 
         if (selectAll) {{
           selectAll.addEventListener("change", () => {{
-            visibleCheckboxes().forEach((cb) => {{
-              cb.checked = selectAll.checked;
+            visibleCheckboxes().forEach((cb, index) => {{
+              cb.checked = selectAll.checked && index < bulkLimit;
             }});
             updateSelectionUi();
           }});
@@ -2627,8 +2641,8 @@ def ui_review_queue(
 
         if (selectPageButton) {{
           selectPageButton.addEventListener("click", () => {{
-            visibleCheckboxes().forEach((cb) => {{
-              cb.checked = true;
+            visibleCheckboxes().forEach((cb, index) => {{
+              cb.checked = index < bulkLimit;
             }});
             updateSelectionUi();
           }});
@@ -2656,6 +2670,11 @@ def ui_review_queue(
             if (!selectedIds.length) {{
               event.preventDefault();
               window.alert("Select at least one item for bulk actions.");
+              return;
+            }}
+            if (selectedIds.length > bulkLimit) {{
+              event.preventDefault();
+              window.alert(`Bulk actions are limited to ${{bulkLimit}} items per request.`);
               return;
             }}
             if (bulkIdsInput) {{
@@ -2700,6 +2719,20 @@ def ui_review_bulk_action(
             _add_flash(target, "Error: select at least one content item"),
             status_code=303,
         )
+    if len(content_ids) > _ADMIN_UI_BULK_ACTION_LIMIT:
+        target = _resolve_ui_url(
+            admin_key=admin_key,
+            fallback_path="/api/v1/admin/ui/review",
+            next_url=next_path,
+            referer=referer,
+        )
+        return RedirectResponse(
+            _add_flash(
+                target,
+                f"Error: bulk actions are limited to {_ADMIN_UI_BULK_ACTION_LIMIT} items per request",
+            ),
+            status_code=303,
+        )
 
     repo = EditorialRepository(db)
     service = EditorialService(db, repo=repo)
@@ -2711,13 +2744,19 @@ def ui_review_bulk_action(
     for content_id in content_ids:
         item = None
         if action == "approve":
-            item = service.approve_content(content_id, actor=ACTOR, note=clean_note)
+            item = service.approve_content(
+                content_id,
+                actor=ACTOR,
+                note=clean_note,
+                dispatch_events=False,
+            )
         elif action == "approve_publish":
             item = service.approve_and_publish(
                 content_id=content_id,
                 actor=ACTOR,
                 boost_level=bounded_boost,
                 note=clean_note,
+                dispatch_events=False,
             )
         elif action == "hold":
             item = repo.hold(content_id, actor=ACTOR, note=clean_note)
@@ -2731,6 +2770,8 @@ def ui_review_bulk_action(
 
     if applied > 0:
         invalidate_tiered_feed_cache()
+        if action in {"approve", "approve_publish"}:
+            service.dispatch_content_events_best_effort()
 
     action_label = {
         "approve": "approved",
