@@ -16,7 +16,8 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from redis.exceptions import RedisError
@@ -27,6 +28,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api import api_router
+from app.api.admin.ui import admin_ui_auth_redirect_response
 from app.core.auth import require_admin_key
 from app.core.config import settings
 from app.core.dependencies import get_redis
@@ -331,6 +333,18 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
 
 
 app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
+
+
+@app.exception_handler(HTTPException)
+async def custom_http_exception_handler(request: Request, exc: HTTPException):
+    """Redirect admin UI auth failures to the login page."""
+    admin_redirect = admin_ui_auth_redirect_response(
+        request,
+        status_code=exc.status_code,
+    )
+    if admin_redirect is not None:
+        return admin_redirect
+    return await http_exception_handler(request, exc)
 
 
 @app.middleware("http")

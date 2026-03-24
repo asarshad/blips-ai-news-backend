@@ -33,7 +33,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse
 
-from fastapi import APIRouter, Cookie, Depends, Form, Header, HTTPException, Query
+from fastapi import APIRouter, Cookie, Depends, Form, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -104,6 +104,35 @@ def _set_admin_ui_cookie(response: RedirectResponse) -> None:
         samesite="strict",
         path=_ADMIN_UI_PREFIX,
     )
+
+
+def admin_ui_auth_redirect_response(
+    request: Request,
+    *,
+    status_code: int,
+) -> RedirectResponse | None:
+    """Redirect unauthenticated admin UI traffic to the login page."""
+    path = request.url.path
+    login_path = f"{_ADMIN_UI_PREFIX}/login"
+
+    if status_code not in {401, 403}:
+        return None
+    if not path.startswith(_ADMIN_UI_PREFIX) or path == login_path:
+        return None
+
+    target = login_path
+    if request.method in {"GET", "HEAD"}:
+        next_url = path
+        if request.url.query:
+            next_url = f"{next_url}?{request.url.query}"
+        target = f"{login_path}?{urlencode({'next': next_url})}"
+
+    response = RedirectResponse(
+        target,
+        status_code=302 if request.method in {"GET", "HEAD"} else 303,
+    )
+    response.delete_cookie(_ADMIN_UI_COOKIE_NAME, path=_ADMIN_UI_PREFIX)
+    return response
 
 
 router = APIRouter(prefix="/admin/ui", tags=["admin-ui"])

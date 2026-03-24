@@ -1,7 +1,9 @@
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.testclient import TestClient
 
+from app.api.admin.ui import admin_ui_auth_redirect_response
 from app.api.admin.ui import router as admin_ui_router
 from app.core.auth import build_admin_ui_session_token, is_valid_admin_ui_session
 from app.core.config import settings
@@ -18,6 +20,16 @@ def client():
 
     app = FastAPI()
     app.include_router(admin_ui_router, prefix="/api/v1")
+
+    @app.exception_handler(HTTPException)
+    async def _http_exception_handler(request: Request, exc: HTTPException):
+        admin_redirect = admin_ui_auth_redirect_response(
+            request,
+            status_code=exc.status_code,
+        )
+        if admin_redirect is not None:
+            return admin_redirect
+        return await http_exception_handler(request, exc)
 
     try:
         with TestClient(app) as test_client:
@@ -81,7 +93,37 @@ def test_admin_ui_submit_page_uses_cookie_without_leaking_admin_key(client):
     assert response.headers["x-content-type-options"] == "nosniff"
 
 
+def test_admin_ui_missing_auth_redirects_to_login_for_deep_links(client):
+    response = client.get("/api/v1/admin/ui/submit", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == (
+        "/api/v1/admin/ui/login?next=%2Fapi%2Fv1%2Fadmin%2Fui%2Fsubmit"
+    )
+
+
 def test_admin_ui_query_param_no_longer_authenticates(client):
     response = client.get("/api/v1/admin/ui/submit?key=test-admin-key", follow_redirects=False)
 
-    assert response.status_code == 401
+    assert response.status_code == 302
+    assert response.headers["location"] == (
+        "/api/v1/admin/ui/login?next=%2Fapi%2Fv1%2Fadmin%2Fui%2Fsubmit%3Fkey%3Dtest-admin-key"
+    )
+
+
+def test_admin_ui_post_auth_failures_redirect_to_login_without_replaying_post():
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/admin/ui/action/42/approve",
+            "headers": [],
+            "query_string": b"",
+        },
+    )
+
+    response = admin_ui_auth_redirect_response(request, status_code=401)
+
+    assert response is not None
+    assert response.status_code == 303
+    assert response.headers["location"] == "/api/v1/admin/ui/login"
