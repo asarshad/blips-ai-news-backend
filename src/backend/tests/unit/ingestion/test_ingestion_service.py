@@ -156,3 +156,14 @@ def test_ingest_rss_entry_refreshes_duplicate_from_rss_image_when_metadata_missi
     assert result is None
     assert existing.image_url == "https://cdn.example.com/rss-hero.jpg"
     pipeline.db.commit.assert_called_once()
+
+
+def test_ingest_rss_entry_skips_blocked_direct_domain():
+    pipeline = _make_pipeline()
+    entry = _make_entry(url="https://github.com/owner/repo")
+
+    result = pipeline.ingest_rss_entry(entry)
+
+    assert result is None
+    pipeline.db.add.assert_not_called()
+    pipeline.db.commit.assert_not_called()

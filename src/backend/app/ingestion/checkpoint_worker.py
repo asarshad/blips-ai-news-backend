@@ -70,7 +70,7 @@ def _build_rss_article_value(
     day_utc: date,
     review_queue_status,
     article_hydrator: ArticleHydrationService,
-) -> dict:
+) -> Optional[dict]:
     """Build a content_items insert payload for an RSS article."""
     prepared = article_hydrator.prepare_rss_article(
         source_url=source_url,
@@ -80,6 +80,8 @@ def _build_rss_article_value(
         published_at=entry.published_date,
         include_text=False,
     )
+    if prepared is None:
+        return None
     stub = article_hydrator.build_article_stub(
         source_url=source_url,
         title=prepared.title,
@@ -306,6 +308,9 @@ def process_progress_row_batch(
                 source_url = normalize_url(e.url) if e.url else e.url
                 if not source_url:
                     return
+                if not article_hydrator.is_direct_article_url_allowed(source_url):
+                    logger.info("Skipping unsupported direct article URL: %s", source_url)
+                    return
 
                 candidate_entries.append((e, source_url))
 
@@ -340,14 +345,18 @@ def process_progress_row_batch(
                     if not chunk:
                         break
                     chunk_values = [
-                        _build_rss_article_value(
-                            entry,
-                            source_url=source_url,
-                            day_utc=day_utc,
-                            review_queue_status=review_queue_status,
-                            article_hydrator=article_hydrator,
+                        value
+                        for value in (
+                            _build_rss_article_value(
+                                entry,
+                                source_url=source_url,
+                                day_utc=day_utc,
+                                review_queue_status=review_queue_status,
+                                article_hydrator=article_hydrator,
+                            )
+                            for entry, source_url in chunk
                         )
-                        for entry, source_url in chunk
+                        if value is not None
                     ]
                     if not chunk_values:
                         idx += len(chunk)

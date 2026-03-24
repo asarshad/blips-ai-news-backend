@@ -146,6 +146,18 @@ def test_youtube_entry_is_not_reel_for_short_watch_url_without_shorts_signal():
     assert checkpoint_worker._youtube_entry_is_reel(entry) is False
 
 
+def test_build_rss_article_value_returns_none_for_blocked_direct_domain():
+    value = checkpoint_worker._build_rss_article_value(
+        _Entry("https://github.com/owner/repo"),
+        source_url="https://github.com/owner/repo",
+        day_utc=datetime.utcnow().date(),
+        review_queue_status="PROMOTED",
+        article_hydrator=checkpoint_worker.ArticleHydrationService(),
+    )
+
+    assert value is None
+
+
 def test_worker_skips_when_retry_at_in_future(monkeypatch):
     # Inject dummy integration modules to avoid importing feedparser under Python 3.14.
     pkg = ModuleType("app.integrations")

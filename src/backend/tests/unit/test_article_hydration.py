@@ -73,6 +73,21 @@ def test_prepare_rss_article_prefers_page_metadata_image_over_rss_image(monkeypa
     assert prepared.image_url == "https://cdn.example.com/page-hero.jpg"
 
 
+def test_prepare_rss_article_returns_none_for_blocked_direct_domain():
+    hydrator = ArticleHydrationService()
+
+    prepared = hydrator.prepare_rss_article(
+        source_url="https://github.com/owner/repo",
+        title="Repo title",
+        description="RSS body",
+        image_url="https://github.com/owner/repo/raw/main/social.png",
+        published_at=None,
+        include_text=False,
+    )
+
+    assert prepared is None
+
+
 def test_refresh_existing_article_metadata_prefers_page_metadata_over_rss_image(monkeypatch):
     hydrator = ArticleHydrationService()
     item = hydrator.build_article_stub(

@@ -233,6 +233,9 @@ class IngestionPipeline:
                 published_at=entry.published_date,
                 include_text=include_text,
             )
+            if prepared is None:
+                logger.info("Skipping unsupported direct article URL: %s", article_url)
+                return None
         except Exception as exc:
             logger.warning(f"Extraction failed for {entry.title}, using RSS data: {exc}")
             prepared = self.article_hydrator.prepare_rss_article(
@@ -243,6 +246,9 @@ class IngestionPipeline:
                 published_at=entry.published_date,
                 include_text=False,
             )
+            if prepared is None:
+                logger.info("Skipping unsupported direct article URL: %s", article_url)
+                return None
 
         extraction = prepared.extraction
         if extraction is not None:

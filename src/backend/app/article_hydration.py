@@ -13,6 +13,7 @@ from typing import Any, Optional
 from urllib.parse import unquote, urlparse
 
 from app.article_image_selection import ArticleImageCandidate, select_best_article_image
+from app.config.source_tiering import DomainTier, get_domain_tier
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.ingestion.canonical import canonical_key_for_article
@@ -257,9 +258,11 @@ class ArticleHydrationService:
         image_url: Optional[str],
         published_at: Optional[datetime],
         include_text: bool,
-    ) -> PreparedArticle:
+    ) -> Optional[PreparedArticle]:
         """Prepare shared article fields from an RSS entry for any ingest path."""
         normalized_source_url = (source_url or "").strip()
+        if not self.is_direct_article_url_allowed(normalized_source_url):
+            return None
         normalized_description = (description or "").strip()
         prepared = PreparedArticle(
             source_url=normalized_source_url,
@@ -497,7 +500,7 @@ class ArticleHydrationService:
         from app.extraction.pipeline import RSSEntryData, run_extraction
 
         article_url = (source_url or "").strip()
-        if not article_url:
+        if not article_url or not self.is_direct_article_url_allowed(article_url):
             return None
 
         return run_extraction(
@@ -534,7 +537,7 @@ class ArticleHydrationService:
             return False
 
         metadata = None
-        if source_url:
+        if source_url and self.is_direct_article_url_allowed(source_url):
             metadata = self.fetch_article_page_metadata(source_url)
             if metadata is not None and needs_canonical and metadata.canonical_url:
                 item.canonical_url = metadata.canonical_url
@@ -579,7 +582,9 @@ class ArticleHydrationService:
     @staticmethod
     def fetch_article_page_metadata(article_url: str):
         """Fetch and extract best-effort page metadata for an article URL."""
-        if not article_url:
+        if not article_url or not ArticleHydrationService.is_direct_article_url_allowed(
+            article_url
+        ):
             return None
 
         try:
@@ -600,6 +605,12 @@ class ArticleHydrationService:
         return select_best_article_image(
             [ArticleImageCandidate(url=candidate_image_url, source="direct")]
         )
+
+    @staticmethod
+    def is_direct_article_url_allowed(article_url: Optional[str]) -> bool:
+        """Return True when a URL is not on the hard-blocked non-editorial list."""
+        normalized = (article_url or "").strip()
+        return bool(normalized and get_domain_tier(normalized) != DomainTier.BLOCKED)
 
     def summarize_article(self, item: ContentItem, article_text: str):
         """Return a best-effort summary result, or None when the LLM is unavailable."""
