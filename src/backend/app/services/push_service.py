@@ -26,6 +26,8 @@ from app.video_surface_rules import effective_content_type
 
 logger = get_logger(__name__)
 
+_DEFAULT_NOTIFICATION_TITLE = "Blips News"
+
 
 class PushNotificationError(RuntimeError):
     """Raised when a push operation cannot proceed."""
@@ -364,7 +366,7 @@ class PushNotificationService:
         actor: str,
         auto_dedup_key: str | None,
     ) -> PushSendResponse:
-        title = item.title
+        title = self._notification_title_for_item(item)
         body = self._notification_body_for_item(item)
         tokens = self._active_tokens()
         log = PushSendLog(
@@ -506,5 +508,9 @@ class PushNotificationService:
             "type": effective_content_type_value(item),
         }
 
+    def _notification_title_for_item(self, item: ContentItem) -> str:
+        return _DEFAULT_NOTIFICATION_TITLE
+
     def _notification_body_for_item(self, item: ContentItem) -> str:
-        return ""
+        title = getattr(item, "title", "")
+        return title.strip() if isinstance(title, str) else ""

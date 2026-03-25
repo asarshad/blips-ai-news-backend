@@ -171,7 +171,7 @@ def test_evaluate_push_eligibility_rejects_thin_promoted_article():
     assert decision.reason == "awaiting_ai_processing"
 
 
-def test_notification_body_is_empty_for_title_only_push():
+def test_notification_uses_app_name_for_title():
     service = PushNotificationService(
         db=MagicMock(),
         config_service=_FakeConfigService(
@@ -192,4 +192,28 @@ def test_notification_body_is_empty_for_title_only_push():
         promotion_reason=None,
     )
 
-    assert service._notification_body_for_item(ready_article) == ""
+    assert service._notification_title_for_item(ready_article) == "Blips News"
+
+
+def test_notification_body_uses_item_title():
+    service = PushNotificationService(
+        db=MagicMock(),
+        config_service=_FakeConfigService(
+            PushRuntimeConfig(enabled=True, mode=PushMode.manual, config_ttl_seconds=300),
+        ),
+        messaging_client=_FakeMessagingClient(is_available=True),
+    )
+    ready_article = SimpleNamespace(
+        id=88,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        type=ContentType.ARTICLE,
+        title="Title only",
+        source_url="https://example.com/title-only",
+        canonical_url="https://example.com/title-only",
+        ai_processed=True,
+        summary="Ready summary",
+        promotion_reason=None,
+    )
+
+    assert service._notification_body_for_item(ready_article) == "Title only"
