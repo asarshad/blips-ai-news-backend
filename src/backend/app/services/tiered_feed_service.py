@@ -528,6 +528,9 @@ def tiered_item_to_dict(
         "image_url": item.image_url or None,  # coerce empty string to null
         "source": item.source or "Unknown",
         "created_at": item.created_at.isoformat() if item.created_at else None,
+        "updated_at": getattr(item, "updated_at", None).isoformat()
+        if getattr(item, "updated_at", None)
+        else None,
         # New: explicit published_at (not just date)
         "published_at": item.published_at.isoformat() if item.published_at else None,
         # Backward compatible: published_date as date string
