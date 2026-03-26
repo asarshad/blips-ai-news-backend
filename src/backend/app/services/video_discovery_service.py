@@ -326,6 +326,12 @@ class VideoDiscoveryService:
     ) -> bool:
         if not story_packs:
             return False
+        if surface == "reels":
+            # Reels discovery is currently more supply-constrained than videos in
+            # production. Prefer story/entity-led searches whenever we have them,
+            # and let static packs serve as the fallback path when story context
+            # is unavailable.
+            return True
         if self.state_store.is_available():
             key = f"youtube:story_window_counter:{surface}"
             payload = self.state_store.get_text(key)

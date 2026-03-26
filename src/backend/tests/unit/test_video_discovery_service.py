@@ -230,6 +230,37 @@ def test_build_search_plan_prefers_story_every_third_window(monkeypatch):
     assert labels == ["static-pack", "static-pack", "story-openai"]
 
 
+def test_build_search_plan_prefers_story_for_reels_when_available(monkeypatch):
+    monkeypatch.setattr(discovery_module, "bootstrap_video_source_profiles", lambda _db: None)
+    monkeypatch.setattr(
+        discovery_module,
+        "get_query_packs",
+        lambda surface: [
+            DiscoveryQueryPack("static-pack", "OpenAI update", "ai", surface, 25, "date", 1)
+        ],
+    )
+    client = _DummyYouTubeClient(begin_window=True)
+    state_store = _InMemoryStateStore()
+    service = _service(client, state_store=state_store)
+    monkeypatch.setattr(
+        service,
+        "_build_story_query_packs",
+        lambda surface: [
+            DiscoveryQueryPack(
+                "story-openai", "OpenAI launch update", "ai", surface, 25, "relevance"
+            )
+        ],
+    )
+
+    labels = []
+    for _ in range(3):
+        step = service._build_search_plan("reels", 10)[0]
+        labels.append(step.pack.label)
+        service._record_search_execution("reels", step)
+
+    assert labels == ["story-openai", "story-openai", "story-openai"]
+
+
 def test_build_search_plan_weighted_rotation_prefers_high_priority_without_repeating(monkeypatch):
     monkeypatch.setattr(discovery_module, "bootstrap_video_source_profiles", lambda _db: None)
     monkeypatch.setattr(

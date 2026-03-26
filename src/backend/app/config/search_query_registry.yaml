@@ -142,6 +142,39 @@ queries:
     reel_query: developer tips shorts
     order: relevance
     enabled: true
+  - id: reels-apps
+    category: Consumer Tech
+    concept: App and platform feature shorts
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: medium
+    priority: 2
+    video_query:
+    reel_query: iOS Android app feature shorts
+    order: relevance
+    enabled: true
+  - id: reels-hardware-unbox
+    category: Consumer Tech
+    concept: Hardware unboxing and quick-look shorts
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: high
+    priority: 2
+    video_query:
+    reel_query: phone laptop gadget unboxing shorts
+    order: viewCount
+    enabled: true
+  - id: reels-coding-tips
+    category: Software Development & Dev Tools
+    concept: Coding workflow shorts
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: medium
+    priority: 2
+    video_query:
+    reel_query: coding tips developer workflow shorts
+    order: relevance
+    enabled: true
   - id: robotics-shorts
     category: Robotics & Automation
     concept: Robotics short-form demos

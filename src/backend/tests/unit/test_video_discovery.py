@@ -50,6 +50,9 @@ def test_query_packs_expose_registry_ids_as_labels():
     assert "ai-models" in video_labels
     assert "launch-highlights" in video_labels
     assert "ai-shorts" in reel_labels
+    assert "reels-apps" in reel_labels
+    assert "reels-hardware-unbox" in reel_labels
+    assert "reels-coding-tips" in reel_labels
     assert "keynote-shorts" in reel_labels
 
 
