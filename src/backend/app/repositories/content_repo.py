@@ -169,6 +169,40 @@ class ContentItemRepository(BaseRepository[ContentItem]):
 
         return short_items
 
+    def get_videos_with_short_summaries(
+        self,
+        *,
+        limit: int = 100,
+        hours_back: int = 168,
+        min_words: int,
+    ) -> List[ContentItem]:
+        """Return promoted video items whose stored summary is shorter than the target."""
+        cutoff = datetime.utcnow() - timedelta(hours=hours_back)
+        candidates = (
+            self.db.query(ContentItem)
+            .filter(
+                ContentItem.type == ContentType.VIDEO,
+                ContentItem.ai_processed.is_(True),
+                ContentItem.summary.isnot(None),
+                ContentItem.published_at >= cutoff,
+                ContentItem.is_suppressed.is_(False),
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+            )
+            .order_by(desc(ContentItem.published_at))
+            .limit(max(limit * 5, limit))
+            .all()
+        )
+
+        short_items: List[ContentItem] = []
+        for item in candidates:
+            summary = (item.summary or "").strip()
+            if summary and len(summary.split()) < min_words:
+                short_items.append(item)
+                if len(short_items) >= limit:
+                    break
+
+        return short_items
+
     def get_articles_with_long_summaries(
         self,
         *,
