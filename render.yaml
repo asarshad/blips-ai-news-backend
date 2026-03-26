@@ -1,7 +1,7 @@
 # Render Blueprint Configuration
 # https://render.com/docs/blueprint-spec
 #
-# Two environments: development (single service) and production (API + Worker).
+# Production environment: API (web) + Worker (background jobs) + Redis.
 # After first deploy, set secrets (sync: false) in the Render dashboard for
 # each service:
 #   ADMIN_API_KEY, OPENAI_API_KEY, MISTRAL_API_KEY, YOUTUBE_API_KEY, LLM_PROVIDER
@@ -16,102 +16,6 @@
 projects:
   - name: blips
     environments:
-
-      # ═══════════════════════════════════════════════════════════════════════
-      # DEVELOPMENT — single web service (API + scheduler in one process)
-      # ═══════════════════════════════════════════════════════════════════════
-      - name: development
-        databases:
-          - name: blips-dev-db
-            plan: free
-            databaseName: blips
-            user: blips
-            region: oregon
-
-        services:
-          # ── Dev API (also runs scheduler) ─────────────────────────────────
-          - type: web
-            name: blips-dev-api
-            runtime: python
-            plan: free
-            autoDeployTrigger: commit
-            region: oregon
-            rootDir: src/backend
-            buildCommand: pip install -r requirements.lock
-            preDeployCommand: alembic upgrade head
-            startCommand: >-
-              gunicorn app.main:app
-              --workers 1
-              --worker-class uvicorn.workers.UvicornWorker
-              --bind 0.0.0.0:$PORT
-              --timeout 120
-              --graceful-timeout 30
-              --access-logfile -
-            healthCheckPath: /health
-            envVars:
-              - key: PYTHON_VERSION
-                value: "3.11.4"
-              - key: DATABASE_URL
-                fromDatabase:
-                  name: blips-dev-db
-                  property: connectionString
-              - key: REDIS_URL
-                fromService:
-                  name: blips-dev-redis
-                  type: redis
-                  property: connectionString
-              - key: ADMIN_API_KEY
-                sync: false
-              - key: OPENAI_API_KEY
-                sync: false
-              - key: MISTRAL_API_KEY
-                sync: false
-              - key: YOUTUBE_API_KEY
-                sync: false
-              - key: LLM_PROVIDER
-                sync: false
-              - key: FIREBASE_SERVICE_ACCOUNT_JSON
-                sync: false
-              - key: ENV
-                value: "dev"
-              - key: LOG_LEVEL
-                value: "INFO"
-              - key: SCHEDULER_ENABLED
-                value: "true"           # Dev: single service runs scheduler
-              - key: DOCS_ENABLED
-                value: "true"           # Dev: Swagger UI enabled
-              - key: INGESTION_ENABLED
-                value: "true"
-              - key: FEATURE_INGESTION_ENABLED
-                value: "true"
-              - key: INGESTION_MAX_WORKERS
-                value: "1"
-              - key: NEWS_FETCH_INTERVAL_MINUTES
-                value: "30"
-              - key: MAX_ITEMS_PER_RUN
-                value: "50"
-              - key: DB_POOL_SIZE
-                value: "2"
-              - key: DB_MAX_OVERFLOW
-                value: "3"
-              - key: REDIS_MAX_CONNECTIONS
-                value: "10"
-              - key: LLM_DAILY_COST_CEILING
-                value: "2.0"
-              - key: PUSH_RUNTIME_ENABLED
-                value: "true"
-              - key: PUSH_MODE
-                value: "manual"
-              - key: PUSH_CONFIG_TTL_SECONDS
-                value: "300"
-
-          # ── Dev Redis ─────────────────────────────────────────────────────
-          - type: redis
-            name: blips-dev-redis
-            plan: free
-            region: oregon
-            maxmemoryPolicy: volatile-lru
-            ipAllowList: []
 
       # ═══════════════════════════════════════════════════════════════════════
       # PRODUCTION — dedicated API + Worker (scheduler separated)
