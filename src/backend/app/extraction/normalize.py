@@ -2,6 +2,7 @@
 
 Functions:
 - validate_image_url:  reject invalid/relative/data/blob URLs → valid absolute or None
+- _unwrap_nextjs_image_url: unwrap /_next/image proxy to inner asset URL
 - is_suspicious_image_url: flag low-trust image-like URLs for repair/verification
 - make_absolute_url:   resolve relative URL against a base
 - clean_text:          strip boilerplate, normalize whitespace
@@ -65,6 +66,25 @@ _SUSPICIOUS_IMAGE_QUERY_KEYS = {
 }
 
 
+def _unwrap_nextjs_image_url(url: str) -> str:
+    """Unwrap a Next.js /_next/image proxy URL to the underlying asset URL.
+
+    Many Next.js sites (e.g. VentureBeat) set og:image to their image
+    optimisation proxy (/_next/image?url=<encoded_asset_url>&w=...&q=...).
+    Those proxy URLs are tied to the origin server and often blocked for
+    third-party hotlinking, whereas the inner asset URL (e.g. Contentful CDN)
+    is always publicly accessible.
+    """
+    parsed = urlparse(url)
+    if parsed.path != "/_next/image":
+        return url
+    params = parse_qs(parsed.query)
+    inner_urls = params.get("url", [])
+    if inner_urls and inner_urls[0].strip():
+        return inner_urls[0].strip()
+    return url
+
+
 def validate_image_url(url: Optional[str]) -> Optional[str]:
     """Return a valid absolute image URL or None.
 
@@ -79,6 +99,11 @@ def validate_image_url(url: Optional[str]) -> Optional[str]:
         return None
 
     url = url.strip()
+
+    # Unwrap Next.js image optimisation proxy URLs before any other checks so
+    # the stored URL is the direct asset (e.g. Contentful CDN) rather than a
+    # /_next/image?url=... proxy that many sites block for hotlinking.
+    url = _unwrap_nextjs_image_url(url)
 
     lowered = url.lower()
     for prefix in _INVALID_IMAGE_PREFIXES:

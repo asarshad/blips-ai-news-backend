@@ -92,6 +92,15 @@ class TestImageExtraction:
             "https://cdn.example.com/images/user_uploaded/photo.jpg"
         )
 
+    def test_nextjs_image_proxy_url_marked_generic(self):
+        # Stored /_next/image URLs are flagged so the repair backfill re-fetches
+        # them; validate_image_url will unwrap to the direct asset URL on re-fetch.
+        from urllib.parse import quote
+
+        inner = "https://images.ctfassets.net/abc/photo.png"
+        proxy = f"https://venturebeat.com/_next/image?url={quote(inner)}&w=3840&q=85"
+        assert is_probably_generic_image_url(proxy)
+
     def test_og_image_preferred(self):
         html = _html_with_head(
             '<meta property="og:image" content="https://cdn.example.com/og.jpg" />'

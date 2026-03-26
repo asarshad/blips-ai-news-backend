@@ -76,6 +76,11 @@ _GENERIC_URL_KEYWORDS = (
     # Also catches proxied CDN URLs (e.g. Yahoo image proxy) wrapping user-uploaded paths.
     "user-uploaded",
     "user_uploaded",
+    # Next.js image optimisation proxy URLs (/_next/image?url=...) are tied to
+    # the origin server and often blocked for third-party hotlinking.
+    # Flag them so the backfill re-fetches; validate_image_url will unwrap to
+    # the direct asset URL on the fresh fetch.
+    "/_next/image",
 )
 _EDITORIAL_URL_KEYWORDS = (
     "hero",

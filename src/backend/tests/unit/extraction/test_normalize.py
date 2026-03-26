@@ -59,6 +59,27 @@ class TestValidateImageUrl:
         url = "https://metrics.example.com/g/collect?tid=G-TEST&cid=123&en=page_view"
         assert validate_image_url(url) is None
 
+    def test_nextjs_image_proxy_url_unwrapped(self):
+        # VentureBeat (and other Next.js sites) put the /_next/image proxy URL
+        # in og:image. validate_image_url should unwrap it to the inner CDN URL.
+        inner = "https://images.ctfassets.net/abc/def/photo.png"
+        from urllib.parse import quote
+
+        proxy = f"https://venturebeat.com/_next/image?url={quote(inner)}&w=3840&q=85"
+        assert validate_image_url(proxy) == inner
+
+    def test_nextjs_image_proxy_inner_url_with_query_params(self):
+        # Inner URL may itself carry query params (w=, q= on the ctfassets URL).
+        from urllib.parse import quote
+
+        inner = "https://images.ctfassets.net/abc/img.png?w=1000&q=100"
+        proxy = f"https://example.com/_next/image?url={quote(inner)}&w=800&q=75"
+        assert validate_image_url(proxy) == inner
+
+    def test_non_nextjs_image_url_unchanged(self):
+        url = "https://cdn.example.com/image.jpg"
+        assert validate_image_url(url) == url
+
 
 class TestSuspiciousImageUrl:
     def test_tracker_host_flagged(self):
