@@ -28,7 +28,11 @@ from app.extraction.metrics import extraction_metrics
 from app.ingestion.extractors import extract_entities, extract_source, extract_topics
 from app.ingestion.language_filter import detect_language, is_english
 from app.ingestion.url_normalizer import normalize_url
-from app.integrations.llm_client import LLMClient
+from app.integrations.llm_client import (
+    LLMClient,
+    is_video_summary_acceptable,
+    normalize_video_summary_output,
+)
 from app.integrations.rss_client import FeedEntry, RSSClient
 from app.integrations.rss_feeds import (
     get_quality_modifier as get_rss_quality_modifier,
@@ -156,9 +160,9 @@ def build_video_content_item_from_entry(
                         summary = transcript[:5000]
 
                 video_result = llm_client.summarize_video(entry.title, summary)
-                ai_summary = video_result.summary
+                ai_summary = normalize_video_summary_output(video_result.summary)
                 inline_starters = video_result.conversation_starters
-                if ai_summary and len(ai_summary.strip()) > 50:
+                if is_video_summary_acceptable(ai_summary):
                     summary = ai_summary
                     ai_processed = True
         except Exception as exc:

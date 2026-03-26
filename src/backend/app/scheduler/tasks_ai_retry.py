@@ -40,7 +40,11 @@ def process_ai_summaries():
     db = SessionLocal()
     try:
         from app.article_hydration import ArticleHydrationService, bounded_article_summary_text
-        from app.integrations.llm_client import LLMClient
+        from app.integrations.llm_client import (
+            LLMClient,
+            is_video_summary_acceptable,
+            normalize_video_summary_output,
+        )
         from app.models.content import ContentType
         from app.repositories.content_repo import ContentItemRepository
 
@@ -95,13 +99,31 @@ def process_ai_summaries():
                 text = item.content_text or item.description or item.title
 
                 if item.type == ContentType.ARTICLE:
+                    needs_retry_refresh = any(
+                        (
+                            not (item.content_text or "").strip(),
+                            not (getattr(item, "image_url", None) or "").strip(),
+                            not (getattr(item, "canonical_url", None) or "").strip(),
+                        )
+                    )
+                    refreshed_article = (
+                        _refresh_article_retry_inputs(article_hydrator, item)
+                        if needs_retry_refresh
+                        else False
+                    )
+                    text = item.content_text or item.description or item.title
                     item.ai_processed = False
                     item.summary = None
 
                     summary_input = bounded_article_summary_text(text)
                     if not summary_input:
-                        stats.items_failed += 1
-                        stats.errors.append(f"Empty summary input: {item.title[:50]}")
+                        if refreshed_article:
+                            db.commit()
+                        stats.items_skipped += 1
+                        logger.info(
+                            "[ai_retry] Skipping article with no usable summary input: %s",
+                            item.title[:80],
+                        )
                         continue
 
                     article_hydrator.populate_article_summary(item)
@@ -111,13 +133,18 @@ def process_ai_summaries():
                     starters = item.conversation_starters
                 else:
                     result = llm_client.summarize_video(item.title, text)
-                    summary = result.summary
+                    summary = normalize_video_summary_output(result.summary)
                     topics = item.topics
                     starters = result.conversation_starters
 
                 stats.llm_calls += 1
 
-                if summary and len(summary.strip()) > 50:
+                summary_is_valid = (
+                    bool(summary and len(summary.strip()) > 50)
+                    if item.type == ContentType.ARTICLE
+                    else is_video_summary_acceptable(summary)
+                )
+                if summary_is_valid:
                     content_repo.mark_ai_processed(item.id, summary=summary, topics=topics)
                     if starters and not item.conversation_starters:
                         item.conversation_starters = starters
@@ -149,6 +176,55 @@ def process_ai_summaries():
 
 
 retry_ai_processing = process_ai_summaries
+
+
+def _refresh_article_retry_inputs(article_hydrator, item) -> bool:
+    """Refresh article extraction fields before retrying summarization."""
+    extraction = article_hydrator.run_article_extraction(item)
+    if extraction is None:
+        return False
+
+    changed = False
+
+    extracted_title = (getattr(extraction, "title", None) or "").strip()
+    if extracted_title and extracted_title != (item.title or "").strip():
+        item.title = extracted_title
+        changed = True
+
+    extracted_canonical = (getattr(extraction, "canonical_url", None) or "").strip()
+    if extracted_canonical and extracted_canonical != (item.canonical_url or "").strip():
+        item.canonical_url = extracted_canonical
+        changed = True
+
+    extracted_published_at = getattr(extraction, "published_at", None)
+    if extracted_published_at is not None and extracted_published_at != getattr(
+        item, "published_at", None
+    ):
+        item.published_at = extracted_published_at
+        changed = True
+
+    extracted_text = (
+        getattr(extraction, "main_text", None)
+        or getattr(extraction, "excerpt_fallback", None)
+        or ""
+    ).strip()
+    if extracted_text and extracted_text != (item.content_text or "").strip():
+        item.content_text = extracted_text[:8000]
+        changed = True
+
+    extracted_image = (getattr(extraction, "image_url", None) or "").strip()
+    if article_hydrator.should_replace_article_image(
+        getattr(item, "image_url", None),
+        extracted_image,
+        candidate_source="extraction",
+    ):
+        item.image_url = extracted_image
+        changed = True
+
+    if changed:
+        article_hydrator.refresh_article_identity(item)
+
+    return changed
 
 
 def _backfill_starters(db: Session, llm_client, stats) -> None:

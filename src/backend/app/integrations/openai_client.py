@@ -225,7 +225,9 @@ class OpenAIClient:
             
             Video Description: {truncated_desc}
             
-            Task: Write a concise summary of this video in at most 85 words based on the description. 
+            Task: Write a concise summary of this video in between {settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS} and {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words based on the description.
+            If the first draft would be shorter, add concrete factual detail from the description until it reaches at least {settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS} words.
+            Never exceed {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words.
             Focus on the main topic and key points. Remove any channel promotion, "link in bio", or "subscribe" text.
             
             Format your response as just the summary text.

@@ -199,3 +199,163 @@ def test_process_ai_summaries_retries_long_article_summaries(monkeypatch):
         summary=item.summary,
         topics=["openai", "hiring"],
     )
+
+
+def test_process_ai_summaries_skips_empty_article_input_without_error(monkeypatch):
+    db = MagicMock()
+    repo = MagicMock()
+    item = SimpleNamespace(
+        id=15,
+        type=ContentType.ARTICLE,
+        content_text=None,
+        description=None,
+        title="Health NZ staff told to stop using ChatGPT to write",
+        canonical_url=None,
+        published_at=None,
+        image_url=None,
+        topics=[],
+        conversation_starters=None,
+        summary=None,
+        ai_processed=False,
+    )
+    repo.get_unprocessed_by_ai.return_value = [item]
+    repo.get_articles_with_short_summaries.return_value = []
+    repo.get_articles_with_long_summaries.return_value = []
+
+    llm_client = MagicMock()
+    llm_client.is_configured.return_value = True
+
+    hydrator = MagicMock()
+    hydrator.run_article_extraction.return_value = None
+    hydrator.should_replace_article_image.return_value = False
+
+    stats = _FakeStats()
+
+    monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
+    monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
+    monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: stats)
+    monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
+    monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
+    monkeypatch.setattr(
+        "app.article_hydration.ArticleHydrationService",
+        lambda llm_client=None: hydrator,
+    )
+    monkeypatch.setattr(tasks_ai_retry.time, "sleep", lambda *_args, **_kwargs: None)
+
+    tasks_ai_retry.process_ai_summaries()
+
+    assert stats.items_skipped == 1
+    assert stats.items_failed == 0
+    assert stats.errors == []
+    repo.mark_ai_processed.assert_not_called()
+    db.commit.assert_not_called()
+
+
+def test_process_ai_summaries_persists_extracted_article_fields_before_summary(monkeypatch):
+    db = MagicMock()
+    repo = MagicMock()
+    item = SimpleNamespace(
+        id=27,
+        type=ContentType.ARTICLE,
+        content_text=None,
+        description=None,
+        title="Pending article",
+        canonical_url=None,
+        published_at=None,
+        image_url=None,
+        topics=[],
+        conversation_starters=None,
+        summary=None,
+        ai_processed=False,
+    )
+    repo.get_unprocessed_by_ai.return_value = [item]
+    repo.get_articles_with_short_summaries.return_value = []
+    repo.get_articles_with_long_summaries.return_value = []
+
+    llm_client = MagicMock()
+    llm_client.is_configured.return_value = True
+
+    hydrator = MagicMock()
+    hydrator.run_article_extraction.return_value = SimpleNamespace(
+        title="Recovered title",
+        canonical_url="https://example.com/story",
+        published_at=None,
+        main_text=("Recovered article body with enough words for summarization. " * 20),
+        excerpt_fallback=None,
+        image_url="https://cdn.example.com/story-hero.jpg",
+    )
+    hydrator.should_replace_article_image.return_value = True
+
+    def _populate(target):
+        target.summary = (
+            "Recovered article summary with enough detail to exceed the minimum "
+            "length threshold and keep the retry worker happy."
+        )
+        target.topics = ["policy", "health"]
+        target.ai_processed = True
+        return True
+
+    hydrator.populate_article_summary.side_effect = _populate
+
+    monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
+    monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
+    monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: _FakeStats())
+    monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
+    monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
+    monkeypatch.setattr(
+        "app.article_hydration.ArticleHydrationService",
+        lambda llm_client=None: hydrator,
+    )
+    monkeypatch.setattr(tasks_ai_retry.time, "sleep", lambda *_args, **_kwargs: None)
+
+    tasks_ai_retry.process_ai_summaries()
+
+    assert item.title == "Recovered title"
+    assert item.canonical_url == "https://example.com/story"
+    assert item.image_url == "https://cdn.example.com/story-hero.jpg"
+    assert item.content_text.startswith("Recovered article body")
+    repo.mark_ai_processed.assert_called_once_with(
+        27,
+        summary=item.summary,
+        topics=["policy", "health"],
+    )
+
+
+def test_process_ai_summaries_rejects_short_video_summary(monkeypatch):
+    db = MagicMock()
+    repo = MagicMock()
+    item = SimpleNamespace(
+        id=55,
+        type=ContentType.VIDEO,
+        content_text="This description has enough detail to trigger video summarization.",
+        description=None,
+        title="Video with weak summary",
+        topics=["video"],
+        conversation_starters=None,
+        summary=None,
+        ai_processed=False,
+    )
+    repo.get_unprocessed_by_ai.return_value = [item]
+    repo.get_articles_with_short_summaries.return_value = []
+    repo.get_articles_with_long_summaries.return_value = []
+
+    llm_client = MagicMock()
+    llm_client.is_configured.return_value = True
+    llm_client.summarize_video.return_value = SimpleNamespace(
+        summary="Too short to keep.",
+        conversation_starters={"starters": ["What stood out in this video?"]},
+    )
+
+    monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
+    monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
+    monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: _FakeStats())
+    monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
+    monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
+    monkeypatch.setattr(tasks_ai_retry.time, "sleep", lambda *_args, **_kwargs: None)
+
+    tasks_ai_retry.process_ai_summaries()
+
+    repo.mark_ai_processed.assert_not_called()

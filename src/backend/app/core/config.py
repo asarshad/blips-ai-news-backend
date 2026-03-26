@@ -187,6 +187,8 @@ class Settings(BaseSettings):
     ARTICLE_SUMMARY_MAX_WORDS: int = 1200  # clip very long article text before summarizing
     ARTICLE_SUMMARY_MIN_OUTPUT_WORDS: int = 60  # target minimum words for generated summaries
     ARTICLE_SUMMARY_MAX_OUTPUT_WORDS: int = 70  # hard cap for generated summaries
+    VIDEO_SUMMARY_MIN_OUTPUT_WORDS: int = 50  # softer minimum for generated video summaries
+    VIDEO_SUMMARY_MAX_OUTPUT_WORDS: int = 70  # hard cap for generated video summaries
     SOURCE_HEALTH_DEGRADED_THRESHOLD: float = 0.3  # below this, mark source degraded
 
     # Minimum fresh counts per surface (triggers top-up if below)

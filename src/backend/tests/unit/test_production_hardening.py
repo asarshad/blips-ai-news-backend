@@ -306,10 +306,11 @@ class TestSummaryLengthPrompting:
         assert f"Never exceed {settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words" in prompt
         assert "exactly 85-90 words" not in prompt
 
-    def test_llm_client_video_summary_prompt_caps_at_85_words(self):
-        """Video summaries should request at most 85 words from the model."""
+    def test_llm_client_video_summary_prompt_targets_configured_word_range(self):
+        """Video summaries should request the configured min/max range."""
         from types import SimpleNamespace
 
+        from app.core.config import settings
         from app.integrations.llm_client import LLMClient
 
         client = LLMClient(provider="openai", api_key="sk-test-fake-key-12345678901234567890")
@@ -320,7 +321,11 @@ class TestSummaryLengthPrompting:
         client.summarize_video("Title", "Description")
 
         prompt = client.chat.call_args.kwargs["messages"][1].content
-        assert "at most 85 words" in prompt
+        assert (
+            f"between {settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS} and "
+            f"{settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words"
+        ) in prompt
+        assert f"Never exceed {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words" in prompt
         assert "exactly 85-90 words" not in prompt
 
     def test_legacy_openai_client_article_summary_prompt_targets_60_to_70_words(self):
@@ -343,10 +348,11 @@ class TestSummaryLengthPrompting:
         assert f"Never exceed {settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words" in prompt
         assert "exactly 85-90 words" not in prompt
 
-    def test_legacy_openai_client_video_summary_prompt_caps_at_85_words(self):
+    def test_legacy_openai_client_video_summary_prompt_targets_configured_word_range(self):
         """Legacy OpenAIClient should match the same video summary contract."""
         from types import SimpleNamespace
 
+        from app.core.config import settings
         from app.integrations.openai_client import OpenAIClient
 
         client = OpenAIClient(api_key="sk-test-fake-key-12345678901234567890")
@@ -355,7 +361,11 @@ class TestSummaryLengthPrompting:
         client.summarize_video("Title", "Description")
 
         prompt = client.chat.call_args.args[0][1].content
-        assert "at most 85 words" in prompt
+        assert (
+            f"between {settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS} and "
+            f"{settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words"
+        ) in prompt
+        assert f"Never exceed {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words" in prompt
         assert "exactly 85-90 words" not in prompt
 
 

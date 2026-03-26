@@ -41,6 +41,30 @@ _TOKEN_COST_PER_1K = {
 }
 
 
+def normalize_video_summary_output(summary_text: Optional[str]) -> Optional[str]:
+    """Normalize generated video summaries while enforcing configured bounds."""
+    cleaned = " ".join((summary_text or "").split()).strip()
+    if not cleaned:
+        return None
+
+    max_words = max(1, int(settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS))
+    words = cleaned.split()
+    if len(words) <= max_words:
+        return cleaned
+
+    return " ".join(words[:max_words]).rstrip(" ,;:-")
+
+
+def is_video_summary_acceptable(summary_text: Optional[str]) -> bool:
+    """Return True when a generated video summary meets the configured floor."""
+    normalized = normalize_video_summary_output(summary_text)
+    if not normalized:
+        return False
+
+    min_words = max(1, int(settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS))
+    return len(normalized.split()) >= min_words
+
+
 def _load_mistral_client_class():
     """Resolve the Mistral SDK client across supported package layouts."""
     try:
@@ -547,7 +571,9 @@ Video Description: {truncated_desc}
 
 Perform BOTH tasks below in a single response.
 
-Task 1: Write a concise summary of this video in at most 85 words based on the description.
+Task 1: Write a concise summary of this video in between {settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS} and {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words based on the description.
+If the first draft would be shorter, add concrete factual detail from the description until it reaches at least {settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS} words.
+Never exceed {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words.
 Focus on the main topic and key points. Remove any channel promotion, "link in bio", or "subscribe" text.
 
 Task 2: Generate exactly 3 conversation-starter questions about this specific video. Each question must:
@@ -600,7 +626,15 @@ STARTERS: question1 | question2 | question3
             else:
                 summary = text
 
-            return SummaryResult(summary=summary, tags=[], conversation_starters=starters)
+            normalized_summary = normalize_video_summary_output(summary)
+            if not normalized_summary:
+                raise ValueError("Empty summary returned from LLM")
+
+            return SummaryResult(
+                summary=normalized_summary,
+                tags=[],
+                conversation_starters=starters,
+            )
 
         except (RuntimeError, ValueError) as e:
             logger.error(f"Video summarization error: {str(e)}")
