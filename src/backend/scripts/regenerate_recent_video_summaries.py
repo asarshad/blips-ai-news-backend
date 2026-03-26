@@ -39,7 +39,9 @@ class RegenerationStats:
     failed: int = 0
 
 
-def regenerate_recent_video_summaries(*, hours_back: int = 72, limit: int = 250) -> RegenerationStats:
+def regenerate_recent_video_summaries(
+    *, hours_back: int = 72, limit: int = 250
+) -> RegenerationStats:
     """Re-run video summarization for recent promoted videos."""
     db = SessionLocal()
     stats = RegenerationStats()

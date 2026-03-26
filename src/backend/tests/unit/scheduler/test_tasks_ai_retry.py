@@ -42,6 +42,7 @@ def test_process_ai_summaries_uses_article_hydrator_for_articles(monkeypatch):
     llm_client.is_configured.return_value = True
 
     hydrator = MagicMock()
+    hydrator.run_article_extraction.return_value = None  # don't corrupt item during retry-refresh
 
     def _populate(target):
         target.summary = (
@@ -102,6 +103,7 @@ def test_process_ai_summaries_retries_short_article_summaries(monkeypatch):
     llm_client.is_configured.return_value = True
 
     hydrator = MagicMock()
+    hydrator.run_article_extraction.return_value = None  # don't corrupt item during retry-refresh
 
     def _populate(target):
         target.summary = (
@@ -161,6 +163,7 @@ def test_process_ai_summaries_retries_long_article_summaries(monkeypatch):
     llm_client.is_configured.return_value = True
 
     hydrator = MagicMock()
+    hydrator.run_article_extraction.return_value = None  # don't corrupt item during retry-refresh
 
     def _populate(target):
         target.summary = (

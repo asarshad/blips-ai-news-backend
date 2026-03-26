@@ -127,8 +127,7 @@ def trigger_topup_async(db_factory, priority_surfaces: list = None):
 
     if not _background_topup_enabled_for_process():
         logger.debug(
-            "Skipping async top-up because background scheduling is disabled "
-            "for this process"
+            "Skipping async top-up because background scheduling is disabled for this process"
         )
         return
 
