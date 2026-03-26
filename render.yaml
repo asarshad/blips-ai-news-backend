@@ -137,7 +137,7 @@ projects:
             startCommand: >-
               alembic upgrade head &&
               gunicorn app.main:app
-              --workers 2
+              --workers 1
               --worker-class uvicorn.workers.UvicornWorker
               --bind 0.0.0.0:$PORT
               --timeout 120
@@ -255,7 +255,9 @@ projects:
               - key: AUTO_APPROVE_REVIEW_CONTENT
                 sync: false
               - key: INGESTION_MAX_WORKERS
-                value: "4"
+                value: "2"
+              - key: INGESTION_BATCH_SIZE
+                value: "5"
               - key: NEWS_FETCH_INTERVAL_MINUTES
                 value: "30"
               - key: PUSH_RUNTIME_ENABLED
@@ -265,7 +267,7 @@ projects:
               - key: PUSH_CONFIG_TTL_SECONDS
                 value: "300"
               - key: MAX_ITEMS_PER_RUN
-                value: "100"
+                value: "50"
               - key: INGEST_UNTIL_TARGETS
                 value: "true"
               - key: INGEST_CATCHUP_MAX_SECONDS

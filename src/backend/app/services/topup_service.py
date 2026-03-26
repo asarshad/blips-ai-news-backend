@@ -9,6 +9,7 @@ Provides non-blocking ingestion kick mechanism:
 This service does NOT block API responses - it queues background work.
 """
 
+import os
 import threading
 from datetime import datetime
 from typing import Optional
@@ -35,6 +36,18 @@ logger = get_logger(__name__)
 _topup_lock = threading.Lock()
 _topup_in_progress = False
 _last_topup_trigger: Optional[datetime] = None
+
+
+def _background_topup_enabled_for_process() -> bool:
+    """Return whether this process should launch top-up background work.
+
+    Production runs a dedicated worker service with ``SCHEDULER_ENABLED=true``
+    and a web service with ``SCHEDULER_ENABLED=false``. Letting feed requests
+    in the web service trigger ingestion causes the API process to execute the
+    same memory-heavy work as the worker, which can push the web dyno over its
+    memory limit.
+    """
+    return os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
 
 
 def _get_redis_client():
@@ -111,6 +124,13 @@ def trigger_topup_async(db_factory, priority_surfaces: list = None):
         priority_surfaces: List of surfaces to prioritize
     """
     global _last_topup_trigger
+
+    if not _background_topup_enabled_for_process():
+        logger.debug(
+            "Skipping async top-up because background scheduling is disabled "
+            "for this process"
+        )
+        return
 
     # Check cooldown (don't trigger too frequently)
     now = datetime.utcnow()
@@ -224,6 +244,13 @@ def check_and_trigger_topup(db: Session, db_factory) -> bool:
     Returns:
         True if top-up was triggered, False otherwise
     """
+    if not _background_topup_enabled_for_process():
+        logger.debug(
+            "Skipping request-triggered top-up because background scheduling "
+            "is disabled for this process"
+        )
+        return False
+
     try:
         health = get_cached_inventory_health(db)
 
