@@ -5043,6 +5043,47 @@
         ]
       }
     },
+    "/api/v1/admin/trigger-content-touch": {
+      "post": {
+        "description": "Force-bump updated_at for recently repaired/fixed content, then bust feed cache.\n\nTouches:\n- Articles created in the last 30 days that have a non-empty image_url\n  (covers all image-repair beneficiaries).\n- Videos/Reels created in the last 30 days that are ai_processed and have\n  a non-empty summary (covers all video summary fix beneficiaries).\n\nThis causes the feed_version hash to change so mobile clients detect\nnew content on their next poll and pull down the corrected data.",
+        "operationId": "trigger_content_touch_api_v1_admin_trigger_content_touch_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger Content Touch",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/trigger-fetch": {
       "post": {
         "description": "Manually trigger content ingestion + AI summarization.",

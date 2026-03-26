@@ -370,6 +370,75 @@ def trigger_image_repair():
         db.close()
 
 
+@router.post("/trigger-content-touch")
+def trigger_content_touch():
+    """Force-bump updated_at for recently repaired/fixed content, then bust feed cache.
+
+    Touches:
+    - Articles created in the last 30 days that have a non-empty image_url
+      (covers all image-repair beneficiaries).
+    - Videos/Reels created in the last 30 days that are ai_processed and have
+      a non-empty summary (covers all video summary fix beneficiaries).
+
+    This causes the feed_version hash to change so mobile clients detect
+    new content on their next poll and pull down the corrected data.
+    """
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import update
+
+    from app.db.base import SessionLocal
+    from app.models.content import ContentItem, ContentType
+    from app.services.tiered_feed_service import invalidate_tiered_feed_cache
+
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        cutoff = now - timedelta(days=30)
+
+        article_result = db.execute(
+            update(ContentItem)
+            .where(
+                ContentItem.type == ContentType.ARTICLE,
+                ContentItem.created_at >= cutoff,
+                ContentItem.image_url.isnot(None),
+                ContentItem.image_url != "",
+            )
+            .values(updated_at=now)
+        )
+
+        video_result = db.execute(
+            update(ContentItem)
+            .where(
+                ContentItem.type.in_([ContentType.VIDEO, ContentType.REEL]),
+                ContentItem.created_at >= cutoff,
+                ContentItem.ai_processed.is_(True),
+                ContentItem.summary.isnot(None),
+                ContentItem.summary != "",
+            )
+            .values(updated_at=now)
+        )
+
+        db.commit()
+        articles_touched = article_result.rowcount
+        videos_touched = video_result.rowcount
+
+        invalidate_tiered_feed_cache()
+
+        return {
+            "status": "ok",
+            "articles_touched": articles_touched,
+            "videos_touched": videos_touched,
+            "cache_busted": True,
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error("trigger-content-touch failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    finally:
+        db.close()
+
+
 @router.post("/youtube/reset-search-cooldown")
 def reset_youtube_search_cooldown(surface: Optional[str] = None):
     """Clear Redis cooldown keys so operators can force a new discovery sweep."""
