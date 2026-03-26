@@ -59,24 +59,88 @@ class TestValidateImageUrl:
         url = "https://metrics.example.com/g/collect?tid=G-TEST&cid=123&en=page_view"
         assert validate_image_url(url) is None
 
-    def test_nextjs_image_proxy_url_unwrapped(self):
-        # VentureBeat (and other Next.js sites) put the /_next/image proxy URL
-        # in og:image. validate_image_url should unwrap it to the inner CDN URL.
-        inner = "https://images.ctfassets.net/abc/def/photo.png"
+    # ── Image proxy unwrapping ────────────────────────────────────────────────
+
+    def test_nextjs_proxy_absolute_inner_url_unwrapped(self):
+        # VentureBeat, Hashicorp etc. — inner URL is an absolute CDN URL
         from urllib.parse import quote
 
+        inner = "https://images.ctfassets.net/abc/def/photo.png"
         proxy = f"https://venturebeat.com/_next/image?url={quote(inner)}&w=3840&q=85"
         assert validate_image_url(proxy) == inner
 
-    def test_nextjs_image_proxy_inner_url_with_query_params(self):
-        # Inner URL may itself carry query params (w=, q= on the ctfassets URL).
+    def test_nextjs_proxy_absolute_inner_url_with_query_params(self):
+        # Inner URL may itself carry query params (w=, q= on ctfassets URL).
         from urllib.parse import quote
 
         inner = "https://images.ctfassets.net/abc/img.png?w=1000&q=100"
         proxy = f"https://example.com/_next/image?url={quote(inner)}&w=800&q=75"
         assert validate_image_url(proxy) == inner
 
-    def test_non_nextjs_image_url_unchanged(self):
+    def test_nextjs_proxy_relative_inner_url_resolved_against_origin(self):
+        # inngest.com, rahuljuliato.com — inner URL is a root-relative path
+        from urllib.parse import quote
+
+        proxy = (
+            f"https://www.inngest.com/_next/image?url={quote('/assets/blog/cover.png')}&w=1920&q=95"
+        )
+        assert validate_image_url(proxy) == "https://www.inngest.com/assets/blog/cover.png"
+
+    def test_netlify_images_proxy_absolute_url_unwrapped(self):
+        # Netlify Image CDN with an absolute inner URL
+        from urllib.parse import quote
+
+        inner = "https://example.com/uploads/hero.jpg"
+        proxy = f"https://mysite.netlify.app/.netlify/images?url={quote(inner)}&w=1200&h=630"
+        assert validate_image_url(proxy) == inner
+
+    def test_netlify_images_proxy_relative_url_resolved(self):
+        # Netlify Image CDN with an Astro-style relative path (no leading slash)
+        from urllib.parse import quote
+
+        proxy = f"https://samhenri.gold/.netlify/images?url={quote('_astro/post.DZE5cK1G.jpg')}&w=1200&h=630"
+        assert validate_image_url(proxy) == "https://samhenri.gold/_astro/post.DZE5cK1G.jpg"
+
+    def test_gatsby_image_proxy_absolute_url_unwrapped(self):
+        # Gatsby Static Image CDN with u= param pointing to absolute URL
+        from urllib.parse import quote
+
+        inner = "https://worksinprogress.co/wip-image/uploads/2026/03/photo.jpg"
+        proxy = (
+            f"https://worksinprogress.co/_gatsby/image/abc123/def456/photo.png"
+            f"?u={quote(inner)}&a=w%3D750%26h%3D500"
+        )
+        assert validate_image_url(proxy) == inner
+
+    def test_dims_proxy_absolute_url_unwrapped(self):
+        # AP News DIMS proxy — dims4 path with url= query param
+        from urllib.parse import quote
+
+        inner = "https://assets.apnews.com/01/cc/photo.jpeg"
+        proxy = (
+            f"https://dims.apnews.com/dims4/default/abc/2147483647"
+            f"/strip/true/resize/979x653!/format/webp/quality/90/?url={quote(inner)}"
+        )
+        assert validate_image_url(proxy) == inner
+
+    def test_cloudflare_cdn_cgi_local_path_resolved(self):
+        # Cloudflare Image Resizing with a same-origin asset path
+        proxy = (
+            "https://media.beehiiv.com/cdn-cgi/image/fit=scale-down,quality=80,format=auto"
+            "/uploads/user/profile_picture/abc123/hero.jpeg"
+        )
+        assert (
+            validate_image_url(proxy)
+            == "https://media.beehiiv.com/uploads/user/profile_picture/abc123/hero.jpeg"
+        )
+
+    def test_cloudflare_cdn_cgi_absolute_url_passed_through(self):
+        # Cloudflare Image Resizing with an absolute remote URL in path
+        remote = "https://other-cdn.example.com/images/hero.jpg"
+        proxy = f"https://site.example.com/cdn-cgi/image/quality=80/{remote}"
+        assert validate_image_url(proxy) == remote
+
+    def test_non_proxy_url_unchanged(self):
         url = "https://cdn.example.com/image.jpg"
         assert validate_image_url(url) == url
 

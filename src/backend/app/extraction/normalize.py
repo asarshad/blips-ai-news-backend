@@ -2,7 +2,7 @@
 
 Functions:
 - validate_image_url:  reject invalid/relative/data/blob URLs → valid absolute or None
-- _unwrap_nextjs_image_url: unwrap /_next/image proxy to inner asset URL
+- _unwrap_image_proxy_url: unwrap origin-specific CDN proxy URLs to direct asset URLs
 - is_suspicious_image_url: flag low-trust image-like URLs for repair/verification
 - make_absolute_url:   resolve relative URL against a base
 - clean_text:          strip boilerplate, normalize whitespace
@@ -66,22 +66,72 @@ _SUSPICIOUS_IMAGE_QUERY_KEYS = {
 }
 
 
-def _unwrap_nextjs_image_url(url: str) -> str:
-    """Unwrap a Next.js /_next/image proxy URL to the underlying asset URL.
+def _unwrap_image_proxy_url(url: str) -> str:
+    """Unwrap known origin-specific image proxy/transform URLs to the direct asset URL.
 
-    Many Next.js sites (e.g. VentureBeat) set og:image to their image
-    optimisation proxy (/_next/image?url=<encoded_asset_url>&w=...&q=...).
-    Those proxy URLs are tied to the origin server and often blocked for
-    third-party hotlinking, whereas the inner asset URL (e.g. Contentful CDN)
-    is always publicly accessible.
+    Several frameworks and CDN providers serve og:image through an on-origin
+    transform proxy whose endpoint enforces same-origin checks, blocking mobile
+    clients (Flutter) from hotlinking even though social-share crawlers
+    (WhatsApp, Slack) typically get through.
+
+    Patterns handled:
+    - Next.js   /_next/image?url=…        absolute or site-relative inner URL
+    - Netlify   /.netlify/images?url=…    absolute or site-relative inner URL
+    - Gatsby    /_gatsby/image/…?u=…      absolute inner URL only
+    - DIMS      dims.*/dims4/…?url=…      AP News, Hearst — absolute inner URL
+    - Cloudflare /cdn-cgi/image/{p}/{asset}  same-origin or absolute asset path
     """
     parsed = urlparse(url)
-    if parsed.path != "/_next/image":
-        return url
+    path = parsed.path
+    host = (parsed.hostname or "").lower()
+    origin = f"{parsed.scheme}://{parsed.netloc}"
     params = parse_qs(parsed.query)
-    inner_urls = params.get("url", [])
-    if inner_urls and inner_urls[0].strip():
-        return inner_urls[0].strip()
+
+    def _resolve(inner: str) -> str:
+        """Make *inner* an absolute URL, resolving relative paths against origin."""
+        inner = inner.strip()
+        if inner.startswith("http://") or inner.startswith("https://"):
+            return inner
+        if inner.startswith("//"):
+            return f"https:{inner}"
+        # Root-relative or bare-path — resolve against the proxy origin
+        return f"{origin}/{inner.lstrip('/')}"
+
+    # ── Next.js image optimisation proxy ─────────────────────────────────────
+    if path == "/_next/image":
+        inner_vals = params.get("url", [])
+        if inner_vals and inner_vals[0].strip():
+            return _resolve(inner_vals[0])
+
+    # ── Netlify Image CDN ─────────────────────────────────────────────────────
+    if path == "/.netlify/images":
+        inner_vals = params.get("url", [])
+        if inner_vals and inner_vals[0].strip():
+            return _resolve(inner_vals[0])
+
+    # ── Gatsby Static Image CDN ───────────────────────────────────────────────
+    if path.startswith("/_gatsby/image/"):
+        inner_vals = params.get("u", [])
+        if inner_vals and inner_vals[0].strip():
+            inner = inner_vals[0].strip()
+            if inner.startswith("http://") or inner.startswith("https://"):
+                return inner
+
+    # ── DIMS image proxy (AP News, Hearst, etc.) ─────────────────────────────
+    # dims.example.com/dims4/default/{hash}/…?url=https://assets.example.com/…
+    if (host.startswith("dims.") or "/dims4/" in path) and "url" in params:
+        inner_vals = params.get("url", [])
+        if inner_vals and inner_vals[0].strip():
+            inner = inner_vals[0].strip()
+            if inner.startswith("http://") or inner.startswith("https://"):
+                return inner
+
+    # ── Cloudflare Image Resizing ─────────────────────────────────────────────
+    # /cdn-cgi/image/{transform-params}/{asset-path-or-absolute-url}
+    cf_match = re.match(r"^/cdn-cgi/image/[^/]+/(.+)$", path)
+    if cf_match:
+        return _resolve(cf_match.group(1))
+
     return url
 
 
@@ -100,10 +150,10 @@ def validate_image_url(url: Optional[str]) -> Optional[str]:
 
     url = url.strip()
 
-    # Unwrap Next.js image optimisation proxy URLs before any other checks so
-    # the stored URL is the direct asset (e.g. Contentful CDN) rather than a
-    # /_next/image?url=... proxy that many sites block for hotlinking.
-    url = _unwrap_nextjs_image_url(url)
+    # Unwrap known image proxy/transform URLs before any other checks so the
+    # stored URL is the direct asset rather than an origin-specific proxy that
+    # many sites block for third-party hotlinking (Flutter, etc.).
+    url = _unwrap_image_proxy_url(url)
 
     lowered = url.lower()
     for prefix in _INVALID_IMAGE_PREFIXES:

@@ -81,6 +81,10 @@ _GENERIC_URL_KEYWORDS = (
     # Flag them so the backfill re-fetches; validate_image_url will unwrap to
     # the direct asset URL on the fresh fetch.
     "/_next/image",
+    # Netlify Image CDN and Gatsby Static Image CDN have the same origin-specific
+    # restriction pattern — flag for the same backfill-and-unwrap treatment.
+    "/.netlify/images",
+    "/_gatsby/image",
 )
 _EDITORIAL_URL_KEYWORDS = (
     "hero",

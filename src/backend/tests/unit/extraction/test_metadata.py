@@ -101,6 +101,21 @@ class TestImageExtraction:
         proxy = f"https://venturebeat.com/_next/image?url={quote(inner)}&w=3840&q=85"
         assert is_probably_generic_image_url(proxy)
 
+    def test_netlify_image_cdn_url_marked_generic(self):
+        from urllib.parse import quote
+
+        proxy = f"https://samhenri.gold/.netlify/images?url={quote('_astro/post.jpg')}&w=1200"
+        assert is_probably_generic_image_url(proxy)
+
+    def test_gatsby_image_cdn_url_marked_generic(self):
+        from urllib.parse import quote
+
+        proxy = (
+            f"https://worksinprogress.co/_gatsby/image/abc/def/photo.png"
+            f"?u={quote('https://worksinprogress.co/wip-image/uploads/2026/photo.jpg')}"
+        )
+        assert is_probably_generic_image_url(proxy)
+
     def test_og_image_preferred(self):
         html = _html_with_head(
             '<meta property="og:image" content="https://cdn.example.com/og.jpg" />'
