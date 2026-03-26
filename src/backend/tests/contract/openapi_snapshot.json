@@ -5084,6 +5084,47 @@
         ]
       }
     },
+    "/api/v1/admin/trigger-image-repair": {
+      "post": {
+        "description": "Manually trigger the article image repair backfill.\n\nRe-fetches images for articles whose stored image is missing, generic,\nsuspicious, or a known origin-bound proxy URL (/_next/image, etc.).",
+        "operationId": "trigger_image_repair_api_v1_admin_trigger_image_repair_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger Image Repair",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/trigger-summarize": {
       "post": {
         "description": "Manually trigger AI summarization for unprocessed content.",
