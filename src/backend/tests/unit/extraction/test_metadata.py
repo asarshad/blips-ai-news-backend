@@ -79,6 +79,19 @@ class TestImageExtraction:
     def test_nojs_placeholder_image_marked_generic(self):
         assert is_probably_generic_image_url("https://www.cbc.ca/a/assets/nojsimg.gif")
 
+    def test_user_uploaded_image_marked_generic(self):
+        # Yahoo proxy wrapping a user-uploaded cloudfront image — seen on real engadget articles
+        url = (
+            "https://s.yimg.com/uu/api/res/1.2/ABC--/hash/"
+            "https://d29szjachogqwa.cloudfront.net/images/user-uploaded/ss-6.jpg"
+        )
+        assert is_probably_generic_image_url(url)
+
+    def test_user_uploaded_underscore_variant_marked_generic(self):
+        assert is_probably_generic_image_url(
+            "https://cdn.example.com/images/user_uploaded/photo.jpg"
+        )
+
     def test_og_image_preferred(self):
         html = _html_with_head(
             '<meta property="og:image" content="https://cdn.example.com/og.jpg" />'

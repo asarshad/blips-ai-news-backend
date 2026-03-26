@@ -72,6 +72,10 @@ _GENERIC_URL_KEYWORDS = (
     "site_image",
     "brand-image",
     "brand_image",
+    # User-generated/uploaded content is not a reliable editorial hero image.
+    # Also catches proxied CDN URLs (e.g. Yahoo image proxy) wrapping user-uploaded paths.
+    "user-uploaded",
+    "user_uploaded",
 )
 _EDITORIAL_URL_KEYWORDS = (
     "hero",
