@@ -344,6 +344,32 @@ def trigger_summarize():
         return {"status": "error", "message": str(e)}
 
 
+@router.post("/trigger-image-repair")
+def trigger_image_repair():
+    """Manually trigger the article image repair backfill.
+
+    Re-fetches images for articles whose stored image is missing, generic,
+    suspicious, or a known origin-bound proxy URL (/_next/image, etc.).
+    """
+    from app.db.base import SessionLocal
+    from app.services.article_image_service import repair_article_image_metadata
+
+    db = SessionLocal()
+    try:
+        result = repair_article_image_metadata(
+            db,
+            lookback_days=30,
+            limit=500,
+            include_generic=True,
+        )
+        return {"status": "ok", "result": result}
+    except Exception as e:
+        logger.error(f"Image repair failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    finally:
+        db.close()
+
+
 @router.post("/youtube/reset-search-cooldown")
 def reset_youtube_search_cooldown(surface: Optional[str] = None):
     """Clear Redis cooldown keys so operators can force a new discovery sweep."""
