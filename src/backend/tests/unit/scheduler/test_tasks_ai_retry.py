@@ -251,8 +251,11 @@ def test_process_ai_summaries_skips_empty_article_input_without_error(monkeypatc
     assert stats.items_skipped == 1
     assert stats.items_failed == 0
     assert stats.errors == []
-    repo.mark_ai_processed.assert_not_called()
-    db.commit.assert_not_called()
+    # Article is permanently marked processed with empty summary so it stops
+    # re-entering the retry queue, but remains PENDING/missing_article_summary
+    # in the feed (evaluate_content_readiness checks for non-empty summary).
+    repo.mark_ai_processed.assert_called_once_with(15, summary="", topics=[])
+    llm_client.summarize_article.assert_not_called()
 
 
 def test_process_ai_summaries_persists_extracted_article_fields_before_summary(monkeypatch):

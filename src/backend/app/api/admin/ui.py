@@ -539,6 +539,8 @@ def _push_ui_reason(reason: str) -> str:
         return "This item type does not support push delivery."
     if reason == "push_ready":
         return ""
+    if reason == "video_missing_push_summary":
+        return "Video has no summary yet — push will be available after AI processing."
     return describe_readiness_reason(reason)
 
 

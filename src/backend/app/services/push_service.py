@@ -216,6 +216,18 @@ def evaluate_push_eligibility(item: ContentItem) -> PushEligibilityDecision:
             reason=readiness.reason,
         )
 
+    # Videos are feed-ready without a summary (they play immediately), but push
+    # notifications must include a summary so the card is not blank on open.
+    if effective_type == ContentType.VIDEO:
+        summary = (getattr(item, "summary", None) or "").strip()
+        if not summary:
+            return PushEligibilityDecision(
+                eligible=False,
+                effective_type=effective_type,
+                surface=surface,
+                reason="video_missing_push_summary",
+            )
+
     return PushEligibilityDecision(
         eligible=True,
         effective_type=effective_type,

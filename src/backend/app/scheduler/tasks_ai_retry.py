@@ -115,22 +115,24 @@ def process_ai_summaries():
                             not (getattr(item, "canonical_url", None) or "").strip(),
                         )
                     )
-                    refreshed_article = (
+                    if needs_retry_refresh:
                         _refresh_article_retry_inputs(article_hydrator, item)
-                        if needs_retry_refresh
-                        else False
-                    )
                     text = item.content_text or item.description or item.title
                     item.ai_processed = False
                     item.summary = None
 
                     summary_input = bounded_article_summary_text(text)
                     if not summary_input:
-                        if refreshed_article:
-                            db.commit()
+                        # No scrapeable content found even after a refresh attempt.
+                        # Permanently mark as processed with empty summary so the item
+                        # is removed from the retry queue and stays PENDING in readiness
+                        # (missing_article_summary) rather than re-entering every cycle.
+                        content_repo.mark_ai_processed(
+                            item.id, summary="", topics=item.topics or []
+                        )
                         stats.items_skipped += 1
                         logger.info(
-                            "[ai_retry] Skipping article with no usable summary input: %s",
+                            "[ai_retry] Giving up on unskimmable article (marked processed): %s",
                             item.title[:80],
                         )
                         continue
