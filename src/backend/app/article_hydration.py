@@ -55,6 +55,16 @@ _INLINE_IMAGE_URL_RE = re.compile(
 )
 
 
+@dataclass(frozen=True)
+class ArticleImageLLMExtractionResult:
+    """Outcome for the article-image LLM fallback, including diagnostics."""
+
+    image_url: Optional[str]
+    reason: str
+    raw_candidate_url: Optional[str] = None
+    error: Optional[str] = None
+
+
 def _humanize_slug_segment(segment: str) -> str:
     words = [part for part in re.split(r"[-_]+", segment) if part]
     if not words:
@@ -662,52 +672,93 @@ class ArticleHydrationService:
         title: Optional[str],
     ) -> Optional[str]:
         """Use the LLM as a last-resort parser for article-owned image URLs."""
+        return self.extract_article_image_with_llm_diagnostics(
+            article_url=article_url,
+            title=title,
+        ).image_url
+
+    def extract_article_image_with_llm_diagnostics(
+        self,
+        *,
+        article_url: Optional[str],
+        title: Optional[str],
+    ) -> ArticleImageLLMExtractionResult:
+        """Run LLM image recovery and preserve why a recovery did or did not happen."""
         if not settings.ARTICLE_IMAGE_LLM_FALLBACK_ENABLED:
-            return None
+            return ArticleImageLLMExtractionResult(
+                image_url=None,
+                reason="llm_fallback_disabled",
+            )
 
         normalized_article_url = (article_url or "").strip()
         if not normalized_article_url or not self.is_direct_article_url_allowed(normalized_article_url):
-            return None
+            return ArticleImageLLMExtractionResult(
+                image_url=None,
+                reason="article_url_not_allowed",
+            )
 
         llm_client = self._get_llm_client()
         if llm_client is None:
-            return None
+            return ArticleImageLLMExtractionResult(
+                image_url=None,
+                reason="llm_not_configured",
+            )
 
         try:
             from app.extraction.fetcher import fetch_url
 
             fetch = fetch_url(normalized_article_url)
             if fetch.error or not fetch.html:
-                return None
+                return ArticleImageLLMExtractionResult(
+                    image_url=None,
+                    reason="article_fetch_failed",
+                    error=fetch.error or f"HTTP {fetch.status_code or 0}",
+                )
 
             document = self._build_llm_image_extraction_document(
                 fetch.html,
                 fetch.url or normalized_article_url,
             )
             if not document:
-                return None
+                return ArticleImageLLMExtractionResult(
+                    image_url=None,
+                    reason="document_empty",
+                )
 
-            candidate = llm_client.extract_article_image_url(
-                article_url=fetch.url or normalized_article_url,
-                title=(title or "").strip()
-                or display_article_title(None, fetch.url or normalized_article_url),
-                document=document,
-            )
-            validated = self._validate_llm_extracted_image_url(
+            try:
+                candidate = llm_client.extract_article_image_url(
+                    article_url=fetch.url or normalized_article_url,
+                    title=(title or "").strip()
+                    or display_article_title(None, fetch.url or normalized_article_url),
+                    document=document,
+                )
+            except Exception as exc:
+                logger.warning("LLM article image extraction failed for %s: %s", article_url, exc)
+                return ArticleImageLLMExtractionResult(
+                    image_url=None,
+                    reason="llm_error",
+                    error=str(exc),
+                )
+
+            validated = self._validate_llm_extracted_image_url_with_diagnostics(
                 raw_candidate_url=candidate,
                 html=fetch.html,
                 article_url=fetch.url or normalized_article_url,
             )
-            if validated:
+            if validated.image_url:
                 logger.info(
                     "Recovered article image via LLM fallback for %s -> %s",
                     normalized_article_url,
-                    validated,
+                    validated.image_url,
                 )
             return validated
         except Exception as exc:
             logger.warning("LLM article image extraction failed for %s: %s", article_url, exc)
-            return None
+            return ArticleImageLLMExtractionResult(
+                image_url=None,
+                reason="unexpected_error",
+                error=str(exc),
+            )
 
     @staticmethod
     def _build_llm_image_extraction_document(html: str, source_url: str) -> Optional[str]:
@@ -775,6 +826,19 @@ class ArticleHydrationService:
         html: str,
         article_url: str,
     ) -> Optional[str]:
+        return ArticleHydrationService._validate_llm_extracted_image_url_with_diagnostics(
+            raw_candidate_url=raw_candidate_url,
+            html=html,
+            article_url=article_url,
+        ).image_url
+
+    @staticmethod
+    def _validate_llm_extracted_image_url_with_diagnostics(
+        *,
+        raw_candidate_url: Optional[str],
+        html: str,
+        article_url: str,
+    ) -> ArticleImageLLMExtractionResult:
         """Verify the LLM returned a real article-owned image URL from the page."""
         from app.extraction.fetcher import fetch_url
         from app.extraction.metadata import is_probably_generic_image_url
@@ -786,10 +850,22 @@ class ArticleHydrationService:
 
         candidate = (raw_candidate_url or "").strip()
         if not candidate:
-            return None
+            return ArticleImageLLMExtractionResult(
+                image_url=None,
+                reason="llm_returned_none",
+            )
 
         if not ArticleHydrationService._html_contains_candidate_reference(html, candidate):
-            return None
+            return ArticleImageLLMExtractionResult(
+                image_url=None,
+                reason="candidate_not_in_document",
+                raw_candidate_url=candidate,
+            )
+
+        saw_invalid_url = False
+        saw_rejected_candidate = False
+        saw_fetch_failure = False
+        saw_not_image = False
 
         for absolute in ArticleHydrationService._candidate_absolute_image_urls(
             candidate,
@@ -797,21 +873,44 @@ class ArticleHydrationService:
         ):
             validated = validate_image_url(absolute)
             if not validated:
+                saw_invalid_url = True
                 continue
             if is_probably_generic_image_url(validated) or is_suspicious_image_url(validated):
+                saw_rejected_candidate = True
                 continue
 
             fetch = fetch_url(validated)
             if fetch.error or fetch.status_code >= 400:
+                saw_fetch_failure = True
                 continue
 
             content_type = (fetch.content_type or "").lower()
             if "image/" not in content_type:
+                saw_not_image = True
                 continue
 
-            return validated
+            return ArticleImageLLMExtractionResult(
+                image_url=validated,
+                reason="recovered",
+                raw_candidate_url=candidate,
+            )
 
-        return None
+        if saw_fetch_failure:
+            reason = "candidate_fetch_failed"
+        elif saw_not_image:
+            reason = "candidate_not_image"
+        elif saw_rejected_candidate:
+            reason = "candidate_rejected"
+        elif saw_invalid_url:
+            reason = "candidate_invalid_url"
+        else:
+            reason = "candidate_validation_failed"
+
+        return ArticleImageLLMExtractionResult(
+            image_url=None,
+            reason=reason,
+            raw_candidate_url=candidate,
+        )
 
     @staticmethod
     def _html_contains_candidate_reference(html: str, candidate_url: str) -> bool:
@@ -843,6 +942,8 @@ class ArticleHydrationService:
         RFC-compliant resolution first, but also try same-origin root
         resolution as a fallback for these CMS-style asset paths.
         """
+        from app.extraction.normalize import make_absolute_url
+
         candidate = (candidate_url or "").strip()
         if not candidate:
             return []

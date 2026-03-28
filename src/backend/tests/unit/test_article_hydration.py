@@ -245,7 +245,11 @@ def test_extract_article_image_with_llm_accepts_root_like_relative_asset_paths(m
                 ),
                 content_type="text/html",
             )
-        if url == "https://www.infoq.com/news/2026/03/news/2026/03/qcon-london-foxwell-dev-teams/en/resources/hero.jpg":
+        if (
+            url
+            == "https://www.infoq.com/news/2026/03/qcon-london-foxwell-dev-teams/"
+            "news/2026/03/qcon-london-foxwell-dev-teams/en/resources/hero.jpg"
+        ):
             return FetchResult(
                 url=url,
                 status_code=404,
@@ -298,6 +302,45 @@ def test_extract_article_image_with_llm_rejects_invented_url(monkeypatch):
     )
 
     assert image_url is None
+
+
+def test_extract_article_image_with_llm_diagnostics_reports_missing_llm():
+    hydrator = ArticleHydrationService(llm_client=False)
+
+    result = hydrator.extract_article_image_with_llm_diagnostics(
+        article_url="https://example.com/story",
+        title="Story",
+    )
+
+    assert result.image_url is None
+    assert result.reason == "llm_not_configured"
+
+
+def test_extract_article_image_with_llm_diagnostics_reports_validation_reason(monkeypatch):
+    from app.extraction.fetcher import FetchResult
+
+    llm_client = MagicMock()
+    llm_client.extract_article_image_url.return_value = "https://cdn.example.com/invented.jpg"
+    hydrator = ArticleHydrationService(llm_client=llm_client)
+
+    monkeypatch.setattr(
+        "app.extraction.fetcher.fetch_url",
+        lambda url: FetchResult(
+            url=url,
+            status_code=200,
+            html="<html><body><article><p>No image here.</p></article></body></html>",
+            content_type="text/html",
+        ),
+    )
+
+    result = hydrator.extract_article_image_with_llm_diagnostics(
+        article_url="https://example.com/story",
+        title="Story",
+    )
+
+    assert result.image_url is None
+    assert result.reason == "candidate_not_in_document"
+    assert result.raw_candidate_url == "https://cdn.example.com/invented.jpg"
 
 
 def test_refresh_existing_article_metadata_prefers_rss_image_over_weak_page_og(monkeypatch):

@@ -174,6 +174,7 @@ def evaluate_llm_article_image_recovery(
     applied_count = 0
     failures = 0
     pending_changes = 0
+    reason_counts: dict[str, int] = defaultdict(int)
     domain_totals: dict[str, int] = defaultdict(int)
     domain_recovered: dict[str, int] = defaultdict(int)
     success_examples: list[dict[str, Any]] = []
@@ -185,23 +186,31 @@ def evaluate_llm_article_image_recovery(
         host = _host_for_item(item)
         domain_totals[host] += 1
         try:
-            image_url = hydrator.extract_article_image_with_llm(
+            extraction = hydrator.extract_article_image_with_llm_diagnostics(
                 article_url=(item.canonical_url or item.source_url or "").strip(),
                 title=item.title,
             )
         except Exception as exc:
             failures += 1
+            reason_counts["unexpected_exception"] += 1
             if len(failure_examples) < max_examples:
                 row = _serialize_item(item)
+                row["reason"] = "unexpected_exception"
                 row["error"] = str(exc)
                 failure_examples.append(row)
             continue
 
+        reason_counts[extraction.reason] += 1
+        image_url = extraction.image_url
         if image_url:
             recovered += 1
             domain_recovered[host] += 1
             if len(success_examples) < max_examples:
-                success_examples.append(_serialize_item(item, recovered_image_url=image_url))
+                success_row = _serialize_item(item, recovered_image_url=image_url)
+                success_row["reason"] = extraction.reason
+                if extraction.raw_candidate_url:
+                    success_row["raw_candidate_url"] = extraction.raw_candidate_url
+                success_examples.append(success_row)
 
             if apply:
                 item.image_url = image_url
@@ -214,7 +223,13 @@ def evaluate_llm_article_image_recovery(
                     pending_changes = 0
         else:
             if len(failure_examples) < max_examples:
-                failure_examples.append(_serialize_item(item))
+                row = _serialize_item(item)
+                row["reason"] = extraction.reason
+                if extraction.raw_candidate_url:
+                    row["raw_candidate_url"] = extraction.raw_candidate_url
+                if extraction.error:
+                    row["error"] = extraction.error
+                failure_examples.append(row)
 
     if apply and pending_changes:
         db.commit()
@@ -243,6 +258,7 @@ def evaluate_llm_article_image_recovery(
         "lookback_days": lookback_days,
         "limit": limit,
         "sample_size": sample_size,
+        "reason_counts": dict(sorted(reason_counts.items())),
         "domain_breakdown": domain_breakdown,
         "success_examples": success_examples,
         "failure_examples": failure_examples,

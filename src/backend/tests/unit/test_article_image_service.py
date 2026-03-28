@@ -5,6 +5,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 
+from app.article_hydration import ArticleImageLLMExtractionResult
 from app.extraction.metadata import PageMetadata
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.services import article_image_service
@@ -168,9 +169,12 @@ def test_evaluate_llm_article_image_recovery_reports_success_rate(monkeypatch):
     db.commit()
 
     monkeypatch.setattr(
-        "app.article_hydration.ArticleHydrationService.extract_article_image_with_llm",
-        lambda self, article_url, title: (
-            "https://cdn.example.com/recovered.jpg" if article_url.endswith("/one") else None
+        "app.article_hydration.ArticleHydrationService.extract_article_image_with_llm_diagnostics",
+        lambda self, article_url, title: ArticleImageLLMExtractionResult(
+            image_url="https://cdn.example.com/recovered.jpg"
+            if article_url.endswith("/one")
+            else None,
+            reason="recovered" if article_url.endswith("/one") else "llm_returned_none",
         ),
     )
 
@@ -187,7 +191,53 @@ def test_evaluate_llm_article_image_recovery_reports_success_rate(monkeypatch):
     assert result["not_recovered"] == 1
     assert result["applied"] == 0
     assert result["success_rate_percent"] == 50.0
+    assert result["reason_counts"] == {"llm_returned_none": 1, "recovered": 1}
     assert result["domain_breakdown"][0]["host"] == "example.com"
+
+
+def test_evaluate_llm_article_image_recovery_reports_failure_reasons(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    ContentItem.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/one",
+        canonical_url="https://example.com/one",
+        published_at=datetime(2026, 3, 20, 10, 0, 0),
+        title="One",
+        curation_status=ContentStatus.PROMOTED,
+        created_at=datetime(2026, 3, 20, 10, 5, 0),
+        updated_at=datetime(2026, 3, 20, 10, 5, 0),
+    )
+    db.add(item)
+    db.commit()
+
+    monkeypatch.setattr(
+        "app.article_hydration.ArticleHydrationService.extract_article_image_with_llm_diagnostics",
+        lambda self, article_url, title: ArticleImageLLMExtractionResult(
+            image_url=None,
+            reason="llm_not_configured",
+            error="missing OPENAI_API_KEY",
+        ),
+    )
+
+    result = article_image_service.evaluate_llm_article_image_recovery(
+        db,
+        lookback_days=14,
+        limit=50,
+        sample_size=5,
+        apply=False,
+    )
+
+    assert result["scanned"] == 1
+    assert result["recovered"] == 0
+    assert result["failures"] == 0
+    assert result["reason_counts"] == {"llm_not_configured": 1}
+    assert result["failure_examples"][0]["reason"] == "llm_not_configured"
+    assert result["failure_examples"][0]["error"] == "missing OPENAI_API_KEY"
 
 
 def test_repair_article_image_metadata_replaces_generic_images(monkeypatch):
