@@ -791,22 +791,27 @@ class ArticleHydrationService:
         if not ArticleHydrationService._html_contains_candidate_reference(html, candidate):
             return None
 
-        absolute = make_absolute_url(candidate, article_url)
-        validated = validate_image_url(absolute)
-        if not validated:
-            return None
-        if is_probably_generic_image_url(validated) or is_suspicious_image_url(validated):
-            return None
+        for absolute in ArticleHydrationService._candidate_absolute_image_urls(
+            candidate,
+            article_url,
+        ):
+            validated = validate_image_url(absolute)
+            if not validated:
+                continue
+            if is_probably_generic_image_url(validated) or is_suspicious_image_url(validated):
+                continue
 
-        fetch = fetch_url(validated)
-        if fetch.error or fetch.status_code >= 400:
-            return None
+            fetch = fetch_url(validated)
+            if fetch.error or fetch.status_code >= 400:
+                continue
 
-        content_type = (fetch.content_type or "").lower()
-        if "image/" not in content_type:
-            return None
+            content_type = (fetch.content_type or "").lower()
+            if "image/" not in content_type:
+                continue
 
-        return validated
+            return validated
+
+        return None
 
     @staticmethod
     def _html_contains_candidate_reference(html: str, candidate_url: str) -> bool:
@@ -827,6 +832,42 @@ class ArticleHydrationService:
                 if needle and needle.lower() in lowered_haystack:
                     return True
         return False
+
+    @staticmethod
+    def _candidate_absolute_image_urls(candidate_url: str, article_url: str) -> list[str]:
+        """Return plausible absolute URLs for an LLM-returned image reference.
+
+        Some publishers embed article-owned assets as root-level paths without a
+        leading slash (for example ``news/2026/...jpg``). ``urljoin`` treats
+        those as page-relative and can produce a broken nested path. Keep the
+        RFC-compliant resolution first, but also try same-origin root
+        resolution as a fallback for these CMS-style asset paths.
+        """
+        candidate = (candidate_url or "").strip()
+        if not candidate:
+            return []
+
+        parsed_candidate = urlparse(candidate)
+        if parsed_candidate.scheme and parsed_candidate.netloc:
+            return [candidate]
+        if candidate.startswith("//"):
+            return [f"https:{candidate}"]
+
+        candidates: list[str] = []
+        resolved = make_absolute_url(candidate, article_url)
+        if resolved:
+            candidates.append(resolved)
+
+        if not candidate.startswith(("/", "./", "../", "?", "#")):
+            parsed_article = urlparse(article_url)
+            if parsed_article.scheme and parsed_article.netloc:
+                root_resolved = (
+                    f"{parsed_article.scheme}://{parsed_article.netloc}/{candidate.lstrip('/')}"
+                )
+                if root_resolved not in candidates:
+                    candidates.append(root_resolved)
+
+        return candidates
 
     @classmethod
     def normalize_article_image(cls, candidate_image_url: Optional[str]) -> Optional[str]:

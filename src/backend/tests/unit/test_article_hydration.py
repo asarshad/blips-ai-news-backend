@@ -224,6 +224,57 @@ def test_extract_article_image_with_llm_validates_url_from_document(monkeypatch)
     llm_client.extract_article_image_url.assert_called_once()
 
 
+def test_extract_article_image_with_llm_accepts_root_like_relative_asset_paths(monkeypatch):
+    from app.extraction.fetcher import FetchResult
+
+    llm_client = MagicMock()
+    llm_client.extract_article_image_url.return_value = (
+        "news/2026/03/qcon-london-foxwell-dev-teams/en/resources/hero.jpg"
+    )
+    hydrator = ArticleHydrationService(llm_client=llm_client)
+
+    def fake_fetch(url):
+        if url == "https://www.infoq.com/news/2026/03/qcon-london-foxwell-dev-teams/":
+            return FetchResult(
+                url=url,
+                status_code=200,
+                html=(
+                    "<html><body><article>"
+                    '<img data-src="news/2026/03/qcon-london-foxwell-dev-teams/en/resources/hero.jpg" />'
+                    "</article></body></html>"
+                ),
+                content_type="text/html",
+            )
+        if url == "https://www.infoq.com/news/2026/03/news/2026/03/qcon-london-foxwell-dev-teams/en/resources/hero.jpg":
+            return FetchResult(
+                url=url,
+                status_code=404,
+                html="",
+                content_type="text/html",
+                error="HTTP 404",
+            )
+        if url == "https://www.infoq.com/news/2026/03/qcon-london-foxwell-dev-teams/en/resources/hero.jpg":
+            return FetchResult(
+                url=url,
+                status_code=200,
+                html="",
+                content_type="image/jpeg",
+            )
+        raise AssertionError(f"unexpected fetch: {url}")
+
+    monkeypatch.setattr("app.extraction.fetcher.fetch_url", fake_fetch)
+
+    image_url = hydrator.extract_article_image_with_llm(
+        article_url="https://www.infoq.com/news/2026/03/qcon-london-foxwell-dev-teams/",
+        title="Story",
+    )
+
+    assert (
+        image_url
+        == "https://www.infoq.com/news/2026/03/qcon-london-foxwell-dev-teams/en/resources/hero.jpg"
+    )
+
+
 def test_extract_article_image_with_llm_rejects_invented_url(monkeypatch):
     from app.extraction.fetcher import FetchResult
 
