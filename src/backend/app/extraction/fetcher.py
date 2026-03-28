@@ -53,6 +53,14 @@ _PLAIN_TEXT_FALLBACK_HINTS = (
     "text/plain",
     "text/markdown",
 )
+_BOT_PROTECTION_TEXT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"just a moment", re.IGNORECASE), "cloudflare_challenge"),
+    (re.compile(r"attention required", re.IGNORECASE), "cloudflare_challenge"),
+    (re.compile(r"verify you are human", re.IGNORECASE), "human_verification"),
+    (re.compile(r"captcha", re.IGNORECASE), "captcha_challenge"),
+    (re.compile(r"enable javascript and cookies", re.IGNORECASE), "javascript_cookie_gate"),
+    (re.compile(r"access denied", re.IGNORECASE), "access_denied"),
+)
 
 # ── Response dataclass ────────────────────────────────────────────────────────
 
@@ -245,6 +253,15 @@ def fetch_url(
                     elapsed_ms=elapsed,
                 )
 
+            if protection_reason := _detect_bot_protection_response(resp):
+                return FetchResult(
+                    url=str(resp.url),
+                    status_code=resp.status_code,
+                    content_type=resp.headers.get("Content-Type", ""),
+                    error=f"BOT_PROTECTED: {protection_reason}",
+                    elapsed_ms=elapsed,
+                )
+
             if resp.status_code in _TRANSIENT_STATUS:
                 last_error = f"HTTP {resp.status_code}"
                 _backoff(attempt)
@@ -371,6 +388,30 @@ def _response_prefers_browser_variant(response) -> bool:
     if "<html" in text or text.startswith("<!doctype html"):
         return True
     return bool(re.search(r"<meta|<title|<article|<main", text))
+
+
+def _detect_bot_protection_response(response) -> Optional[str]:
+    """Return a protection reason when the response looks like a challenge page."""
+    status_code = int(getattr(response, "status_code", 0) or 0)
+    headers = getattr(response, "headers", {}) or {}
+    server = str(headers.get("Server", "") or "").lower()
+    content_type = str(headers.get("Content-Type", "") or "").lower()
+    raw = getattr(response, "content", b"") or b""
+    encoding = getattr(response, "encoding", None) or "utf-8"
+    text = raw[:8192].decode(encoding, errors="replace").lower()
+
+    if "cloudflare" in server and status_code in {401, 403, 429}:
+        return "cloudflare_challenge"
+
+    if not text and status_code not in {401, 403, 429}:
+        return None
+
+    for pattern, reason in _BOT_PROTECTION_TEXT_PATTERNS:
+        if pattern.search(text):
+            if status_code in {200, 401, 403, 429, 503} or "html" in content_type:
+                return reason
+
+    return None
 
 
 def _get_with_validated_redirects(

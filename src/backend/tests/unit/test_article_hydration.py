@@ -364,6 +364,32 @@ def test_extract_article_image_with_llm_diagnostics_reports_missing_llm():
     assert result.reason == "llm_not_configured"
 
 
+def test_extract_article_image_with_llm_diagnostics_reports_bot_protected_fetch(monkeypatch):
+    from app.extraction.fetcher import FetchResult
+
+    hydrator = ArticleHydrationService(llm_client=MagicMock())
+
+    monkeypatch.setattr(
+        "app.extraction.fetcher.fetch_url",
+        lambda url: FetchResult(
+            url=url,
+            status_code=403,
+            html="",
+            content_type="text/html",
+            error="BOT_PROTECTED: cloudflare_challenge",
+        ),
+    )
+
+    result = hydrator.extract_article_image_with_llm_diagnostics(
+        article_url="https://example.com/story",
+        title="Story",
+    )
+
+    assert result.image_url is None
+    assert result.reason == "article_bot_protected"
+    assert result.error == "BOT_PROTECTED: cloudflare_challenge"
+
+
 def test_extract_article_image_with_llm_diagnostics_reports_validation_reason(monkeypatch):
     from app.extraction.fetcher import FetchResult
 

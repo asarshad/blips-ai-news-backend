@@ -721,9 +721,12 @@ class ArticleHydrationService:
 
             fetch = fetch_url(normalized_article_url)
             if fetch.error or not fetch.html:
+                fetch_reason = "article_fetch_failed"
+                if (fetch.error or "").startswith("BOT_PROTECTED:"):
+                    fetch_reason = "article_bot_protected"
                 return ArticleImageLLMExtractionResult(
                     image_url=None,
-                    reason="article_fetch_failed",
+                    reason=fetch_reason,
                     error=fetch.error or f"HTTP {fetch.status_code or 0}",
                 )
 

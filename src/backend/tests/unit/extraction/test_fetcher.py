@@ -293,6 +293,59 @@ class TestFetchUrlHappyPath:
         assert result.url == "https://www.example.com/article"
         mock_requests_get.assert_called_once()
 
+    def test_cloudflare_challenge_is_classified_as_bot_protected(self):
+        challenge_response = MagicMock()
+        challenge_response.status_code = 403
+        challenge_response.headers = {
+            "Content-Type": "text/html; charset=UTF-8",
+            "Server": "cloudflare",
+        }
+        challenge_response.url = "https://example.com/article"
+        challenge_response.content = (
+            b"<!DOCTYPE html><html><head><title>Just a moment...</title></head></html>"
+        )
+        challenge_response.encoding = "utf-8"
+
+        with self._mock_public_host():
+            with patch("app.extraction.fetcher._get_client") as mock_client:
+                mock_client.return_value = MagicMock()
+                with patch(
+                    "app.extraction.fetcher._get_with_validated_redirects"
+                ) as mock_httpx_get:
+                    mock_httpx_get.return_value = (challenge_response, 18.0)
+                    with patch(
+                        "app.extraction.fetcher._requests_get_with_validated_redirects"
+                    ) as mock_requests_get:
+                        mock_requests_get.return_value = (challenge_response, 5.0)
+                        with patch("app.extraction.fetcher._rate_limit_domain"):
+                            result = fetch_url("https://example.com/article")
+
+        assert result.status_code == 403
+        assert result.error == "BOT_PROTECTED: cloudflare_challenge"
+
+    def test_200_human_verification_page_is_classified_as_bot_protected(self):
+        challenge_response = MagicMock()
+        challenge_response.status_code = 200
+        challenge_response.headers = {"Content-Type": "text/html; charset=UTF-8"}
+        challenge_response.url = "https://example.com/article"
+        challenge_response.content = (
+            b"<html><body><h1>Verify you are human</h1><p>Enable JavaScript and cookies.</p></body></html>"
+        )
+        challenge_response.encoding = "utf-8"
+
+        with self._mock_public_host():
+            with patch("app.extraction.fetcher._get_client") as mock_client:
+                mock_client.return_value = MagicMock()
+                with patch(
+                    "app.extraction.fetcher._get_with_validated_redirects"
+                ) as mock_httpx_get:
+                    mock_httpx_get.return_value = (challenge_response, 11.0)
+                    with patch("app.extraction.fetcher._rate_limit_domain"):
+                        result = fetch_url("https://example.com/article")
+
+        assert result.status_code == 200
+        assert result.error == "BOT_PROTECTED: human_verification"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # _rate_limit_domain — lock released before sleeping
