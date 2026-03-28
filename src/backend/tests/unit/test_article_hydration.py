@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from app.article_hydration import ArticleHydrationService
+from app.article_hydration import ArticleHydrationService, ArticleImageLLMExtractionResult
 from app.models.content import ContentType
 
 
@@ -172,7 +172,10 @@ def test_refresh_existing_article_metadata_uses_llm_fallback_when_metadata_has_n
     monkeypatch.setattr(
         hydrator,
         "extract_article_image_with_llm",
-        lambda **_kwargs: "https://cdn.example.com/story-hero.jpg",
+        lambda **_kwargs: ArticleImageLLMExtractionResult(
+            image_url="https://cdn.example.com/story-hero.jpg",
+            reason="validated",
+        ),
     )
 
     changed = hydrator.refresh_existing_article_metadata(
@@ -247,8 +250,7 @@ def test_extract_article_image_with_llm_accepts_root_like_relative_asset_paths(m
             )
         if (
             url
-            == "https://www.infoq.com/news/2026/03/qcon-london-foxwell-dev-teams/"
-            "news/2026/03/qcon-london-foxwell-dev-teams/en/resources/hero.jpg"
+            == "https://www.infoq.com/news/2026/03/qcon-london-foxwell-dev-teams/news/2026/03/qcon-london-foxwell-dev-teams/en/resources/hero.jpg"
         ):
             return FetchResult(
                 url=url,
@@ -257,7 +259,10 @@ def test_extract_article_image_with_llm_accepts_root_like_relative_asset_paths(m
                 content_type="text/html",
                 error="HTTP 404",
             )
-        if url == "https://www.infoq.com/news/2026/03/qcon-london-foxwell-dev-teams/en/resources/hero.jpg":
+        if (
+            url
+            == "https://www.infoq.com/news/2026/03/qcon-london-foxwell-dev-teams/en/resources/hero.jpg"
+        ):
             return FetchResult(
                 url=url,
                 status_code=200,

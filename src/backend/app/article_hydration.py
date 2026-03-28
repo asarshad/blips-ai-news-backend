@@ -23,6 +23,7 @@ from app.article_image_selection import (
 from app.config.source_tiering import DomainTier, get_domain_tier
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.extraction.normalize import make_absolute_url
 from app.ingestion.canonical import canonical_key_for_article
 from app.ingestion.extractors import extract_entities, extract_source, extract_topics
 from app.models.content import ContentItem, ContentType
@@ -609,7 +610,7 @@ class ArticleHydrationService:
 
         refreshed_image = select_best_article_image(image_candidates)
         if not refreshed_image and needs_image:
-            llm_image = self.extract_article_image_with_llm(
+            llm_result = self.extract_article_image_with_llm(
                 article_url=source_url,
                 title=display_article_title(item.title, source_url),
             )
@@ -617,8 +618,16 @@ class ArticleHydrationService:
                 [
                     ArticleImageCandidate(url=item.image_url, source="existing"),
                     ArticleImageCandidate(url=rss_image_url, source="rss"),
-                    ArticleImageCandidate(url=llm_image, source="llm_extract"),
-                ]
+                    ArticleImageCandidate(
+                        url=llm_result.image_url if llm_result else None,
+                        source="llm_extract",
+                    ),
+                ],
+                allow_generic_fallback=True,
+            )
+        if not refreshed_image:
+            refreshed_image = select_best_article_image(
+                image_candidates, allow_generic_fallback=True
             )
 
         changed = False
@@ -691,7 +700,9 @@ class ArticleHydrationService:
             )
 
         normalized_article_url = (article_url or "").strip()
-        if not normalized_article_url or not self.is_direct_article_url_allowed(normalized_article_url):
+        if not normalized_article_url or not self.is_direct_article_url_allowed(
+            normalized_article_url
+        ):
             return ArticleImageLLMExtractionResult(
                 image_url=None,
                 reason="article_url_not_allowed",
@@ -778,7 +789,11 @@ class ArticleHydrationService:
             for tag in head.find_all("meta"):
                 prop = (tag.get("property") or tag.get("name") or "").strip().lower()
                 content = (tag.get("content") or "").strip()
-                if prop and content and any(keyword in prop for keyword in ("image", "title", "description")):
+                if (
+                    prop
+                    and content
+                    and any(keyword in prop for keyword in ("image", "title", "description"))
+                ):
                     lines.append(f"META: {str(tag)[:400]}")
 
             for link in head.find_all("link", rel=True):
@@ -844,7 +859,6 @@ class ArticleHydrationService:
         from app.extraction.metadata import is_probably_generic_image_url
         from app.extraction.normalize import (
             is_suspicious_image_url,
-            make_absolute_url,
             validate_image_url,
         )
 
@@ -942,7 +956,6 @@ class ArticleHydrationService:
         RFC-compliant resolution first, but also try same-origin root
         resolution as a fallback for these CMS-style asset paths.
         """
-        from app.extraction.normalize import make_absolute_url
 
         candidate = (candidate_url or "").strip()
         if not candidate:

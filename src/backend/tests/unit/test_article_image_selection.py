@@ -80,3 +80,45 @@ def test_rank_article_image_candidates_prefers_rss_over_weak_page_metadata_og():
     assert [candidate.url for candidate in ranked] == [
         "https://s.yimg.com/creatr-uploaded-images/2026-03/meta-youtube-hero.jpg",
     ]
+
+
+def test_select_best_article_image_falls_back_to_generic_when_only_option():
+    """When the only available candidate is a generic-looking URL it should be
+    returned (with a score penalty) rather than discarding it and returning
+    no image at all.  This covers publishers like github.blog that name their
+    featured image 'generic-github-logo-right.png' but still intend it as the
+    article hero.
+    """
+    selected = select_best_article_image(
+        [
+            ArticleImageCandidate(
+                url="https://github.blog/wp-content/uploads/2026/01/generic-github-logo-right.png",
+                source="extraction",
+            ),
+        ],
+        allow_generic_fallback=True,
+    )
+
+    assert (
+        selected == "https://github.blog/wp-content/uploads/2026/01/generic-github-logo-right.png"
+    )
+
+
+def test_select_best_article_image_editorial_beats_generic_fallback():
+    """A real editorial image should still win over a generic one even when
+    both are present in the candidate list.
+    """
+    selected = select_best_article_image(
+        [
+            ArticleImageCandidate(
+                url="https://github.blog/wp-content/uploads/2026/01/generic-github-logo-right.png",
+                source="extraction",
+            ),
+            ArticleImageCandidate(
+                url="https://github.blog/wp-content/uploads/2026/01/copilot-hero.jpg",
+                source="rss_content",
+            ),
+        ]
+    )
+
+    assert selected == "https://github.blog/wp-content/uploads/2026/01/copilot-hero.jpg"

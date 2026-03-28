@@ -68,7 +68,9 @@ class RankedArticleImageCandidate:
 
 def page_metadata_candidate_source(image_source: Optional[str]) -> str:
     """Return a selector source label that reflects the page metadata origin."""
-    normalized = (image_source or "").strip().lower()
+    if not isinstance(image_source, str):
+        return "page_metadata"
+    normalized = image_source.strip().lower()
     if normalized == "body":
         return "page_metadata_body"
     if normalized == "og":
@@ -109,12 +111,51 @@ def rank_article_image_candidates(
     )
 
 
-def select_best_article_image(candidates: Iterable[ArticleImageCandidate]) -> Optional[str]:
-    """Return the strongest validated editorial image, or None."""
-    ranked = rank_article_image_candidates(candidates)
-    if not ranked:
+def select_best_article_image(
+    candidates: Iterable[ArticleImageCandidate],
+    *,
+    allow_generic_fallback: bool = False,
+) -> Optional[str]:
+    """Return the strongest validated editorial image, or None.
+
+    When *allow_generic_fallback* is True and every strict candidate is
+    generic, falls back to the best generic candidate with a 40-point score
+    penalty.  This prevents blank cards for publishers whose only og:image
+    contains a generic keyword (e.g. github.blog uses a logo as its hero).
+    Pass allow_generic_fallback=True only at the final selection step after
+    all extraction sources have been exhausted.
+    """
+    candidates_list = list(candidates)
+    ranked = rank_article_image_candidates(candidates_list)
+    if ranked:
+        return ranked[0].url
+
+    if not allow_generic_fallback:
         return None
-    return ranked[0].url
+
+    # Fallback: accept generic images but penalise them heavily so a real
+    # editorial image would always beat them if present in a future re-rank.
+    fallback: dict[str, RankedArticleImageCandidate] = {}
+    for candidate in candidates_list:
+        normalized = validate_image_url((candidate.url or "").strip())
+        if not normalized:
+            continue
+        if is_suspicious_image_url(normalized):
+            continue
+        if not is_probably_generic_image_url(normalized):
+            continue  # already handled by the strict pass above
+        score = _score_article_image_candidate(normalized, candidate.source) - 40.0
+        current = fallback.get(normalized)
+        if current is None or score > current.score:
+            fallback[normalized] = RankedArticleImageCandidate(
+                url=normalized,
+                source=candidate.source,
+                score=score,
+            )
+
+    if not fallback:
+        return None
+    return max(fallback.values(), key=lambda c: c.score).url
 
 
 def _score_article_image_candidate(url: str, source: str) -> float:

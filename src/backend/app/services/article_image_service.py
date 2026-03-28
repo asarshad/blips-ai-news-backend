@@ -54,8 +54,8 @@ def repair_article_image_metadata(
     items = []
     for item in recent_items:
         needs_second_pass = (
-            (getattr(item, "article_image_status", "") or "").strip().upper() != "VERIFIED"
-        )
+            getattr(item, "article_image_status", "") or ""
+        ).strip().upper() != "VERIFIED"
         if needs_second_pass or hydrator.needs_article_metadata_repair(
             item, include_generic=include_generic
         ):
@@ -97,12 +97,11 @@ def repair_article_image_metadata(
         finalize_article_image_verification(item)
         sync_content_readiness(db, item)
         verification_changed = (
-            (getattr(item, "article_image_status", None) or "").strip()
-            != previous_verification_status
-        )
+            getattr(item, "article_image_status", None) or ""
+        ).strip() != previous_verification_status
         readiness_changed = (
-            (getattr(item, "readiness_status", None) or "").strip() != previous_readiness_status
-        )
+            getattr(item, "readiness_status", None) or ""
+        ).strip() != previous_readiness_status
         changed = bool(changed or verification_changed or readiness_changed)
 
         if not changed:

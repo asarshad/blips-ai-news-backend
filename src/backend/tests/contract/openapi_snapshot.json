@@ -373,6 +373,39 @@
         "title": "ApprovePublishResponse",
         "type": "object"
       },
+      "ArticleImageRecoveryEvalRequest": {
+        "description": "Admin request body for evaluating LLM article image recovery.",
+        "properties": {
+          "apply": {
+            "default": false,
+            "title": "Apply",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 200,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "lookback_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lookback Days"
+          },
+          "sample_size": {
+            "default": 20,
+            "title": "Sample Size",
+            "type": "integer"
+          }
+        },
+        "title": "ArticleImageRecoveryEvalRequest",
+        "type": "object"
+      },
       "ArticleWithConversation": {
         "properties": {
           "added_age_seconds": {
@@ -5120,6 +5153,57 @@
           }
         },
         "summary": "Trigger Fetch",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/trigger-image-recovery-eval": {
+      "post": {
+        "description": "Evaluate or apply LLM recovery on promoted article rows with blank images.",
+        "operationId": "trigger_image_recovery_eval_api_v1_admin_trigger_image_recovery_eval_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Admin-Key",
+            "required": false,
+            "schema": {
+              "title": "X-Admin-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArticleImageRecoveryEvalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Trigger Image Recovery Eval",
         "tags": [
           "admin"
         ]

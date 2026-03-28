@@ -6,11 +6,11 @@ Switch providers via LLM_PROVIDER environment variable.
 Includes retry logic, request timeouts, and daily cost tracking.
 """
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
-import re
 from typing import Dict, List, Optional
 
 from redis.exceptions import RedisError

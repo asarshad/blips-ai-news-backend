@@ -45,10 +45,11 @@ def test_get_article_returns_ready_article_payload():
         source_url="https://example.com/ready",
         canonical_url="https://example.com/ready",
         summary="This article is fully hydrated and ready.",
-        image_url=None,
         published_at=now,
         created_at=now,
         ai_processed=True,
+        article_image_status="VERIFIED",
+        image_url="https://example.com/ready-hero.jpg",
         topics=["AI"],
         conversation_starters={"starters": ["Why now?"], "fallback": ["Summarize it"]},
     )

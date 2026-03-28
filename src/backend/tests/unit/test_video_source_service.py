@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import JSONB
@@ -62,16 +62,17 @@ def test_repair_video_source_metadata_backfills_curated_fields():
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
+    now = datetime.now(tz=timezone.utc).replace(tzinfo=None)
     item = ContentItem(
         type=ContentType.VIDEO,
         source="Marques Brownlee",
         source_url="https://www.youtube.com/watch?v=abc123xyz89",
         canonical_url="https://www.youtube.com/watch?v=abc123xyz89",
-        published_at=datetime(2026, 3, 13, 9, 0, 0),
+        published_at=now - timedelta(days=1),
         title="MacBook Air M5 Review",
         curation_status=ContentStatus.PROMOTED,
-        created_at=datetime(2026, 3, 13, 9, 5, 0),
-        updated_at=datetime(2026, 3, 13, 9, 5, 0),
+        created_at=now - timedelta(days=1),
+        updated_at=now - timedelta(days=1),
     )
     db.add(item)
     db.commit()
@@ -92,16 +93,17 @@ def test_repair_video_source_metadata_leaves_unmatched_rows_unchanged():
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
+    now = datetime.now(tz=timezone.utc).replace(tzinfo=None)
     item = ContentItem(
         type=ContentType.REEL,
         source="Unknown Channel",
         source_url="https://www.youtube.com/shorts/xyz98765432",
         canonical_url="https://www.youtube.com/shorts/xyz98765432",
-        published_at=datetime(2026, 3, 13, 9, 0, 0),
+        published_at=now - timedelta(days=1),
         title="Random Short",
         curation_status=ContentStatus.PROMOTED,
-        created_at=datetime(2026, 3, 13, 9, 5, 0),
-        updated_at=datetime(2026, 3, 13, 9, 5, 0),
+        created_at=now - timedelta(days=1),
+        updated_at=now - timedelta(days=1),
     )
     db.add(item)
     db.commit()
@@ -123,6 +125,7 @@ def test_repair_video_source_metadata_upserts_discovery_profiles_from_recent_ite
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
+    now = datetime.now(tz=timezone.utc).replace(tzinfo=None)
     item = ContentItem(
         type=ContentType.REEL,
         source="Discovery Shorts Lab",
@@ -132,12 +135,12 @@ def test_repair_video_source_metadata_upserts_discovery_profiles_from_recent_ite
         channel_id="channel-discovery-1",
         acquisition_lane="search",
         source_status="discovery",
-        published_at=datetime(2026, 3, 13, 9, 0, 0),
+        published_at=now - timedelta(days=1),
         title="Pixel privacy shortcut",
         summary="A quick Pixel privacy shortcut demo.",
         curation_status=ContentStatus.PROMOTED,
-        created_at=datetime(2026, 3, 13, 9, 5, 0),
-        updated_at=datetime(2026, 3, 13, 9, 5, 0),
+        created_at=now - timedelta(days=1),
+        updated_at=now - timedelta(days=1),
     )
     db.add(item)
     db.commit()
@@ -159,6 +162,7 @@ def test_repair_video_source_metadata_understands_query_tagged_search_provenance
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
+    now = datetime.now(tz=timezone.utc).replace(tzinfo=None)
     item = ContentItem(
         type=ContentType.VIDEO,
         source="Discovery Query Lab",
@@ -168,12 +172,12 @@ def test_repair_video_source_metadata_understands_query_tagged_search_provenance
         channel_id="channel-discovery-query",
         discovered_via="yt_search:ai-models",
         source_status="discovery",
-        published_at=datetime(2026, 3, 13, 9, 0, 0),
+        published_at=now - timedelta(days=1),
         title="Claude 4 agent update",
         summary="A discovery item tagged with a query-specific provenance label.",
         curation_status=ContentStatus.PROMOTED,
-        created_at=datetime(2026, 3, 13, 9, 5, 0),
-        updated_at=datetime(2026, 3, 13, 9, 5, 0),
+        created_at=now - timedelta(days=1),
+        updated_at=now - timedelta(days=1),
     )
     db.add(item)
     db.commit()

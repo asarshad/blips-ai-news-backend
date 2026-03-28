@@ -208,6 +208,8 @@ def test_send_push_now_maps_service_error_to_http_400(monkeypatch):
 
 
 def test_trigger_image_recovery_eval_returns_service_result(monkeypatch):
+    import app.services.article_image_service as _ais
+
     expected = {"scanned": 12, "recovered": 5, "success_rate_percent": 41.7}
 
     class _FakeSession:
@@ -219,7 +221,8 @@ def test_trigger_image_recovery_eval_returns_service_result(monkeypatch):
 
     monkeypatch.setattr("app.db.base.SessionLocal", lambda: _FakeSession())
     monkeypatch.setattr(
-        "app.services.article_image_service.evaluate_llm_article_image_recovery",
+        _ais,
+        "evaluate_llm_article_image_recovery",
         lambda db, **kwargs: expected,
     )
 

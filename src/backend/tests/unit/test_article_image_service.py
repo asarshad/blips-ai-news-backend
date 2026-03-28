@@ -124,7 +124,10 @@ def test_repair_article_image_metadata_uses_llm_fallback_when_metadata_has_no_im
     )
     monkeypatch.setattr(
         "app.article_hydration.ArticleHydrationService.extract_article_image_with_llm",
-        lambda self, **_kwargs: "https://cdn.example.com/hero.jpg",
+        lambda self, **_kwargs: ArticleImageLLMExtractionResult(
+            image_url="https://cdn.example.com/hero.jpg",
+            reason="validated",
+        ),
     )
 
     result = article_image_service.repair_article_image_metadata(db, lookback_days=14, limit=50)
