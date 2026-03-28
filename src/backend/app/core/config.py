@@ -191,6 +191,9 @@ class Settings(BaseSettings):
     ARTICLE_IMAGE_LLM_MAX_INPUT_CHARS: int = 12000
     VIDEO_SUMMARY_MIN_OUTPUT_WORDS: int = 50  # softer minimum for generated video summaries
     VIDEO_SUMMARY_MAX_OUTPUT_WORDS: int = 70  # hard cap for generated video summaries
+    VIDEO_TECH_CLASSIFIER_ENABLED: bool = True
+    VIDEO_TECH_NONE_BLOCK_CONFIDENCE: float = 0.85
+    VIDEO_TECH_MIXED_ROUNDUP_BLOCK_CONFIDENCE: float = 0.80
     SOURCE_HEALTH_DEGRADED_THRESHOLD: float = 0.3  # below this, mark source degraded
 
     # Minimum fresh counts per surface (triggers top-up if below)

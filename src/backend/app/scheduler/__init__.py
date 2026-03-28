@@ -5,6 +5,7 @@ Uses APScheduler to run periodic tasks like news fetching.
 """
 
 import os
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -88,6 +89,11 @@ def _resolve_backfill_hours() -> int:
     return 6
 
 
+def _initial_fetch_next_run(minutes: int) -> datetime:
+    """Delay the first scheduled fetch so startup's manual fetch can finish."""
+    return datetime.now(timezone.utc) + timedelta(minutes=minutes)
+
+
 def init_scheduler() -> Optional[BackgroundScheduler]:
     """
     Initialize and start the background scheduler.
@@ -113,6 +119,7 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             max_instances=1,
             coalesce=True,
             misfire_grace_time=300,
+            next_run_time=_initial_fetch_next_run(fetch_minutes),
         )
 
         # Add scoring job (hourly)

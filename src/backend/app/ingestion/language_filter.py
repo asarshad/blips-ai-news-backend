@@ -169,16 +169,16 @@ def is_english(
         return True
 
     if _has_non_latin_letters(stripped_title):
-        logger.warning("Non-Latin title detected: %s", stripped_title[:100])
+        logger.info("Non-Latin title detected: %s", stripped_title[:100])
         return False
 
     if _has_transliterated_non_english(stripped_title):
-        logger.warning("Transliterated non-English title detected: %s", stripped_title[:100])
+        logger.info("Transliterated non-English title detected: %s", stripped_title[:100])
         return False
 
     title_lang, _title_prob = detect_language(stripped_title)
     if is_non_english(title_lang):
-        logger.warning(
+        logger.info(
             "Non-English title detected (lang=%s): %s",
             title_lang,
             stripped_title[:100],
@@ -192,7 +192,7 @@ def is_english(
         # language metadata when available.
         primary_lang = _normalize_primary_language_tag(channel_language)
         if primary_lang and primary_lang != "en":
-            logger.warning(
+            logger.info(
                 "Short text inconclusive, channel_language=%s: %s",
                 channel_language,
                 stripped_title[:100],
@@ -201,7 +201,7 @@ def is_english(
         return True
 
     if is_non_english(lang):
-        logger.warning(
+        logger.info(
             "Non-English content detected (lang=%s): %s",
             lang,
             title[:100],

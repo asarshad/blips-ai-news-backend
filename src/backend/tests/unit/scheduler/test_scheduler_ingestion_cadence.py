@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -75,3 +76,21 @@ def test_backfill_job_registered_with_default_interval(mock_scheduler_cls, monke
     init_scheduler()
     trigger = _job_call_from_calls(mock_scheduler, "backfill_job").args[1]
     assert int(trigger.interval.total_seconds() // 3600) == 6
+
+
+@patch("app.scheduler.BackgroundScheduler")
+def test_fetch_job_is_delayed_after_startup_initial_fetch(mock_scheduler_cls, monkeypatch):
+    mock_scheduler = MagicMock()
+    mock_scheduler_cls.return_value = mock_scheduler
+    monkeypatch.setenv("INGESTION_SCHEDULER_MINUTES", "10")
+
+    from app.scheduler import init_scheduler
+
+    before = datetime.now(timezone.utc)
+    init_scheduler()
+    after = datetime.now(timezone.utc)
+
+    call = _job_call_from_calls(mock_scheduler, "fetch_news")
+    next_run_time = call.kwargs["next_run_time"]
+
+    assert before + timedelta(minutes=10) <= next_run_time <= after + timedelta(minutes=10)

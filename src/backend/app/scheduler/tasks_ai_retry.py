@@ -147,9 +147,20 @@ def process_ai_summaries():
                     summary = normalize_video_summary_output(result.summary)
                     topics = item.topics
                     starters = result.conversation_starters
+                    item.tech_relevance = result.tech_relevance
+                    item.tech_relevance_confidence = result.tech_relevance_confidence
+                    item.tech_relevance_reason = result.tech_relevance_reason
+                    item.is_mixed_roundup = result.is_mixed_roundup
 
                 stats.llm_calls += 1
 
+                classification_only = (
+                    item.type == ContentType.VIDEO
+                    and (
+                        getattr(item, "tech_relevance", None) == "none"
+                        or bool(getattr(item, "is_mixed_roundup", False))
+                    )
+                )
                 summary_is_valid = (
                     bool(summary and len(summary.strip()) > 50)
                     if item.type == ContentType.ARTICLE
@@ -160,6 +171,11 @@ def process_ai_summaries():
                     if starters and not item.conversation_starters:
                         item.conversation_starters = starters
                         db.commit()
+                    stats.items_processed += 1
+                elif classification_only:
+                    item.ai_processed = True
+                    item.summary = None
+                    db.commit()
                     stats.items_processed += 1
                 else:
                     stats.items_failed += 1

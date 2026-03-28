@@ -184,6 +184,10 @@ class ContentItem(Base):
     engagement_snapshot = Column(JSONB, nullable=True)
     views_per_hour = Column(Float, nullable=True, index=True)
     format_fit_score = Column(Float, nullable=True)
+    tech_relevance = Column(String(16), nullable=True, index=True)
+    tech_relevance_confidence = Column(Float, nullable=True)
+    tech_relevance_reason = Column(String(255), nullable=True)
+    is_mixed_roundup = Column(Boolean, nullable=True, index=True)
 
     # Candidate provenance fields (set by signal ingestion when created as CANDIDATE).
     candidate_first_seen_at = Column(DateTime, nullable=True, index=True)

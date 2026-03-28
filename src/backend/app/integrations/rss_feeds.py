@@ -612,8 +612,9 @@ FEED_REGISTRY: List[FeedConfig] = [
         quality_tier=QualityTier.PREMIUM,
         daily_cap=2,
         decay_profile=DecayProfile.NORMAL,
+        enabled=False,
         base_quality_weight=0.85,
-        notes="Llama family, open-source AI, infrastructure",
+        notes="Disabled March 28, 2026: feed URL returns 404 from both local checks and Render",
     ),
     FeedConfig(
         url="https://blogs.microsoft.com/ai/feed/",
@@ -653,8 +654,9 @@ FEED_REGISTRY: List[FeedConfig] = [
         quality_tier=QualityTier.STANDARD,
         daily_cap=2,
         decay_profile=DecayProfile.SLOW,
+        enabled=False,
         base_quality_weight=0.80,
-        notes="State-of-the-art results with reproducible code",
+        notes="Disabled March 28, 2026: URL redirects away from an RSS feed and parses as empty/broken",
     ),
     FeedConfig(
         url="https://hai.stanford.edu/news/feed",
@@ -663,8 +665,9 @@ FEED_REGISTRY: List[FeedConfig] = [
         quality_tier=QualityTier.PREMIUM,
         daily_cap=1,
         decay_profile=DecayProfile.SLOW,
+        enabled=False,
         base_quality_weight=0.90,
-        notes="Human-centred AI policy, interdisciplinary research",
+        notes="Disabled March 28, 2026: endpoint serves HTML instead of a valid feed",
     ),
     FeedConfig(
         url="https://news.csail.mit.edu/feed/",
@@ -673,8 +676,9 @@ FEED_REGISTRY: List[FeedConfig] = [
         quality_tier=QualityTier.PREMIUM,
         daily_cap=1,
         decay_profile=DecayProfile.SLOW,
+        enabled=False,
         base_quality_weight=0.88,
-        notes="Applied CS research from MIT's AI lab",
+        notes="Disabled March 28, 2026: consistently unreachable from Render worker",
     ),
     # ── AI infrastructure & chips ─────────────────────────────────────────────
     FeedConfig(
@@ -684,8 +688,9 @@ FEED_REGISTRY: List[FeedConfig] = [
         quality_tier=QualityTier.STANDARD,
         daily_cap=2,
         decay_profile=DecayProfile.NORMAL,
+        enabled=False,
         base_quality_weight=0.78,
-        notes="GPU architecture, CUDA, AI hardware announcements",
+        notes="Disabled March 28, 2026: feed URL returns 404 from both local checks and Render",
     ),
     FeedConfig(
         url="https://aws.amazon.com/blogs/machine-learning/feed/",
@@ -714,8 +719,9 @@ FEED_REGISTRY: List[FeedConfig] = [
         quality_tier=QualityTier.STANDARD,
         daily_cap=1,
         decay_profile=DecayProfile.NORMAL,
+        enabled=False,
         base_quality_weight=0.78,
-        notes="Azure OpenAI Service, Copilot stack, responsible AI",
+        notes="Disabled March 28, 2026: feed endpoint returns 403 and yields no entries",
     ),
     FeedConfig(
         url="https://www.deeplearning.ai/the-batch/feed/",
@@ -779,8 +785,9 @@ FEED_REGISTRY: List[FeedConfig] = [
         quality_tier=QualityTier.STANDARD,
         daily_cap=1,
         decay_profile=DecayProfile.NORMAL,
+        enabled=False,
         base_quality_weight=0.76,
-        notes="Product strategy and growth signal curation (Beehiiv)",
+        notes="Disabled March 28, 2026: feed is blocked by Cloudflare challenge/403 from ingestion",
     ),
     FeedConfig(
         url="https://cutlefish.substack.com/feed",
@@ -817,8 +824,9 @@ FEED_REGISTRY: List[FeedConfig] = [
         quality_tier=QualityTier.PREMIUM,
         daily_cap=1,
         decay_profile=DecayProfile.SLOW,
+        enabled=False,
         base_quality_weight=0.95,
-        notes="Premium tech business journalism, scoops, analysis",
+        notes="Disabled March 28, 2026: feed returns 403 from Render despite public availability elsewhere",
     ),
 ]
 

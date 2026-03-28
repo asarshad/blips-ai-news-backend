@@ -27,7 +27,6 @@ _DISCOVERY_FEED_SOURCES: Sequence[Tuple[str, str]] = (
     ("Clouded Judgement", "https://cloudedjudgement.substack.com/feed"),
     ("Joe Reis", "https://joereis.substack.com/feed"),
     ("Latent Space", "https://latent.space/feed"),
-    ("Product Picnic", "https://productpicnic.beehiiv.com/feed"),
     ("Cut Le Fish", "https://cutlefish.substack.com/feed"),
 )
 

@@ -1,4 +1,5 @@
 import types
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 
@@ -51,8 +52,6 @@ def test_mistral_client_initializes_with_timeout_ms():
 
 
 def test_extract_article_image_url_uses_strict_extract_only_prompt():
-    from types import SimpleNamespace
-
     from app.integrations.llm_client import LLMClient
 
     client = LLMClient(provider="openai", api_key="sk-test-fake-key-12345678901234567890")
@@ -68,3 +67,37 @@ def test_extract_article_image_url_uses_strict_extract_only_prompt():
     assert image_url == "/images/hero.jpg"
     assert "Do not invent, guess, search the web, or rewrite a URL." in prompt
     assert "Return only an image URL that is explicitly present in the provided document." in prompt
+
+
+def test_summarize_video_parses_structured_classifier_payload():
+    from app.integrations.llm_client import LLMClient
+
+    client = LLMClient(provider="openai", api_key="sk-test-fake-key-12345678901234567890")
+    client.chat = Mock(
+        return_value=SimpleNamespace(
+            content="""{
+  "tech_relevance": "meaningful",
+  "confidence": 0.82,
+  "is_mixed_roundup": false,
+  "reason": "Technology materially shapes why the story matters.",
+  "summary": "This video explains how cloud tooling is helping cancer researchers speed up diagnostics while outlining the remaining clinical limits and tradeoffs in deploying those systems responsibly across hospitals.",
+  "starters": [
+    "How central is the cloud infrastructure angle here?",
+    "What limits still exist for hospitals adopting this tech?",
+    "Why does this matter beyond the medical example?"
+  ]
+}"""
+        )
+    )
+
+    result = client.summarize_video(
+        "How Google Cloud is helping cancer diagnostics",
+        "A deeper look at the medical workflow and the supporting cloud systems.",
+    )
+
+    assert result.tech_relevance == "meaningful"
+    assert result.tech_relevance_confidence == 0.82
+    assert result.is_mixed_roundup is False
+    assert result.tech_relevance_reason == "Technology materially shapes why the story matters."
+    assert result.summary
+    assert result.conversation_starters["starters"][0].startswith("How central")

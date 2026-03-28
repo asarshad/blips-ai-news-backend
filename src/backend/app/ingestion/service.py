@@ -150,6 +150,10 @@ def build_video_content_item_from_entry(
     summary = entry.summary
     ai_processed = False
     inline_starters = None
+    tech_relevance = None
+    tech_relevance_confidence = None
+    tech_relevance_reason = None
+    is_mixed_roundup = None
 
     if content_type != ContentType.REEL:
         try:
@@ -167,7 +171,17 @@ def build_video_content_item_from_entry(
                 video_result = llm_client.summarize_video(entry.title, summary)
                 ai_summary = normalize_video_summary_output(video_result.summary)
                 inline_starters = video_result.conversation_starters
-                if is_video_summary_acceptable(ai_summary):
+                tech_relevance = video_result.tech_relevance
+                tech_relevance_confidence = video_result.tech_relevance_confidence
+                tech_relevance_reason = video_result.tech_relevance_reason
+                is_mixed_roundup = video_result.is_mixed_roundup
+
+                classification_only = tech_relevance == "none" or bool(is_mixed_roundup)
+                if classification_only:
+                    summary = None
+                    inline_starters = None
+                    ai_processed = True
+                elif is_video_summary_acceptable(ai_summary):
                     summary = ai_summary
                     ai_processed = True
         except Exception as exc:
@@ -209,6 +223,10 @@ def build_video_content_item_from_entry(
         simhash=compute_title_simhash(entry.title),
         ai_processed=ai_processed,
         conversation_starters=inline_starters,
+        tech_relevance=tech_relevance,
+        tech_relevance_confidence=tech_relevance_confidence,
+        tech_relevance_reason=tech_relevance_reason,
+        is_mixed_roundup=is_mixed_roundup,
         language=detected_lang or "en",
         curation_status=resolved_status,
         discovered_via=resolved_discovered_via,
@@ -566,11 +584,12 @@ class IngestionPipeline:
         resolved_type_value = (
             resolved_type.value if hasattr(resolved_type, "value") else str(resolved_type)
         )
-        status = (
-            "with AI summary"
-            if getattr(content_item, "ai_processed", False)
-            else "without AI summary"
-        )
+        if getattr(content_item, "summary", None):
+            status = "with AI summary"
+        elif getattr(content_item, "ai_processed", False):
+            status = "with AI classification only"
+        else:
+            status = "without AI summary"
         logger.info(
             f"Ingested {resolved_type_value}{role_info} {status}: {entry.title} -> {content_item.id}"
         )

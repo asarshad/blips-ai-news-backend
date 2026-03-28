@@ -1,4 +1,5 @@
 import datetime as dt
+import warnings
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -14,6 +15,15 @@ def test_decode_html_entities_handles_numeric_and_named_entities():
         decode_html_entities("AI&#8217;s next leap &amp; what it means")
         == "AI\u2019s next leap & what it means"
     )
+
+
+def test_decode_html_entities_avoids_bs4_locator_warning_for_plain_text():
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = decode_html_entities("gr.HTML release notes")
+
+    assert result == "gr.HTML release notes"
+    assert caught == []
 
 
 def test_fetch_feed_parses_fixture_xml_without_network(fixture_text):

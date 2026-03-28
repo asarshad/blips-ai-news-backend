@@ -403,6 +403,35 @@ class TestEditorialGates:
 
         assert reason == "off_topic_broad_news_video"
 
+    def test_classify_promotion_block_rejects_high_confidence_non_tech_broad_news_video(self):
+        item = self._make_item(
+            "Houthis fire missiles at Israel, Iran's missile toll revealed and Tiger Woods arrest",
+            summary="Reuters general-news roundup.",
+        )
+        item.acquisition_lane = "curated"
+        item.source_status = "core"
+        item.source = "Reuters"
+        item.tech_relevance = "none"
+        item.tech_relevance_confidence = 0.97
+        item.is_mixed_roundup = True
+
+        reason = classify_promotion_block(
+            item,
+            ContentType.VIDEO,
+            story_topic_counts={},
+            story_entity_counts={},
+            channel_config=ChannelConfig(
+                channel_id="channel-1",
+                name="Reuters",
+                role=ChannelRole.NEWS,
+                content_format=ContentFormat.LONG_FORM,
+                daily_cap=2,
+                quality_tier=QualityTier.PREMIUM,
+            ),
+        )
+
+        assert reason == "llm_mixed_roundup_broad_news_video"
+
     def test_classify_promotion_block_rejects_broad_news_politics_reel(self):
         item = self._make_item(
             "Stratton’s Illinois win signals Democratic shift left on immigration",

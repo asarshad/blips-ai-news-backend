@@ -37,6 +37,7 @@ from typing import Dict, List, Optional, Tuple
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.integrations.youtube_channels import (
     ChannelConfig,
@@ -444,6 +445,30 @@ def _safe_text(value: Optional[str]) -> str:
     return value.lower() if isinstance(value, str) else ""
 
 
+def _llm_broad_news_block_reason(item: ContentItem, *, suffix: str) -> str | None:
+    """Use persisted classifier metadata to block clear non-tech broad-news items."""
+    if not settings.VIDEO_TECH_CLASSIFIER_ENABLED:
+        return None
+
+    tech_relevance = _safe_text(getattr(item, "tech_relevance", None))
+    confidence = _safe_float(getattr(item, "tech_relevance_confidence", None), default=-1.0)
+    is_mixed_roundup = getattr(item, "is_mixed_roundup", None) is True
+
+    if (
+        is_mixed_roundup
+        and confidence >= max(0.0, float(settings.VIDEO_TECH_MIXED_ROUNDUP_BLOCK_CONFIDENCE))
+    ):
+        return f"llm_mixed_roundup_broad_news_{suffix}"
+
+    if (
+        tech_relevance == "none"
+        and confidence >= max(0.0, float(settings.VIDEO_TECH_NONE_BLOCK_CONFIDENCE))
+    ):
+        return f"llm_non_tech_broad_news_{suffix}"
+
+    return None
+
+
 def compute_story_importance(
     item: ContentItem,
     story_topic_counts: Dict[str, int],
@@ -609,6 +634,9 @@ def classify_promotion_block(
             and role == ChannelRole.NEWS
             and content_format == ContentFormat.LONG_FORM
         ):
+            llm_reason = _llm_broad_news_block_reason(item, suffix="reel")
+            if llm_reason:
+                return llm_reason
             if any(pattern.search(title) for pattern in _BROAD_NEWS_LEAK_PATTERNS):
                 return "off_topic_broad_news_reel"
             if story_importance < 0.28 and tech_score < 0.24:
@@ -626,6 +654,10 @@ def classify_promotion_block(
         and role == ChannelRole.NEWS
         and content_format == ContentFormat.LONG_FORM
     ):
+        if broad_news_source:
+            llm_reason = _llm_broad_news_block_reason(item, suffix="video")
+            if llm_reason:
+                return llm_reason
         if broad_news_source and any(
             pattern.search(title) for pattern in _BROAD_NEWS_LEAK_PATTERNS
         ):
@@ -931,10 +963,14 @@ class PromotionService:
         source_profiles = self._get_source_profiles(promoted_items)
         count = 0
         demote_reasons = {
+            "llm_non_tech_broad_news_video",
+            "llm_mixed_roundup_broad_news_video",
             "off_topic_news_video",
             "off_topic_broad_news_video",
             "weak_broad_news_video",
             "weak_tech_signal_video",
+            "llm_non_tech_broad_news_reel",
+            "llm_mixed_roundup_broad_news_reel",
             "off_topic_broad_news_reel",
             "weak_broad_news_reel",
         }

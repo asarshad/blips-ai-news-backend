@@ -5,7 +5,7 @@ Supports multiple LLM providers (OpenAI, Mistral) with a unified interface.
 Switch providers via LLM_PROVIDER environment variable.
 Includes retry logic, request timeouts, and daily cost tracking.
 """
-
+import json
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -45,6 +45,8 @@ _IMAGE_URL_RESPONSE_RE = re.compile(
     r"IMAGE_URL:\s*(?P<value>\S+)",
     re.IGNORECASE,
 )
+_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
+_VIDEO_TECH_RELEVANCE_VALUES = {"none", "incidental", "meaningful", "primary"}
 
 
 def normalize_video_summary_output(summary_text: Optional[str]) -> Optional[str]:
@@ -69,6 +71,35 @@ def is_video_summary_acceptable(summary_text: Optional[str]) -> bool:
 
     min_words = max(1, int(settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS))
     return len(normalized.split()) >= min_words
+
+
+def normalize_video_tech_relevance(value: Optional[str]) -> Optional[str]:
+    """Normalize classifier labels so the rest of the pipeline can compare reliably."""
+    normalized = str(value or "").strip().lower()
+    if normalized in _VIDEO_TECH_RELEVANCE_VALUES:
+        return normalized
+    return None
+
+
+def normalize_video_classifier_confidence(value: object) -> Optional[float]:
+    """Clamp classifier confidence into [0, 1]."""
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError):
+        return None
+    return min(max(normalized, 0.0), 1.0)
+
+
+def normalize_video_classifier_reason(value: Optional[str]) -> Optional[str]:
+    """Store compact, user-readable classifier reasons."""
+    cleaned = " ".join((value or "").split()).strip()
+    if not cleaned:
+        return None
+    return cleaned[:255]
+
+
+def _strip_json_fence(payload: str) -> str:
+    return _JSON_FENCE_RE.sub("", payload.strip())
 
 
 def _load_mistral_client_class():
@@ -123,6 +154,10 @@ class SummaryResult:
     summary: str
     tags: List[str]
     conversation_starters: Optional[Dict[str, List[str]]] = None
+    tech_relevance: Optional[str] = None
+    tech_relevance_confidence: Optional[float] = None
+    tech_relevance_reason: Optional[str] = None
+    is_mixed_roundup: Optional[bool] = None
 
 
 class BaseLLMClient(ABC):
@@ -234,7 +269,7 @@ class OpenAILLMClient(BaseLLMClient):
             if instructions:
                 request_kwargs["instructions"] = instructions
             if temperature != 0.7:
-                logger.warning(
+                logger.debug(
                     "Ignoring OpenAI temperature override for pinned GPT-5 model '%s'",
                     self.model,
                 )
@@ -575,21 +610,35 @@ Video Title: {title}
 
 Video Description: {truncated_desc}
 
-Perform BOTH tasks below in a single response.
+Return one JSON object with these keys only:
+- "tech_relevance": one of "none", "incidental", "meaningful", "primary"
+- "confidence": float between 0 and 1
+- "is_mixed_roundup": boolean
+- "reason": short explanation (max 25 words)
+- "summary": string or null
+- "starters": array of exactly 3 strings when summary is present, otherwise []
 
-Task 1: Write a concise summary of this video in between {settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS} and {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words based on the description.
-If the first draft would be shorter, add concrete factual detail from the description until it reaches at least {settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS} words.
-Never exceed {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words.
-Focus on the main topic and key points. Remove any channel promotion, "link in bio", or "subscribe" text.
+Classification rules:
+- "primary" means the video is mainly about technology, products, software, hardware, AI, developer tools, cloud, cybersecurity, or the tech industry.
+- "meaningful" means technology is not the whole story, but it materially affects why the story matters.
+- "incidental" means technology is mentioned, but it is a minor supporting detail.
+- "none" means the video has no meaningful tech angle for a tech-news feed.
+- Medical, politics, sports, celebrity, crime, war, or general-news stories are NOT tech videos just because they mention AI, an app, social media, or a cloud provider.
+- Set "is_mixed_roundup" to true when the video bundles multiple unrelated general-news stories into one omnibus segment.
 
-Task 2: Generate exactly 3 conversation-starter questions about this specific video. Each question must:
-- Reference the specific topic or title
-- Be at most 120 characters
-- Encourage deeper discussion
+Summary rules:
+- If tech_relevance is "none" OR is_mixed_roundup is true, set "summary" to null and "starters" to [].
+- Otherwise write a concise summary between {settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS} and {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words.
+- If the first draft would be shorter, add concrete factual detail from the description until it reaches at least {settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS} words.
+- Never exceed {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words.
+- Remove channel promotion, "link in bio", or "subscribe" text.
 
-Format your response exactly like this:
-SUMMARY: [your summary here]
-STARTERS: question1 | question2 | question3
+Starter rules:
+- Each starter must reference the specific topic or title.
+- Each starter must be at most 120 characters.
+- Each starter should encourage deeper discussion.
+
+Return JSON only. Do not wrap it in markdown.
 """
 
         try:
@@ -597,7 +646,10 @@ STARTERS: question1 | question2 | question3
                 messages=[
                     ChatMessage(
                         role="system",
-                        content="You are a tech journalist assistant that creates concise, informative summaries of tech videos.",
+                        content=(
+                            "You are a careful tech-news editor. "
+                            "Classify how relevant a video is to a tech-news feed and summarize it only when appropriate."
+                        ),
                     ),
                     ChatMessage(role="user", content=prompt),
                 ],
@@ -609,37 +661,87 @@ STARTERS: question1 | question2 | question3
             if not text:
                 raise ValueError("Empty response returned from LLM")
 
-            summary = ""
-            starters = None
+            try:
+                payload = json.loads(_strip_json_fence(text))
+                if not isinstance(payload, dict):
+                    raise ValueError("Video classifier returned a non-object payload")
 
-            if "SUMMARY:" in text:
-                if "STARTERS:" in text:
-                    parts = text.split("STARTERS:", 1)
-                    summary = parts[0].replace("SUMMARY:", "").strip()
-                    raw_starters = [s.strip() for s in parts[1].split("|") if s.strip()]
-                    raw_starters = [s[:117] + "..." if len(s) > 120 else s for s in raw_starters]
-                    if raw_starters:
+                tech_relevance = normalize_video_tech_relevance(payload.get("tech_relevance"))
+                confidence = normalize_video_classifier_confidence(payload.get("confidence"))
+                is_mixed_roundup = payload.get("is_mixed_roundup")
+                reason = normalize_video_classifier_reason(payload.get("reason"))
+
+                raw_summary = payload.get("summary")
+                normalized_summary = normalize_video_summary_output(raw_summary)
+
+                raw_starters = payload.get("starters")
+                starters = None
+                if isinstance(raw_starters, list):
+                    sanitized = []
+                    for value in raw_starters:
+                        cleaned = " ".join(str(value or "").split()).strip()
+                        if not cleaned:
+                            continue
+                        sanitized.append(
+                            cleaned[:117] + "..." if len(cleaned) > 120 else cleaned
+                        )
+                    if sanitized:
                         starters = {
-                            "starters": raw_starters[:5],
+                            "starters": sanitized[:3],
                             "fallback": [
                                 "What are the main points of this?",
                                 "Can you summarize this for me?",
                                 "What should I know about this topic?",
                             ],
                         }
-                else:
-                    summary = text.replace("SUMMARY:", "").strip()
-            else:
-                summary = text
 
-            normalized_summary = normalize_video_summary_output(summary)
-            if not normalized_summary:
-                raise ValueError("Empty summary returned from LLM")
+                should_skip_summary = bool(is_mixed_roundup) or tech_relevance == "none"
+            except json.JSONDecodeError:
+                tech_relevance = None
+                confidence = None
+                is_mixed_roundup = None
+                reason = None
+                normalized_summary = ""
+                starters = None
+                should_skip_summary = False
+
+                if "SUMMARY:" in text:
+                    if "STARTERS:" in text:
+                        parts = text.split("STARTERS:", 1)
+                        normalized_summary = normalize_video_summary_output(
+                            parts[0].replace("SUMMARY:", "").strip()
+                        ) or ""
+                        raw_starters = [s.strip() for s in parts[1].split("|") if s.strip()]
+                        raw_starters = [
+                            s[:117] + "..." if len(s) > 120 else s for s in raw_starters
+                        ]
+                        if raw_starters:
+                            starters = {
+                                "starters": raw_starters[:3],
+                                "fallback": [
+                                    "What are the main points of this?",
+                                    "Can you summarize this for me?",
+                                    "What should I know about this topic?",
+                                ],
+                            }
+                    else:
+                        normalized_summary = normalize_video_summary_output(
+                            text.replace("SUMMARY:", "").strip()
+                        ) or ""
+                else:
+                    normalized_summary = normalize_video_summary_output(text) or ""
+
+            if not should_skip_summary and not normalized_summary:
+                raise ValueError("Empty summary returned from LLM for tech-relevant video")
 
             return SummaryResult(
-                summary=normalized_summary,
+                summary=normalized_summary or "",
                 tags=[],
                 conversation_starters=starters,
+                tech_relevance=tech_relevance,
+                tech_relevance_confidence=confidence,
+                tech_relevance_reason=reason,
+                is_mixed_roundup=bool(is_mixed_roundup) if is_mixed_roundup is not None else None,
             )
 
         except (RuntimeError, ValueError) as e:

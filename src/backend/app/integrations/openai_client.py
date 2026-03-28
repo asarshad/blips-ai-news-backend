@@ -111,7 +111,7 @@ class OpenAIClient:
             api_messages = [{"role": msg.role, "content": msg.content} for msg in messages]
 
             if temperature != 0.7:
-                logger.warning(
+                logger.debug(
                     "Ignoring OpenAI temperature override for pinned GPT-5 model '%s'",
                     self.model,
                 )

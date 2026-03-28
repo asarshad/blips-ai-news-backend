@@ -64,7 +64,11 @@ def decode_html_entities(text: str) -> str:
         return text
     # First pass: decode HTML entities like &#8217;
     decoded = html.unescape(text)
-    # Second pass: use BeautifulSoup to handle any remaining entities
+    # Avoid feeding plain text back through BeautifulSoup. Titles that look
+    # like paths or filenames can trigger noisy parser warnings in production.
+    if "<" not in decoded and "&" not in decoded:
+        return decoded
+    # Second pass: use BeautifulSoup only when markup-like content remains.
     soup = BeautifulSoup(decoded, "html.parser")
     return soup.get_text()
 
@@ -208,7 +212,7 @@ class RSSClient:
                     # Use RSS feed content only (no full-page scraping)
                     content = self._get_rss_description(entry)
                     if not content:
-                        logger.warning(f"Skipped article with no RSS content: {title}")
+                        logger.info(f"Skipped article with no RSS content: {title}")
                         continue
 
                     # Get image

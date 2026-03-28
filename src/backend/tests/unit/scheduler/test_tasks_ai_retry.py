@@ -357,6 +357,10 @@ def test_process_ai_summaries_rejects_short_video_summary(monkeypatch):
     llm_client.summarize_video.return_value = SimpleNamespace(
         summary="Too short to keep.",
         conversation_starters={"starters": ["What stood out in this video?"]},
+        tech_relevance="meaningful",
+        tech_relevance_confidence=0.72,
+        tech_relevance_reason="Technology is part of the main story.",
+        is_mixed_roundup=False,
     )
 
     monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
@@ -371,3 +375,56 @@ def test_process_ai_summaries_rejects_short_video_summary(monkeypatch):
     tasks_ai_retry.process_ai_summaries()
 
     repo.mark_ai_processed.assert_not_called()
+
+
+def test_process_ai_summaries_marks_non_tech_video_processed_without_summary(monkeypatch):
+    db = MagicMock()
+    repo = MagicMock()
+    item = SimpleNamespace(
+        id=56,
+        type=ContentType.VIDEO,
+        content_text="General-news roundup with sports and war updates.",
+        description=None,
+        title="Reuters roundup with Tiger Woods arrest",
+        topics=["video"],
+        conversation_starters=None,
+        summary=None,
+        ai_processed=False,
+        tech_relevance=None,
+        tech_relevance_confidence=None,
+        tech_relevance_reason=None,
+        is_mixed_roundup=None,
+    )
+    repo.get_unprocessed_by_ai.return_value = [item]
+    repo.get_articles_with_short_summaries.return_value = []
+    repo.get_articles_with_long_summaries.return_value = []
+    repo.get_videos_with_short_summaries.return_value = []
+
+    llm_client = MagicMock()
+    llm_client.is_configured.return_value = True
+    llm_client.summarize_video.return_value = SimpleNamespace(
+        summary="",
+        conversation_starters=None,
+        tech_relevance="none",
+        tech_relevance_confidence=0.98,
+        tech_relevance_reason="General-news roundup without a tech angle.",
+        is_mixed_roundup=True,
+    )
+
+    monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
+    monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
+    monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: _FakeStats())
+    monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tasks_ai_retry, "_run_article_image_verification", lambda *_a, **_k: {})
+    monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
+    monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
+    monkeypatch.setattr(tasks_ai_retry.time, "sleep", lambda *_args, **_kwargs: None)
+
+    tasks_ai_retry.process_ai_summaries()
+
+    repo.mark_ai_processed.assert_not_called()
+    assert item.ai_processed is True
+    assert item.summary is None
+    assert item.tech_relevance == "none"
+    assert item.is_mixed_roundup is True
+    db.commit.assert_called()
