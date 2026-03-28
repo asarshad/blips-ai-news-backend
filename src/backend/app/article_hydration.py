@@ -9,10 +9,17 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from html import unescape as html_unescape
 from typing import Any, Optional
 from urllib.parse import unquote, urlparse
 
-from app.article_image_selection import ArticleImageCandidate, select_best_article_image
+from bs4 import BeautifulSoup
+
+from app.article_image_selection import (
+    ArticleImageCandidate,
+    page_metadata_candidate_source,
+    select_best_article_image,
+)
 from app.config.source_tiering import DomainTier, get_domain_tier
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -23,6 +30,10 @@ from app.services.content_readiness import seed_content_readiness
 
 logger = get_logger(__name__)
 settings = get_settings()
+
+ARTICLE_IMAGE_STATUS_PENDING = "PENDING"
+ARTICLE_IMAGE_STATUS_VERIFIED = "VERIFIED"
+ARTICLE_IMAGE_STATUS_MISSING = "MISSING"
 
 _GENERIC_PATH_SEGMENTS = {
     "article",
@@ -38,6 +49,10 @@ _GENERIC_PATH_SEGMENTS = {
 }
 _DATE_SEGMENT_RE = re.compile(r"^\d{4}(?:-\d{2}(?:-\d{2})?)?$")
 _FILE_EXT_RE = re.compile(r"\.[a-z0-9]{1,6}$", re.IGNORECASE)
+_INLINE_IMAGE_URL_RE = re.compile(
+    r"https?://[^\s\"'<>]+?\.(?:jpg|jpeg|png|webp|gif|avif)(?:\?[^\s\"'<>]*)?",
+    re.IGNORECASE,
+)
 
 
 def _humanize_slug_segment(segment: str) -> str:
@@ -118,6 +133,26 @@ def bounded_article_summary_text(article_text: Optional[str]) -> Optional[str]:
     if len(words) <= max_words:
         return cleaned
     return " ".join(words[:max_words])
+
+
+def seed_article_image_verification(item: Any) -> None:
+    """Mark article rows as awaiting post-ingest image verification."""
+    if getattr(item, "type", None) != ContentType.ARTICLE:
+        return
+    item.article_image_status = ARTICLE_IMAGE_STATUS_PENDING
+    item.article_image_checked_at = None
+
+
+def finalize_article_image_verification(item: Any, *, now: Optional[datetime] = None) -> None:
+    """Persist the outcome of article image verification."""
+    if getattr(item, "type", None) != ContentType.ARTICLE:
+        return
+    item.article_image_status = (
+        ARTICLE_IMAGE_STATUS_VERIFIED
+        if ArticleHydrationService.normalize_article_image(getattr(item, "image_url", None))
+        else ARTICLE_IMAGE_STATUS_MISSING
+    )
+    item.article_image_checked_at = now or datetime.utcnow()
 
 
 def normalize_article_summary_output(summary_text: Optional[str]) -> Optional[str]:
@@ -246,6 +281,7 @@ class ArticleHydrationService:
         )
         if curation_status is not None:
             stub.curation_status = curation_status
+        seed_article_image_verification(stub)
         seed_content_readiness(stub)
         return stub
 
@@ -327,7 +363,12 @@ class ArticleHydrationService:
                 prepared.image_url = select_best_article_image(
                     [
                         ArticleImageCandidate(url=prepared.image_url, source="rss"),
-                        ArticleImageCandidate(url=extracted_image, source="page_metadata"),
+                        ArticleImageCandidate(
+                            url=extracted_image,
+                            source=page_metadata_candidate_source(
+                                getattr(metadata, "image_source", None)
+                            ),
+                        ),
                     ]
                 )
 
@@ -542,18 +583,33 @@ class ArticleHydrationService:
             if metadata is not None and needs_canonical and metadata.canonical_url:
                 item.canonical_url = metadata.canonical_url
 
-        refreshed_image = select_best_article_image(
-            [
-                ArticleImageCandidate(url=item.image_url, source="existing"),
-                ArticleImageCandidate(url=rss_image_url, source="rss"),
-                ArticleImageCandidate(
-                    url=(getattr(metadata, "image_url", None) or "").strip()
-                    if metadata is not None
-                    else None,
-                    source="page_metadata",
+        image_candidates = [
+            ArticleImageCandidate(url=rss_image_url, source="rss"),
+            ArticleImageCandidate(
+                url=(getattr(metadata, "image_url", None) or "").strip()
+                if metadata is not None
+                else None,
+                source=page_metadata_candidate_source(
+                    getattr(metadata, "image_source", None) if metadata is not None else None
                 ),
-            ]
-        )
+            ),
+        ]
+        if not force_reconcile_image:
+            image_candidates.insert(0, ArticleImageCandidate(url=item.image_url, source="existing"))
+
+        refreshed_image = select_best_article_image(image_candidates)
+        if not refreshed_image and needs_image:
+            llm_image = self.extract_article_image_with_llm(
+                article_url=source_url,
+                title=display_article_title(item.title, source_url),
+            )
+            refreshed_image = select_best_article_image(
+                [
+                    ArticleImageCandidate(url=item.image_url, source="existing"),
+                    ArticleImageCandidate(url=rss_image_url, source="rss"),
+                    ArticleImageCandidate(url=llm_image, source="llm_extract"),
+                ]
+            )
 
         changed = False
         if refreshed_image and refreshed_image != current_image_url:
@@ -598,6 +654,179 @@ class ArticleHydrationService:
         except Exception as exc:
             logger.debug("Article metadata fetch failed for %s: %s", article_url, exc)
             return None
+
+    def extract_article_image_with_llm(
+        self,
+        *,
+        article_url: Optional[str],
+        title: Optional[str],
+    ) -> Optional[str]:
+        """Use the LLM as a last-resort parser for article-owned image URLs."""
+        if not settings.ARTICLE_IMAGE_LLM_FALLBACK_ENABLED:
+            return None
+
+        normalized_article_url = (article_url or "").strip()
+        if not normalized_article_url or not self.is_direct_article_url_allowed(normalized_article_url):
+            return None
+
+        llm_client = self._get_llm_client()
+        if llm_client is None:
+            return None
+
+        try:
+            from app.extraction.fetcher import fetch_url
+
+            fetch = fetch_url(normalized_article_url)
+            if fetch.error or not fetch.html:
+                return None
+
+            document = self._build_llm_image_extraction_document(
+                fetch.html,
+                fetch.url or normalized_article_url,
+            )
+            if not document:
+                return None
+
+            candidate = llm_client.extract_article_image_url(
+                article_url=fetch.url or normalized_article_url,
+                title=(title or "").strip()
+                or display_article_title(None, fetch.url or normalized_article_url),
+                document=document,
+            )
+            validated = self._validate_llm_extracted_image_url(
+                raw_candidate_url=candidate,
+                html=fetch.html,
+                article_url=fetch.url or normalized_article_url,
+            )
+            if validated:
+                logger.info(
+                    "Recovered article image via LLM fallback for %s -> %s",
+                    normalized_article_url,
+                    validated,
+                )
+            return validated
+        except Exception as exc:
+            logger.warning("LLM article image extraction failed for %s: %s", article_url, exc)
+            return None
+
+    @staticmethod
+    def _build_llm_image_extraction_document(html: str, source_url: str) -> Optional[str]:
+        """Compress page content down to image-relevant snippets for the LLM."""
+        cleaned_html = (html or "").strip()
+        if not cleaned_html:
+            return None
+
+        lines = [f"SOURCE_URL: {source_url}"]
+        try:
+            soup = BeautifulSoup(cleaned_html, "html.parser")
+        except Exception:
+            soup = None
+
+        if soup is not None:
+            head = soup.find("head") or soup
+            for tag in head.find_all("meta"):
+                prop = (tag.get("property") or tag.get("name") or "").strip().lower()
+                content = (tag.get("content") or "").strip()
+                if prop and content and any(keyword in prop for keyword in ("image", "title", "description")):
+                    lines.append(f"META: {str(tag)[:400]}")
+
+            for link in head.find_all("link", rel=True):
+                rel_value = link.get("rel")
+                if isinstance(rel_value, list):
+                    rel = " ".join(str(part) for part in rel_value)
+                else:
+                    rel = str(rel_value or "")
+                href = (link.get("href") or "").strip()
+                if href and "image" in rel.lower():
+                    lines.append(f"LINK: {str(link)[:400]}")
+
+            for tag in soup.find_all(["img", "source", "picture"], limit=30):
+                rendered = str(tag).strip()
+                if rendered:
+                    lines.append(f"MEDIA: {rendered[:500]}")
+
+            for script in soup.find_all(
+                "script",
+                attrs={"type": re.compile("ld\\+json", re.IGNORECASE)},
+            ):
+                payload = script.get_text(" ", strip=True)
+                if payload and "image" in payload.lower():
+                    lines.append(f"JSON_LD: {payload[:1000]}")
+
+        seen_urls: set[str] = set()
+        for match in _INLINE_IMAGE_URL_RE.finditer(cleaned_html):
+            url = match.group(0).strip()
+            if url in seen_urls:
+                continue
+            seen_urls.add(url)
+            lines.append(f"RAW_URL: {url}")
+            if len(seen_urls) >= 30:
+                break
+
+        document = "\n".join(lines).strip()
+        if not document:
+            return None
+        return document[: int(settings.ARTICLE_IMAGE_LLM_MAX_INPUT_CHARS)]
+
+    @staticmethod
+    def _validate_llm_extracted_image_url(
+        *,
+        raw_candidate_url: Optional[str],
+        html: str,
+        article_url: str,
+    ) -> Optional[str]:
+        """Verify the LLM returned a real article-owned image URL from the page."""
+        from app.extraction.fetcher import fetch_url
+        from app.extraction.metadata import is_probably_generic_image_url
+        from app.extraction.normalize import (
+            is_suspicious_image_url,
+            make_absolute_url,
+            validate_image_url,
+        )
+
+        candidate = (raw_candidate_url or "").strip()
+        if not candidate:
+            return None
+
+        if not ArticleHydrationService._html_contains_candidate_reference(html, candidate):
+            return None
+
+        absolute = make_absolute_url(candidate, article_url)
+        validated = validate_image_url(absolute)
+        if not validated:
+            return None
+        if is_probably_generic_image_url(validated) or is_suspicious_image_url(validated):
+            return None
+
+        fetch = fetch_url(validated)
+        if fetch.error or fetch.status_code >= 400:
+            return None
+
+        content_type = (fetch.content_type or "").lower()
+        if "image/" not in content_type:
+            return None
+
+        return validated
+
+    @staticmethod
+    def _html_contains_candidate_reference(html: str, candidate_url: str) -> bool:
+        """Check that the model returned a URL string that actually appears in the page."""
+        haystacks = {
+            (html or ""),
+            html_unescape(html or ""),
+        }
+        needles = {
+            (candidate_url or "").strip(),
+            html_unescape((candidate_url or "").strip()),
+            (candidate_url or "").strip().replace("&", "&amp;"),
+        }
+
+        for haystack in haystacks:
+            lowered_haystack = haystack.lower()
+            for needle in needles:
+                if needle and needle.lower() in lowered_haystack:
+                    return True
+        return False
 
     @classmethod
     def normalize_article_image(cls, candidate_image_url: Optional[str]) -> Optional[str]:

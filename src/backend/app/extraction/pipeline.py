@@ -13,6 +13,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
+from app.article_image_selection import (
+    ArticleImageCandidate,
+    page_metadata_candidate_source,
+    rank_article_image_candidates,
+)
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -147,23 +152,33 @@ def run_extraction(
     result.title = page_title or rss.title
 
     # ── Step 4: Image (page → RSS) ───────────────────────────────────
-    from app.extraction.normalize import validate_image_url
-
+    image_candidates = []
     if page_image:
-        result.image_url = page_image
-        result.image_source = page_image_source
-        result.image_confidence = page_image_confidence
-        result.image_suspicious = page_image_suspicious
+        image_candidates.append(
+            ArticleImageCandidate(
+                url=page_image,
+                source=page_metadata_candidate_source(page_image_source),
+            )
+        )
+    if rss.image_url:
+        image_candidates.append(ArticleImageCandidate(url=rss.image_url, source="rss"))
+
+    ranked_images = rank_article_image_candidates(image_candidates)
+    if ranked_images:
+        selected = ranked_images[0]
+        result.image_url = selected.url
         result.image_status = ImageStatus.OK
-    elif rss.image_url:
-        validated = validate_image_url(rss.image_url)
-        if validated:
-            result.image_url = validated
-            result.image_source = "rss"
-            result.image_status = ImageStatus.OK
+        if selected.source.startswith("page_metadata"):
+            result.image_source = page_image_source
+            result.image_confidence = page_image_confidence
+            result.image_suspicious = page_image_suspicious
         else:
-            result.image_url = None
-            result.image_status = ImageStatus.INVALID
+            result.image_source = "rss"
+            result.image_confidence = "none"
+            result.image_suspicious = False
+    elif page_image or rss.image_url:
+        result.image_url = None
+        result.image_status = ImageStatus.INVALID
     else:
         result.image_url = None
         result.image_status = ImageStatus.MISSING

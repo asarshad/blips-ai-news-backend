@@ -61,3 +61,22 @@ def test_rank_article_image_candidates_prefers_page_metadata_over_existing():
         "https://cdn.example.com/page-hero.jpg",
         "https://cdn.example.com/older-story.jpg",
     ]
+
+
+def test_rank_article_image_candidates_prefers_rss_over_weak_page_metadata_og():
+    ranked = rank_article_image_candidates(
+        [
+            ArticleImageCandidate(
+                url="https://s.yimg.com/kw/assets/engadget-amp-proposed.png",
+                source="page_metadata_og",
+            ),
+            ArticleImageCandidate(
+                url="https://s.yimg.com/creatr-uploaded-images/2026-03/meta-youtube-hero.jpg",
+                source="rss_media_content",
+            ),
+        ]
+    )
+
+    assert [candidate.url for candidate in ranked] == [
+        "https://s.yimg.com/creatr-uploaded-images/2026-03/meta-youtube-hero.jpg",
+    ]

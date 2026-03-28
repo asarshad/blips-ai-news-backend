@@ -23,6 +23,10 @@ _READINESS_REASON_DESCRIPTIONS = {
     "awaiting_promotion": "Promote this item before it can be delivered to users.",
     "blocked_promotion": "This item is blocked by promotion policy and is not client-visible.",
     "missing_article_source": "This article is missing a canonical source URL.",
+    "awaiting_article_image_verification": (
+        "This article is still waiting for the post-ingest image verification pass."
+    ),
+    "missing_article_image": "This article does not yet have a usable verified image.",
     "awaiting_ai_processing": "This article still needs AI summarization before delivery.",
     "missing_article_summary": "This article does not yet have a usable summary.",
     "missing_video_title": "This video is missing a title.",
@@ -133,6 +137,27 @@ def evaluate_content_readiness(item: Any) -> ContentReadinessDecision:
             return ContentReadinessDecision(
                 status=ContentReadinessStatus.PENDING,
                 reason="missing_article_source",
+                effective_type=effective_type,
+                surfaces=surfaces,
+            )
+
+        article_image_status = _trimmed(getattr(item, "article_image_status", None)).upper()
+        if article_image_status != "VERIFIED":
+            return ContentReadinessDecision(
+                status=ContentReadinessStatus.PENDING,
+                reason=(
+                    "missing_article_image"
+                    if article_image_status == "MISSING"
+                    else "awaiting_article_image_verification"
+                ),
+                effective_type=effective_type,
+                surfaces=surfaces,
+            )
+
+        if not _trimmed(getattr(item, "image_url", None)):
+            return ContentReadinessDecision(
+                status=ContentReadinessStatus.PENDING,
+                reason="missing_article_image",
                 effective_type=effective_type,
                 surfaces=surfaces,
             )

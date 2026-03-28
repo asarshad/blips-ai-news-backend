@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from app.article_hydration import ArticleHydrationService
 from app.models.content import ContentType
@@ -18,6 +19,8 @@ def test_build_article_stub_sets_normalized_article_defaults():
     assert stub.canonical_key
     assert stub.title == "[pending] How World Bank Manages Hybrid Cloud"
     assert stub.image_url is None
+    assert stub.article_image_status == "PENDING"
+    assert stub.article_image_checked_at is None
 
 
 def test_prepare_rss_article_uses_page_metadata_when_image_missing(monkeypatch):
@@ -56,6 +59,7 @@ def test_prepare_rss_article_prefers_page_metadata_image_over_rss_image(monkeypa
             title="Recovered title",
             canonical_url=f"{article_url}/canonical",
             image_url="https://cdn.example.com/page-hero.jpg",
+            image_source="body",
         ),
     )
 
@@ -71,6 +75,31 @@ def test_prepare_rss_article_prefers_page_metadata_image_over_rss_image(monkeypa
     assert prepared.title == "Recovered title"
     assert prepared.canonical_url == "https://example.com/story/canonical"
     assert prepared.image_url == "https://cdn.example.com/page-hero.jpg"
+
+
+def test_prepare_rss_article_prefers_rss_image_over_weak_page_metadata_og(monkeypatch):
+    hydrator = ArticleHydrationService()
+    monkeypatch.setattr(
+        hydrator,
+        "fetch_article_page_metadata",
+        lambda article_url: SimpleNamespace(
+            title="Recovered title",
+            canonical_url=f"{article_url}/canonical",
+            image_url="https://s.yimg.com/kw/assets/engadget-amp-proposed.png",
+            image_source="og",
+        ),
+    )
+
+    prepared = hydrator.prepare_rss_article(
+        source_url="https://example.com/story",
+        title="RSS title",
+        description="RSS body",
+        image_url="https://cdn.example.com/rss-image.jpg",
+        published_at=None,
+        include_text=False,
+    )
+
+    assert prepared.image_url == "https://cdn.example.com/rss-image.jpg"
 
 
 def test_prepare_rss_article_returns_none_for_blocked_direct_domain():
@@ -104,6 +133,7 @@ def test_refresh_existing_article_metadata_prefers_page_metadata_over_rss_image(
             title="Recovered title",
             canonical_url=f"{article_url}/canonical",
             image_url="https://cdn.example.com/page-hero.jpg",
+            image_source="body",
         ),
     )
 
@@ -117,6 +147,137 @@ def test_refresh_existing_article_metadata_prefers_page_metadata_over_rss_image(
     assert changed is True
     assert item.image_url == "https://cdn.example.com/page-hero.jpg"
     assert item.canonical_url == "https://example.com/story"
+
+
+def test_refresh_existing_article_metadata_uses_llm_fallback_when_metadata_has_no_image(
+    monkeypatch,
+):
+    hydrator = ArticleHydrationService()
+    item = hydrator.build_article_stub(
+        source_url="https://example.com/story",
+        title="Recovered title",
+        image_url=None,
+    )
+    item.canonical_url = "https://example.com/story"
+
+    monkeypatch.setattr(
+        hydrator,
+        "fetch_article_page_metadata",
+        lambda article_url: SimpleNamespace(
+            canonical_url=article_url,
+            image_url=None,
+            image_source="none",
+        ),
+    )
+    monkeypatch.setattr(
+        hydrator,
+        "extract_article_image_with_llm",
+        lambda **_kwargs: "https://cdn.example.com/story-hero.jpg",
+    )
+
+    changed = hydrator.refresh_existing_article_metadata(
+        item,
+        source_url="https://example.com/story",
+        rss_image_url=None,
+    )
+
+    assert changed is True
+    assert item.image_url == "https://cdn.example.com/story-hero.jpg"
+
+
+def test_extract_article_image_with_llm_validates_url_from_document(monkeypatch):
+    from app.extraction.fetcher import FetchResult
+
+    llm_client = MagicMock()
+    llm_client.extract_article_image_url.return_value = "/images/hero.jpg?fit=cover"
+    hydrator = ArticleHydrationService(llm_client=llm_client)
+
+    def fake_fetch(url):
+        if url == "https://example.com/story":
+            return FetchResult(
+                url=url,
+                status_code=200,
+                html=(
+                    "<html><head><title>Story</title></head><body><article>"
+                    '<img src="/images/hero.jpg?fit=cover" alt="Lead image" />'
+                    "</article></body></html>"
+                ),
+                content_type="text/html",
+            )
+        if url == "https://example.com/images/hero.jpg?fit=cover":
+            return FetchResult(
+                url=url,
+                status_code=200,
+                html="",
+                content_type="image/jpeg",
+            )
+        raise AssertionError(f"unexpected fetch: {url}")
+
+    monkeypatch.setattr("app.extraction.fetcher.fetch_url", fake_fetch)
+
+    image_url = hydrator.extract_article_image_with_llm(
+        article_url="https://example.com/story",
+        title="Story",
+    )
+
+    assert image_url == "https://example.com/images/hero.jpg?fit=cover"
+    llm_client.extract_article_image_url.assert_called_once()
+
+
+def test_extract_article_image_with_llm_rejects_invented_url(monkeypatch):
+    from app.extraction.fetcher import FetchResult
+
+    llm_client = MagicMock()
+    llm_client.extract_article_image_url.return_value = "https://cdn.example.com/invented.jpg"
+    hydrator = ArticleHydrationService(llm_client=llm_client)
+
+    monkeypatch.setattr(
+        "app.extraction.fetcher.fetch_url",
+        lambda url: FetchResult(
+            url=url,
+            status_code=200,
+            html="<html><body><article><p>No image here.</p></article></body></html>",
+            content_type="text/html",
+        ),
+    )
+
+    image_url = hydrator.extract_article_image_with_llm(
+        article_url="https://example.com/story",
+        title="Story",
+    )
+
+    assert image_url is None
+
+
+def test_refresh_existing_article_metadata_prefers_rss_image_over_weak_page_og(monkeypatch):
+    hydrator = ArticleHydrationService()
+    item = hydrator.build_article_stub(
+        source_url="https://example.com/story",
+        title="Recovered title",
+        image_url="https://cdn.example.com/stale-rss-image.jpg",
+    )
+    item.canonical_url = "https://example.com/story"
+
+    monkeypatch.setattr(
+        hydrator,
+        "fetch_article_page_metadata",
+        lambda article_url: SimpleNamespace(
+            title="Recovered title",
+            canonical_url=article_url,
+            image_url="https://s.yimg.com/kw/assets/engadget-amp-proposed.png",
+            image_source="og",
+        ),
+    )
+
+    changed = hydrator.refresh_existing_article_metadata(
+        item,
+        source_url="https://example.com/story",
+        rss_image_url="https://cdn.example.com/rss-image.jpg",
+        force_reconcile_image=True,
+    )
+
+    assert changed is True
+    assert item.image_url == "https://cdn.example.com/rss-image.jpg"
 
 
 def test_populate_article_summary_sets_summary_topics_and_starters():

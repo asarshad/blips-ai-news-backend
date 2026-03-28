@@ -85,6 +85,10 @@ _GENERIC_URL_KEYWORDS = (
     # restriction pattern — flag for the same backfill-and-unwrap treatment.
     "/.netlify/images",
     "/_gatsby/image",
+    "amp-proposed",
+    "not-found",
+    "not_found",
+    "global-error",
 )
 _EDITORIAL_URL_KEYWORDS = (
     "hero",

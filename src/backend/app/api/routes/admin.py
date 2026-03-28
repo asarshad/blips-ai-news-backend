@@ -58,6 +58,15 @@ class FeatureFlagResponse(BaseModel):
     source: str
 
 
+class ArticleImageRecoveryEvalRequest(BaseModel):
+    """Admin request body for evaluating LLM article image recovery."""
+
+    lookback_days: Optional[int] = None
+    limit: int = 200
+    sample_size: int = 20
+    apply: bool = False
+
+
 @router.get("/ads/config", response_model=AdsConfigAdminResponse)
 def get_ads_config(
     ad_config_service: AdConfigService = Depends(get_ad_config_service),
@@ -365,6 +374,30 @@ def trigger_image_repair():
         return {"status": "ok", "result": result}
     except Exception as e:
         logger.error(f"Image repair failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    finally:
+        db.close()
+
+
+@router.post("/trigger-image-recovery-eval")
+def trigger_image_recovery_eval(payload: ArticleImageRecoveryEvalRequest):
+    """Evaluate or apply LLM recovery on promoted article rows with blank images."""
+    from app.db.base import SessionLocal
+    from app.services.article_image_service import evaluate_llm_article_image_recovery
+
+    db = SessionLocal()
+    try:
+        result = evaluate_llm_article_image_recovery(
+            db,
+            lookback_days=payload.lookback_days,
+            limit=payload.limit,
+            sample_size=payload.sample_size,
+            apply=payload.apply,
+        )
+        return {"status": "ok", "result": result}
+    except Exception as e:
+        db.rollback()
+        logger.error("Image recovery evaluation failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from e
     finally:
         db.close()

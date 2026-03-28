@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
+import re
 from typing import Dict, List, Optional
 
 from redis.exceptions import RedisError
@@ -39,6 +40,11 @@ _TOKEN_COST_PER_1K = {
     "mistral": 0.00025,  # mistral-small blended
     "fake": 0.0,
 }
+
+_IMAGE_URL_RESPONSE_RE = re.compile(
+    r"IMAGE_URL:\s*(?P<value>\S+)",
+    re.IGNORECASE,
+)
 
 
 def normalize_video_summary_output(summary_text: Optional[str]) -> Optional[str]:
@@ -639,6 +645,67 @@ STARTERS: question1 | question2 | question3
         except (RuntimeError, ValueError) as e:
             logger.error(f"Video summarization error: {str(e)}")
             raise
+
+    def extract_article_image_url(
+        self,
+        *,
+        article_url: str,
+        title: str,
+        document: str,
+    ) -> Optional[str]:
+        """Extract the article's own hero image URL from provided page content."""
+        if not self.is_configured():
+            raise RuntimeError(f"{self.get_provider()} API key is not configured")
+
+        prompt = f"""
+Article URL: {article_url}
+Article Title: {title}
+
+You are extracting the primary editorial image URL from the article document below.
+
+Rules:
+- Return only an image URL that is explicitly present in the provided document.
+- Do not invent, guess, search the web, or rewrite a URL.
+- Prefer the article's hero, featured, or lead image.
+- Reject logos, icons, avatars, author photos, trackers, placeholders, thumbnails, and generic social/share images.
+- If no trustworthy editorial image URL is present, return NONE.
+
+Format your response exactly like this:
+IMAGE_URL: <absolute-or-relative-url-from-document-or-NONE>
+
+Article Document:
+{document}
+"""
+
+        try:
+            response = self.chat(
+                messages=[
+                    ChatMessage(
+                        role="system",
+                        content=(
+                            "You extract article hero image URLs from provided page content. "
+                            "Return only URLs present in the supplied document."
+                        ),
+                    ),
+                    ChatMessage(role="user", content=prompt),
+                ],
+                max_tokens=120,
+                temperature=0.1,
+            )
+        except (RuntimeError, ValueError) as e:
+            logger.error(f"Article image extraction error: {str(e)}")
+            raise
+
+        content = (response.content or "").strip()
+        if not content:
+            return None
+
+        match = _IMAGE_URL_RESPONSE_RE.search(content)
+        candidate = match.group("value").strip() if match else content.splitlines()[0].strip()
+        if candidate.upper() == "NONE":
+            return None
+
+        return candidate
 
     def generate_chat_response(
         self,

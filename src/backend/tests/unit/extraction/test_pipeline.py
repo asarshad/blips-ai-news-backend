@@ -242,6 +242,25 @@ class TestRunExtractionWithFetch:
         assert result.image_source == "rss"
 
     @patch(_FETCH_URL_PATCH)
+    def test_pipeline_prefers_rss_image_over_weak_page_og_asset(self, mock_fetch):
+        html = """<!DOCTYPE html>
+<html>
+<head>
+<title>Blocked Variant</title>
+<meta property="og:image" content="https://s.yimg.com/kw/assets/engadget-amp-proposed.png" />
+</head>
+<body><article><p>"""
+        html += " ".join(["content"] * 200)
+        html += """</p></article></body></html>"""
+        mock_fetch.return_value = self._make_fetch_result(html)
+
+        rss = RSSEntryData(image_url="https://cdn.example.com/rss-hero.jpg")
+        result = run_extraction("https://example.com/article", rss_entry=rss)
+
+        assert result.image_url == "https://cdn.example.com/rss-hero.jpg"
+        assert result.image_source == "rss"
+
+    @patch(_FETCH_URL_PATCH)
     def test_fetch_error_falls_back_to_rss(self, mock_fetch):
         from app.extraction.fetcher import FetchResult
 

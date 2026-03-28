@@ -116,6 +116,11 @@ class TestImageExtraction:
         )
         assert is_probably_generic_image_url(proxy)
 
+    def test_engadget_amp_proposed_image_marked_generic(self):
+        assert is_probably_generic_image_url(
+            "https://s.yimg.com/kw/assets/engadget-amp-proposed.png"
+        )
+
     def test_og_image_preferred(self):
         html = _html_with_head(
             '<meta property="og:image" content="https://cdn.example.com/og.jpg" />'

@@ -207,6 +207,34 @@ def test_send_push_now_maps_service_error_to_http_400(monkeypatch):
         raise AssertionError("Expected HTTPException for push send failure")
 
 
+def test_trigger_image_recovery_eval_returns_service_result(monkeypatch):
+    expected = {"scanned": 12, "recovered": 5, "success_rate_percent": 41.7}
+
+    class _FakeSession:
+        def rollback(self):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("app.db.base.SessionLocal", lambda: _FakeSession())
+    monkeypatch.setattr(
+        "app.services.article_image_service.evaluate_llm_article_image_recovery",
+        lambda db, **kwargs: expected,
+    )
+
+    result = admin_module.trigger_image_recovery_eval(
+        admin_module.ArticleImageRecoveryEvalRequest(
+            lookback_days=7,
+            limit=100,
+            sample_size=10,
+            apply=False,
+        )
+    )
+
+    assert result == {"status": "ok", "result": expected}
+
+
 def test_list_content_passes_has_image_filter(monkeypatch):
     _FakeEditorialRepo.last_list_args = None
     monkeypatch.setattr(admin_routes, "EditorialRepository", _FakeEditorialRepo)

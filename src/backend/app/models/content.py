@@ -208,6 +208,8 @@ class ContentItem(Base):
     description = Column(Text, nullable=True)
     content_text = Column(Text, nullable=True)
     image_url = Column(String(2048), nullable=True)
+    article_image_status = Column(String(32), nullable=True, index=True)
+    article_image_checked_at = Column(DateTime, nullable=True, index=True)
     video_url = Column(String(2048), nullable=True)
 
     # AI-generated content (nullable for reels)

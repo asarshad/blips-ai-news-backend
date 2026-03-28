@@ -48,3 +48,23 @@ def test_mistral_client_initializes_with_timeout_ms():
 
             mock_constructor.assert_called_once()
             assert mock_constructor.call_args.kwargs["timeout_ms"] == 30000
+
+
+def test_extract_article_image_url_uses_strict_extract_only_prompt():
+    from types import SimpleNamespace
+
+    from app.integrations.llm_client import LLMClient
+
+    client = LLMClient(provider="openai", api_key="sk-test-fake-key-12345678901234567890")
+    client.chat = Mock(return_value=SimpleNamespace(content="IMAGE_URL: /images/hero.jpg"))
+
+    image_url = client.extract_article_image_url(
+        article_url="https://example.com/story",
+        title="Story",
+        document='MEDIA: <img src="/images/hero.jpg" alt="Hero" />',
+    )
+
+    prompt = client.chat.call_args.kwargs["messages"][1].content
+    assert image_url == "/images/hero.jpg"
+    assert "Do not invent, guess, search the web, or rewrite a URL." in prompt
+    assert "Return only an image URL that is explicitly present in the provided document." in prompt

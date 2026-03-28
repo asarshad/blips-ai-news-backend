@@ -120,6 +120,8 @@ def _build_rss_article_value(
         "description": stub.description,
         "content_text": stub.content_text,
         "image_url": stub.image_url,
+        "article_image_status": stub.article_image_status,
+        "article_image_checked_at": stub.article_image_checked_at,
         "video_url": stub.video_url,
         "summary": stub.summary,
         "ai_processed": stub.ai_processed,

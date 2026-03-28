@@ -34,6 +34,8 @@ class TestArticlesFeedReadiness:
             promotion_reason=None,
             source_url="https://example.com/article",
             canonical_url="https://example.com/article",
+            image_url="https://cdn.example.com/article.jpg",
+            article_image_status="VERIFIED",
             ai_processed=False,
             summary=None,
         )

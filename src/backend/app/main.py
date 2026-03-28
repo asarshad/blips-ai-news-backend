@@ -311,6 +311,7 @@ app.add_middleware(
         "X-Admin-Key",
         "X-Admin-Share-Token",
         "X-Device-ID",
+        "X-Device-Country",
     ],
 )
 

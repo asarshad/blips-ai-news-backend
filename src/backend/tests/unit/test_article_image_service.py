@@ -51,6 +51,7 @@ def test_repair_article_image_metadata_backfills_recent_article_rows(monkeypatch
     assert result["updated"] == 1
     assert repaired.image_url == "https://cdn.example.com/hero.jpg"
     assert repaired.canonical_url == "https://example.com/canonical-story"
+    assert repaired.article_image_status == "VERIFIED"
 
 
 def test_repair_article_image_metadata_skips_when_no_metadata_found(monkeypatch):
@@ -82,9 +83,111 @@ def test_repair_article_image_metadata_skips_when_no_metadata_found(monkeypatch)
     untouched = db.get(ContentItem, item.id)
 
     assert result["scanned"] == 1
-    assert result["updated"] == 0
+    assert result["updated"] == 1
+    assert result["verified_missing"] == 1
     assert untouched.image_url is None
     assert untouched.canonical_url is None
+    assert untouched.article_image_status == "MISSING"
+
+
+def test_repair_article_image_metadata_uses_llm_fallback_when_metadata_has_no_image(
+    monkeypatch,
+):
+    engine = create_engine("sqlite:///:memory:")
+    ContentItem.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/story",
+        canonical_url="https://example.com/story",
+        published_at=datetime(2026, 3, 20, 10, 0, 0),
+        title="Fallback image available via LLM",
+        curation_status=ContentStatus.PROMOTED,
+        created_at=datetime(2026, 3, 20, 10, 5, 0),
+        updated_at=datetime(2026, 3, 20, 10, 5, 0),
+    )
+    db.add(item)
+    db.commit()
+
+    monkeypatch.setattr(
+        article_image_service,
+        "fetch_article_page_metadata",
+        lambda article_url: PageMetadata(
+            canonical_url=article_url,
+            image_url=None,
+            image_source="none",
+        ),
+    )
+    monkeypatch.setattr(
+        "app.article_hydration.ArticleHydrationService.extract_article_image_with_llm",
+        lambda self, **_kwargs: "https://cdn.example.com/hero.jpg",
+    )
+
+    result = article_image_service.repair_article_image_metadata(db, lookback_days=14, limit=50)
+    repaired = db.get(ContentItem, item.id)
+
+    assert result["scanned"] == 1
+    assert result["updated"] == 1
+    assert result["filled_missing"] == 1
+    assert repaired.image_url == "https://cdn.example.com/hero.jpg"
+    assert repaired.article_image_status == "VERIFIED"
+
+
+def test_evaluate_llm_article_image_recovery_reports_success_rate(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    ContentItem.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    first = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/one",
+        canonical_url="https://example.com/one",
+        published_at=datetime(2026, 3, 20, 10, 0, 0),
+        title="One",
+        curation_status=ContentStatus.PROMOTED,
+        created_at=datetime(2026, 3, 20, 10, 5, 0),
+        updated_at=datetime(2026, 3, 20, 10, 5, 0),
+    )
+    second = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/two",
+        canonical_url="https://example.com/two",
+        published_at=datetime(2026, 3, 20, 9, 0, 0),
+        title="Two",
+        curation_status=ContentStatus.PROMOTED,
+        created_at=datetime(2026, 3, 20, 9, 5, 0),
+        updated_at=datetime(2026, 3, 20, 9, 5, 0),
+    )
+    db.add_all([first, second])
+    db.commit()
+
+    monkeypatch.setattr(
+        "app.article_hydration.ArticleHydrationService.extract_article_image_with_llm",
+        lambda self, article_url, title: (
+            "https://cdn.example.com/recovered.jpg" if article_url.endswith("/one") else None
+        ),
+    )
+
+    result = article_image_service.evaluate_llm_article_image_recovery(
+        db,
+        lookback_days=14,
+        limit=50,
+        sample_size=5,
+        apply=False,
+    )
+
+    assert result["scanned"] == 2
+    assert result["recovered"] == 1
+    assert result["not_recovered"] == 1
+    assert result["applied"] == 0
+    assert result["success_rate_percent"] == 50.0
+    assert result["domain_breakdown"][0]["host"] == "example.com"
 
 
 def test_repair_article_image_metadata_replaces_generic_images(monkeypatch):
@@ -130,6 +233,7 @@ def test_repair_article_image_metadata_replaces_generic_images(monkeypatch):
     assert result["updated"] == 1
     assert result["replaced_generic"] == 1
     assert repaired.image_url == "https://cdn.example.com/article-hero.jpg"
+    assert repaired.article_image_status == "VERIFIED"
 
 
 def test_repair_article_image_metadata_replaces_suspicious_images(monkeypatch):
@@ -171,6 +275,7 @@ def test_repair_article_image_metadata_replaces_suspicious_images(monkeypatch):
     assert result["updated"] == 1
     assert result["replaced_suspicious"] == 1
     assert repaired.image_url == "https://cdn.example.com/article-hero.jpg"
+    assert repaired.article_image_status == "VERIFIED"
 
 
 def test_fetch_article_page_metadata_uses_final_fetched_url_for_relative_assets(monkeypatch):

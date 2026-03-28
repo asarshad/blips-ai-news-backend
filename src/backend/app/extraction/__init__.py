@@ -13,11 +13,27 @@ Sub-modules:
   - pipeline:      orchestrates full extraction and returns ExtractionResult
 """
 
-from app.extraction.pipeline import ExtractionResult, ExtractionStatus, ImageStatus, run_extraction
+from __future__ import annotations
 
-__all__ = [
-    "ExtractionResult",
-    "ExtractionStatus",
-    "ImageStatus",
-    "run_extraction",
-]
+from typing import Any
+
+__all__ = ["ExtractionResult", "ExtractionStatus", "ImageStatus", "run_extraction"]
+
+
+def __getattr__(name: str) -> Any:
+    if name in __all__:
+        from app.extraction.pipeline import (
+            ExtractionResult,
+            ExtractionStatus,
+            ImageStatus,
+            run_extraction,
+        )
+
+        exports = {
+            "ExtractionResult": ExtractionResult,
+            "ExtractionStatus": ExtractionStatus,
+            "ImageStatus": ImageStatus,
+            "run_extraction": run_extraction,
+        }
+        return exports[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

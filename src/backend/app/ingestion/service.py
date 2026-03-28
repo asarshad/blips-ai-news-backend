@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.article_hydration import (
     ArticleHydrationService,
+    finalize_article_image_verification,
 )
 from app.clustering.dedupe import compute_dedupe_key, compute_title_simhash
 from app.clustering.service import ClusteringService
@@ -45,7 +46,11 @@ from app.models.content import ContentItem, ContentStatus, ContentType
 from app.ranking.quality import compute_source_weight
 from app.ranking.service import ScoringService
 from app.repositories.content_repo import ContentItemRepository
-from app.services.content_readiness import queue_content_ready_event, seed_content_readiness
+from app.services.content_readiness import (
+    queue_content_ready_event,
+    seed_content_readiness,
+    sync_content_readiness,
+)
 from app.services.video_discovery_provenance import build_discovered_via
 from app.video_surface_rules import classify_video_like_item
 
@@ -272,6 +277,8 @@ class IngestionPipeline:
             return False
 
         try:
+            finalize_article_image_verification(existing_item)
+            sync_content_readiness(self.db, existing_item)
             self.db.add(existing_item)
             self.db.commit()
             self.db.refresh(existing_item)

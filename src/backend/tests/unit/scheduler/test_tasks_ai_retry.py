@@ -60,6 +60,7 @@ def test_process_ai_summaries_uses_article_hydrator_for_articles(monkeypatch):
     monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
     monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: _FakeStats())
     monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tasks_ai_retry, "_run_article_image_verification", lambda *_a, **_k: {})
     monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
     monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
     monkeypatch.setattr(
@@ -121,6 +122,7 @@ def test_process_ai_summaries_retries_short_article_summaries(monkeypatch):
     monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
     monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: _FakeStats())
     monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tasks_ai_retry, "_run_article_image_verification", lambda *_a, **_k: {})
     monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
     monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
     monkeypatch.setattr(
@@ -184,6 +186,7 @@ def test_process_ai_summaries_retries_long_article_summaries(monkeypatch):
     monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
     monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: _FakeStats())
     monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tasks_ai_retry, "_run_article_image_verification", lambda *_a, **_k: {})
     monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
     monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
     monkeypatch.setattr(
@@ -238,6 +241,7 @@ def test_process_ai_summaries_skips_empty_article_input_without_error(monkeypatc
     monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
     monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: stats)
     monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tasks_ai_retry, "_run_article_image_verification", lambda *_a, **_k: {})
     monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
     monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
     monkeypatch.setattr(
@@ -308,6 +312,7 @@ def test_process_ai_summaries_persists_extracted_article_fields_before_summary(m
     monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
     monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: _FakeStats())
     monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tasks_ai_retry, "_run_article_image_verification", lambda *_a, **_k: {})
     monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
     monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
     monkeypatch.setattr(
@@ -358,6 +363,7 @@ def test_process_ai_summaries_rejects_short_video_summary(monkeypatch):
     monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
     monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: _FakeStats())
     monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tasks_ai_retry, "_run_article_image_verification", lambda *_a, **_k: {})
     monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
     monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
     monkeypatch.setattr(tasks_ai_retry.time, "sleep", lambda *_args, **_kwargs: None)

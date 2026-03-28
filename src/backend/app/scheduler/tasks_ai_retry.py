@@ -40,8 +40,8 @@ def process_ai_summaries():
     db = SessionLocal()
     try:
         from app.article_hydration import ArticleHydrationService, bounded_article_summary_text
+        from app.integrations import LLMClient
         from app.integrations.llm_client import (
-            LLMClient,
             is_video_summary_acceptable,
             normalize_video_summary_output,
         )
@@ -173,6 +173,8 @@ def process_ai_summaries():
                 continue
 
         _backfill_starters(db, llm_client, stats)
+        image_repair = _run_article_image_verification(db)
+        logger.info("[ai_retry] Article image verification: %s", image_repair)
         from app.scheduler.tasks_content_events import run_content_event_dispatch_job
 
         run_content_event_dispatch_job()
@@ -279,3 +281,15 @@ def _backfill_starters(db: Session, llm_client, stats) -> None:
         except Exception as e:
             db.rollback()
             logger.warning(f"[ai_retry] Starters backfill failed for {item.id}: {e}")
+
+
+def _run_article_image_verification(db: Session) -> dict[str, int]:
+    """Run the lightweight article image verification pass for recent promoted rows."""
+    from app.services.article_image_service import repair_article_image_metadata
+
+    return repair_article_image_metadata(
+        db,
+        lookback_days=3,
+        limit=max(50, MAX_ITEMS_PER_RUN),
+        include_generic=True,
+    )

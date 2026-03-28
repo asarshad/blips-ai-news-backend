@@ -31,6 +31,10 @@ _WEAK_URL_KEYWORDS = (
 _SOURCE_BASE_SCORES = {
     "extraction": 100.0,
     "page_metadata": 92.0,
+    "page_metadata_body": 92.0,
+    "page_metadata_og": 74.0,
+    "page_metadata_twitter": 72.0,
+    "page_metadata_other": 76.0,
     "prepared": 90.0,
     "rss_content": 84.0,
     "rss_summary": 82.0,
@@ -39,6 +43,7 @@ _SOURCE_BASE_SCORES = {
     "rss_media_content": 76.0,
     "rss_enclosure": 74.0,
     "rss_media_thumbnail": 68.0,
+    "llm_extract": 88.0,
     "direct": 72.0,
     "existing": 86.0,
 }
@@ -59,6 +64,20 @@ class RankedArticleImageCandidate:
     url: str
     source: str
     score: float
+
+
+def page_metadata_candidate_source(image_source: Optional[str]) -> str:
+    """Return a selector source label that reflects the page metadata origin."""
+    normalized = (image_source or "").strip().lower()
+    if normalized == "body":
+        return "page_metadata_body"
+    if normalized == "og":
+        return "page_metadata_og"
+    if normalized == "twitter":
+        return "page_metadata_twitter"
+    if normalized:
+        return "page_metadata_other"
+    return "page_metadata"
 
 
 def rank_article_image_candidates(

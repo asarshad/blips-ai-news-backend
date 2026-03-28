@@ -22,6 +22,8 @@ def test_article_requires_ai_summary_to_be_ready():
         promotion_reason=None,
         source_url="https://example.com/article",
         canonical_url="https://example.com/article",
+        image_url="https://cdn.example.com/article.jpg",
+        article_image_status="VERIFIED",
         ai_processed=False,
         summary=None,
     )
@@ -52,6 +54,27 @@ def test_video_is_ready_without_summary_when_core_fields_exist():
     assert decision.surfaces == ("videos",)
 
 
+def test_article_waits_for_image_verification_before_becoming_ready():
+    article = SimpleNamespace(
+        id=8,
+        type=ContentType.ARTICLE,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        promotion_reason=None,
+        source_url="https://example.com/article",
+        canonical_url="https://example.com/article",
+        image_url="https://cdn.example.com/article.jpg",
+        article_image_status="PENDING",
+        ai_processed=True,
+        summary="This article is summarized but still awaiting image verification.",
+    )
+
+    decision = evaluate_content_readiness(article)
+
+    assert decision.status == ContentReadinessStatus.PENDING
+    assert decision.reason == "awaiting_article_image_verification"
+
+
 def test_sync_content_readiness_enqueues_ready_event_once():
     now = datetime(2026, 3, 23, 18, 0, 0)
     db = MagicMock()
@@ -63,6 +86,8 @@ def test_sync_content_readiness_enqueues_ready_event_once():
         promotion_reason=None,
         source_url="https://example.com/ready",
         canonical_url="https://example.com/ready",
+        image_url="https://cdn.example.com/ready.jpg",
+        article_image_status="VERIFIED",
         ai_processed=True,
         summary="This article now has a real summary and is ready for clients.",
         readiness_status=ContentReadinessStatus.PENDING.value,

@@ -176,6 +176,16 @@ class TestProductionPosture:
         assert s.ENV == "dev"
         assert s.LOG_LEVEL == "INFO"
 
+    def test_cors_allows_device_country_header(self):
+        from app.main import app
+
+        cors = next(
+            middleware
+            for middleware in app.user_middleware
+            if middleware.cls.__name__ == "CORSMiddleware"
+        )
+        assert "X-Device-Country" in cors.kwargs["allow_headers"]
+
 
 # ── LLM retry config ─────────────────────────────────────────────────
 

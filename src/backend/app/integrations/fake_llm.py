@@ -98,6 +98,9 @@ class FakeLLMClient(BaseLLMClient):
         if "conversation starter" in combined or "suggested question" in combined:
             return self._generate_starters_response(user_message)
 
+        if "image_url:" in combined and "editorial image url" in combined:
+            return self._generate_image_extraction_response(user_message)
+
         # Detect summarization request
         if "summary" in combined or "summarize" in combined:
             return self._generate_summary_response(user_message)
@@ -150,6 +153,17 @@ TAGS: technology, innovation, ai, software, testing"""
     def _generate_chat_response(self, user_message: str) -> str:
         """Generate chat discussion response."""
         return "That's an interesting question about this article. Based on the content, here are some key points to consider:\n\n1. The main topic relates to current technology trends.\n2. There are potential implications for the broader industry.\n3. Experts have varying opinions on the long-term impact.\n\nWould you like me to elaborate on any of these points?"
+
+    def _generate_image_extraction_response(self, user_message: str) -> str:
+        """Return the first plausible image URL mentioned in the prompt."""
+        match = re.search(
+            r"https?://[^\s\"'<>]+?\.(?:jpg|jpeg|png|webp|gif|avif)(?:\?[^\s\"'<>]*)?",
+            user_message,
+            re.IGNORECASE,
+        )
+        if match:
+            return f"IMAGE_URL: {match.group(0)}"
+        return "IMAGE_URL: NONE"
 
 
 def generate_starters_for_content(
