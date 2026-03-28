@@ -121,6 +121,13 @@ class TestImageExtraction:
             "https://s.yimg.com/kw/assets/engadget-amp-proposed.png"
         )
 
+    def test_silicon_filename_not_mistaken_for_icon(self):
+        assert not is_probably_generic_image_url(
+            "https://spectrum.ieee.org/media-library/"
+            "a-woman-in-a-cleansuit-carefully-inspecting-a-semiconductor-wafer-in-a-lab.jpg"
+            "?id=65416186&width=1200&height=600&coordinates=0%2C625%2C0%2C625"
+        )
+
     def test_og_image_preferred(self):
         html = _html_with_head(
             '<meta property="og:image" content="https://cdn.example.com/og.jpg" />'

@@ -76,6 +76,12 @@ _GENERIC_URL_KEYWORDS = (
     # Also catches proxied CDN URLs (e.g. Yahoo image proxy) wrapping user-uploaded paths.
     "user-uploaded",
     "user_uploaded",
+    "amp-proposed",
+    "not-found",
+    "not_found",
+    "global-error",
+)
+_GENERIC_URL_SUBSTRINGS = (
     # Next.js image optimisation proxy URLs (/_next/image?url=...) are tied to
     # the origin server and often blocked for third-party hotlinking.
     # Flag them so the backfill re-fetches; validate_image_url will unwrap to
@@ -85,10 +91,16 @@ _GENERIC_URL_KEYWORDS = (
     # restriction pattern — flag for the same backfill-and-unwrap treatment.
     "/.netlify/images",
     "/_gatsby/image",
-    "amp-proposed",
-    "not-found",
-    "not_found",
-    "global-error",
+)
+def _generic_keyword_pattern(keyword: str) -> re.Pattern[str]:
+    escaped = re.escape(keyword)
+    escaped = escaped.replace(r"\-", "[^a-z0-9]+").replace(r"\_", "[^a-z0-9]+")
+    return re.compile(rf"(^|[^a-z0-9]){escaped}([^a-z0-9]|$)")
+
+
+_GENERIC_URL_KEYWORD_PATTERNS = tuple(
+    _generic_keyword_pattern(keyword)
+    for keyword in _GENERIC_URL_KEYWORDS
 )
 _EDITORIAL_URL_KEYWORDS = (
     "hero",
@@ -294,7 +306,10 @@ def is_probably_generic_image_url(url: Optional[str]) -> bool:
     if not haystack:
         return False
 
-    if any(keyword in haystack for keyword in _GENERIC_URL_KEYWORDS):
+    if any(keyword in haystack for keyword in _GENERIC_URL_SUBSTRINGS):
+        return True
+
+    if any(pattern.search(haystack) for pattern in _GENERIC_URL_KEYWORD_PATTERNS):
         return True
 
     filename = (parsed.path.rsplit("/", 1)[-1] or "").lower()

@@ -717,6 +717,7 @@ class ArticleHydrationService:
 
         try:
             from app.extraction.fetcher import fetch_url
+            from app.extraction.metadata import extract_metadata
 
             fetch = fetch_url(normalized_article_url)
             if fetch.error or not fetch.html:
@@ -734,6 +735,40 @@ class ArticleHydrationService:
                 return ArticleImageLLMExtractionResult(
                     image_url=None,
                     reason="document_empty",
+                )
+
+            fresh_metadata = extract_metadata(
+                fetch.html,
+                fetch.url or normalized_article_url,
+            )
+            fresh_metadata_image = select_best_article_image(
+                [
+                    ArticleImageCandidate(
+                        url=getattr(fresh_metadata, "image_url", None),
+                        source=page_metadata_candidate_source(
+                            getattr(fresh_metadata, "image_source", None)
+                        ),
+                    ),
+                ]
+            )
+            if fresh_metadata_image:
+                verified_metadata_image = self._confirm_fetched_image_url(fresh_metadata_image)
+                if verified_metadata_image:
+                    return ArticleImageLLMExtractionResult(
+                        image_url=verified_metadata_image,
+                        reason="fresh_page_metadata",
+                        raw_candidate_url=getattr(fresh_metadata, "image_url", None),
+                    )
+
+            document_candidate_image = self._extract_article_image_from_document_candidates(
+                html=fetch.html,
+                article_url=fetch.url or normalized_article_url,
+            )
+            if document_candidate_image:
+                return ArticleImageLLMExtractionResult(
+                    image_url=document_candidate_image,
+                    reason="document_candidate",
+                    raw_candidate_url=document_candidate_image,
                 )
 
             try:
@@ -846,6 +881,102 @@ class ArticleHydrationService:
             html=html,
             article_url=article_url,
         ).image_url
+
+    @staticmethod
+    def _confirm_fetched_image_url(candidate_url: Optional[str]) -> Optional[str]:
+        """Return the candidate only when it resolves to an actual image response."""
+        from app.extraction.fetcher import fetch_url
+
+        candidate = (candidate_url or "").strip()
+        if not candidate:
+            return None
+
+        fetch = fetch_url(candidate)
+        if fetch.error or fetch.status_code >= 400:
+            return None
+
+        content_type = (fetch.content_type or "").lower()
+        if "image/" not in content_type:
+            return None
+
+        return candidate
+
+    @staticmethod
+    def _extract_article_image_from_document_candidates(
+        *,
+        html: str,
+        article_url: str,
+    ) -> Optional[str]:
+        """Try direct document image candidates before falling back to the LLM."""
+        from app.extraction.metadata import _best_srcset_candidate, _looks_like_editorial_image
+
+        cleaned_html = (html or "").strip()
+        if not cleaned_html:
+            return None
+
+        try:
+            soup = BeautifulSoup(cleaned_html, "html.parser")
+        except Exception:
+            return None
+
+        seen_roots: set[int] = set()
+        for root in (soup.find("article"), soup.find("main"), soup.body, soup):
+            if root is None or id(root) in seen_roots:
+                continue
+            seen_roots.add(id(root))
+            for tag in root.find_all(["picture", "img", "source"], limit=30):
+                for candidate in ArticleHydrationService._document_tag_candidate_urls(
+                    tag,
+                    best_srcset_candidate=_best_srcset_candidate,
+                ):
+                    if not candidate or not _looks_like_editorial_image(tag, candidate):
+                        continue
+                    validated = (
+                        ArticleHydrationService._validate_llm_extracted_image_url_with_diagnostics(
+                            raw_candidate_url=candidate,
+                            html=cleaned_html,
+                            article_url=article_url,
+                        )
+                    )
+                    if validated.image_url:
+                        return validated.image_url
+
+        return None
+
+    @staticmethod
+    def _document_tag_candidate_urls(tag, *, best_srcset_candidate) -> list[str]:
+        """Collect raw candidate URLs from a media tag in priority order."""
+        nodes = []
+        if getattr(tag, "name", None) == "picture":
+            nodes.extend(tag.find_all("source"))
+            img = tag.find("img")
+            if img is not None:
+                nodes.append(img)
+        else:
+            nodes.append(tag)
+
+        candidates: list[str] = []
+        for node in nodes:
+            for attr in (
+                "data-src",
+                "data-lazy-src",
+                "data-original",
+                "data-image",
+                "data-url",
+                "data-srcset",
+                "srcset",
+                "src",
+            ):
+                value = node.get(attr)
+                if not value or not str(value).strip():
+                    continue
+                if attr.endswith("srcset"):
+                    candidate = best_srcset_candidate(str(value))
+                    if candidate:
+                        candidates.append(candidate)
+                    continue
+                candidates.append(str(value).strip())
+        return candidates
 
     @staticmethod
     def _validate_llm_extracted_image_url_with_diagnostics(

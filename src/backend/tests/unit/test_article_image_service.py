@@ -177,7 +177,7 @@ def test_evaluate_llm_article_image_recovery_reports_success_rate(monkeypatch):
             image_url="https://cdn.example.com/recovered.jpg"
             if article_url.endswith("/one")
             else None,
-            reason="recovered" if article_url.endswith("/one") else "llm_returned_none",
+            reason="fresh_page_metadata" if article_url.endswith("/one") else "llm_returned_none",
         ),
     )
 
@@ -194,7 +194,7 @@ def test_evaluate_llm_article_image_recovery_reports_success_rate(monkeypatch):
     assert result["not_recovered"] == 1
     assert result["applied"] == 0
     assert result["success_rate_percent"] == 50.0
-    assert result["reason_counts"] == {"llm_returned_none": 1, "recovered": 1}
+    assert result["reason_counts"] == {"fresh_page_metadata": 1, "llm_returned_none": 1}
     assert result["domain_breakdown"][0]["host"] == "example.com"
 
 

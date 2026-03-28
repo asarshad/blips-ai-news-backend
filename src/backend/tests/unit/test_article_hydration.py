@@ -224,7 +224,49 @@ def test_extract_article_image_with_llm_validates_url_from_document(monkeypatch)
     )
 
     assert image_url == "https://example.com/images/hero.jpg?fit=cover"
-    llm_client.extract_article_image_url.assert_called_once()
+    llm_client.extract_article_image_url.assert_not_called()
+
+
+def test_extract_article_image_with_llm_uses_fresh_page_metadata_before_llm(monkeypatch):
+    from app.extraction.fetcher import FetchResult
+
+    llm_client = MagicMock()
+    hydrator = ArticleHydrationService(llm_client=llm_client)
+
+    def fake_fetch(url):
+        if url == "https://example.com/story":
+            return FetchResult(
+                url=url,
+                status_code=200,
+                html=(
+                    "<html><head>"
+                    '<meta property="og:image" content="https://example.com/images/hero.jpg" />'
+                    "</head><body><article><p>Story</p></article></body></html>"
+                ),
+                content_type="text/html",
+            )
+        if url == "https://example.com/images/hero.jpg":
+            return FetchResult(
+                url=url,
+                status_code=200,
+                html="",
+                content_type="image/jpeg",
+            )
+        raise AssertionError(f"unexpected fetch: {url}")
+
+    monkeypatch.setattr(
+        "app.extraction.fetcher.fetch_url",
+        fake_fetch,
+    )
+
+    result = hydrator.extract_article_image_with_llm_diagnostics(
+        article_url="https://example.com/story",
+        title="Story",
+    )
+
+    assert result.image_url == "https://example.com/images/hero.jpg"
+    assert result.reason == "fresh_page_metadata"
+    llm_client.extract_article_image_url.assert_not_called()
 
 
 def test_extract_article_image_with_llm_accepts_root_like_relative_asset_paths(monkeypatch):
@@ -282,6 +324,7 @@ def test_extract_article_image_with_llm_accepts_root_like_relative_asset_paths(m
         image_url
         == "https://www.infoq.com/news/2026/03/qcon-london-foxwell-dev-teams/en/resources/hero.jpg"
     )
+    llm_client.extract_article_image_url.assert_not_called()
 
 
 def test_extract_article_image_with_llm_rejects_invented_url(monkeypatch):
