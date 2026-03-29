@@ -46,7 +46,7 @@ from app.core.auth import (
 )
 from app.core.config import settings
 from app.core.dependencies import get_db, get_redis
-from app.domain.editorial.service import EditorialService
+from app.domain.editorial.service import EditorialApprovalBlockedError, EditorialService
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.push import PushSendLog
 from app.repositories.editorial_repo import EditorialRepository
@@ -548,6 +548,42 @@ def _readiness_badge(item: ContentItem) -> str:
     readiness_status = (getattr(item, "readiness_status", "") or "PENDING").strip().upper()
     tone = "green" if readiness_status == "READY" else "yellow"
     return _badge(f"ready {readiness_status.lower()}", tone)
+
+
+def _promotion_reason_code(reason: Any, prefix: str) -> str:
+    if not isinstance(reason, str):
+        return ""
+    for raw_part in reason.split("|"):
+        part = raw_part.strip()
+        if part.startswith(prefix):
+            return part[len(prefix) :]
+    return ""
+
+
+def _promotion_policy_badges(item: ContentItem) -> str:
+    reason = getattr(item, "promotion_reason", None)
+    blocked = _promotion_reason_code(reason, "blocked=")
+    override = _promotion_reason_code(reason, "override_block=")
+    badges: list[str] = []
+    if blocked:
+        badges.append(_badge(f"blocked {blocked}", "yellow"))
+    if override:
+        badges.append(_badge(f"override {override}", "purple"))
+    return " ".join(badges)
+
+
+def _promotion_reason_markup(item: ContentItem) -> str:
+    reason = getattr(item, "promotion_reason", None)
+    if not isinstance(reason, str) or not reason.strip():
+        return "—"
+    badges = _promotion_policy_badges(item)
+    escaped = _esc(reason)
+    if badges:
+        return (
+            f'<div class="flex flex-wrap gap-1">{badges}</div>'
+            f'<div class="mt-1 break-all font-mono text-[11px] text-slate-500">{escaped}</div>'
+        )
+    return f'<div class="break-all font-mono text-[11px] text-slate-500">{escaped}</div>'
 
 
 def _push_log_summaries(db: Session, content_ids: list[int]) -> dict[int, dict[str, Any]]:
@@ -2289,6 +2325,7 @@ def ui_review_queue(
         discovered_label = _esc(getattr(item, "discovered_via", None) or "—")
         signal_hits = str(getattr(item, "signal_hits", 0) or 0)
         source_label = _esc(item.source or "—")
+        policy_badges = _promotion_policy_badges(item)
         title = _esc((item.title or "Untitled")[:85])
         item_link = (
             "/api/v1/admin/ui/review?"
@@ -2310,6 +2347,7 @@ def ui_review_queue(
           <td class="px-3 py-2 text-sm">
             <a href="{item_link}" class="text-blue-600 hover:underline font-medium">{title}</a>
             <div class="text-xs text-gray-500 mt-0.5">{source_label}</div>
+            {f'<div class="mt-1 flex flex-wrap gap-1">{policy_badges}</div>' if policy_badges else ""}
           </td>
           <td class="px-3 py-2 text-xs text-gray-600">{item.type.value if item.type else "—"}</td>
           <td class="px-3 py-2 text-xs font-mono text-gray-700">{score}</td>
@@ -2330,6 +2368,7 @@ def ui_review_queue(
                 {_badge(item.type.value if item.type else "—", "gray")}
                 {_badge(f"score {score}", "blue")}
                 {_badge(f"hits {signal_hits}", "yellow")}
+                {policy_badges}
               </div>
               <div class="mt-2 text-xs text-gray-500">
                 First seen {first_seen_str} · Published {published}
@@ -2396,6 +2435,9 @@ def ui_review_queue(
             selected_status += " " + _badge("suppressed", "red")
         if (selected_item.editorial_boost or 0) > 0:
             selected_status += " " + _badge(f"boost {selected_item.editorial_boost}", "purple")
+        selected_policy_badges = _promotion_policy_badges(selected_item)
+        if selected_policy_badges:
+            selected_status += " " + selected_policy_badges
 
         selected_url = _esc(selected_item.source_url or "")
         selected_description = (
@@ -2437,6 +2479,11 @@ def ui_review_queue(
               <div class="flex justify-between gap-3"><span class="text-gray-500">Hits</span><span class="text-gray-800">{selected_item.signal_hits or 0}</span></div>
               <div class="flex justify-between gap-3"><span class="text-gray-500">First seen</span><span class="text-gray-800">{selected_first_seen_str}</span></div>
               <div class="flex justify-between gap-3"><span class="text-gray-500">Published</span><span class="text-gray-800">{selected_pub}</span></div>
+            </div>
+
+            <div>
+              <div class="text-xs uppercase tracking-wide text-gray-500 mb-1">Promotion reason</div>
+              {_promotion_reason_markup(selected_item)}
             </div>
 
             <div>
@@ -2743,27 +2790,33 @@ def ui_review_bulk_action(
 
     applied = 0
     failed = 0
+    blocked = 0
     for content_id in content_ids:
         item = None
-        if action == "approve":
-            item = service.approve_content(
-                content_id,
-                actor=ACTOR,
-                note=clean_note,
-                dispatch_events=False,
-            )
-        elif action == "approve_publish":
-            item = service.approve_and_publish(
-                content_id=content_id,
-                actor=ACTOR,
-                boost_level=bounded_boost,
-                note=clean_note,
-                dispatch_events=False,
-            )
-        elif action == "hold":
-            item = repo.hold(content_id, actor=ACTOR, note=clean_note)
-        elif action == "reject":
-            item = repo.reject(content_id, actor=ACTOR, note=clean_note)
+        try:
+            if action == "approve":
+                item = service.approve_content(
+                    content_id,
+                    actor=ACTOR,
+                    note=clean_note,
+                    dispatch_events=False,
+                )
+            elif action == "approve_publish":
+                item = service.approve_and_publish(
+                    content_id=content_id,
+                    actor=ACTOR,
+                    boost_level=bounded_boost,
+                    note=clean_note,
+                    dispatch_events=False,
+                )
+            elif action == "hold":
+                item = repo.hold(content_id, actor=ACTOR, note=clean_note)
+            elif action == "reject":
+                item = repo.reject(content_id, actor=ACTOR, note=clean_note)
+        except EditorialApprovalBlockedError:
+            blocked += 1
+            failed += 1
+            continue
 
         if item is None:
             failed += 1
@@ -2786,6 +2839,13 @@ def ui_review_bulk_action(
         flash = "Error: unsupported bulk action"
     elif failed == 0:
         flash = f"Bulk action complete: {applied} items {action_label}"
+    elif blocked and applied == 0:
+        flash = f"Error: {blocked} items are still waiting on readiness"
+    elif blocked:
+        flash = (
+            f"Bulk action partial: {applied} items {action_label}; "
+            f"{blocked} still waiting on readiness"
+        )
     else:
         flash = f"Bulk action partial: {applied} succeeded, {failed} failed"
 
@@ -2963,6 +3023,9 @@ def ui_content_list(
         if (i.editorial_boost or 0) > 0:
             badges += _badge(f"boost {i.editorial_boost}", "purple") + " "
         badges += _readiness_badge(i) + " "
+        policy_badges = _promotion_policy_badges(i)
+        if policy_badges:
+            badges += policy_badges + " "
         if not (getattr(i, "image_url", None) or "").strip():
             badges += _badge("no image", "gray") + " "
 
@@ -3328,6 +3391,7 @@ def ui_content_detail(
           {_row("Readiness reason", _esc(describe_readiness_reason(getattr(item, "readiness_reason", None))))}
           {_row("Ready at", item.ready_at.strftime("%Y-%m-%d %H:%M") if getattr(item, "ready_at", None) else "—")}
           {_row("Promotion score", f"{item.promotion_score:.4f}" if getattr(item, "promotion_score", None) else "—")}
+          {_row("Promotion reason", _promotion_reason_markup(item))}
           {_row("Discovered via", _esc(getattr(item, "discovered_via", None) or "—"))}
           {_row("Signal hits", str(getattr(item, "signal_hits", 0) or 0))}
           {_row("Source", _esc(item.source or "—"))}
@@ -3753,7 +3817,16 @@ def ui_promote(
     admin_key: str = Depends(_require_admin_ui_auth),
 ):
     service = EditorialService(db)
-    item = service.promote_content(content_id, actor=ACTOR)
+    try:
+        item = service.promote_content(content_id, actor=ACTOR)
+    except EditorialApprovalBlockedError as exc:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash=f"Promotion blocked: {exc.detail}",
+            next_url=next_path,
+            referer=referer,
+        )
     if not item:
         return _redirect_after_action(
             content_id=content_id,
@@ -3813,7 +3886,16 @@ def ui_approve(
 ):
     service = EditorialService(db)
     clean_note = note.strip() or None
-    item = service.approve_content(content_id, actor=ACTOR, note=clean_note)
+    try:
+        item = service.approve_content(content_id, actor=ACTOR, note=clean_note)
+    except EditorialApprovalBlockedError as exc:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash=f"Approval blocked: {exc.detail}",
+            next_url=next_path,
+            referer=referer,
+        )
     if not item:
         return _redirect_after_action(
             content_id=content_id,
@@ -3948,12 +4030,21 @@ def ui_approve_publish(
     bounded_boost = max(0, min(3, boost_level))
     clean_note = note.strip() or None
     service = EditorialService(db)
-    item = service.approve_and_publish(
-        content_id=content_id,
-        actor=ACTOR,
-        boost_level=bounded_boost,
-        note=clean_note,
-    )
+    try:
+        item = service.approve_and_publish(
+            content_id=content_id,
+            actor=ACTOR,
+            boost_level=bounded_boost,
+            note=clean_note,
+        )
+    except EditorialApprovalBlockedError as exc:
+        return _redirect_after_action(
+            content_id=content_id,
+            admin_key=admin_key,
+            flash=f"Publish blocked: {exc.detail}",
+            next_url=next_path,
+            referer=referer,
+        )
     if not item:
         return _redirect_after_action(
             content_id=content_id,

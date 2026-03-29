@@ -9,7 +9,7 @@ see domain/editorial/service.py for that.
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import and_, desc, func, or_
+from sqlalchemy import and_, asc, case, desc, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.content import ContentItem, ContentStatus, ContentType
@@ -22,6 +22,23 @@ class EditorialRepository:
 
     def __init__(self, db: Session):
         self.db = db
+
+    @staticmethod
+    def _apply_editorial_override_reason(reason: Optional[str]) -> str:
+        parts = []
+        for raw_part in (reason or "").split("|"):
+            part = raw_part.strip()
+            if not part:
+                continue
+            if part.startswith("blocked="):
+                continue
+            if part.startswith("override_block="):
+                continue
+            if part == "preserved=editorial_override":
+                continue
+            parts.append(part)
+        parts.append("preserved=editorial_override")
+        return "|".join(parts)
 
     # ------------------------------------------------------------------
     # Content queries
@@ -182,7 +199,15 @@ class EditorialRepository:
         elif sort_by == "published_at":
             query = query.order_by(desc(ContentItem.published_at))
         else:
+            blocked_last = case(
+                (
+                    func.coalesce(ContentItem.promotion_reason, "").ilike("%blocked=%"),
+                    1,
+                ),
+                else_=0,
+            )
             ordering = [
+                asc(blocked_last),
                 desc(ContentItem.promotion_score).nullslast(),
                 desc(ContentItem.signal_hits),
             ]
@@ -364,6 +389,10 @@ class EditorialRepository:
             item.curation_status = curation_status
         if suppressed is not None:
             item.is_suppressed = suppressed
+        if curation_status == ContentStatus.PROMOTED and not bool(item.is_suppressed):
+            item.promotion_reason = self._apply_editorial_override_reason(
+                getattr(item, "promotion_reason", None)
+            )
         sync_content_readiness(self.db, item)
 
         item.last_modified_by = actor
@@ -433,6 +462,9 @@ class EditorialRepository:
         item.is_suppressed = False
         item.published_at = now
         item.editorial_boost = max(item.editorial_boost or 0, int(boost_level))
+        item.promotion_reason = self._apply_editorial_override_reason(
+            getattr(item, "promotion_reason", None)
+        )
         sync_content_readiness(self.db, item, now=now)
         item.last_modified_by = actor
         item.last_modified_at = now

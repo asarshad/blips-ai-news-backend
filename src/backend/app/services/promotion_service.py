@@ -46,12 +46,13 @@ from app.integrations.youtube_channels import (
     get_channel_by_id,
     get_channel_by_name,
 )
-from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.content import ContentItem, ContentReadinessStatus, ContentStatus, ContentType
 from app.models.video_source import VideoSourceProfile
 from app.ranking.quality import compute_source_weight
 from app.repositories.video_source_repo import VideoSourceProfileRepository
 from app.services.content_readiness import sync_content_readiness
 from app.services.video_content_policy import apply_content_policy
+from app.video_surface_rules import visible_promotion_filter
 
 logger = get_logger(__name__)
 
@@ -463,7 +464,7 @@ def _llm_broad_news_block_reason(item: ContentItem, *, suffix: str) -> str | Non
 
     if (
         tech_relevance == "none"
-        and confidence >= max(0.0, float(settings.VIDEO_TECH_NONE_BLOCK_CONFIDENCE))
+        and confidence >= min(max(0.0, float(settings.VIDEO_TECH_NONE_BLOCK_CONFIDENCE)), 0.50)
     ):
         return f"llm_non_tech_broad_news_{suffix}"
 
@@ -665,6 +666,8 @@ def classify_promotion_block(
             return "off_topic_broad_news_video"
         if any(pattern.search(title) for pattern in _VIDEO_LEAK_PATTERNS):
             return "off_topic_news_video"
+        if broad_news_source and tech_score < 0.18:
+            return "weak_broad_news_video"
         if broad_news_source and story_importance < 0.28 and tech_score < 0.22:
             return "weak_broad_news_video"
         if story_importance < 0.20 and tech_score < 0.38:
@@ -709,7 +712,7 @@ def score_candidate(
     clickbait = compute_clickbait_penalty(item.title or "")
     duplicate_penalty = compute_duplicate_penalty(item.cluster_id, cluster_sizes)
     velocity = compute_velocity_score(getattr(item, "views_per_hour", None))
-    format_fit = min(max(_safe_float(getattr(item, "format_fit_score", None), 0.5), 0.0), 1.0)
+    format_fit = min(max(_safe_float(getattr(item, "format_fit_score", None), 0.0), 0.0), 1.0)
     topics = (
         getattr(item, "topics", None) if isinstance(getattr(item, "topics", None), list) else []
     )
@@ -828,8 +831,10 @@ class PromotionService:
             .filter(
                 ContentItem.type == content_type,
                 ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.readiness_status == ContentReadinessStatus.READY.value,
                 ContentItem.is_suppressed.is_(False),
                 ContentItem.published_at >= cutoff,
+                visible_promotion_filter(),
             )
             .all()
         )
@@ -853,8 +858,10 @@ class PromotionService:
             .filter(
                 ContentItem.type == content_type,
                 ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.readiness_status == ContentReadinessStatus.READY.value,
                 ContentItem.is_suppressed.is_(False),
                 ContentItem.published_at >= cutoff,
+                visible_promotion_filter(),
             )
             .group_by("channel_key")
             .all()
@@ -868,8 +875,10 @@ class PromotionService:
             apply_content_policy(self.db.query(ContentItem))
             .filter(
                 ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.readiness_status == ContentReadinessStatus.READY.value,
                 ContentItem.is_suppressed.is_(False),
                 ContentItem.published_at >= cutoff,
+                visible_promotion_filter(),
             )
             .all()
         )
@@ -1006,6 +1015,9 @@ class PromotionService:
             "llm_mixed_roundup_broad_news_reel",
             "off_topic_broad_news_reel",
             "weak_broad_news_reel",
+            "weak_editorial_reel",
+            "low_story_discovery_reel",
+            "low_signal_official_reel",
         }
         for item in promoted_items:
             item.promotion_score = score_candidate(
@@ -1034,12 +1046,15 @@ class PromotionService:
                 source_profile=source_profile,
             )
             if block_reason:
-                item.promotion_reason = f"{item.promotion_reason}|blocked={block_reason}"
-            if block_reason in demote_reasons:
                 if self._has_editorial_override(item):
-                    item.promotion_reason = f"{item.promotion_reason}|preserved=editorial_override"
+                    item.promotion_reason = (
+                        f"{item.promotion_reason}|override_block={block_reason}|"
+                        "preserved=editorial_override"
+                    )
                 else:
-                    item.curation_status = ContentStatus.CANDIDATE
+                    item.promotion_reason = f"{item.promotion_reason}|blocked={block_reason}"
+            if block_reason in demote_reasons and not self._has_editorial_override(item):
+                item.curation_status = ContentStatus.CANDIDATE
             sync_content_readiness(self.db, item)
             count += 1
         return count

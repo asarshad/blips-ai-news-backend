@@ -7,7 +7,9 @@ from unittest.mock import MagicMock
 from app.models.content import ContentReadinessStatus, ContentStatus, ContentType
 from app.services.content_readiness import (
     CONTENT_READY_EVENT_TYPE,
+    CONTENT_UNREADY_EVENT_TYPE,
     build_content_ready_event_payload,
+    build_content_unready_event_payload,
     evaluate_content_readiness,
     sync_content_readiness,
 )
@@ -100,6 +102,7 @@ def test_sync_content_readiness_enqueues_ready_event_once():
     result = sync_content_readiness(db, article, now=now)
 
     assert result.transitioned_to_ready is True
+    assert result.transitioned_from_ready is False
     assert article.readiness_status == ContentReadinessStatus.READY.value
     assert article.ready_at == now
     queued_event = db.add.call_args[0][0]
@@ -108,6 +111,39 @@ def test_sync_content_readiness_enqueues_ready_event_once():
 
     sync_content_readiness(db, article, now=now)
     assert db.add.call_count == 1
+
+
+def test_sync_content_readiness_enqueues_unready_event_on_ready_regression():
+    now = datetime(2026, 3, 23, 19, 0, 0)
+    db = MagicMock()
+    article = SimpleNamespace(
+        id=4,
+        type=ContentType.ARTICLE,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        promotion_reason=None,
+        source_url="https://example.com/ready",
+        canonical_url="https://example.com/ready",
+        image_url="https://cdn.example.com/ready.jpg",
+        article_image_status="VERIFIED",
+        ai_processed=False,
+        summary=None,
+        readiness_status=ContentReadinessStatus.READY.value,
+        readiness_reason="article_ready",
+        ready_at=now,
+        published_at=now,
+        created_at=now,
+    )
+
+    result = sync_content_readiness(db, article, now=now)
+
+    assert result.transitioned_to_ready is False
+    assert result.transitioned_from_ready is True
+    assert article.readiness_status == ContentReadinessStatus.PENDING.value
+    assert article.ready_at is None
+    queued_event = db.add.call_args[0][0]
+    assert queued_event.event_type == CONTENT_UNREADY_EVENT_TYPE
+    assert queued_event.content_item_id == 4
 
 
 def test_build_content_ready_event_payload_includes_delivery_metadata():
@@ -132,3 +168,30 @@ def test_build_content_ready_event_payload_includes_delivery_metadata():
     assert payload["effective_type"] == ContentType.VIDEO.value
     assert payload["surfaces"] == ["videos"]
     assert payload["ready_at"] == now.isoformat()
+
+
+def test_build_content_unready_event_payload_preserves_reason_metadata():
+    now = datetime(2026, 3, 23, 18, 0, 0)
+    article = SimpleNamespace(
+        id=10,
+        type=ContentType.ARTICLE,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        promotion_reason=None,
+        source_url="https://example.com/article",
+        canonical_url="https://example.com/article",
+        image_url="https://cdn.example.com/article.jpg",
+        article_image_status="VERIFIED",
+        ai_processed=False,
+        summary=None,
+        published_at=now,
+        created_at=now,
+        ready_at=None,
+    )
+
+    payload = build_content_unready_event_payload(article)
+
+    assert payload["content_id"] == 10
+    assert payload["effective_type"] == ContentType.ARTICLE.value
+    assert payload["surfaces"] == ["articles"]
+    assert payload["readiness_reason"] == "awaiting_ai_processing"

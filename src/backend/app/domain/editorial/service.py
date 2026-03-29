@@ -8,12 +8,13 @@ and is therefore unit-testable without a database.
 
 from dataclasses import dataclass
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Optional
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.article_hydration import ArticleHydrationService
+from app.article_hydration import ArticleHydrationService, finalize_article_image_verification
 from app.core.curation import review_queue_target_status
 from app.core.logging import get_logger
 from app.ingestion.canonical import (
@@ -25,11 +26,16 @@ from app.ingestion.service import build_video_content_item_from_entry
 from app.ingestion.url_normalizer import normalize_url
 from app.integrations.llm_client import LLMClient
 from app.integrations.youtube_client import YouTubeClient
-from app.models.content import ContentItem, ContentType
+from app.models.content import ContentItem, ContentStatus, ContentType
 from app.ranking.quality import compute_source_weight
 from app.repositories.editorial_repo import EditorialRepository
 from app.scheduler.tasks_content_events import run_content_event_dispatch_job
-from app.services.content_readiness import seed_content_readiness
+from app.services.content_readiness import (
+    ContentReadinessStatus,
+    describe_readiness_reason,
+    evaluate_content_readiness,
+    seed_content_readiness,
+)
 from app.video_surface_rules import has_explicit_shorts_url
 
 logger = get_logger(__name__)
@@ -47,6 +53,16 @@ class SubmitResult:
     status: str  # created | duplicate_boosted | duplicate_exists | error
     message: str
     content_type: Optional[str] = None
+
+
+class EditorialApprovalBlockedError(RuntimeError):
+    """Raised when a manual promote/approve action would still leave content unready."""
+
+    def __init__(self, *, content_id: int, readiness_reason: str):
+        self.content_id = content_id
+        self.readiness_reason = readiness_reason
+        self.detail = describe_readiness_reason(readiness_reason)
+        super().__init__(self.detail)
 
 
 class _NoopLLMClient:
@@ -424,6 +440,7 @@ class EditorialService:
             return None
 
         self._hydrate_for_approval(item)
+        self._ensure_ready_for_manual_promotion(item)
         promoted = self.repo.promote(content_id, actor=actor)
         if dispatch_events:
             self.dispatch_content_events_best_effort()
@@ -443,6 +460,7 @@ class EditorialService:
             return None
 
         self._hydrate_for_approval(item)
+        self._ensure_ready_for_manual_promotion(item)
         approved = self.repo.approve(content_id, actor=actor, note=note)
         if dispatch_events:
             self.dispatch_content_events_best_effort()
@@ -463,6 +481,7 @@ class EditorialService:
             return None
 
         self._hydrate_for_approval(item)
+        self._ensure_ready_for_manual_promotion(item)
         published = self.repo.approve_and_publish(
             content_id=content_id,
             actor=actor,
@@ -476,16 +495,44 @@ class EditorialService:
     def _hydrate_for_approval(self, item: ContentItem) -> None:
         """Best-effort enrichment before a candidate becomes feed-visible."""
         hydrator = self._get_article_hydrator()
-        if not hydrator.needs_hydration(item):
+        if hydrator.needs_hydration(item):
+            try:
+                hydrator.hydrate_article_candidate(item)
+            except Exception as exc:
+                logger.warning(
+                    "Editorial approval hydration failed for %s: %s",
+                    getattr(item, "source_url", None) or getattr(item, "canonical_url", None),
+                    exc,
+                )
+
+        if item.type == ContentType.ARTICLE:
+            finalize_article_image_verification(item)
+
+    def _ensure_ready_for_manual_promotion(self, item: ContentItem) -> None:
+        """Prevent manual approval flows from promoting content that still cannot ship."""
+        if item.type != ContentType.ARTICLE:
             return
 
-        try:
-            hydrator.hydrate_article_candidate(item)
-        except Exception as exc:
-            logger.warning(
-                "Editorial approval hydration failed for %s: %s",
-                getattr(item, "source_url", None) or getattr(item, "canonical_url", None),
-                exc,
+        preview = SimpleNamespace(
+            id=getattr(item, "id", None),
+            type=item.type,
+            curation_status=ContentStatus.PROMOTED,
+            is_suppressed=False,
+            promotion_reason=getattr(item, "promotion_reason", None),
+            source_url=getattr(item, "source_url", None),
+            canonical_url=getattr(item, "canonical_url", None),
+            image_url=getattr(item, "image_url", None),
+            article_image_status=getattr(item, "article_image_status", None),
+            ai_processed=bool(getattr(item, "ai_processed", False)),
+            summary=getattr(item, "summary", None),
+            title=getattr(item, "title", None),
+            video_url=getattr(item, "video_url", None),
+        )
+        decision = evaluate_content_readiness(preview)
+        if decision.status != ContentReadinessStatus.READY:
+            raise EditorialApprovalBlockedError(
+                content_id=int(getattr(item, "id", 0) or 0),
+                readiness_reason=decision.reason,
             )
 
     def _get_article_hydrator(self) -> ArticleHydrationService:

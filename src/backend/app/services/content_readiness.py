@@ -18,6 +18,7 @@ from app.video_surface_rules import (
 )
 
 CONTENT_READY_EVENT_TYPE = "content.ready"
+CONTENT_UNREADY_EVENT_TYPE = "content.unready"
 _READINESS_REASON_DESCRIPTIONS = {
     "suppressed": "Suppressed items are hidden from all client delivery paths.",
     "awaiting_promotion": "Promote this item before it can be delivered to users.",
@@ -55,6 +56,7 @@ class ContentReadinessSyncResult:
     current_status: ContentReadinessStatus
     reason: str
     transitioned_to_ready: bool
+    transitioned_from_ready: bool
     surfaces: tuple[str, ...]
 
 
@@ -242,6 +244,8 @@ def sync_content_readiness(
             queue_content_ready_event(db, item, decision, now=ts)
     else:
         item.ready_at = None
+        if emit_ready_event and previous_status == ContentReadinessStatus.READY and db is not None:
+            queue_content_unready_event(db, item, decision, now=ts)
 
     return ContentReadinessSyncResult(
         previous_status=previous_status,
@@ -250,6 +254,10 @@ def sync_content_readiness(
         transitioned_to_ready=(
             previous_status != ContentReadinessStatus.READY
             and decision.status == ContentReadinessStatus.READY
+        ),
+        transitioned_from_ready=(
+            previous_status == ContentReadinessStatus.READY
+            and decision.status != ContentReadinessStatus.READY
         ),
         surfaces=decision.surfaces,
     )
@@ -281,6 +289,32 @@ def queue_content_ready_event(
     return event
 
 
+def queue_content_unready_event(
+    db: Session,
+    item: Any,
+    decision: ContentReadinessDecision | None = None,
+    *,
+    now: datetime | None = None,
+) -> ContentEventOutbox | None:
+    """Enqueue a durable outbox event when content leaves the ready state."""
+    if getattr(item, "id", None) is None:
+        return None
+
+    readiness = decision or evaluate_content_readiness(item)
+    if readiness.status == ContentReadinessStatus.READY:
+        return None
+
+    event = ContentEventOutbox(
+        content_item_id=int(item.id),
+        event_type=CONTENT_UNREADY_EVENT_TYPE,
+        payload=build_content_unready_event_payload(item, readiness),
+        status="pending",
+        available_at=now or datetime.utcnow(),
+    )
+    db.add(event)
+    return event
+
+
 def build_content_ready_event_payload(
     item: Any,
     decision: ContentReadinessDecision | None = None,
@@ -302,6 +336,14 @@ def build_content_ready_event_payload(
         "ready_at": ready_at.isoformat() if ready_at else None,
         "readiness_reason": readiness.reason,
     }
+
+
+def build_content_unready_event_payload(
+    item: Any,
+    decision: ContentReadinessDecision | None = None,
+) -> dict[str, Any]:
+    """Build the durable payload for a not-ready content outbox event."""
+    return build_content_ready_event_payload(item, decision)
 
 
 def _normalize_status(value: Any) -> ContentReadinessStatus:

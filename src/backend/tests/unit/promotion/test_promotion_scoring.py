@@ -262,6 +262,32 @@ class TestScoreCandidate:
 
         assert trending_score > search_score
 
+    def test_missing_format_fit_does_not_receive_free_score_boost(self):
+        item = self._make_item(title="OpenAI dev tools update", hours_old=2)
+        item.format_fit_score = None
+        item.views_per_hour = 0.0
+        item.acquisition_lane = "curated"
+        item.source_status = "core"
+
+        score = score_candidate(
+            item,
+            {"c1": 1},
+            PromotionConfig(
+                w_source=0.0,
+                w_cluster=0.0,
+                w_recency=0.0,
+                w_clickbait=0.0,
+                w_duplicate=0.0,
+                w_velocity=0.0,
+                w_format_fit=0.08,
+                w_category_gap=0.0,
+                w_creator_fatigue=0.0,
+                w_story=0.0,
+            ),
+        )
+
+        assert score == 0.0
+
 
 class TestStoryImportance:
     def test_launch_keywords_and_story_overlap_drive_score(self):
@@ -753,3 +779,34 @@ class TestPromotionService:
         assert rescored == 1
         assert item.curation_status == ContentStatus.CANDIDATE
         assert "blocked=weak_tech_signal_video" in item.promotion_reason
+
+    def test_classifier_none_blocks_broad_news_video_at_moderate_confidence(self):
+        item = self._make_candidate(
+            id_=101,
+            content_type=ContentType.VIDEO,
+            title="Humpback whale Timmy struggles to escape shallow waters",
+        )
+        item.source = "Reuters"
+        item.summary = None
+        item.description = "A whale rescue story from Reuters Newsfeed."
+        item.topics = ["twitter"]
+        item.entities = ["twitter"]
+        item.tech_relevance = "none"
+        item.tech_relevance_confidence = 0.58
+
+        block_reason = classify_promotion_block(
+            item,
+            ContentType.VIDEO,
+            story_topic_counts={"twitter": 8},
+            story_entity_counts={"twitter": 8},
+            channel_config=ChannelConfig(
+                channel_id="reuters-2",
+                name="Reuters",
+                role=ChannelRole.NEWS,
+                content_format=ContentFormat.LONG_FORM,
+                daily_cap=2,
+                quality_tier=QualityTier.PREMIUM,
+            ),
+        )
+
+        assert block_reason == "llm_non_tech_broad_news_video"

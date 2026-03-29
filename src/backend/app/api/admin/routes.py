@@ -33,7 +33,7 @@ from app.api.admin.schemas import (
     SuppressResponse,
 )
 from app.core.dependencies import get_db
-from app.domain.editorial.service import EditorialService
+from app.domain.editorial.service import EditorialApprovalBlockedError, EditorialService
 from app.repositories.editorial_repo import EditorialRepository
 from app.services.tiered_feed_service import invalidate_tiered_feed_cache
 
@@ -310,7 +310,10 @@ def promote_content(
 ):
     """Promote a candidate item to the feed-visible tier."""
     service = EditorialService(db)
-    item = service.promote_content(content_id, actor=ACTOR)
+    try:
+        item = service.promote_content(content_id, actor=ACTOR)
+    except EditorialApprovalBlockedError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
     if not item:
         raise HTTPException(status_code=404, detail="Content not found")
     invalidate_tiered_feed_cache()
@@ -394,7 +397,10 @@ def approve_content(
     """Approve and promote content into feed-eligible state."""
     service = EditorialService(db)
     note = body.note if body else None
-    item = service.approve_content(content_id, actor=ACTOR, note=note)
+    try:
+        item = service.approve_content(content_id, actor=ACTOR, note=note)
+    except EditorialApprovalBlockedError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
     if not item:
         raise HTTPException(status_code=404, detail="Content not found")
     invalidate_tiered_feed_cache()
@@ -480,12 +486,15 @@ def approve_publish_content(
 ):
     """Approve candidate content and publish it to top of playlist ordering."""
     service = EditorialService(db)
-    item = service.approve_and_publish(
-        content_id=content_id,
-        actor=ACTOR,
-        boost_level=body.boost_level,
-        note=body.note,
-    )
+    try:
+        item = service.approve_and_publish(
+            content_id=content_id,
+            actor=ACTOR,
+            boost_level=body.boost_level,
+            note=body.note,
+        )
+    except EditorialApprovalBlockedError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
     if not item:
         raise HTTPException(status_code=404, detail="Content not found")
 

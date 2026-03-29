@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.models.content_event import ContentEventOutbox
-from app.services.content_readiness import CONTENT_READY_EVENT_TYPE
+from app.services.content_readiness import CONTENT_READY_EVENT_TYPE, CONTENT_UNREADY_EVENT_TYPE
 from app.services.inventory_service import Surface
 from app.services.push_service import PushNotificationService
 from app.services.tiered_feed_service import invalidate_tiered_feed_cache
@@ -125,10 +125,10 @@ class ContentEventDispatcher:
     def _dispatch(self, event: ContentEventOutbox, db: Session) -> None:
         if event.event_type == CONTENT_READY_EVENT_TYPE:
             self._dispatch_ready_event(event, db)
+        elif event.event_type == CONTENT_UNREADY_EVENT_TYPE:
+            self._dispatch_unready_event(event)
 
-    def _dispatch_ready_event(self, event: ContentEventOutbox, db: Session) -> None:
-        payload = dict(event.payload or {})
-        content_id = int(payload.get("content_id") or event.content_item_id)
+    def _invalidate_surfaces(self, payload: dict) -> None:
         for surface_name in payload.get("surfaces", []):
             try:
                 invalidate_tiered_feed_cache(surface=Surface(surface_name))
@@ -136,10 +136,18 @@ class ContentEventDispatcher:
                 invalidate_tiered_feed_cache()
                 break
 
+    def _dispatch_ready_event(self, event: ContentEventOutbox, db: Session) -> None:
+        payload = dict(event.payload or {})
+        content_id = int(payload.get("content_id") or event.content_item_id)
+        self._invalidate_surfaces(payload)
+
         PushNotificationService(db=db).send_auto_for_content_ids(
             [content_id],
             actor=f"event:{CONTENT_READY_EVENT_TYPE}",
         )
+
+    def _dispatch_unready_event(self, event: ContentEventOutbox) -> None:
+        self._invalidate_surfaces(dict(event.payload or {}))
 
 
 def _retry_delay(attempt_count: int | None) -> timedelta:

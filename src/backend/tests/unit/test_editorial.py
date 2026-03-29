@@ -25,7 +25,11 @@ from sqlalchemy.exc import IntegrityError
 
 from app.article_hydration import ArticleHydrationService
 from app.domain.editorial import service as editorial_service_module
-from app.domain.editorial.service import EditorialService, _extract_domain
+from app.domain.editorial.service import (
+    EditorialApprovalBlockedError,
+    EditorialService,
+    _extract_domain,
+)
 from app.models.content import ContentStatus, ContentType
 from app.ranking.global_score import (
     EDITORIAL_BOOST_WEIGHT,
@@ -69,6 +73,8 @@ class FakeContentItem:
         self.summary = kwargs.get("summary", None)
         self.image_url = kwargs.get("image_url", None)
         self.ai_processed = kwargs.get("ai_processed", False)
+        self.article_image_status = kwargs.get("article_image_status", None)
+        self.promotion_reason = kwargs.get("promotion_reason", None)
         self.topics = kwargs.get("topics", [])
         self.entities = kwargs.get("entities", [])
         self.conversation_starters = kwargs.get("conversation_starters", None)
@@ -82,6 +88,7 @@ class FakeContentItem:
         self.added_at = kwargs.get("added_at", None)
         self.last_modified_by = kwargs.get("last_modified_by", None)
         self.last_modified_at = kwargs.get("last_modified_at", None)
+        self.video_url = kwargs.get("video_url", None)
 
 
 class TestEditorialServiceSubmit:
@@ -409,6 +416,13 @@ class TestEditorialServiceApproval:
         svc = self._make_service(repo)
         hydrator = MagicMock()
         hydrator.needs_hydration.return_value = True
+        hydrator.hydrate_article_candidate.side_effect = lambda candidate: (
+            setattr(candidate, "canonical_url", "https://example.com/story"),
+            setattr(candidate, "image_url", "https://cdn.example.com/story.jpg"),
+            setattr(candidate, "content_text", "A detailed tech article. " * 80),
+            setattr(candidate, "summary", "A detailed summary of the article's main tech points."),
+            setattr(candidate, "ai_processed", True),
+        )
         svc._article_hydrator = hydrator
 
         result = svc.promote_content(14, actor="reviewer")
@@ -479,7 +493,7 @@ class TestEditorialServiceApproval:
                 canonical_url=item.source_url,
                 title=None,
                 published_at=None,
-                image_url=None,
+                image_url="https://assets.bloomberg.com/openai-headcount.jpg",
                 main_text="OpenAI is planning a large hiring push across research and product teams. "
                 * 40,
                 excerpt_fallback=None,
@@ -499,7 +513,7 @@ class TestEditorialServiceApproval:
         assert item.title == "OpenAI Plans To Nearly Double Its Headcount This Year"
         repo.approve.assert_called_once_with(15, actor="reviewer", note=None)
 
-    def test_approve_still_promotes_when_hydration_fails(self):
+    def test_approve_blocks_when_hydration_fails(self):
         repo = MagicMock()
         item = FakeContentItem(
             id=12,
@@ -516,10 +530,11 @@ class TestEditorialServiceApproval:
         hydrator.hydrate_article_candidate.side_effect = RuntimeError("fetch failed")
         svc._article_hydrator = hydrator
 
-        result = svc.approve_content(12, actor="reviewer")
+        with pytest.raises(EditorialApprovalBlockedError) as excinfo:
+            svc.approve_content(12, actor="reviewer")
 
-        assert result is item
-        repo.approve.assert_called_once_with(12, actor="reviewer", note=None)
+        assert excinfo.value.readiness_reason == "missing_article_image"
+        repo.approve.assert_not_called()
 
     def test_approve_does_not_summarize_placeholder_title_when_extraction_fails(self):
         repo = MagicMock()
@@ -542,11 +557,12 @@ class TestEditorialServiceApproval:
         hydrator.summarize_article = MagicMock()
         svc._article_hydrator = hydrator
 
-        result = svc.approve_content(13, actor="reviewer")
+        with pytest.raises(EditorialApprovalBlockedError) as excinfo:
+            svc.approve_content(13, actor="reviewer")
 
-        assert result is item
+        assert excinfo.value.readiness_reason == "missing_article_image"
         hydrator.summarize_article.assert_not_called()
-        repo.approve.assert_called_once_with(13, actor="reviewer", note=None)
+        repo.approve.assert_not_called()
 
     def test_approve_does_not_summarize_short_article_text(self):
         repo = MagicMock()
@@ -578,10 +594,12 @@ class TestEditorialServiceApproval:
         hydrator.summarize_article = MagicMock()
         svc._article_hydrator = hydrator
 
-        result = svc.approve_content(16, actor="reviewer")
+        with pytest.raises(EditorialApprovalBlockedError) as excinfo:
+            svc.approve_content(16, actor="reviewer")
 
-        assert result is item
+        assert excinfo.value.readiness_reason == "missing_article_image"
         hydrator.summarize_article.assert_not_called()
+        repo.approve.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -784,6 +802,7 @@ class TestEditorialRepository:
             editorial_boost=1,
             is_suppressed=True,
             published_at=old_time,
+            promotion_reason="curated|core|fit=0.55|blocked=weak_tech_signal_video",
         )
         session.query.return_value.filter.return_value.first.return_value = item
 
@@ -794,11 +813,28 @@ class TestEditorialRepository:
         assert item.is_suppressed is False
         assert item.editorial_boost == 3
         assert item.published_at > old_time
+        assert item.promotion_reason == "curated|core|fit=0.55|preserved=editorial_override"
         session.add.assert_called_once()
         logged_action = session.add.call_args[0][0]
         assert logged_action.action_type == "APPROVE_PUBLISH"
         assert logged_action.new_value.get("note") == "priority story"
         session.commit.assert_called_once()
+
+    def test_approve_clears_visibility_block_reason(self):
+        repo, session = self._make_repo()
+        item = FakeContentItem(
+            id=15,
+            curation_status=ContentStatus.CANDIDATE,
+            is_suppressed=False,
+            promotion_reason="curated|core|fit=0.55|blocked=off_topic_broad_news_video",
+        )
+        session.query.return_value.filter.return_value.first.return_value = item
+
+        result = repo.approve(15, "editor")
+
+        assert result is item
+        assert item.curation_status == ContentStatus.PROMOTED
+        assert item.promotion_reason == "curated|core|fit=0.55|preserved=editorial_override"
 
     def test_promote_idempotent(self):
         repo, session = self._make_repo()

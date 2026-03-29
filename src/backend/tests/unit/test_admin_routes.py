@@ -3,9 +3,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import fakeredis
+import pytest
 
 from app.api.admin import routes as admin_routes
 from app.api.routes import admin as admin_module
+from app.domain.editorial.service import EditorialApprovalBlockedError
 from app.schemas.ads import AdsRuntimeConfigPatch
 from app.schemas.push import PushRuntimeConfigPatch, PushSendResponse
 from app.services.push_service import PushNotificationError
@@ -261,3 +263,71 @@ def test_list_content_passes_has_image_filter(monkeypatch):
     assert _FakeEditorialRepo.last_list_args["suppressed"] is False
     assert _FakeEditorialRepo.last_list_args["has_image"] is False
     assert response.total == 0
+
+
+def test_promote_content_maps_readiness_block_to_http_409(monkeypatch):
+    class _BlockedService:
+        def __init__(self, db):
+            self.db = db
+
+        def promote_content(self, content_id, *, actor="admin"):
+            raise EditorialApprovalBlockedError(
+                content_id=content_id,
+                readiness_reason="missing_article_summary",
+            )
+
+    monkeypatch.setattr(admin_routes, "EditorialService", _BlockedService)
+
+    with pytest.raises(Exception) as excinfo:
+        admin_routes.promote_content(content_id=42, db=object())
+
+    assert getattr(excinfo.value, "status_code", None) == 409
+    assert "usable summary" in str(getattr(excinfo.value, "detail", ""))
+
+
+def test_approve_content_maps_readiness_block_to_http_409(monkeypatch):
+    class _BlockedService:
+        def __init__(self, db):
+            self.db = db
+
+        def approve_content(self, content_id, *, actor="admin", note=None):
+            raise EditorialApprovalBlockedError(
+                content_id=content_id,
+                readiness_reason="missing_article_summary",
+            )
+
+    monkeypatch.setattr(admin_routes, "EditorialService", _BlockedService)
+
+    with pytest.raises(Exception) as excinfo:
+        admin_routes.approve_content(
+            content_id=42,
+            body=SimpleNamespace(note="looks good"),
+            db=object(),
+        )
+
+    assert getattr(excinfo.value, "status_code", None) == 409
+    assert "usable summary" in str(getattr(excinfo.value, "detail", ""))
+
+
+def test_approve_publish_content_maps_readiness_block_to_http_409(monkeypatch):
+    class _BlockedService:
+        def __init__(self, db):
+            self.db = db
+
+        def approve_and_publish(self, *, content_id, actor="admin", boost_level=3, note=None):
+            raise EditorialApprovalBlockedError(
+                content_id=content_id,
+                readiness_reason="missing_article_summary",
+            )
+
+    monkeypatch.setattr(admin_routes, "EditorialService", _BlockedService)
+
+    with pytest.raises(Exception) as excinfo:
+        admin_routes.approve_publish_content(
+            content_id=42,
+            body=SimpleNamespace(boost_level=3, note="priority"),
+            db=object(),
+        )
+
+    assert getattr(excinfo.value, "status_code", None) == 409
+    assert "usable summary" in str(getattr(excinfo.value, "detail", ""))

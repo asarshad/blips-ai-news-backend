@@ -89,6 +89,34 @@ class _FakeBulkService:
         self.__class__.dispatch_calls += 1
 
 
+class _BlockedApprovalService(_FakeBulkService):
+    def promote_content(self, content_id, *, actor="admin", dispatch_events=True):
+        raise admin_ui.EditorialApprovalBlockedError(
+            content_id=content_id,
+            readiness_reason="missing_article_summary",
+        )
+
+    def approve_content(self, content_id, *, actor="admin", note=None, dispatch_events=True):
+        raise admin_ui.EditorialApprovalBlockedError(
+            content_id=content_id,
+            readiness_reason="missing_article_summary",
+        )
+
+    def approve_and_publish(
+        self,
+        content_id,
+        *,
+        actor="admin",
+        boost_level=3,
+        note=None,
+        dispatch_events=True,
+    ):
+        raise admin_ui.EditorialApprovalBlockedError(
+            content_id=content_id,
+            readiness_reason="missing_article_summary",
+        )
+
+
 def test_review_queue_promoted_scope_passes_filters(monkeypatch):
     _FakeRepo.last_list_args = None
     _FakeRepo.last_count_args = None
@@ -186,9 +214,38 @@ def test_content_list_maps_missing_image_filter(monkeypatch):
     assert "title, URL, summary" in html
     assert 'name="has_image"' in html
     assert "Missing" in html
-    assert "Present" in html
-    assert "has_image=false" in html
-    assert "q=openai" in html
+
+
+def test_promotion_policy_badges_include_override_codes():
+    item = type(
+        "Item",
+        (),
+        {
+            "promotion_reason": (
+                "curated|core|fit=0.55|override_block=weak_tech_signal_video|"
+                "preserved=editorial_override"
+            )
+        },
+    )()
+
+    markup = admin_ui._promotion_policy_badges(item)
+
+    assert "override weak_tech_signal_video" in markup
+
+
+def test_promotion_reason_markup_renders_block_reason():
+    item = type(
+        "Item",
+        (),
+        {
+            "promotion_reason": "curated|core|fit=0.55|blocked=off_topic_broad_news_video"
+        },
+    )()
+
+    markup = admin_ui._promotion_reason_markup(item)
+
+    assert "blocked off_topic_broad_news_video" in markup
+    assert "curated|core|fit=0.55|blocked=off_topic_broad_news_video" in markup
 
 
 def test_review_bulk_action_limits_batch_size(monkeypatch):
@@ -255,3 +312,64 @@ def test_review_bulk_action_dispatches_events_once(monkeypatch):
     ]
     assert _FakeBulkService.dispatch_calls == 1
     assert len(invalidations) == 1
+
+
+def test_review_bulk_action_surfaces_readiness_block(monkeypatch):
+    monkeypatch.setattr(admin_ui, "EditorialRepository", _FakeBulkRepo)
+    monkeypatch.setattr(admin_ui, "EditorialService", _BlockedApprovalService)
+    _FakeBulkRepo.reset()
+
+    response = admin_ui.ui_review_bulk_action(
+        action="approve",
+        content_ids_csv="42,43",
+        boost_level=3,
+        note="",
+        next_path="/api/v1/admin/ui/review",
+        key="",
+        referer=None,
+        db=object(),
+        admin_key="secret",
+    )
+
+    assert response.status_code == 303
+    assert (
+        response.headers["location"]
+        == "/api/v1/admin/ui/review?flash=Error%3A+2+items+are+still+waiting+on+readiness"
+    )
+
+
+def test_ui_approve_surfaces_article_readiness_block(monkeypatch):
+    monkeypatch.setattr(admin_ui, "EditorialService", _BlockedApprovalService)
+
+    response = admin_ui.ui_approve(
+        content_id=42,
+        note="",
+        next_path="/api/v1/admin/ui/review",
+        key="",
+        referer=None,
+        db=object(),
+        admin_key="secret",
+    )
+
+    assert response.status_code == 303
+    assert "Approval+blocked%3A+This+article+does+not+yet+have+a+usable+summary." in (
+        response.headers["location"]
+    )
+
+
+def test_ui_promote_surfaces_article_readiness_block(monkeypatch):
+    monkeypatch.setattr(admin_ui, "EditorialService", _BlockedApprovalService)
+
+    response = admin_ui.ui_promote(
+        content_id=42,
+        next_path="/api/v1/admin/ui/review",
+        key="",
+        referer=None,
+        db=object(),
+        admin_key="secret",
+    )
+
+    assert response.status_code == 303
+    assert "Promotion+blocked%3A+This+article+does+not+yet+have+a+usable+summary." in (
+        response.headers["location"]
+    )

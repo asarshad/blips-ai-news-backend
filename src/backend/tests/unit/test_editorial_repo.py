@@ -39,6 +39,21 @@ def test_list_candidate_queue_all_status_skips_status_filter():
     assert query.filter.call_count == 0
 
 
+def test_list_candidate_queue_priority_sorts_reviewable_items_before_blocked():
+    session = MagicMock()
+    repo = EditorialRepository(session)
+    query = _make_query_chain(session)
+
+    repo.list_candidate_queue(include_suppressed=True, sort_by="priority")
+
+    assert query.order_by.called
+    blocked_expr = query.order_by.call_args.args[0]
+    rendered = str(blocked_expr).lower()
+    assert "promotion_reason" in rendered
+    assert "like" in rendered
+    assert "asc" in rendered
+
+
 def test_candidate_queue_counts_can_include_all_statuses():
     session = MagicMock()
     repo = EditorialRepository(session)

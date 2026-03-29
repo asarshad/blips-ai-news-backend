@@ -4,13 +4,23 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from app.models.content import ContentStatus, ContentType
+from sqlalchemy import create_engine
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import sessionmaker
+
+from app.models.content import ContentItem, ContentReadinessStatus, ContentStatus, ContentType
 from app.services.promotion_service import (
     _REEL_CONFIG,
     _VIDEO_CONFIG,
     PromotionService,
     compute_story_keyword_signal,
 )
+
+
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
+    return "TEXT"
 
 
 def test_video_and_reel_configs_use_longer_half_lives():
@@ -124,7 +134,10 @@ def test_rescore_promoted_preserves_editorially_approved_items(monkeypatch):
     assert rescored == 1
     assert item.curation_status == ContentStatus.PROMOTED
     assert item.promotion_score == 0.12
-    assert item.promotion_reason == "base|blocked=off_topic_news_video|preserved=editorial_override"
+    assert (
+        item.promotion_reason
+        == "base|override_block=off_topic_news_video|preserved=editorial_override"
+    )
 
 
 def test_rescore_promoted_demotes_blocked_non_editorial_items(monkeypatch):
@@ -168,3 +181,87 @@ def test_rescore_promoted_demotes_blocked_non_editorial_items(monkeypatch):
     assert item.curation_status == ContentStatus.CANDIDATE
     assert item.promotion_score == 0.12
     assert item.promotion_reason == "base|blocked=off_topic_news_video"
+
+
+def test_recent_promotion_context_counts_only_visible_ready_items(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    ContentItem.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+    now = datetime.utcnow()
+
+    ready_item = ContentItem(
+        type=ContentType.VIDEO,
+        source="Ready Source",
+        source_url="https://example.com/watch/ready",
+        canonical_url="https://example.com/watch/ready",
+        channel_id="ready-channel",
+        published_at=now,
+        title="Ready item",
+        topics=["ai"],
+        entities=["openai"],
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status=ContentReadinessStatus.READY.value,
+        readiness_reason="video_ready",
+        promotion_reason="curated|core|fit=0.55|vph=0.0|story=0.50",
+        is_suppressed=False,
+        created_at=now,
+        updated_at=now,
+        ready_at=now,
+        readiness_updated_at=now,
+    )
+    blocked_item = ContentItem(
+        type=ContentType.VIDEO,
+        source="Blocked Source",
+        source_url="https://example.com/watch/blocked",
+        canonical_url="https://example.com/watch/blocked",
+        channel_id="blocked-channel",
+        published_at=now,
+        title="Blocked item",
+        topics=["security"],
+        entities=["google"],
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status=ContentReadinessStatus.READY.value,
+        readiness_reason="video_ready",
+        promotion_reason="curated|core|fit=0.55|vph=0.0|story=0.50|blocked=weak_tech_signal_video",
+        is_suppressed=False,
+        created_at=now,
+        updated_at=now,
+        ready_at=now,
+        readiness_updated_at=now,
+    )
+    pending_item = ContentItem(
+        type=ContentType.VIDEO,
+        source="Pending Source",
+        source_url="https://example.com/watch/pending",
+        canonical_url="https://example.com/watch/pending",
+        channel_id="pending-channel",
+        published_at=now,
+        title="Pending item",
+        topics=["privacy"],
+        entities=["meta"],
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status=ContentReadinessStatus.PENDING.value,
+        readiness_reason="awaiting_promotion",
+        promotion_reason="curated|core|fit=0.55|vph=0.0|story=0.50",
+        is_suppressed=False,
+        created_at=now,
+        updated_at=now,
+        readiness_updated_at=now,
+    )
+    db.add_all([ready_item, blocked_item, pending_item])
+    db.commit()
+
+    monkeypatch.setattr(
+        "app.services.promotion_service.apply_content_policy",
+        lambda query, **_kwargs: query,
+    )
+
+    service = PromotionService(db)
+
+    assert service._get_recent_promoted_topic_counts(ContentType.VIDEO) == {"ai": 1}
+    assert service._get_recent_promoted_channel_counts(ContentType.VIDEO) == {"ready-channel": 1}
+
+    topic_counts, entity_counts = service._get_recent_story_context()
+    assert topic_counts == {"ai": 1}
+    assert entity_counts == {"openai": 1}
