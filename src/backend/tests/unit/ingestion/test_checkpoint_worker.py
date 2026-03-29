@@ -285,6 +285,7 @@ def test_youtube_reel_rows_use_uploads_head_scan_when_enabled(monkeypatch):
                     content_format=ContentFormat.MIXED,
                     fresh_published_hours=None,
                     channel_id="channel-yt",
+                    effective_daily_reel_cap=10,
                 )
             ]
 
