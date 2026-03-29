@@ -7,7 +7,7 @@ Includes tiered freshness strategy (A/B/C) and diversity mixing.
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.api.feed_headers import FeedMetadata, compute_feed_version
@@ -16,6 +16,7 @@ from app.core.dependencies import get_db
 from app.core.exceptions import not_found_exception
 from app.core.feature_flags import FeatureFlags, get_feature_flags
 from app.core.logging import get_logger
+from app.core.session_auth import AuthenticatedSession, require_session_token
 from app.db.base import SessionLocal
 from app.models.content import ContentType
 from app.repositories.content_repo import ContentItemRepository
@@ -30,7 +31,7 @@ from app.services.topup_service import check_and_trigger_topup
 from app.video_surface_rules import effective_content_type
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_session_token)])
 
 
 def get_content_repo(db: Session = Depends(get_db)) -> ContentItemRepository:
@@ -73,10 +74,10 @@ def get_recent_videos(
     limit: int = Query(10, ge=1, le=50, description="Number of videos to return"),
     cursor: Optional[str] = Query(None, description="Cursor returned by the previous page"),
     page: Optional[int] = Query(None, ge=1, include_in_schema=False),
-    x_device_id: Optional[str] = Header(None, description="Optional device identifier"),
     response: Response = None,
     db: Session = Depends(get_db),
     flags: FeatureFlags = Depends(get_feature_flags),
+    session: AuthenticatedSession = Depends(require_session_token),
 ):
     """
     Get the most recent videos using tiered freshness strategy.
@@ -106,7 +107,7 @@ def get_recent_videos(
         limit=limit,
         offset=offset,
         hybrid_video_rerank=flags.is_enabled("video_hybrid_rerank"),
-        device_id=x_device_id,
+        device_id=session.device_id,
     )
 
     # Log tier distribution (from cached results)
@@ -178,10 +179,10 @@ def get_reels(
     limit: int = Query(10, ge=1, le=50, description="Number of reels to return"),
     cursor: Optional[str] = Query(None, description="Cursor returned by the previous page"),
     page: Optional[int] = Query(None, ge=1, include_in_schema=False),
-    x_device_id: Optional[str] = Header(None, description="Optional device identifier"),
     response: Response = None,
     db: Session = Depends(get_db),
     flags: FeatureFlags = Depends(get_feature_flags),
+    session: AuthenticatedSession = Depends(require_session_token),
 ):
     """
     Get the most recent reels (short videos) using tiered freshness strategy.
@@ -210,7 +211,7 @@ def get_reels(
         limit=limit,
         offset=offset,
         hybrid_video_rerank=flags.is_enabled("video_hybrid_rerank"),
-        device_id=x_device_id,
+        device_id=session.device_id,
     )
 
     # Log tier distribution (from cached results)

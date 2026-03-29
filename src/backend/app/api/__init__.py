@@ -14,6 +14,7 @@ from app.api.routes import (
     notifications,
     preferences,
     session,
+    session_auth,
     share_target,
     starters,
     usage,
@@ -24,6 +25,7 @@ from app.core.config import settings
 api_router = APIRouter()
 
 api_router.include_router(articles.router, prefix="/articles", tags=["articles"])
+api_router.include_router(session_auth.router, prefix="/auth/session", tags=["session-auth"])
 api_router.include_router(config.router, tags=["config"])
 api_router.include_router(events.router, tags=["events"])
 api_router.include_router(ai_chat.router, prefix="/ai", tags=["ai"])
@@ -32,7 +34,7 @@ api_router.include_router(usage.router, prefix="/usage", tags=["usage"])
 api_router.include_router(videos.router, prefix="/videos", tags=["videos"])
 api_router.include_router(notifications.router, tags=["notifications"])
 api_router.include_router(session.router, prefix="/session", tags=["session"])
-api_router.include_router(preferences.router, prefix="/users", tags=["preferences"])
+api_router.include_router(preferences.router, prefix="/preferences", tags=["preferences"])
 api_router.include_router(share_target.router, tags=["admin-share-target"])
 api_router.include_router(admin_routes.router, prefix="/admin", tags=["admin"])
 api_router.include_router(editorial_admin_router, tags=["admin-editorial"])

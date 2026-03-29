@@ -1229,10 +1229,6 @@
       "CategorySelectionResponse": {
         "description": "Response for category preference endpoints.",
         "properties": {
-          "device_id": {
-            "title": "Device Id",
-            "type": "string"
-          },
           "selected_categories": {
             "items": {
               "type": "string"
@@ -1242,7 +1238,6 @@
           }
         },
         "required": [
-          "device_id",
           "selected_categories"
         ],
         "title": "CategorySelectionResponse",
@@ -2980,6 +2975,88 @@
           "message"
         ],
         "title": "ReviewerNoteResponse",
+        "type": "object"
+      },
+      "SessionAuthResponse": {
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          },
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "refresh_token",
+          "expires_in",
+          "device_id"
+        ],
+        "title": "SessionAuthResponse",
+        "type": "object"
+      },
+      "SessionCreateRequest": {
+        "properties": {
+          "app_version": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "App Version",
+            "type": "string"
+          },
+          "platform": {
+            "maxLength": 32,
+            "minLength": 2,
+            "title": "Platform",
+            "type": "string"
+          }
+        },
+        "required": [
+          "platform",
+          "app_version"
+        ],
+        "title": "SessionCreateRequest",
+        "type": "object"
+      },
+      "SessionRefreshRequest": {
+        "properties": {
+          "refresh_token": {
+            "minLength": 16,
+            "title": "Refresh Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "refresh_token"
+        ],
+        "title": "SessionRefreshRequest",
+        "type": "object"
+      },
+      "SessionRevokeRequest": {
+        "properties": {
+          "refresh_token": {
+            "anyOf": [
+              {
+                "minLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refresh Token"
+          }
+        },
+        "title": "SessionRevokeRequest",
         "type": "object"
       },
       "StartersResponse": {
@@ -7964,7 +8041,7 @@
         "parameters": [
           {
             "in": "header",
-            "name": "user-agent",
+            "name": "Authorization",
             "required": false,
             "schema": {
               "anyOf": [
@@ -7975,23 +8052,7 @@
                   "type": "null"
                 }
               ],
-              "title": "User-Agent"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Device-ID",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Device-Id"
+              "title": "Authorization"
             }
           }
         ],
@@ -8033,7 +8094,7 @@
     },
     "/api/v1/articles/recent": {
       "get": {
-        "description": "Get the most recent articles using tiered freshness strategy.\n\nReturns a blend of:\n- Tier A (Fresh): articles published within rolling window\n- Tier B (Backfill): articles added recently but published earlier\n- Tier C (Evergreen): older high-quality articles\n\nEach article includes freshness_tier, published_age_seconds, and added_age_seconds.\nResults are diversity-mixed and cached (45s TTL) for performance.\n\nIf X-Device-ID header is present, results are personalised:\n- Items matching the user's declared category interests receive an interest_boost.\n- Stale items receive a staleness_decay penalty.\n- Over-represented sources receive a source_dominance_penalty.\n\nResponse headers include diagnostic info:\n- X-Feed-Generated-At, X-Feed-Source, X-Cache, X-Newest-Published-At, etc.",
+        "description": "Get the most recent articles using tiered freshness strategy.\n\nReturns a blend of:\n- Tier A (Fresh): articles published within rolling window\n- Tier B (Backfill): articles added recently but published earlier\n- Tier C (Evergreen): older high-quality articles\n\nEach article includes freshness_tier, published_age_seconds, and added_age_seconds.\nResults are diversity-mixed and cached (45s TTL) for performance.\n\nResults are personalised using the caller's anonymous bearer session:\n- Items matching the user's declared category interests receive an interest_boost.\n- Stale items receive a staleness_decay penalty.\n- Over-represented sources receive a source_dominance_penalty.\n\nResponse headers include diagnostic info:\n- X-Feed-Generated-At, X-Feed-Source, X-Cache, X-Newest-Published-At, etc.",
         "operationId": "get_recent_articles_api_v1_articles_recent_get",
         "parameters": [
           {
@@ -8065,7 +8126,7 @@
           },
           {
             "in": "header",
-            "name": "X-Device-ID",
+            "name": "Authorization",
             "required": false,
             "schema": {
               "anyOf": [
@@ -8076,7 +8137,7 @@
                   "type": "null"
                 }
               ],
-              "title": "X-Device-Id"
+              "title": "Authorization"
             }
           }
         ],
@@ -8123,6 +8184,22 @@
               "title": "Article Id",
               "type": "integer"
             }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
           }
         ],
         "responses": {
@@ -8153,14 +8230,95 @@
         ]
       }
     },
-    "/api/v1/config": {
-      "get": {
-        "description": "Returns current server-side feature flags and ad settings. Clients should fetch on app start and cache with a reasonable TTL.",
-        "operationId": "get_app_config_api_v1_config_get",
+    "/api/v1/auth/session": {
+      "post": {
+        "operationId": "create_anonymous_session_api_v1_auth_session_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAuthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Anonymous Session",
+        "tags": [
+          "session-auth"
+        ]
+      }
+    },
+    "/api/v1/auth/session/refresh": {
+      "post": {
+        "operationId": "refresh_anonymous_session_api_v1_auth_session_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionRefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAuthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Anonymous Session",
+        "tags": [
+          "session-auth"
+        ]
+      }
+    },
+    "/api/v1/auth/session/revoke": {
+      "post": {
+        "operationId": "revoke_anonymous_session_api_v1_auth_session_revoke_post",
         "parameters": [
           {
             "in": "header",
-            "name": "X-Device-ID",
+            "name": "Authorization",
             "required": false,
             "schema": {
               "anyOf": [
@@ -8171,7 +8329,60 @@
                   "type": "null"
                 }
               ],
-              "title": "X-Device-Id"
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionRevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Anonymous Session",
+        "tags": [
+          "session-auth"
+        ]
+      }
+    },
+    "/api/v1/config": {
+      "get": {
+        "description": "Returns current server-side feature flags and ad settings. Clients should fetch on app start and cache with a reasonable TTL.",
+        "operationId": "get_app_config_api_v1_config_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -8207,6 +8418,24 @@
       "post": {
         "description": "Log that a user tapped / clicked a feed item or ad.",
         "operationId": "record_click_api_v1_events_click_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -8249,6 +8478,24 @@
       "post": {
         "description": "Log that a user viewed a feed item or ad.",
         "operationId": "record_impression_api_v1_events_impression_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -8291,6 +8538,24 @@
       "post": {
         "description": "Record a generic freshness or product analytics event.",
         "operationId": "record_named_event_api_v1_events_track_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -8982,7 +9247,7 @@
         "parameters": [
           {
             "in": "header",
-            "name": "X-Device-ID",
+            "name": "Authorization",
             "required": false,
             "schema": {
               "anyOf": [
@@ -8993,7 +9258,7 @@
                   "type": "null"
                 }
               ],
-              "title": "X-Device-Id"
+              "title": "Authorization"
             }
           }
         ],
@@ -9040,7 +9305,7 @@
         "parameters": [
           {
             "in": "header",
-            "name": "X-Device-ID",
+            "name": "Authorization",
             "required": false,
             "schema": {
               "anyOf": [
@@ -9051,7 +9316,7 @@
                   "type": "null"
                 }
               ],
-              "title": "X-Device-Id"
+              "title": "Authorization"
             }
           }
         ],
@@ -9093,20 +9358,133 @@
         ]
       }
     },
+    "/api/v1/preferences/categories": {
+      "get": {
+        "description": "Return the user's declared category selections.",
+        "operationId": "get_categories_api_v1_preferences_categories_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategorySelectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get declared category interests",
+        "tags": [
+          "preferences"
+        ]
+      },
+      "put": {
+        "description": "Create or replace the user's declared category selections.\n\nCategories are stored as an ordered list.  The first element is treated\nas the highest-priority interest when ranking content.",
+        "operationId": "set_categories_api_v1_preferences_categories_put",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategorySelectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategorySelectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set declared category interests",
+        "tags": [
+          "preferences"
+        ]
+      }
+    },
     "/api/v1/session/data": {
       "delete": {
         "description": "Delete all data associated with a device.\n\nRemoves usage records, interaction events, learned preferences, and the\ndevice profile.  Returns counts of deleted rows per table.",
         "operationId": "delete_my_data_api_v1_session_data_delete",
         "parameters": [
           {
-            "description": "Device identifier",
             "in": "header",
-            "name": "x-device-id",
-            "required": true,
+            "name": "Authorization",
+            "required": false,
             "schema": {
-              "description": "Device identifier",
-              "title": "X-Device-Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -9144,14 +9522,19 @@
         "operationId": "record_interaction_api_v1_session_interactions_post",
         "parameters": [
           {
-            "description": "Device identifier",
             "in": "header",
-            "name": "x-device-id",
-            "required": true,
+            "name": "Authorization",
+            "required": false,
             "schema": {
-              "description": "Device identifier",
-              "title": "X-Device-Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -9272,14 +9655,19 @@
             }
           },
           {
-            "description": "Device identifier",
             "in": "header",
-            "name": "x-device-id",
-            "required": true,
+            "name": "Authorization",
+            "required": false,
             "schema": {
-              "description": "Device identifier",
-              "title": "X-Device-Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -9496,7 +9884,7 @@
           },
           {
             "in": "header",
-            "name": "user-agent",
+            "name": "Authorization",
             "required": false,
             "schema": {
               "anyOf": [
@@ -9507,23 +9895,7 @@
                   "type": "null"
                 }
               ],
-              "title": "User-Agent"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Device-ID",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Device-Id"
+              "title": "Authorization"
             }
           }
         ],
@@ -9552,122 +9924,6 @@
         "summary": "Get Usage Stats",
         "tags": [
           "usage"
-        ]
-      }
-    },
-    "/api/v1/users/{device_id}/categories": {
-      "get": {
-        "description": "Return the user's declared category selections.",
-        "operationId": "get_categories_api_v1_users__device_id__categories_get",
-        "parameters": [
-          {
-            "description": "Device identifier",
-            "in": "path",
-            "name": "device_id",
-            "required": true,
-            "schema": {
-              "description": "Device identifier",
-              "title": "Device Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Device-ID",
-            "required": true,
-            "schema": {
-              "title": "X-Device-Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CategorySelectionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get declared category interests",
-        "tags": [
-          "preferences"
-        ]
-      },
-      "put": {
-        "description": "Create or replace the user's declared category selections.\n\nCategories are stored as an ordered list.  The first element is treated\nas the highest-priority interest when ranking content.",
-        "operationId": "set_categories_api_v1_users__device_id__categories_put",
-        "parameters": [
-          {
-            "description": "Device identifier",
-            "in": "path",
-            "name": "device_id",
-            "required": true,
-            "schema": {
-              "description": "Device identifier",
-              "title": "Device Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Device-ID",
-            "required": true,
-            "schema": {
-              "title": "X-Device-Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CategorySelectionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CategorySelectionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Set declared category interests",
-        "tags": [
-          "preferences"
         ]
       }
     },
@@ -9709,9 +9965,8 @@
             }
           },
           {
-            "description": "Optional device identifier",
             "in": "header",
-            "name": "x-device-id",
+            "name": "Authorization",
             "required": false,
             "schema": {
               "anyOf": [
@@ -9722,8 +9977,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Optional device identifier",
-              "title": "X-Device-Id"
+              "title": "Authorization"
             }
           }
         ],
@@ -9795,9 +10049,8 @@
             }
           },
           {
-            "description": "Optional device identifier",
             "in": "header",
-            "name": "x-device-id",
+            "name": "Authorization",
             "required": false,
             "schema": {
               "anyOf": [
@@ -9808,8 +10061,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Optional device identifier",
-              "title": "X-Device-Id"
+              "title": "Authorization"
             }
           }
         ],
@@ -9855,6 +10107,22 @@
             "schema": {
               "title": "Video Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],

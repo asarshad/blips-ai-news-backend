@@ -3,7 +3,19 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.api.routes import session as session_module
+from app.core.session_auth import AuthenticatedSession
 from app.models.content import ContentType
+
+
+def _session(device_id: str) -> AuthenticatedSession:
+    return AuthenticatedSession(
+        device_id=device_id,
+        platform="ios",
+        app_version="1.0.0",
+        session_expires_at=__import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        ),
+    )
 
 
 def test_record_interaction_invalidates_tiered_cache_for_less_from_creator(monkeypatch):
@@ -39,7 +51,7 @@ def test_record_interaction_invalidates_tiered_cache_for_less_from_creator(monke
 
     response = session_module.record_interaction(
         request,
-        device_id="device-12345678",
+        session=_session("device-12345678"),
         personalization_service=personalization_service,
         playlist_service=playlist_service,
     )
@@ -85,7 +97,7 @@ def test_record_interaction_invalidates_tiered_cache_for_fast_skip(monkeypatch):
 
     response = session_module.record_interaction(
         request,
-        device_id="device-abcdefgh",
+        session=_session("device-abcdefgh"),
         personalization_service=personalization_service,
         playlist_service=playlist_service,
     )
@@ -124,6 +136,8 @@ class _DeleteMyDataDB:
             return _CountDeleteQuery(delete_value=4)
         if model is session_module.UserPreference:
             return _CountDeleteQuery(delete_value=5)
+        if model is session_module.DeviceSession:
+            return _CountDeleteQuery(delete_value=1)
         if model is session_module.UserProfile:
             return _CountDeleteQuery(delete_value=1)
         raise AssertionError(f"Unexpected model queried: {model}")
@@ -138,7 +152,7 @@ class _DeleteMyDataDB:
 def test_delete_my_data_reports_push_subscriptions_and_total_rows():
     db = _DeleteMyDataDB()
 
-    response = session_module.delete_my_data(device_id="device-12345678", db=db)
+    response = session_module.delete_my_data(session=_session("device-12345678"), db=db)
 
     assert db.committed is True
     assert db.rolled_back is False
@@ -148,6 +162,7 @@ def test_delete_my_data_reports_push_subscriptions_and_total_rows():
         "usage": 3,
         "interaction_events": 4,
         "user_preferences": 5,
+        "device_sessions": 1,
         "user_profiles": 1,
     }
-    assert response.message == "Deleted 15 records across 5 tables."
+    assert response.message == "Deleted 16 records across 6 tables."

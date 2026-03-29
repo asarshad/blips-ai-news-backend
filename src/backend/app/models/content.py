@@ -325,6 +325,12 @@ class UserProfile(Base):
         back_populates="profile",
         cascade="all, delete-orphan",
     )
+    device_session = relationship(
+        "DeviceSession",
+        back_populates="profile",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
     def __repr__(self):
         return f"<UserProfile(device_id={self.device_id})>"

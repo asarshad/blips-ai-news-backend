@@ -1,20 +1,25 @@
 """
 Analytics event endpoints — impression and click tracking.
 
-Events are logged for later analysis.  No external tracking SDK is
-called; the data stays on-server.  A future ad provider integration
+Events are logged for later analysis. No external tracking SDK is
+called; the data stays on-server. A future ad provider integration
 may forward events to an attribution service.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
+from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.session_auth import require_session_token
 from app.schemas.events import EventPayload, EventResponse
 from app.services.freshness_metrics_service import record_client_freshness_event
 
 logger = get_logger(__name__)
 
 router = APIRouter()
+_limiter = Limiter(key_func=get_remote_address)
 
 
 @router.post(
@@ -22,8 +27,14 @@ router = APIRouter()
     response_model=EventResponse,
     summary="Record an impression event",
 )
-def record_impression(payload: EventPayload) -> EventResponse:
+@_limiter.limit(settings.RATE_LIMIT_EVENTS)
+def record_impression(
+    request: Request,
+    payload: EventPayload,
+    _session=Depends(require_session_token),
+) -> EventResponse:
     """Log that a user viewed a feed item or ad."""
+    del request
     if payload.event_name:
         record_client_freshness_event(
             event_name=payload.event_name,
@@ -54,8 +65,14 @@ def record_impression(payload: EventPayload) -> EventResponse:
     response_model=EventResponse,
     summary="Record a click event",
 )
-def record_click(payload: EventPayload) -> EventResponse:
+@_limiter.limit(settings.RATE_LIMIT_EVENTS)
+def record_click(
+    request: Request,
+    payload: EventPayload,
+    _session=Depends(require_session_token),
+) -> EventResponse:
     """Log that a user tapped / clicked a feed item or ad."""
+    del request
     if payload.event_name:
         record_client_freshness_event(
             event_name=payload.event_name,
@@ -86,8 +103,14 @@ def record_click(payload: EventPayload) -> EventResponse:
     response_model=EventResponse,
     summary="Record a named analytics event",
 )
-def record_named_event(payload: EventPayload) -> EventResponse:
+@_limiter.limit(settings.RATE_LIMIT_EVENTS)
+def record_named_event(
+    request: Request,
+    payload: EventPayload,
+    _session=Depends(require_session_token),
+) -> EventResponse:
     """Record a generic freshness or product analytics event."""
+    del request
     if payload.event_name:
         record_client_freshness_event(
             event_name=payload.event_name,

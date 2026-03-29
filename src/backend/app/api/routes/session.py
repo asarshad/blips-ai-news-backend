@@ -12,16 +12,18 @@ from enum import Enum
 from typing import Dict, List, Optional
 
 import redis
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.feed_headers import FeedMetadata
 from app.core.auth import require_admin_key
 from app.core.dependencies import get_db, get_redis
+from app.core.session_auth import AuthenticatedSession, require_session_token
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.models.content import ContentType, EventType, InteractionEvent, UserPreference, UserProfile
+from app.models.device_session import DeviceSession
 from app.models.push import PushSubscription
 from app.models.usage import Usage
 from app.repositories.content_repo import ContentItemRepository
@@ -167,13 +169,6 @@ def get_personalization_service(db: Session = Depends(get_db)) -> Personalizatio
     )
 
 
-def get_device_id(x_device_id: str = Header(..., description="Device identifier")) -> str:
-    """Extract and validate device ID from header."""
-    if not x_device_id or len(x_device_id) < 8:
-        raise HTTPException(status_code=400, detail="Invalid X-Device-ID header")
-    return x_device_id
-
-
 def _tiered_surfaces_for_interaction(content_item, event_type: EventType) -> List[Surface]:
     """Map an interaction to the device-scoped tiered feed caches it affects."""
     effective_type = effective_content_type(content_item)
@@ -202,7 +197,7 @@ def get_playlist(
     session_id: Optional[str] = Query(None, description="Session ID for continuity"),
     cursor: Optional[int] = Query(None, ge=0, description="Cursor position to continue from"),
     refresh: bool = Query(False, description="Force refresh playlist (new session)"),
-    device_id: str = Depends(get_device_id),
+    session: AuthenticatedSession = Depends(require_session_token),
     db: Session = Depends(get_db),
     playlist_service: PlaylistService = Depends(get_playlist_service),
 ):
@@ -227,7 +222,7 @@ def get_playlist(
 
     # Get playlist with session support
     result = playlist_service.get_playlist(
-        device_id=device_id,
+        device_id=session.device_id,
         content_type=content_type,
         size=size,
         session_id=session_id,
@@ -288,7 +283,7 @@ def get_playlist(
 @router.post("/interactions", response_model=InteractionResponse)
 def record_interaction(
     request: InteractionRequest,
-    device_id: str = Depends(get_device_id),
+    session: AuthenticatedSession = Depends(require_session_token),
     personalization_service: PersonalizationService = Depends(get_personalization_service),
     playlist_service: PlaylistService = Depends(get_playlist_service),
 ):
@@ -310,7 +305,7 @@ def record_interaction(
 
     # Record interaction
     event = personalization_service.record_interaction(
-        device_id=device_id,
+        device_id=session.device_id,
         content_item_id=request.content_item_id,
         event_type=event_type,
         extra_data=request.extra_data,
@@ -333,13 +328,13 @@ def record_interaction(
         EventType.CHAT_MESSAGE,
         EventType.LESS_FROM_CREATOR,
     ):
-        playlist_service.invalidate_user_cache(device_id)
+        playlist_service.invalidate_user_cache(session.device_id)
 
     if event_type in (EventType.VIDEO_SKIP_LT_2S, EventType.LESS_FROM_CREATOR):
         content_item = personalization_service.content_repo.get_by_id(request.content_item_id)
         if content_item:
             for surface in _tiered_surfaces_for_interaction(content_item, event_type):
-                invalidate_tiered_feed_cache(surface=surface, device_id=device_id)
+                invalidate_tiered_feed_cache(surface=surface, device_id=session.device_id)
 
     return InteractionResponse(success=True, event_id=event.id)
 
@@ -377,7 +372,7 @@ class DataDeletionResponse(BaseModel):
 
 @router.delete("/data", response_model=DataDeletionResponse)
 def delete_my_data(
-    device_id: str = Depends(get_device_id),
+    session: AuthenticatedSession = Depends(require_session_token),
     db: Session = Depends(get_db),
 ):
     """
@@ -390,34 +385,42 @@ def delete_my_data(
 
     try:
         counts["push_subscriptions"] = (
-            db.query(PushSubscription).filter(PushSubscription.device_id == device_id).count()
+            db.query(PushSubscription).filter(PushSubscription.device_id == session.device_id).count()
         )
 
         counts["usage"] = (
-            db.query(Usage).filter(Usage.device_id == device_id).delete(synchronize_session=False)
+            db.query(Usage)
+            .filter(Usage.device_id == session.device_id)
+            .delete(synchronize_session=False)
         )
 
         counts["interaction_events"] = (
             db.query(InteractionEvent)
-            .filter(InteractionEvent.device_id == device_id)
+            .filter(InteractionEvent.device_id == session.device_id)
             .delete(synchronize_session=False)
         )
 
         counts["user_preferences"] = (
             db.query(UserPreference)
-            .filter(UserPreference.device_id == device_id)
+            .filter(UserPreference.device_id == session.device_id)
+            .delete(synchronize_session=False)
+        )
+
+        counts["device_sessions"] = (
+            db.query(DeviceSession)
+            .filter(DeviceSession.device_id == session.device_id)
             .delete(synchronize_session=False)
         )
 
         counts["user_profiles"] = (
             db.query(UserProfile)
-            .filter(UserProfile.device_id == device_id)
+            .filter(UserProfile.device_id == session.device_id)
             .delete(synchronize_session=False)
         )
 
         db.commit()
         total = sum(counts.values())
-        logger.info(f"[delete_my_data] Deleted {total} rows for device {device_id[:8]}...")
+        logger.info(f"[delete_my_data] Deleted {total} rows for device {session.device_id[:8]}...")
 
         return DataDeletionResponse(
             success=True,
@@ -427,7 +430,7 @@ def delete_my_data(
 
     except Exception as e:
         db.rollback()
-        logger.error(f"[delete_my_data] Error for device {device_id[:8]}...: {e}")
+        logger.error(f"[delete_my_data] Error for device {session.device_id[:8]}...: {e}")
         raise HTTPException(
             status_code=500, detail="Failed to delete data. Please try again."
         ) from e

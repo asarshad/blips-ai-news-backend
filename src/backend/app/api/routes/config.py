@@ -1,8 +1,9 @@
-"""Public application config endpoint."""
+"""Authenticated application config endpoint."""
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends
 
 from app.core.dependencies import get_redis
+from app.core.session_auth import AuthenticatedSession, require_session_token
 from app.schemas.ads import AppConfigResponse
 from app.services.ad_config_service import AdConfigService
 from app.services.push_config_service import PushConfigService
@@ -31,14 +32,14 @@ def get_push_config_service(redis_client=Depends(get_redis)) -> PushConfigServic
     ),
 )
 def get_app_config(
-    x_device_id: str | None = Header(None, alias="X-Device-ID"),
+    session: AuthenticatedSession = Depends(require_session_token),
     ad_config_service: AdConfigService = Depends(get_ad_config_service),
     push_config_service: PushConfigService = Depends(get_push_config_service),
 ) -> AppConfigResponse:
     """Return effective server-side ad settings for the caller."""
     push_messaging_client = create_push_messaging_client()
     return AppConfigResponse(
-        ads=ad_config_service.get_public_config(x_device_id),
+        ads=ad_config_service.get_public_config(session.device_id),
         push=push_config_service.get_public_config(
             provider_ready=push_messaging_client.is_available,
         ),

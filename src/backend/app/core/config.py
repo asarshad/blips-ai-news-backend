@@ -28,10 +28,18 @@ class Settings(BaseSettings):
     DEBUG_ROUTES_ENABLED: bool = False
     CORS_ORIGINS: str = ""
     DOCS_ENABLED: bool = False
+    SESSION_AUTH_ACCESS_SECRET: str = ""
+    SESSION_AUTH_ACCESS_TTL_SECONDS: int = 900
+    SESSION_AUTH_REFRESH_TTL_DAYS: int = 30
+    EDGE_ORIGIN_SECRET: str = ""
+    EDGE_SESSION_BOOTSTRAP_SECRET: str = ""
 
     # Rate limiting
     RATE_LIMIT_DEFAULT: str = "60/minute"
     RATE_LIMIT_CHAT: str = "10/minute"
+    RATE_LIMIT_SESSION_CREATE: str = "10/minute"
+    RATE_LIMIT_SESSION_REFRESH: str = "20/minute"
+    RATE_LIMIT_EVENTS: str = "120/minute"
 
     # Alerting
     ALERT_ENABLED: bool = False

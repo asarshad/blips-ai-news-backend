@@ -10,6 +10,15 @@ from app.api.routes import videos as videos_module
 from app.models.content import ContentStatus, ContentType
 
 
+def _session(device_id: str):
+    return SimpleNamespace(
+        device_id=device_id,
+        platform="ios",
+        app_version="1.0.0",
+        session_expires_at=datetime(2026, 3, 13, 13, 0, 0),
+    )
+
+
 def test_get_recent_videos_uses_shared_readiness_gate(monkeypatch):
     captured = {}
 
@@ -61,10 +70,10 @@ def test_get_recent_videos_uses_shared_readiness_gate(monkeypatch):
         limit=1,
         cursor=None,
         page=None,
-        x_device_id="device-12345678",
         response=response,
         db=object(),
         flags=SimpleNamespace(is_enabled=lambda name: name == "videos"),
+        session=_session("device-12345678"),
     )
 
     assert captured["hybrid_video_rerank"] is False
@@ -107,15 +116,15 @@ def test_get_recent_videos_passes_hybrid_rerank_flag(monkeypatch):
         limit=1,
         cursor=None,
         page=None,
-        x_device_id=None,
         response=Response(),
         db=object(),
         flags=SimpleNamespace(is_enabled=lambda name: name in {"videos", "video_hybrid_rerank"}),
+        session=_session("device-default"),
     )
 
     assert captured["surface"].value == "videos"
     assert captured["hybrid_video_rerank"] is True
-    assert captured["device_id"] is None
+    assert captured["device_id"] == "device-default"
     assert result["inventory_state"] == "warming_up"
 
 
@@ -157,10 +166,10 @@ def test_get_recent_videos_uses_remaining_window_count_for_caught_up(monkeypatch
         limit=1,
         cursor="5",
         page=None,
-        x_device_id="device-abc",
         response=Response(),
         db=object(),
         flags=SimpleNamespace(is_enabled=lambda name: name == "videos"),
+        session=_session("device-abc"),
     )
 
     assert result["has_more"] is True
@@ -200,10 +209,10 @@ def test_get_reels_passes_hybrid_rerank_flag(monkeypatch):
         limit=1,
         cursor=None,
         page=None,
-        x_device_id="device-reels",
         response=Response(),
         db=object(),
         flags=SimpleNamespace(is_enabled=lambda name: name in {"reels", "video_hybrid_rerank"}),
+        session=_session("device-reels"),
     )
 
     assert captured["surface"].value == "reels"

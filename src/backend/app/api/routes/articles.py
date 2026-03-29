@@ -7,7 +7,7 @@ Includes tiered freshness strategy (A/B/C) and diversity mixing.
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from app.api.feed_headers import FeedMetadata, compute_feed_version
@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.core.dependencies import get_db
 from app.core.exceptions import not_found_exception
 from app.core.logging import get_logger
+from app.core.session_auth import AuthenticatedSession, require_session_token
 from app.db.base import SessionLocal
 from app.models.content import ContentType
 from app.ranking.feed_score import rerank_feed
@@ -32,7 +33,7 @@ from app.services.tiered_feed_service import (
 from app.services.topup_service import check_and_trigger_topup
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_session_token)])
 
 
 def get_content_repo(db: Session = Depends(get_db)) -> ContentItemRepository:
@@ -51,7 +52,7 @@ def get_recent_articles(
     limit: int = Query(5, ge=1, le=50, description="Number of articles to return"),
     page: int = Query(1, ge=1, description="Page number"),
     db: Session = Depends(get_db),
-    x_device_id: Optional[str] = Header(None, alias="X-Device-ID"),
+    session: AuthenticatedSession = Depends(require_session_token),
 ):
     """
     Get the most recent articles using tiered freshness strategy.
@@ -64,7 +65,7 @@ def get_recent_articles(
     Each article includes freshness_tier, published_age_seconds, and added_age_seconds.
     Results are diversity-mixed and cached (45s TTL) for performance.
 
-    If X-Device-ID header is present, results are personalised:
+    Results are personalised using the caller's anonymous bearer session:
     - Items matching the user's declared category interests receive an interest_boost.
     - Stale items receive a staleness_decay penalty.
     - Over-represented sources receive a source_dominance_penalty.
@@ -91,10 +92,10 @@ def get_recent_articles(
     # This happens AFTER the cached retrieval, so the DB-level cache is
     # shared across all users and only the lightweight in-memory sort is
     # per-user.
-    if x_device_id and articles:
+    if articles:
         cat_repo = UserCategorySelectionRepository(db)
-        selected = cat_repo.get_selected_categories(x_device_id)
-        total_weight = cat_repo.get_total_learned_weight(x_device_id)
+        selected = cat_repo.get_selected_categories(session.device_id)
+        total_weight = cat_repo.get_total_learned_weight(session.device_id)
         if selected:
             articles = rerank_feed(
                 items=articles,

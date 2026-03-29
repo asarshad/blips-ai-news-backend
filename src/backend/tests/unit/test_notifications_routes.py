@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.api.routes import notifications as notifications_module
+from app.core.session_auth import AuthenticatedSession
 from app.schemas.push import PushSubscriptionDeleteRequest, PushSubscriptionUpsertRequest
 
 
@@ -26,13 +27,15 @@ class _FakePushService:
         return 1
 
 
-def test_get_device_id_rejects_invalid_header():
-    try:
-        notifications_module.get_device_id("short")
-    except Exception as exc:  # pragma: no cover - explicit assertion below
-        assert getattr(exc, "status_code", None) == 400
-    else:  # pragma: no cover
-        raise AssertionError("Expected HTTPException for short device id")
+def _session(device_id: str) -> AuthenticatedSession:
+    return AuthenticatedSession(
+        device_id=device_id,
+        platform="ios",
+        app_version="1.0.0",
+        session_expires_at=__import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        ),
+    )
 
 
 def test_upsert_push_subscription_passes_device_token_and_platform():
@@ -44,7 +47,7 @@ def test_upsert_push_subscription_passes_device_token_and_platform():
 
     response = notifications_module.upsert_push_subscription(
         request=request,
-        device_id="device-12345678",
+        session=_session("device-12345678"),
         push_service=service,
     )
 
@@ -61,7 +64,7 @@ def test_delete_push_subscription_returns_inactive_response():
 
     response = notifications_module.delete_push_subscription(
         request=request,
-        device_id="device-abcdefgh",
+        session=_session("device-abcdefgh"),
         push_service=service,
     )
 

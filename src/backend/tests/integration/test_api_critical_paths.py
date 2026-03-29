@@ -30,6 +30,17 @@ def client():
         yield c
 
 
+def _auth_headers(client: TestClient) -> dict[str, str]:
+    """Bootstrap an anonymous session and return bearer auth headers."""
+    resp = client.post(
+        "/api/v1/auth/session",
+        json={"platform": "ios", "app_version": "1.0.0"},
+    )
+    assert resp.status_code == 200
+    token = resp.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
 class TestHealthEndpoint:
     """Test the /health endpoint behavior."""
 
@@ -60,7 +71,7 @@ class TestContentEndpoints:
 
     def test_articles_recent_returns_payload(self, client):
         """Articles recent endpoint should exist and return the current payload shape."""
-        resp = client.get("/api/v1/articles/recent")
+        resp = client.get("/api/v1/articles/recent", headers=_auth_headers(client))
         assert resp.status_code in [200, 404, 500]
         if resp.status_code == 200:
             data = resp.json()
@@ -71,7 +82,7 @@ class TestContentEndpoints:
 
     def test_videos_recent_returns_payload(self, client):
         """Videos recent endpoint should exist and return the current payload shape."""
-        resp = client.get("/api/v1/videos/recent")
+        resp = client.get("/api/v1/videos/recent", headers=_auth_headers(client))
         assert resp.status_code in [200, 500, 503]
         if resp.status_code == 200:
             data = resp.json()
@@ -82,7 +93,7 @@ class TestContentEndpoints:
 
     def test_reels_recent_returns_payload(self, client):
         """Reels endpoint should exist and return the current payload shape."""
-        resp = client.get("/api/v1/videos/reels")
+        resp = client.get("/api/v1/videos/reels", headers=_auth_headers(client))
         assert resp.status_code in [200, 500, 503]
         if resp.status_code == 200:
             data = resp.json()
@@ -95,7 +106,7 @@ class TestContentEndpoints:
         """Playlist endpoint should exist on the session API."""
         resp = client.get(
             "/api/v1/session/playlist?type=ARTICLE&size=10",
-            headers={"X-Device-ID": "test-device-1234"},
+            headers=_auth_headers(client),
         )
         assert resp.status_code in [200, 500]
         if resp.status_code == 200:
@@ -158,6 +169,7 @@ class TestAIChatEndpoints:
         resp = client.post(
             "/api/v1/ai/respond",
             json={"content_id": "test-123", "message": "Hello", "device_id": "test-device"},
+            headers=_auth_headers(client),
         )
         # Will fail validation or LLM config, but endpoint should exist
         assert resp.status_code in [200, 400, 404, 422, 500]
@@ -213,10 +225,14 @@ class TestOpenAPISpec:
 
         assert resp.status_code == 404
 
-    def test_preferences_require_matching_device_header(self, client):
-        """Preferences APIs must reject callers acting on another device."""
-        resp = client.get(
-            "/api/v1/users/device-alpha/categories",
-            headers={"X-Device-ID": "device-beta"},
-        )
-        assert resp.status_code == 403
+    def test_preferences_categories_use_authenticated_route(self, client):
+        """Preferences APIs should use the auth-scoped route."""
+        headers = _auth_headers(client)
+        resp = client.get("/api/v1/preferences/categories", headers=headers)
+        assert resp.status_code == 200
+        assert resp.json() == {"selected_categories": []}
+
+    def test_legacy_preferences_route_is_not_exposed(self, client):
+        """Caller-scoped preferences route should be removed."""
+        resp = client.get("/api/v1/users/device-alpha/categories")
+        assert resp.status_code == 404

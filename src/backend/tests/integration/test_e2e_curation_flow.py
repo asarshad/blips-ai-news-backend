@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 pytestmark = [pytest.mark.integration]
 
 ADMIN_KEY = "qa-admin-key"
-DEVICE_ID = "qa-device-0001"
 
 
 @pytest.fixture
@@ -28,6 +27,17 @@ def client(monkeypatch: pytest.MonkeyPatch):
 
     with TestClient(app) as test_client:
         yield test_client
+
+
+def _auth_headers(client: TestClient) -> dict[str, str]:
+    """Bootstrap an anonymous session and return bearer auth headers."""
+    resp = client.post(
+        "/api/v1/auth/session",
+        json={"platform": "ios", "app_version": "1.0.0"},
+    )
+    assert resp.status_code == 200
+    token = resp.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
 
 
 def _insert_content(*, title: str, score: float, promoted: bool) -> int:
@@ -67,6 +77,8 @@ def _insert_content(*, title: str, score: float, promoted: bool) -> int:
 
 class TestE2ECurationFlow:
     def test_ingest_review_promote_then_feed(self, client: TestClient):
+        auth_headers = _auth_headers(client)
+
         # Ingest two rows: one already promoted, one still candidate.
         promoted_id = _insert_content(
             title="Baseline promoted item",
@@ -83,7 +95,7 @@ class TestE2ECurationFlow:
         before = client.get(
             "/api/v1/session/playlist",
             params={"type": "ARTICLE", "size": 20, "refresh": True},
-            headers={"X-Device-ID": DEVICE_ID},
+            headers=auth_headers,
         )
         assert before.status_code == 200
         before_ids = [item["id"] for item in before.json()["items"]]
@@ -112,7 +124,7 @@ class TestE2ECurationFlow:
         after = client.get(
             "/api/v1/session/playlist",
             params={"type": "ARTICLE", "size": 20, "refresh": True},
-            headers={"X-Device-ID": DEVICE_ID},
+            headers=auth_headers,
         )
         assert after.status_code == 200
         after_ids = [item["id"] for item in after.json()["items"]]

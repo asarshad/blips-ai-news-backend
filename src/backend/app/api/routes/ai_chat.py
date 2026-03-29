@@ -3,14 +3,13 @@
 from typing import Optional
 
 import redis
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from app.core.config import settings as _settings
 from app.core.dependencies import get_db, get_redis
-from app.core.device_id import resolve_device_id
 from app.core.exceptions import (
     ArticleNotFoundError,
     ChatGenerationError,
@@ -19,6 +18,7 @@ from app.core.exceptions import (
     quota_exceeded_exception,
 )
 from app.core.feature_flags import FeatureFlags, get_feature_flags
+from app.core.session_auth import AuthenticatedSession, require_session_token
 from app.repositories.content_repo import ContentItemRepository
 from app.repositories.usage_repo import UsageRepository
 from app.schemas.conversation import ConversationCreate
@@ -38,8 +38,7 @@ def get_ai_response(
     db: Session = Depends(get_db),
     redis_client: redis.Redis = Depends(get_redis),
     flags: FeatureFlags = Depends(get_feature_flags),
-    user_agent: Optional[str] = Header(None),
-    x_device_id: Optional[str] = Header(None, alias="X-Device-ID"),
+    session: AuthenticatedSession = Depends(require_session_token),
 ):
     """Generate AI response for a message about a content item."""
     # Check chat feature flag
@@ -50,13 +49,11 @@ def get_ai_response(
     content_repo = ContentItemRepository(db)
     usage_repo = UsageRepository(db)
 
-    device_id = resolve_device_id(request, x_device_id=x_device_id, user_agent=user_agent)
-
     # Check quota
     quota_manager = QuotaManager(usage_repo, redis_client)
 
     content_id = message.content_item_id
-    quota = quota_manager.check_quota(device_id, content_id)
+    quota = quota_manager.check_quota(session.device_id, content_id)
 
     if quota["remaining_daily_messages"] <= 0:
         raise quota_exceeded_exception("daily")
@@ -90,7 +87,11 @@ def get_ai_response(
     # Usage tracking is still preserved below.
 
     # Update usage
-    quota_manager.update_usage(device_id, message.content_item_id, response.get("tokens_used", 0))
+    quota_manager.update_usage(
+        session.device_id,
+        message.content_item_id,
+        response.get("tokens_used", 0),
+    )
 
     return {
         "response": response["response"],
