@@ -127,6 +127,7 @@ _REEL_CONFIG = PromotionConfig(
     recency_half_life_hours=48.0,
     discovery_lane_penalty=0.10,
 )
+_REEL_CAP_ZERO_FALLBACK_MIN_SCORE = 0.40
 
 
 # ── Clickbait detection ───────────────────────────────────────────────────────
@@ -930,10 +931,33 @@ class PromotionService:
     ) -> int | None:
         if content_type != ContentType.REEL:
             return None
+        lane = _safe_text(getattr(item, "acquisition_lane", None))
         if source_profile is not None:
-            return max(0, int(source_profile.daily_reel_cap or 0))
+            resolved = max(0, int(source_profile.daily_reel_cap or 0))
+            if resolved > 0:
+                return resolved
+            if (
+                lane == "curated"
+                and bool(getattr(source_profile, "allow_curated", False))
+                and not _is_broad_news_source(item, channel_config, source_profile)
+                and _safe_float(getattr(item, "promotion_score", None), 0.0)
+                >= _REEL_CAP_ZERO_FALLBACK_MIN_SCORE
+            ):
+                return 1
+            return resolved
         if channel_config is not None:
-            return channel_config.effective_daily_reel_cap
+            resolved = channel_config.effective_daily_reel_cap
+            if resolved > 0:
+                return resolved
+            if (
+                lane == "curated"
+                and channel_config.enabled
+                and not _is_broad_news_source(item, channel_config, source_profile)
+                and _safe_float(getattr(item, "promotion_score", None), 0.0)
+                >= _REEL_CAP_ZERO_FALLBACK_MIN_SCORE
+            ):
+                return 1
+            return resolved
         return 1
 
     def _has_editorial_override(self, item: ContentItem) -> bool:

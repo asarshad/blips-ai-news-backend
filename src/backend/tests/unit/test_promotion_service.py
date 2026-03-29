@@ -38,6 +38,52 @@ def test_reels_use_lower_auto_promote_threshold_by_default():
     assert service._min_promotion_score(ContentType.VIDEO, _VIDEO_CONFIG) == _VIDEO_CONFIG.min_score
 
 
+def test_curated_high_score_reels_can_fall_back_to_single_promotion_slot():
+    service = PromotionService(MagicMock())
+    item = SimpleNamespace(
+        acquisition_lane="curated",
+        promotion_score=0.4304,
+        source="TechCrunch",
+    )
+    source_profile = SimpleNamespace(
+        daily_reel_cap=0,
+        allow_curated=True,
+        channel_name="TechCrunch",
+    )
+
+    cap = service._surface_channel_cap(
+        ContentType.REEL,
+        item=item,
+        channel_config=None,
+        source_profile=source_profile,
+    )
+
+    assert cap == 1
+
+
+def test_broad_news_reels_do_not_use_zero_cap_fallback():
+    service = PromotionService(MagicMock())
+    item = SimpleNamespace(
+        acquisition_lane="curated",
+        promotion_score=0.4304,
+        source="Reuters",
+    )
+    source_profile = SimpleNamespace(
+        daily_reel_cap=0,
+        allow_curated=True,
+        channel_name="Reuters",
+    )
+
+    cap = service._surface_channel_cap(
+        ContentType.REEL,
+        item=item,
+        channel_config=None,
+        source_profile=source_profile,
+    )
+
+    assert cap == 0
+
+
 def test_rescore_promoted_preserves_editorially_approved_items(monkeypatch):
     item = SimpleNamespace(
         id=1,
