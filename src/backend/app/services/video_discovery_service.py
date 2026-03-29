@@ -172,6 +172,7 @@ class SearchPlanStep:
     pack: DiscoveryQueryPack
     region: str
     uses_story_pack: bool
+    story_packs: tuple[DiscoveryQueryPack, ...]
     static_packs: tuple[DiscoveryQueryPack, ...]
 
 
@@ -286,13 +287,13 @@ class VideoDiscoveryService:
 
         uses_story_pack = False
         if self._should_use_story_pack(surface, story_packs):
-            pack = story_packs[0]
-            uses_story_pack = True
+            pack = self._select_story_pack(surface, story_packs)
+            uses_story_pack = pack is not None
         else:
             pack = self._select_static_pack(surface, static_packs)
             if pack is None and story_packs:
-                pack = story_packs[0]
-                uses_story_pack = True
+                pack = self._select_story_pack(surface, story_packs)
+                uses_story_pack = pack is not None
 
         if pack is None:
             return []
@@ -302,6 +303,7 @@ class VideoDiscoveryService:
                 pack=pack,
                 region=self._peek_region(surface),
                 uses_story_pack=uses_story_pack,
+                story_packs=tuple(story_packs),
                 static_packs=tuple(static_packs),
             )
         ]
@@ -327,11 +329,19 @@ class VideoDiscoveryService:
         if not story_packs:
             return False
         if surface == "reels":
-            # Reels discovery is currently more supply-constrained than videos in
-            # production. Prefer story/entity-led searches whenever we have them,
-            # and let static packs serve as the fallback path when story context
-            # is unavailable.
-            return True
+            # Reels need stronger story-driven discovery, but fully pinning the
+            # lane to story packs causes production to collapse into a single
+            # dominant entity. Keep stories as the default while reserving every
+            # fourth window for static packs.
+            if self.state_store.is_available():
+                key = f"youtube:story_window_counter:{surface}"
+                payload = self.state_store.get_text(key)
+                try:
+                    counter = int(payload or "0")
+                except ValueError:
+                    counter = 0
+                return (counter + 1) % 4 != 0
+            return (self._fallback_window_index(surface) + 1) % 4 != 0
         if self.state_store.is_available():
             key = f"youtube:story_window_counter:{surface}"
             payload = self.state_store.get_text(key)
@@ -386,6 +396,29 @@ class VideoDiscoveryService:
         )
         return choice
 
+    def _select_story_pack(
+        self,
+        surface: str,
+        packs: List[DiscoveryQueryPack],
+    ) -> DiscoveryQueryPack | None:
+        if not packs:
+            return None
+
+        last_query = self.state_store.get_text(f"youtube:search_last_query:{surface}")
+        if not self.state_store.is_available():
+            index = self._fallback_window_index(surface) % len(packs)
+            ordered = packs[index:] + packs[:index]
+            return self._choose_with_repetition_guard(ordered, last_query=last_query)
+
+        cursor_key = f"youtube:story_pack_cursor:{surface}"
+        payload = self.state_store.get_text(cursor_key)
+        try:
+            index = int(payload or "0")
+        except ValueError:
+            index = 0
+        ordered = packs[index % len(packs) :] + packs[: index % len(packs)]
+        return self._choose_with_repetition_guard(ordered, last_query=last_query)
+
     def _choose_with_repetition_guard(
         self,
         ordered_packs: List[DiscoveryQueryPack],
@@ -427,8 +460,34 @@ class VideoDiscoveryService:
     def _record_search_execution(self, surface: str, step: SearchPlanStep) -> None:
         self._record_story_window(surface)
         self._record_region_execution(surface, step.region)
-        if not step.uses_story_pack:
+        if step.uses_story_pack:
+            self._record_story_selection(surface, step.pack, step.story_packs)
+        else:
             self._record_static_selection(surface, step.pack, step.static_packs)
+
+    def _record_story_selection(
+        self,
+        surface: str,
+        pack: DiscoveryQueryPack,
+        packs: tuple[DiscoveryQueryPack, ...],
+    ) -> None:
+        if self.state_store.is_available():
+            if packs:
+                try:
+                    current_index = next(
+                        index for index, candidate in enumerate(packs) if candidate.label == pack.label
+                    )
+                except StopIteration:
+                    current_index = 0
+                self.state_store.set_text(
+                    f"youtube:story_pack_cursor:{surface}",
+                    str((current_index + 1) % len(packs)),
+                )
+            self.state_store.set_text(f"youtube:search_last_query:{surface}", pack.label)
+            self.state_store.set_text(
+                f"youtube:search_last_run:{surface}:{pack.label}",
+                datetime.utcnow().isoformat(),
+            )
 
     def _record_story_window(self, surface: str) -> None:
         if self.state_store.is_available():
@@ -570,7 +629,8 @@ class VideoDiscoveryService:
                     order="relevance",
                 )
             )
-            if len(dynamic_packs) >= 2:
+            max_story_packs = 3 if surface == "reels" else 2
+            if len(dynamic_packs) >= max_story_packs:
                 break
 
         return dynamic_packs

@@ -206,7 +206,7 @@ def process_progress_row_batch(
     from app.models.ingestion_progress import IngestionProgress
 
     progress = db.query(IngestionProgress).filter(IngestionProgress.id == row_id).one()
-    review_queue_status = review_queue_target_status()
+    article_review_queue_status = review_queue_target_status(content_type=ContentType.ARTICLE)
     logger.info(
         f"Processing row: id={row_id} type={progress.source_type} feed={progress.feed_name} target={progress.target} ingested={progress.items_ingested} status={progress.status}"
     )
@@ -353,7 +353,7 @@ def process_progress_row_batch(
                                 entry,
                                 source_url=source_url,
                                 day_utc=day_utc,
-                                review_queue_status=review_queue_status,
+                                review_queue_status=article_review_queue_status,
                                 article_hydrator=article_hydrator,
                             )
                             for entry, source_url in chunk
@@ -541,7 +541,11 @@ def process_progress_row_batch(
 
                 payload = {
                     "type": ContentType.REEL if is_reel else ContentType.VIDEO,
-                    "curation_status": review_queue_status,
+                    "curation_status": review_queue_target_status(
+                        content_type=ContentType.REEL if is_reel else ContentType.VIDEO,
+                        acquisition_lane=getattr(e, "acquisition_lane", "curated"),
+                        reel_cap=cfg.effective_daily_reel_cap,
+                    ),
                     "discovered_via": f"yt_{getattr(e, 'acquisition_lane', 'curated')}",
                     "source": e.source or "YouTube",
                     "source_url": source_url,

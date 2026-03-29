@@ -39,6 +39,8 @@ from app.integrations.rss_feeds import (
     get_quality_modifier as get_rss_quality_modifier,
 )
 from app.integrations.youtube_channels import (
+    get_channel_by_id,
+    get_channel_by_name,
     get_quality_weight_modifier,
 )
 from app.integrations.youtube_client import VideoEntry, YouTubeClient
@@ -200,7 +202,15 @@ def build_video_content_item_from_entry(
     resolved_source_status = (
         source_status if source_status is not None else getattr(entry, "source_status", None)
     )
-    resolved_status = curation_status or review_queue_target_status()
+    channel_config = get_channel_by_id(getattr(entry, "channel_id", "") or "") or get_channel_by_name(
+        source
+    )
+    reel_cap = channel_config.effective_daily_reel_cap if channel_config is not None else None
+    resolved_status = curation_status or review_queue_target_status(
+        content_type=content_type,
+        acquisition_lane=lane,
+        reel_cap=reel_cap,
+    )
 
     topics = extract_topics(entry.title, summary or "")
     entities = extract_entities(entry.title, summary or "")

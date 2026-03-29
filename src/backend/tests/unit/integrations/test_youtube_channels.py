@@ -94,3 +94,21 @@ def test_channel_name_lookup_prefers_high_confidence_matches():
     assert apple.name == "Apple"
 
     assert unknown is None
+
+
+def test_selected_long_form_news_channels_can_feed_reels():
+    dtns = get_channel_by_name("Daily Tech News Show")
+    the_information = get_channel_by_name("The Information")
+    wired = get_channel_by_name("WIRED")
+    appleinsider = get_channel_by_name("AppleInsider")
+    techradar = get_channel_by_name("TechRadar")
+    digital_trends = get_channel_by_name("Digital Trends")
+    reuters = get_channel_by_name("Reuters")
+
+    assert dtns is not None and dtns.reels_enabled and dtns.effective_daily_reel_cap == 1
+    assert the_information is not None and the_information.reels_enabled
+    assert wired is not None and wired.reels_enabled
+    assert appleinsider is not None and appleinsider.reels_enabled
+    assert techradar is not None and techradar.reels_enabled
+    assert digital_trends is not None and digital_trends.reels_enabled
+    assert reuters is not None and reuters.reels_enabled is False

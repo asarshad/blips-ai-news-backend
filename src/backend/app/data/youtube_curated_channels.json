@@ -355,6 +355,8 @@
     "role": "news",
     "content_format": "long_form",
     "daily_cap": 1,
+    "daily_reel_cap": 1,
+    "allow_reels": true,
     "quality_tier": "standard"
   },
   {
@@ -363,6 +365,8 @@
     "role": "news",
     "content_format": "long_form",
     "daily_cap": 1,
+    "daily_reel_cap": 1,
+    "allow_reels": true,
     "quality_tier": "standard"
   },
   {
@@ -395,6 +399,8 @@
     "role": "news",
     "content_format": "long_form",
     "daily_cap": 1,
+    "daily_reel_cap": 1,
+    "allow_reels": true,
     "quality_tier": "standard"
   },
   {
@@ -957,6 +963,8 @@
     "role": "news",
     "content_format": "long_form",
     "daily_cap": 2,
+    "daily_reel_cap": 1,
+    "allow_reels": true,
     "quality_tier": "premium",
     "bootstrap_on_add": true
   },
@@ -1064,6 +1072,8 @@
     "role": "news",
     "content_format": "long_form",
     "daily_cap": 2,
+    "daily_reel_cap": 1,
+    "allow_reels": true,
     "fresh_published_hours": 48,
     "backfill_created_hours": 24,
     "evergreen_max_days": 14,
@@ -1140,6 +1150,8 @@
     "role": "news",
     "content_format": "long_form",
     "daily_cap": 1,
+    "daily_reel_cap": 1,
+    "allow_reels": true,
     "quality_tier": "supplemental",
     "ingestion_stream": "expansion",
     "notes": "Expansion stream: activated only when video inventory needs fill."

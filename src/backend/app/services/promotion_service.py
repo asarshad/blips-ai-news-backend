@@ -893,6 +893,15 @@ class PromotionService:
             return _REEL_CONFIG
         return self.config
 
+    def _min_promotion_score(
+        self,
+        content_type: ContentType,
+        config: PromotionConfig,
+    ) -> float:
+        if content_type == ContentType.REEL and bool(getattr(settings, "AUTO_PROMOTE_REELS", True)):
+            return min(config.min_score, float(getattr(settings, "AUTO_PROMOTE_REELS_MIN_SCORE", 0.30)))
+        return config.min_score
+
     def _get_source_profiles(self, items: List[ContentItem]) -> Dict[str, VideoSourceProfile]:
         channel_ids = [
             channel_id
@@ -1136,10 +1145,11 @@ class PromotionService:
 
         promoted = 0
         promoted_ids: List[int] = []
+        min_score = self._min_promotion_score(content_type, config)
         for s, item, block_reason, channel_config, source_profile in scored:
             if promoted >= config.top_n_per_type:
                 break
-            if s < config.min_score:
+            if s < min_score:
                 break
             if block_reason:
                 continue
@@ -1178,7 +1188,7 @@ class PromotionService:
             content_type.value,
             evaluated,
             promoted,
-            config.min_score,
+            min_score,
         )
         return promoted, evaluated, rescored, promoted_ids
 
