@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hmac
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -28,20 +26,6 @@ router = APIRouter()
 _limiter = Limiter(key_func=get_remote_address)
 
 
-def _require_edge_bootstrap_verification(request: Request) -> None:
-    """Require an edge-issued bootstrap verification signal in prod."""
-    if settings.ENV != "prod":
-        return
-
-    expected = settings.EDGE_SESSION_BOOTSTRAP_SECRET.strip()
-    if not expected:
-        raise HTTPException(status_code=503, detail="Session bootstrap is not configured")
-
-    provided = request.headers.get("X-Edge-Session-Bootstrap", "")
-    if not hmac.compare_digest(provided, expected):
-        raise HTTPException(status_code=403, detail="Session bootstrap not allowed")
-
-
 @router.post("", response_model=SessionAuthResponse)
 @_limiter.limit(settings.RATE_LIMIT_SESSION_CREATE)
 def create_anonymous_session(
@@ -49,7 +33,7 @@ def create_anonymous_session(
     body: SessionCreateRequest,
     db: Session = Depends(get_db),
 ) -> SessionAuthResponse:
-    _require_edge_bootstrap_verification(request)
+    del request
     try:
         return create_session(
             db,

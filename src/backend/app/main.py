@@ -367,28 +367,6 @@ async def docs_guard(request: Request, call_next):
     return await call_next(request)
 
 
-@app.middleware("http")
-async def edge_origin_guard(request: Request, call_next):
-    """Require prod API traffic to come through the trusted edge."""
-    path = request.url.path
-    if settings.ENV != "prod" or not path.startswith(settings.API_V1_STR) or path == "/health":
-        return await call_next(request)
-
-    expected = settings.EDGE_ORIGIN_SECRET.strip()
-    if not expected:
-        logger.error("EDGE_ORIGIN_SECRET is missing in prod; rejecting API traffic")
-        return JSONResponse(
-            status_code=503,
-            content={"detail": "API edge origin is not configured"},
-        )
-
-    provided = request.headers.get("X-Edge-Origin-Secret", "")
-    if provided != expected:
-        return JSONResponse(status_code=403, content={"detail": "Direct origin access denied"})
-
-    return await call_next(request)
-
-
 # ── Redis fail-closed middleware ────────────────────────────────────────
 _redis_last_check: float = 0.0
 _redis_healthy: bool = True

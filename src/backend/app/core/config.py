@@ -31,8 +31,6 @@ class Settings(BaseSettings):
     SESSION_AUTH_ACCESS_SECRET: str = ""
     SESSION_AUTH_ACCESS_TTL_SECONDS: int = 900
     SESSION_AUTH_REFRESH_TTL_DAYS: int = 30
-    EDGE_ORIGIN_SECRET: str = ""
-    EDGE_SESSION_BOOTSTRAP_SECRET: str = ""
 
     # Rate limiting
     RATE_LIMIT_DEFAULT: str = "60/minute"
