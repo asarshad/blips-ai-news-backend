@@ -373,6 +373,7 @@ def test_youtube_video_rows_stay_on_rss_when_reel_uploads_enabled(monkeypatch):
                     content_format=ContentFormat.MIXED,
                     fresh_published_hours=None,
                     channel_id="channel-yt",
+                    effective_daily_reel_cap=10,
                 )
             ]
 
@@ -655,6 +656,7 @@ def test_worker_persists_youtube_metadata_fields(monkeypatch):
                     name="Channel One",
                     content_format=SimpleNamespace(value="mixed"),
                     enabled=True,
+                    effective_daily_reel_cap=10,
                 )
             ]
 
@@ -750,6 +752,7 @@ def test_worker_keeps_short_duration_long_form_entry_off_reels(monkeypatch):
                     name="Channel One",
                     content_format=SimpleNamespace(value="long_form"),
                     enabled=True,
+                    effective_daily_reel_cap=10,
                 )
             ]
 
