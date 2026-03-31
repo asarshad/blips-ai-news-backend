@@ -614,12 +614,13 @@ class ArticleHydrationService:
                 article_url=source_url,
                 title=display_article_title(item.title, source_url),
             )
+            llm_image_url = getattr(llm_result, "image_url", llm_result)
             refreshed_image = select_best_article_image(
                 [
                     ArticleImageCandidate(url=item.image_url, source="existing"),
                     ArticleImageCandidate(url=rss_image_url, source="rss"),
                     ArticleImageCandidate(
-                        url=llm_result.image_url if llm_result else None,
+                        url=llm_image_url if llm_result else None,
                         source="llm_extract",
                     ),
                 ],

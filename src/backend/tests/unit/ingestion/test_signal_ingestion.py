@@ -516,3 +516,31 @@ class TestRunSignalIngestion:
 
         assert result.signal_urls_seen == 2
         assert result.stubs_created == 2
+
+    def test_signal_ingestion_commits_in_small_batches(self, monkeypatch):
+        items = [
+            SignalItem(
+                raw_url=f"https://example.com/article-{i}",
+                signal_source=SignalSource.HN_TOP,
+                raw_title=f"Story {i}",
+                signal_score=100.0,
+            )
+            for i in range(3)
+        ]
+        mock_db, patches, _cr, _sr = _patch_orchestrator(hn_top=items)
+        monkeypatch.setenv("SIGNAL_INGESTION_COMMIT_EVERY", "2")
+
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+            patches[7],
+        ):
+            result = run_signal_ingestion(mock_db)
+
+        assert result.stubs_created == 3
+        assert mock_db.commit.call_count == 2

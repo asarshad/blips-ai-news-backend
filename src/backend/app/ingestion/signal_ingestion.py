@@ -23,6 +23,7 @@ become eligible for AI summarisation and feed display.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Dict, List, Optional
@@ -263,6 +264,8 @@ def run_signal_ingestion(
     content_repo = ContentItemRepository(db)
     signal_repo = SignalURLRepository(db)
     article_hydrator = ArticleHydrationService()
+    commit_every = max(1, int(os.getenv("SIGNAL_INGESTION_COMMIT_EVERY", "10")))
+    pending_writes = 0
 
     # ── 1. Collect raw signal items ───────────────────────────────────────
     all_items: List[SignalItem] = []
@@ -302,6 +305,7 @@ def run_signal_ingestion(
         # Each item runs inside its own savepoint so an IntegrityError only
         # rolls back that single item, not the whole batch already flushed.
         try:
+            item_mutated = False
             with db.begin_nested():  # SAVEPOINT sp_N
                 canonical = normalize_url(item.raw_url)
                 if not canonical:
@@ -330,6 +334,7 @@ def run_signal_ingestion(
                     raw_title=item.raw_title,
                     signal_score=item.signal_score,
                 )
+                item_mutated = True
 
                 is_new_signal = signal_row.hit_count == 1
                 if is_new_signal:
@@ -401,6 +406,12 @@ def run_signal_ingestion(
                     },
                 )
 
+            if item_mutated:
+                pending_writes += 1
+            if pending_writes >= commit_every:
+                db.commit()
+                pending_writes = 0
+
         except IntegrityError:
             # Savepoint already rolled back by context manager exit.
             # Only this item's changes are lost; prior items in batch are safe.
@@ -412,7 +423,8 @@ def run_signal_ingestion(
             result.errors.append(msg)
 
     try:
-        db.commit()
+        if pending_writes:
+            db.commit()
     except Exception as exc:
         db.rollback()
         msg = f"Commit failed: {exc}"

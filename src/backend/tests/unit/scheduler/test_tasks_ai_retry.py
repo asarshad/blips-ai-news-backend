@@ -428,3 +428,57 @@ def test_process_ai_summaries_marks_non_tech_video_processed_without_summary(mon
     assert item.tech_relevance == "none"
     assert item.is_mixed_roundup is True
     db.commit.assert_called()
+
+
+def test_process_ai_summaries_skips_maintenance_for_immediate_runs(monkeypatch):
+    db = MagicMock()
+    repo = MagicMock()
+    item = SimpleNamespace(
+        id=88,
+        type=ContentType.REEL,
+        content_text=None,
+        description=None,
+        title="Short-form clip",
+        topics=[],
+        conversation_starters=None,
+        summary=None,
+        ai_processed=False,
+    )
+    repo.get_unprocessed_by_ai.return_value = [item]
+    repo.get_articles_with_short_summaries.return_value = []
+    repo.get_articles_with_long_summaries.return_value = []
+    repo.get_videos_with_short_summaries.return_value = []
+
+    llm_client = MagicMock()
+    llm_client.is_configured.return_value = True
+    stats = _FakeStats()
+    maintenance_calls = {"starters": 0, "images": 0, "events": 0}
+
+    monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
+    monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
+    monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: stats)
+    monkeypatch.setattr(
+        tasks_ai_retry,
+        "_backfill_starters",
+        lambda *_args, **_kwargs: maintenance_calls.__setitem__(
+            "starters", maintenance_calls["starters"] + 1
+        ),
+    )
+    monkeypatch.setattr(
+        tasks_ai_retry,
+        "_run_article_image_verification",
+        lambda *_args, **_kwargs: maintenance_calls.__setitem__(
+            "images", maintenance_calls["images"] + 1
+        ),
+    )
+    monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
+    monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
+    monkeypatch.setattr(
+        "app.scheduler.tasks_content_events.run_content_event_dispatch_job",
+        lambda: maintenance_calls.__setitem__("events", maintenance_calls["events"] + 1),
+    )
+
+    tasks_ai_retry.process_ai_summaries(max_items=1, include_maintenance=False)
+
+    assert stats.items_processed == 1
+    assert maintenance_calls == {"starters": 0, "images": 0, "events": 1}

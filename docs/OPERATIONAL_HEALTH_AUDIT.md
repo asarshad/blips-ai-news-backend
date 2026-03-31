@@ -487,36 +487,45 @@ Assessment:
 
 ### Critical
 
-- Increase worker memory or move worker off the current `starter` memory tier.
-  - This is the clearest confirmed production stability issue.
-- Investigate and reduce worker peak memory during ingestion and promotion runs.
-  - The repeated OOM cycle is likely contributing to reels freshness lag.
-- Triage signal-ingestion deadlocks.
-  - Repeated `DeadlockDetected` warnings indicate real contention.
+- [ ] Increase worker memory or move worker off the current `starter` memory tier.
+  Status: still pending. This is the clearest confirmed production stability issue, but it changes spend and needs an explicit infra decision before rollout.
+- [x] Investigate and reduce worker peak memory during ingestion and promotion runs.
+  Status: in progress and partially implemented in repo. Immediate post-ingestion AI now runs with a lighter cap and skips the heavier maintenance pass so the fetch cycle does less work on the memory-constrained worker.
+- [x] Triage signal-ingestion deadlocks.
+  Status: first mitigation implemented in repo. Signal ingestion now commits in smaller batches to reduce transaction scope and lock hold time; live validation is still needed after deploy.
 
 ### High
 
-- Reduce scheduler overlap pressure.
-  - Investigate why `fetch_and_process_news` still exceeds its `15 minute` window often enough to hit max-instances warnings.
-- Add alerting for:
-  - worker OOM events
-  - reels `recent_refresh_count` below threshold
-  - deadlock frequency
-  - repeated scheduler overlap skips
-- Fix recurring article image repair type errors.
-  - `'str' object has no attribute 'image_url'` is noisy and should be removed from the steady-state log stream.
-- Ship the mobile tab-entry refresh fix in the next app release.
+- [x] Reduce scheduler overlap pressure.
+  Status: first mitigation implemented in repo. The immediate freshness pass after ingestion is now lightweight instead of running the full AI retry maintenance workload every cycle.
+- [ ] Add alerting for worker OOM events, reels freshness underfill, deadlock frequency, and repeated scheduler overlap skips.
+  Status: pending. The need is clear from the audit, but the alerting mechanism still needs to be wired up.
+- [x] Fix recurring article image repair type errors.
+  Status: fixed in repo. The article-image fallback path now accepts the actual string return shape from the LLM extractor instead of dereferencing `.image_url` on a string-like result.
+- [ ] Ship the mobile tab-entry refresh fix in the next app release.
+  Status: code is already merged and pushed in the mobile repo, but it is not live until the next app release.
 
 ### Medium
 
-- Expand `/health` or `/ops/status` with resource and restart signals.
-  - Current health still misses memory pressure and recent restart count.
-- Add a post-deploy operational smoke check that runs automatically.
-  - Include `/health`, anonymous session bootstrap, articles/videos/reels feeds, cache-header validation, and inventory-health assertions.
-- Add automation that pages on repeated worker `server_failed` OOM events from Render.
-- Reassess noisy and permanently failing sources.
-  - Some RSS and extraction failures are source-specific and may be better disabled, quarantined, or deprioritized.
-- Consider broadening mobile resume refresh to all three surfaces when the app returns from a long background interval.
+- [ ] Expand `/health` or `/ops/status` with resource and restart signals.
+  Status: pending. Current health still misses memory pressure and recent restart count.
+- [ ] Add a post-deploy operational smoke check that runs automatically.
+  Status: partially prepared. `src/backend/scripts/operational_check.py` exists and is useful now, but it is not wired into deploy automation yet.
+- [ ] Add automation that pages on repeated worker `server_failed` OOM events from Render.
+  Status: pending.
+- [ ] Reassess noisy and permanently failing sources.
+  Status: pending. Some RSS and extraction failures are source-specific and may be better disabled, quarantined, or deprioritized.
+- [ ] Broaden mobile resume refresh to all three surfaces when the app returns from a long background interval.
+  Status: pending. Current repo state still refreshes only the visible tab on resume.
+
+### Active Work Log
+
+- [x] March 31, 2026: converted this section into a live checklist for handoff.
+- [x] March 31, 2026: fixed the article-image fallback type mismatch behind the recurring `'str' object has no attribute 'image_url'` warning.
+- [x] March 31, 2026: split immediate post-ingestion AI work from heavier retry maintenance so the fetch job does less work per cycle.
+- [x] March 31, 2026: added smaller commit batches to signal ingestion to reduce deadlock exposure.
+- [x] March 31, 2026: added or updated targeted unit coverage for the fixes above.
+- [ ] Next: deploy these backend changes to Render and verify whether worker overlap, deadlock warnings, and reels freshness improve under live load.
 
 ## Test / Automation Gap Analysis
 

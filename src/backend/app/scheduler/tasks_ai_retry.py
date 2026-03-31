@@ -23,7 +23,11 @@ from app.scheduler.job_stats import log_job_start
 logger = get_logger(__name__)
 
 
-def process_ai_summaries():
+def process_ai_summaries(
+    *,
+    max_items: int | None = None,
+    include_maintenance: bool = True,
+):
     """Summarise all unprocessed content items via the LLM pipeline.
 
     Called:
@@ -58,8 +62,10 @@ def process_ai_summaries():
             )
             return
 
-        items = content_repo.get_unprocessed_by_ai(limit=MAX_ITEMS_PER_RUN, hours_back=168)
-        remaining_slots = max(0, MAX_ITEMS_PER_RUN - len(items))
+        item_limit = MAX_ITEMS_PER_RUN if max_items is None else max(1, int(max_items))
+
+        items = content_repo.get_unprocessed_by_ai(limit=item_limit, hours_back=168)
+        remaining_slots = max(0, item_limit - len(items))
         if remaining_slots:
             items.extend(
                 content_repo.get_articles_with_short_summaries(
@@ -68,7 +74,7 @@ def process_ai_summaries():
                     max_words=settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS,
                 )
             )
-        remaining_slots = max(0, MAX_ITEMS_PER_RUN - len(items))
+        remaining_slots = max(0, item_limit - len(items))
         if remaining_slots:
             items.extend(
                 content_repo.get_articles_with_long_summaries(
@@ -77,7 +83,7 @@ def process_ai_summaries():
                     min_words=settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS,
                 )
             )
-        remaining_slots = max(0, MAX_ITEMS_PER_RUN - len(items))
+        remaining_slots = max(0, item_limit - len(items))
         if remaining_slots:
             items.extend(
                 content_repo.get_videos_with_short_summaries(
@@ -188,9 +194,12 @@ def process_ai_summaries():
                 stats.errors.append(f"{item.title[:50]}: {str(e)}")
                 continue
 
-        _backfill_starters(db, llm_client, stats)
-        image_repair = _run_article_image_verification(db)
-        logger.info("[ai_retry] Article image verification: %s", image_repair)
+        if include_maintenance:
+            _backfill_starters(db, llm_client, stats)
+            image_repair = _run_article_image_verification(db)
+            logger.info("[ai_retry] Article image verification: %s", image_repair)
+        else:
+            logger.info("[ai_retry] Maintenance skipped for this run")
         from app.scheduler.tasks_content_events import run_content_event_dispatch_job
 
         run_content_event_dispatch_job()

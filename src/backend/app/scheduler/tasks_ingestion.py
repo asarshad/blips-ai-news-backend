@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from app.core.dependencies import get_redis
 from app.core.feature_flags import feature_flags
 from app.core.logging import get_logger
@@ -10,6 +12,19 @@ from app.scheduler.job_stats import JobStats, log_job_start
 from app.services.video_content_policy import youtube_discovery_enabled
 
 logger = get_logger(__name__)
+
+
+def _resolve_immediate_ai_summary_max_items() -> int:
+    """Keep the post-ingestion freshness pass lightweight on constrained workers."""
+    raw = os.getenv("IMMEDIATE_AI_SUMMARY_MAX_ITEMS", "20")
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        logger.warning(
+            "Invalid IMMEDIATE_AI_SUMMARY_MAX_ITEMS=%r; defaulting to 20",
+            raw,
+        )
+        return 20
 
 
 def fetch_and_process_news():
@@ -44,8 +59,12 @@ def fetch_and_process_news():
     try:
         from app.scheduler.tasks_ai_retry import process_ai_summaries
 
-        logger.info("[fetch_news] Running immediate AI summarization…")
-        process_ai_summaries()
+        immediate_limit = _resolve_immediate_ai_summary_max_items()
+        logger.info(
+            "[fetch_news] Running immediate AI summarization (max_items=%s, maintenance=false)…",
+            immediate_limit,
+        )
+        process_ai_summaries(max_items=immediate_limit, include_maintenance=False)
         logger.info("[fetch_news] AI summarization complete")
     except Exception as e:
         # Non-fatal — the periodic ai_retry job will pick them up later.
