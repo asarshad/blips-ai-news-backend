@@ -236,7 +236,7 @@ def get_playlist(
         else datetime.utcnow()
     )
 
-    FeedMetadata(
+    feed_meta = FeedMetadata(
         generated_at=generated_at,
         source=result.get("source", "db"),
         cache_key=result.get("cache_key"),
@@ -248,7 +248,9 @@ def get_playlist(
             ContentType.REEL: "reels",
         }[content_type],
         feed_version=result.get("feed_version"),
-    ).add_headers(response)
+    )
+    newest_published_at, newest_created_at = feed_meta.get_newest_dates()
+    feed_meta.add_headers(response)
     record_feed_served(
         surface={
             ContentType.ARTICLE: "articles",
@@ -269,8 +271,8 @@ def get_playlist(
         inventory_state=result.get("inventory_state"),
         served_at=result.get("served_at"),
         feed_version=result.get("feed_version"),
-        newest_published_at=result.get("newest_published_at"),
-        newest_created_at=result.get("newest_created_at"),
+        newest_published_at=newest_published_at,
+        newest_created_at=newest_created_at,
         remaining_count=int(result.get("remaining_count", 0) or 0),
     )
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -345,3 +346,40 @@ def test_get_cached_tiered_feed_hydrates_missing_video_durations(monkeypatch):
     assert items[0]["duration_seconds"] == 915
     assert has_more is False
     assert meta.cache_hit is False
+
+
+def test_get_cached_tiered_feed_preserves_cache_generated_at_on_hit(monkeypatch):
+    generated_at = datetime(2026, 3, 30, 12, 0, 0)
+
+    class _FakeRedis:
+        def get(self, key):  # noqa: ARG002
+            return json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": 1,
+                            "title": "Cached article",
+                            "source_url": "https://example.com/article",
+                            "published_at": "2026-03-30T11:00:00",
+                            "created_at": "2026-03-30T11:05:00",
+                        }
+                    ],
+                    "has_more": False,
+                    "remaining_window_count": 0,
+                    "generated_at": generated_at.isoformat(),
+                }
+            )
+
+    monkeypatch.setattr(tiered_feed_service, "_get_redis_client", lambda: _FakeRedis())
+
+    items, has_more, meta = tiered_feed_service.get_cached_tiered_feed(
+        db=SimpleNamespace(),
+        surface=Surface.ARTICLES,
+        limit=20,
+        offset=0,
+    )
+
+    assert items[0]["id"] == 1
+    assert has_more is False
+    assert meta.cache_hit is True
+    assert meta.generated_at == generated_at

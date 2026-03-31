@@ -8,6 +8,7 @@ Provides:
 - Unified operational status endpoint
 """
 
+import os
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -169,6 +170,103 @@ class MetricsCollector:
 metrics_collector = MetricsCollector()
 
 
+def _redis_health_check() -> Dict[str, Any]:
+    """Check Redis connectivity."""
+    try:
+        from app.core.dependencies import get_redis
+
+        redis_client = get_redis()
+        redis_client.ping()
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+def _database_health_check() -> Dict[str, Any]:
+    """Check database connectivity."""
+    try:
+        from sqlalchemy import text
+
+        from app.db.base import SessionLocal
+
+        db = SessionLocal()
+        try:
+            db.execute(text("SELECT 1"))
+        finally:
+            db.close()
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+def get_ingestion_health_status() -> Dict[str, Any]:
+    """Get ingestion freshness and stall status."""
+    try:
+        from app.scheduler.tasks_health import get_ingestion_metrics
+
+        metrics = get_ingestion_metrics()
+        if metrics.get("error"):
+            return {"status": "error", **metrics}
+        if metrics.get("is_stalled"):
+            return {"status": "stalled", **metrics}
+        return {"status": "ok", **metrics}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+def get_scheduler_status() -> Dict[str, Any]:
+    """Inspect distributed scheduler visibility via the shared Redis leader lock."""
+    scheduler_enabled = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
+    ingestion_enabled = os.getenv("INGESTION_ENABLED", "true").lower() == "true"
+    lock_key = os.getenv("SCHEDULER_LEADER_LOCK_KEY", "scheduler_lock")
+
+    status: Dict[str, Any] = {
+        "mode": "local" if scheduler_enabled else "external",
+        "scheduler_enabled": scheduler_enabled,
+        "ingestion_enabled": ingestion_enabled,
+        "lock_key": lock_key,
+    }
+
+    try:
+        from app.core.dependencies import get_redis
+
+        redis_client = get_redis()
+        raw_owner = redis_client.get(lock_key)
+        lock_ttl = redis_client.ttl(lock_key)
+
+        owner = None
+        if raw_owner is not None:
+            owner = (
+                raw_owner.decode("utf-8", errors="replace")
+                if isinstance(raw_owner, (bytes, bytearray))
+                else str(raw_owner)
+            )
+
+        status.update(
+            {
+                "leader_lock_present": raw_owner is not None,
+                "leader_lock_owner": owner,
+                "leader_lock_ttl_seconds": lock_ttl if isinstance(lock_ttl, int) and lock_ttl >= 0 else None,
+            }
+        )
+
+        if raw_owner is not None:
+            status["status"] = "ok"
+        elif scheduler_enabled:
+            status["status"] = "unhealthy"
+            status["detail"] = "Scheduler is enabled locally but no leader lock is present."
+        elif ingestion_enabled:
+            status["status"] = "degraded"
+            status["detail"] = "Ingestion is expected externally but no scheduler leader lock is visible."
+        else:
+            status["status"] = "disabled"
+    except Exception as e:
+        status["status"] = "error"
+        status["error"] = str(e)
+
+    return status
+
+
 def get_redis_pool_stats() -> Dict[str, Any]:
     """Get Redis connection pool statistics."""
     try:
@@ -195,7 +293,7 @@ def get_redis_pool_stats() -> Dict[str, Any]:
 def get_db_pool_stats() -> Dict[str, Any]:
     """Get database connection pool statistics."""
     try:
-        from app.core.database import engine
+        from app.db.base import engine
 
         pool = engine.pool
 
@@ -210,6 +308,34 @@ def get_db_pool_stats() -> Dict[str, Any]:
         return {"status": "error", "error": str(e)}
 
 
+def get_runtime_health() -> Dict[str, Any]:
+    """Return request-safe runtime health for health checks and ops endpoints."""
+    database = _database_health_check()
+    redis = _redis_health_check()
+    scheduler = get_scheduler_status()
+    ingestion = get_ingestion_health_status()
+
+    status = "healthy"
+    if database["status"] != "ok" or redis["status"] != "ok":
+        status = "unhealthy"
+    elif scheduler.get("status") in {"degraded", "unhealthy", "error"} or ingestion.get("status") in {
+        "stalled",
+        "error",
+    }:
+        status = "degraded"
+
+    return {
+        "status": status,
+        "timestamp": datetime.utcnow().isoformat(),
+        "checks": {
+            "database": database,
+            "redis": redis,
+            "scheduler": scheduler,
+            "ingestion": ingestion,
+        },
+    }
+
+
 def get_operational_status() -> Dict[str, Any]:
     """
     Get comprehensive operational status.
@@ -219,9 +345,12 @@ def get_operational_status() -> Dict[str, Any]:
     - Connection pool stats
     - Service health indicators
     """
+    health = get_runtime_health()
     return {
+        "status": health["status"],
         "timestamp": datetime.utcnow().isoformat(),
         "request_metrics": metrics_collector.get_stats_summary(),
+        "health_checks": health["checks"],
         "redis_pool": get_redis_pool_stats(),
         "db_pool": get_db_pool_stats(),
     }

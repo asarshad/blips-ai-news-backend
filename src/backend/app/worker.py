@@ -44,7 +44,7 @@ try:
     from redis.exceptions import RedisError
 
     from app.core.dependencies import get_redis
-    from app.scheduler import init_scheduler
+    from app.scheduler import _resolve_ingestion_minutes, init_scheduler
     from app.scheduler.tasks import fetch_and_process_news
 
     _heavy_imports_ok = True
@@ -272,7 +272,12 @@ def run_worker():
     logger.info(f"Scheduler enabled: {os.getenv('SCHEDULER_ENABLED', 'true')}")
     logger.info(f"Ingestion enabled: {os.getenv('INGESTION_ENABLED', 'true')}")
     logger.info(f"Feature ingestion: {os.getenv('FEATURE_INGESTION_ENABLED', 'not set')}")
-    logger.info(f"Fetch interval: {os.getenv('NEWS_FETCH_INTERVAL_MINUTES', '30')} minutes")
+    configured_interval = os.getenv(
+        "INGESTION_SCHEDULER_MINUTES",
+        os.getenv("NEWS_FETCH_INTERVAL_MINUTES", "15"),
+    )
+    logger.info(f"Fetch interval configured: {configured_interval} minutes")
+    logger.info(f"Fetch interval effective: {_resolve_ingestion_minutes()} minutes")
     logger.info(f"Scheduler lock key: {WORKER_LOCK_KEY}")
     logger.info("=" * 60)
     sys.stdout.flush()

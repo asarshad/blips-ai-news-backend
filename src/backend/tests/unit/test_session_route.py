@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from fastapi import Response
+
 from app.api.routes import session as session_module
 from app.core.session_auth import AuthenticatedSession
 from app.models.content import ContentType
@@ -166,3 +168,63 @@ def test_delete_my_data_reports_push_subscriptions_and_total_rows():
         "user_profiles": 1,
     }
     assert response.message == "Deleted 16 records across 6 tables."
+
+
+def test_get_playlist_uses_current_page_dates_for_headers_and_body(monkeypatch):
+    monkeypatch.setattr(session_module, "check_and_trigger_topup", lambda *_args, **_kwargs: None)
+
+    playlist_service = SimpleNamespace(
+        get_playlist=lambda **_kwargs: {
+            "items": [
+                {
+                    "id": 11,
+                    "type": "ARTICLE",
+                    "title": "Current page article",
+                    "source": "Example",
+                    "source_url": "https://example.com/article-11",
+                    "description": None,
+                    "summary": "summary",
+                    "image_url": None,
+                    "video_url": None,
+                    "duration": None,
+                    "topics": ["Technology"],
+                    "entities": [],
+                    "published_at": "2026-03-31T10:00:00",
+                    "created_at": "2026-03-31T10:05:00",
+                    "global_score": None,
+                    "cluster_id": None,
+                }
+            ],
+            "session_id": "abcd1234",
+            "cursor": 1,
+            "has_more": True,
+            "total_items": 100,
+            "inventory_state": "healthy",
+            "served_at": "2026-03-31T12:00:00",
+            "feed_version": "feed-v1",
+            "newest_published_at": "2026-03-31T12:59:00",
+            "newest_created_at": "2026-03-31T13:00:00",
+            "remaining_count": 99,
+            "source": "redis",
+            "cache_key": "playlist:test",
+            "cache_hit": True,
+        }
+    )
+
+    response = Response()
+    body = session_module.get_playlist(
+        response=response,
+        type=session_module.ContentTypeParam.ARTICLE,
+        size=20,
+        session_id=None,
+        cursor=None,
+        refresh=False,
+        session=_session("device-12345678"),
+        db=SimpleNamespace(),
+        playlist_service=playlist_service,
+    )
+
+    assert body.newest_published_at == "2026-03-31T10:00:00"
+    assert body.newest_created_at == "2026-03-31T10:05:00"
+    assert response.headers["X-Newest-Published-At"] == "2026-03-31T10:00:00"
+    assert response.headers["X-Newest-Created-At"] == "2026-03-31T10:05:00"

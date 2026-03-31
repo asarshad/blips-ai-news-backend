@@ -608,6 +608,17 @@ def _normalize_cached_article_titles(
     return normalized if mutated else items
 
 
+def _cached_generated_at(payload: Dict[str, Any], fallback: datetime) -> datetime:
+    """Recover the original cache generation time for consistent freshness headers."""
+    raw = payload.get("generated_at")
+    if isinstance(raw, str) and raw:
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            return fallback
+    return fallback
+
+
 def get_cached_tiered_feed(
     db: Session,
     surface: Surface,
@@ -647,6 +658,7 @@ def get_cached_tiered_feed(
             cached = redis_client.get(cache_key)
             if cached:
                 data = json.loads(cached)
+                generated_at = _cached_generated_at(data, now)
                 logger.debug(f"Cache HIT for {cache_key}")
 
                 # Log cache hit with item preview for debugging
@@ -662,7 +674,7 @@ def get_cached_tiered_feed(
                     source="redis",
                     cache_key=cache_key,
                     cache_hit=True,
-                    generated_at=now,
+                    generated_at=generated_at,
                     tier_config=cfg,
                     surface=surface.value,
                 )
@@ -717,6 +729,7 @@ def get_cached_tiered_feed(
                     "items": items,
                     "has_more": has_more,
                     "remaining_window_count": remaining_window_count,
+                    "generated_at": now.isoformat(),
                 }
             )
             redis_client.setex(cache_key, TIERED_FEED_CACHE_TTL, cache_data)

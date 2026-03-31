@@ -45,6 +45,11 @@ def _get_redis_pool() -> redis.ConnectionPool:
     return _redis_pool
 
 
+def get_redis_pool() -> redis.ConnectionPool:
+    """Public accessor for the shared Redis connection pool."""
+    return _get_redis_pool()
+
+
 def get_redis() -> redis.Redis:
     """
     Redis client dependency.

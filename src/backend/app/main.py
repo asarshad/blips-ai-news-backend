@@ -512,48 +512,29 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 def health_check():
     """Health check endpoint for monitoring.
 
-    Validates DB and Redis connectivity for Render's readiness probe.
-    Returns 503 if any critical dependency is unreachable.
+    Validates DB and Redis connectivity plus scheduler / ingestion runtime
+    signals. Returns 503 only when critical dependencies are unreachable.
+    Scheduler or ingestion issues surface as a degraded 200 response so Render
+    does not restart a healthy API process for an external worker failure.
     """
-    checks: dict = {"status": "healthy"}
-    is_healthy = True
+    from app.core.observability import get_runtime_health
 
-    # Check database
-    try:
-        db = SessionLocal()
-        try:
-            db.execute(text("SELECT 1"))
-            checks["database"] = "ok"
-        finally:
-            db.close()
-    except SQLAlchemyError as e:
-        checks["database"] = f"error: {type(e).__name__}"
-        is_healthy = False
+    health = get_runtime_health()
 
-    # Check Redis
-    try:
-        redis_client = get_redis()
-        redis_client.ping()
-        checks["redis"] = "ok"
-    except RedisError as e:
-        checks["redis"] = f"error: {type(e).__name__}"
-        is_healthy = False
-
-    if not is_healthy:
-        checks["status"] = "unhealthy"
+    if health["status"] == "unhealthy":
         # Send alert for health check failure
         try:
             from app.services.alerting_service import alert_health_check_failed
 
             alert_health_check_failed(
-                database_status=checks.get("database", "unknown"),
-                redis_status=checks.get("redis", "unknown"),
+                database_status=health["checks"].get("database", {}).get("status", "unknown"),
+                redis_status=health["checks"].get("redis", {}).get("status", "unknown"),
             )
         except Exception as e:
             logger.warning(f"Failed to send health check alert: {e}")
-        return JSONResponse(status_code=503, content=checks)
+        return JSONResponse(status_code=503, content=health)
 
-    return checks
+    return health
 
 
 def _get_ingestion_health_metrics() -> dict:

@@ -162,8 +162,10 @@ projects:
                 value: "2"
               - key: INGESTION_BATCH_SIZE
                 value: "5"
+              - key: INGESTION_SCHEDULER_MINUTES
+                value: "15"
               - key: NEWS_FETCH_INTERVAL_MINUTES
-                value: "30"
+                value: "15"
               - key: PUSH_RUNTIME_ENABLED
                 value: "true"
               - key: PUSH_MODE
