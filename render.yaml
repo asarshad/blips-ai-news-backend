@@ -88,6 +88,8 @@ projects:
                 value: "false"
               - key: INGESTION_ENABLED
                 value: "false"          # Prod: worker owns ingestion
+              - key: EXTERNAL_SCHEDULER_EXPECTED
+                value: "true"
               - key: FEATURE_CHAT_ENABLED
                 value: "true"
               - key: AUTO_APPROVE_REVIEW_CONTENT

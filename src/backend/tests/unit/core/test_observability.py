@@ -115,3 +115,30 @@ def test_get_runtime_health_reports_healthy_when_scheduler_lock_visible(monkeypa
     assert health["status"] == "healthy"
     assert health["checks"]["scheduler"]["status"] == "ok"
     assert health["checks"]["scheduler"]["leader_lock_owner"] == "worker-1"
+
+
+def test_get_runtime_health_reports_degraded_when_external_worker_expected(monkeypatch):
+    monkeypatch.setenv("SCHEDULER_ENABLED", "false")
+    monkeypatch.setenv("INGESTION_ENABLED", "false")
+    monkeypatch.setenv("EXTERNAL_SCHEDULER_EXPECTED", "true")
+    monkeypatch.setattr(observability, "_database_health_check", lambda: {"status": "ok"})
+    monkeypatch.setattr(observability, "_redis_health_check", lambda: {"status": "ok"})
+    monkeypatch.setattr(
+        "app.core.dependencies.get_redis",
+        lambda: _FakeRedisClient(lock_owner=None, ttl=-2),
+    )
+    monkeypatch.setattr(
+        observability,
+        "get_ingestion_health_status",
+        lambda: {
+            "status": "ok",
+            "is_stalled": False,
+            "last_successful_ingestion_at": "2026-03-31T00:00:00",
+        },
+    )
+
+    health = observability.get_runtime_health()
+
+    assert health["status"] == "degraded"
+    assert health["checks"]["scheduler"]["status"] == "degraded"
+    assert health["checks"]["scheduler"]["external_scheduler_expected"] is True

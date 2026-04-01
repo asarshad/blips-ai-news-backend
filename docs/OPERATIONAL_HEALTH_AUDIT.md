@@ -508,7 +508,7 @@ Assessment:
 ### Medium
 
 - [ ] Expand `/health` or `/ops/status` with resource and restart signals.
-  Status: pending. Current health still misses memory pressure and recent restart count.
+  Status: in progress. Current health still misses memory pressure and recent restart count, but scheduler-status semantics have been tightened for API-only external-worker deployments via an explicit `EXTERNAL_SCHEDULER_EXPECTED` production knob.
 - [ ] Add a post-deploy operational smoke check that runs automatically.
   Status: in progress. `src/backend/scripts/operational_check.py` now supports failing on anomalies/admin failures, checks detail and starters endpoints, and a dedicated GitHub Actions workflow has been added for scheduled/manual smoke runs. The workflow stays strict while temporarily tolerating the already-known reels inventory degradation.
 - [ ] Add automation that pages on repeated worker `server_failed` OOM events from Render.
@@ -529,6 +529,7 @@ Assessment:
 - [x] March 31, 2026: mobile resume-refresh batch reviewed by subagent with no findings.
 - [x] March 31, 2026: upgraded the operational probe to fail on anomalies and added a dedicated backend operational smoke workflow.
 - [x] March 31, 2026: expanded the operational probe to cover detail and starters endpoints and adjusted the smoke workflow to tolerate only the known reels degradation instead of turning the whole gate permanently red.
+- [x] April 1, 2026: fixed `/health` scheduler-status semantics for API services that expect an external worker so missing leader-lock visibility degrades health instead of incorrectly reporting the scheduler as disabled.
 - [ ] Next: deploy the new backend checkpoint to Render and verify whether worker overlap, deadlock warnings, and reels freshness improve under live load.
 
 ## Test / Automation Gap Analysis
