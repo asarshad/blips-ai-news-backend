@@ -112,17 +112,19 @@ def summarize_events(
                     summary=summary,
                 )
             )
-        elif event_type == "deploy_ended" and details.get("deployStatus") not in {
-            "succeeded",
-            2,
-        }:
-            anomalies.append(
-                RuntimeAnomaly(
-                    timestamp=timestamp.isoformat(),
-                    event_type=event_type,
-                    summary=f"deploy ended with status {details.get('deployStatus')}",
+        elif event_type == "deploy_ended":
+            deploy_status = details.get("deployStatus")
+            reason = details.get("reason")
+            reason_payload = reason if isinstance(reason, dict) else {}
+            superseded = bool(reason_payload.get("newDeploy"))
+            if deploy_status not in {"succeeded", 2} and not superseded:
+                anomalies.append(
+                    RuntimeAnomaly(
+                        timestamp=timestamp.isoformat(),
+                        event_type=event_type,
+                        summary=f"deploy ended with status {deploy_status}",
+                    )
                 )
-            )
 
     return {
         "window_hours": recent_hours,
@@ -142,10 +144,30 @@ def build_alert_payload(*, service_id: str, summary: dict[str, Any]) -> dict[str
     return {"text": "\n".join(lines)}
 
 
+def select_alertable_anomalies(
+    anomalies: list[dict[str, Any]],
+    *,
+    max_age_minutes: int | None,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Limit webhook posts to freshly observed anomalies."""
+    if max_age_minutes is None:
+        return list(anomalies)
+
+    cutoff = (now or _utcnow()) - timedelta(minutes=max_age_minutes)
+    selected: list[dict[str, Any]] = []
+    for anomaly in anomalies:
+        timestamp = _parse_timestamp(str(anomaly.get("timestamp") or ""))
+        if timestamp is not None and timestamp >= cutoff:
+            selected.append(anomaly)
+    return selected
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--service-id", default=os.getenv("RENDER_WORKER_SERVICE_ID", DEFAULT_WORKER_SERVICE_ID))
     parser.add_argument("--recent-hours", type=int, default=DEFAULT_RECENT_HOURS)
+    parser.add_argument("--alert-max-age-minutes", type=int, default=None)
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
     parser.add_argument("--render-api-token", default=os.getenv("RENDER_API_TOKEN"))
     parser.add_argument("--alert-webhook-url", default=os.getenv("ALERT_WEBHOOK_URL"))
@@ -176,11 +198,19 @@ def main(argv: list[str] | None = None) -> int:
     }
     summary.update(summarize_events(events_payload or [], recent_hours=args.recent_hours))
 
-    if summary["anomalies"] and args.alert_webhook_url:
+    alertable_anomalies = select_alertable_anomalies(
+        summary["anomalies"],
+        max_age_minutes=args.alert_max_age_minutes,
+    )
+    summary["alertable_anomaly_count"] = len(alertable_anomalies)
+
+    if alertable_anomalies and args.alert_webhook_url:
         try:
+            alert_summary = dict(summary)
+            alert_summary["anomalies"] = alertable_anomalies
             _post_webhook(
                 args.alert_webhook_url,
-                build_alert_payload(service_id=args.service_id, summary=summary),
+                build_alert_payload(service_id=args.service_id, summary=alert_summary),
                 timeout=args.timeout,
             )
             summary["alert_sent"] = True

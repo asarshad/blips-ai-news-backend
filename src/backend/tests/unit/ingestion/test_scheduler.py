@@ -44,6 +44,7 @@ def test_scheduler_respects_per_type_caps_and_lease_visibility():
         max_workers_article=1,
         max_workers_video=1,
         max_workers_reel=1,
+        share_video_slot_with_reels=False,
         batch_size=10,
         loop_sleep_seconds=0.01,
     )
@@ -89,6 +90,7 @@ def test_scheduler_skips_tasks_when_lease_exists():
         max_workers_article=1,
         max_workers_video=0,
         max_workers_reel=0,
+        share_video_slot_with_reels=False,
         batch_size=10,
         loop_sleep_seconds=0.01,
     )
@@ -113,6 +115,7 @@ def test_load_scheduler_config_preserves_article_capacity_when_explicit_caps_sta
     assert cfg.max_workers_article == 1
     assert cfg.max_workers_video == 1
     assert cfg.max_workers_reel == 0
+    assert cfg.share_video_slot_with_reels is False
 
 
 def test_load_scheduler_config_rebalances_when_article_is_zero_and_caps_are_full(monkeypatch):
@@ -127,6 +130,7 @@ def test_load_scheduler_config_rebalances_when_article_is_zero_and_caps_are_full
     assert cfg.max_workers_article == 1
     assert cfg.max_workers_video == 1
     assert cfg.max_workers_reel == 1
+    assert cfg.share_video_slot_with_reels is False
 
 
 def test_scheduler_run_rotates_rows_instead_of_restarting_queue_each_cycle():
@@ -135,6 +139,7 @@ def test_scheduler_run_rotates_rows_instead_of_restarting_queue_each_cycle():
         max_workers_article=1,
         max_workers_video=0,
         max_workers_reel=0,
+        share_video_slot_with_reels=False,
         batch_size=1,
         loop_sleep_seconds=0.001,
     )
@@ -168,3 +173,89 @@ def test_scheduler_run_rotates_rows_instead_of_restarting_queue_each_cycle():
 
     assert result["status"] in {"stopping", "budget_exhausted", "idle", "complete"}
     assert seen_order[:3] == [1, 2, 3]
+
+
+def test_scheduler_allows_reels_to_share_video_capacity_when_reel_cap_is_zero():
+    cfg = SchedulerConfig(
+        max_workers=2,
+        max_workers_article=1,
+        max_workers_video=1,
+        max_workers_reel=0,
+        share_video_slot_with_reels=True,
+        batch_size=10,
+        loop_sleep_seconds=0.01,
+    )
+
+    scheduler = IngestionScheduler(day_utc=date(2026, 1, 29), redis_client=_FakeRedis(), config=cfg)
+    scheduler.refresh(
+        tasks=[
+            TaskRef(1, "rss", "a"),
+            TaskRef(2, "youtube_reel", "r1"),
+        ]
+    )
+
+    article_task = scheduler.pop_next_dispatchable()
+    scheduler.mark_active(article_task)
+    reel_task = scheduler.pop_next_dispatchable()
+
+    assert article_task.source_type == "rss"
+    assert reel_task is not None
+    assert reel_task.source_type == "youtube_reel"
+
+
+def test_scheduler_treats_video_and_reel_as_shared_slot_when_reel_cap_is_zero():
+    cfg = SchedulerConfig(
+        max_workers=2,
+        max_workers_article=1,
+        max_workers_video=1,
+        max_workers_reel=0,
+        share_video_slot_with_reels=True,
+        batch_size=10,
+        loop_sleep_seconds=0.01,
+    )
+
+    scheduler = IngestionScheduler(day_utc=date(2026, 1, 29), redis_client=_FakeRedis(), config=cfg)
+    scheduler.refresh(
+        tasks=[
+            TaskRef(1, "youtube_video", "v1"),
+            TaskRef(2, "youtube_reel", "r1"),
+        ]
+    )
+
+    first = scheduler.pop_next_dispatchable()
+    scheduler.mark_active(first)
+
+    assert scheduler.pop_next_dispatchable() is None
+
+    scheduler.mark_done(first.row_id)
+    second = scheduler.pop_next_dispatchable()
+    assert second is not None
+    assert {first.source_type, second.source_type} == {"youtube_video", "youtube_reel"}
+
+
+def test_explicit_zero_reel_cap_keeps_reels_disabled():
+    cfg = SchedulerConfig(
+        max_workers=2,
+        max_workers_article=0,
+        max_workers_video=2,
+        max_workers_reel=0,
+        share_video_slot_with_reels=False,
+        batch_size=10,
+        loop_sleep_seconds=0.01,
+    )
+
+    scheduler = IngestionScheduler(day_utc=date(2026, 1, 29), redis_client=_FakeRedis(), config=cfg)
+    scheduler.refresh(
+        tasks=[
+            TaskRef(1, "youtube_video", "v1"),
+            TaskRef(2, "youtube_reel", "r1"),
+        ]
+    )
+
+    first = scheduler.pop_next_dispatchable()
+    assert first is not None
+    assert first.source_type == "youtube_video"
+    scheduler.mark_active(first)
+
+    second = scheduler.pop_next_dispatchable()
+    assert second is None

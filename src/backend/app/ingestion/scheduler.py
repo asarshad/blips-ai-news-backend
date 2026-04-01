@@ -37,6 +37,7 @@ class SchedulerConfig:
     max_workers_article: int
     max_workers_video: int
     max_workers_reel: int
+    share_video_slot_with_reels: bool
     batch_size: int
     loop_sleep_seconds: float
 
@@ -76,6 +77,7 @@ def _float_env(name: str, default: float) -> float:
 
 def load_scheduler_config() -> SchedulerConfig:
     max_workers = max(1, _int_env("INGESTION_MAX_WORKERS", 1))
+    share_video_slot_with_reels = False
 
     w_a = _int_env("INGESTION_MAX_WORKERS_ARTICLE", 0)
     w_v = _int_env("INGESTION_MAX_WORKERS_VIDEO", 0)
@@ -92,6 +94,7 @@ def load_scheduler_config() -> SchedulerConfig:
         elif max_workers == 2:
             # Prefer ARTICLE + VIDEO, REEL shares VIDEO slot.
             w_a, w_v, w_r = 1, 1, 0
+            share_video_slot_with_reels = True
         else:
             w_a, w_v, w_r = 1, 0, 0
 
@@ -138,6 +141,7 @@ def load_scheduler_config() -> SchedulerConfig:
         max_workers_article=max(0, w_a),
         max_workers_video=max(0, w_v),
         max_workers_reel=max(0, w_r),
+        share_video_slot_with_reels=share_video_slot_with_reels,
         batch_size=batch_size,
         loop_sleep_seconds=loop_sleep_seconds,
     )
@@ -226,8 +230,12 @@ class IngestionScheduler:
         if ct == "ARTICLE":
             return active.get(ct, 0) < self.config.max_workers_article
         if ct == "VIDEO":
+            if self.config.share_video_slot_with_reels:
+                return (active.get("VIDEO", 0) + active.get("REEL", 0)) < self.config.max_workers_video
             return active.get(ct, 0) < self.config.max_workers_video
         if ct == "REEL":
+            if self.config.share_video_slot_with_reels:
+                return (active.get("VIDEO", 0) + active.get("REEL", 0)) < self.config.max_workers_video
             return active.get(ct, 0) < self.config.max_workers_reel
         return True
 

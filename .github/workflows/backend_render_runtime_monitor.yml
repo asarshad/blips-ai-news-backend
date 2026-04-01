@@ -28,13 +28,27 @@ jobs:
         env:
           RENDER_API_TOKEN: ${{ secrets.RENDER_API_TOKEN }}
           ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
-          RECENT_HOURS: ${{ inputs.recent_hours || '24' }}
           WORKER_SERVICE_ID: ${{ vars.RENDER_WORKER_SERVICE_ID || 'srv-d6hvve8gjchc73d0cq70' }}
         run: |
           set -euo pipefail
 
-          python src/backend/scripts/render_runtime_check.py \
-            --service-id "$WORKER_SERVICE_ID" \
-            --recent-hours "$RECENT_HOURS" \
-            --fail-on-anomaly \
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            recent_hours=1
+            alert_max_age_minutes=70
+          else
+            recent_hours="${{ inputs.recent_hours || '24' }}"
+            alert_max_age_minutes=""
+          fi
+
+          args=(
+            src/backend/scripts/render_runtime_check.py
+            --service-id "$WORKER_SERVICE_ID"
+            --recent-hours "$recent_hours"
+            --fail-on-anomaly
             --pretty
+          )
+          if [ -n "$alert_max_age_minutes" ]; then
+            args+=(--alert-max-age-minutes "$alert_max_age_minutes")
+          fi
+
+          python "${args[@]}"
