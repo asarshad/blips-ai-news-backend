@@ -8,6 +8,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -16,6 +17,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.scheduler.tasks import (
     check_ingestion_health,
+    check_inventory_health,
     fetch_and_process_news,
     retry_ai_processing,
     run_backfill_job,
@@ -29,6 +31,38 @@ from app.scheduler.tasks import (
 )
 
 logger = get_logger(__name__)
+
+
+def _scheduler_event_listener(event) -> None:
+    """Surface scheduler overlaps/misses/errors through the shared alerting channel."""
+    try:
+        from app.services.alerting_service import AlertSeverity, alert_scheduler_job_issue
+
+        job_id = getattr(event, "job_id", "unknown")
+        if event.code == EVENT_JOB_MAX_INSTANCES:
+            alert_scheduler_job_issue(
+                job_id=job_id,
+                issue_type="max_instances",
+                details="Job skipped because maximum running instances was reached",
+                severity=AlertSeverity.WARNING,
+            )
+        elif event.code == EVENT_JOB_MISSED:
+            alert_scheduler_job_issue(
+                job_id=job_id,
+                issue_type="missed_run",
+                details="Scheduled job missed its intended run window",
+                severity=AlertSeverity.WARNING,
+            )
+        elif event.code == EVENT_JOB_ERROR:
+            detail = str(getattr(event, "exception", None) or "job raised exception")
+            alert_scheduler_job_issue(
+                job_id=job_id,
+                issue_type="job_error",
+                details=detail,
+                severity=AlertSeverity.CRITICAL,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to emit scheduler event alert: %s", exc)
 
 
 def _bounded_ingestion_minutes(value: int) -> int:
@@ -209,6 +243,16 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             misfire_grace_time=300,
         )
 
+        scheduler.add_job(
+            check_inventory_health,
+            IntervalTrigger(minutes=30),
+            id="inventory_health_check",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
+        )
+
         # ── Coverage Guarantee: signal ingestion (every 60 min by default) ──
         signal_minutes = int(getattr(settings, "SIGNAL_INTERVAL_MINUTES", 60) or 60)
         scheduler.add_job(
@@ -233,10 +277,14 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
         )
 
         scheduler.start()
+        scheduler.add_listener(
+            _scheduler_event_listener,
+            EVENT_JOB_ERROR | EVENT_JOB_MAX_INSTANCES | EVENT_JOB_MISSED,
+        )
         logger.info(f"Started background scheduler - fetching news every {fetch_human}")
         logger.info(
             "Curation jobs: scoring (hourly), clustering (15min), decay (daily), "
-            f"AI retry (15min), content-events (1min), cleanup (daily), backfill ({backfill_hours}h), health (30min), "
+            f"AI retry (15min), content-events (1min), cleanup (daily), backfill ({backfill_hours}h), health (30min), inventory (30min), "
             f"signals ({signal_minutes}min), promotion (30min)"
         )
 

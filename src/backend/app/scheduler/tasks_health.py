@@ -76,6 +76,48 @@ def check_ingestion_health() -> None:
         db.close()
 
 
+def check_inventory_health() -> None:
+    """Check per-surface inventory health and alert on degraded freshness."""
+    logger.info("Running inventory health check")
+
+    db = SessionLocal()
+    try:
+        from app.services.alerting_service import alert_inventory_surface_degraded
+        from app.services.inventory_service import get_cached_inventory_health
+
+        health = get_cached_inventory_health(db, force_refresh=True)
+        unhealthy_surfaces = []
+
+        for surface, metrics in health.surfaces.items():
+            if metrics.is_healthy:
+                continue
+
+            unhealthy_surfaces.append(surface.value)
+            logger.warning(
+                "Inventory degraded for %s: %s",
+                surface.value,
+                "; ".join(metrics.issues) or "unknown issue",
+            )
+            try:
+                alert_inventory_surface_degraded(
+                    surface=surface.value,
+                    issues=metrics.issues,
+                    recent_refresh_count=metrics.recent_refresh_count,
+                    recent_refresh_threshold=metrics.recent_refresh_threshold,
+                    newest_item_age_seconds=metrics.newest_item_age_seconds,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed to send inventory alert for %s: %s", surface.value, exc)
+
+        if not unhealthy_surfaces:
+            logger.info("Inventory health OK")
+
+    except Exception as e:
+        logger.error(f"Error checking inventory health: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
 def get_ingestion_metrics() -> dict:
     """
     Get ingestion metrics for the /metrics endpoint.

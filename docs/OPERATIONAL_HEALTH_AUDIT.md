@@ -4,10 +4,11 @@ Audit date: March 31, 2026
 Primary live target: `https://api.blips.tech`  
 Scope: backend runtime health, scheduler and ingestion behavior, Render runtime stability, endpoint freshness, mobile refresh wiring, and operational automation gaps.
 
-Render verification update: March 31, 2026 23:20 UTC
+Render verification update: April 1, 2026 04:26 UTC
 
-- Backend fixes are deployed live on Render from commit `d333785`.
-- Mobile refresh fixes are committed and pushed from commit `29dc053`, but mobile runtime behavior in users' hands still depends on shipping a new app build.
+- Backend fixes are deployed live on Render through commit `2108beb`.
+- Render worker `blips-worker` was resized to Render `standard` and redeployed at `2026-04-01T04:24:53Z`.
+- Mobile refresh fixes are committed and pushed through commit `656a914`, but mobile runtime behavior in users' hands still depends on shipping a new app build.
 - Evidence sources used in this report:
   - live API probes against `https://api.blips.tech`
   - Render service, deploy, event, and log APIs
@@ -20,22 +21,23 @@ Overall operational status: partially healthy.
 
 - The API is live, DB and Redis are reachable, anonymous session bootstrap works, and Articles, Videos, and Reels all return coherent non-empty data.
 - The improved `/health` response is live in production and now reports database, Redis, scheduler lock state, and ingestion freshness.
+- The scheduler-health semantics fix is also live: the API now correctly reflects the external worker lock instead of implying scheduling is disabled.
 - Articles and Videos are healthy right now.
 - Reels are serving data, but the backend's own inventory health still reports reels unhealthy because recent refresh volume is below threshold.
-- The main production risk is worker stability: the Render worker has repeated `oomKilled` events on the `512Mi` starter plan.
+- The main production risk remains worker stability, but the worker has now been moved off the `512Mi` starter plan to `standard` and needs an observation window to prove the OOM pattern is gone.
 
 Release confidence level: Medium.
 
 - Feed delivery is working.
 - Observability is materially better than before and the new health contract is live.
-- Confidence is reduced by repeated worker OOM restarts, ingestion overlap pressure, and reels freshness underfill.
+- Confidence is reduced by recent worker OOM history, ingestion overlap pressure, and reels freshness underfill.
 
 Top current operational risks:
 
-- Worker service is repeatedly OOM-killed on Render.
-- Reels freshness is below target: `recent_refresh_count=3` against threshold `12` in the last `24h`.
+- Worker was repeatedly OOM-killed on Render before the `2026-04-01T04:24:53Z` resize to `standard`; the next risk is whether that upgrade actually eliminates restart churn.
+- Reels freshness is below target: `recent_refresh_count=2` against threshold `12` in the last `24h`.
 - Worker logs show scheduler overlap warnings and deadlock errors in signal ingestion.
-- Mobile repo wiring is now better, but app-resume refresh still only forces the visible tab, and the tab-entry fix is not production-mobile-effective until the next app release.
+- Mobile repo wiring is now better, including all-surface resume refresh and tab-entry refresh, but those fixes are not production-mobile-effective until the next app release.
 
 ## 2. Backend Runtime Health
 
@@ -85,6 +87,7 @@ Live scheduler evidence:
 
 - `/health` reports `scheduler.mode=external`, which is correct for the split API plus worker deployment model.
 - `/health` also reports `leader_lock_present=true`, proving the worker leadership lock is active in Redis.
+- The live response now shows `scheduler.status=ok` with `external_scheduler_expected=true`, which matches the intended API plus worker deployment model.
 - Worker logs after deploy show active lock lifecycle messages and ingestion work:
   - `Lease claimed`
   - `Lease released`
@@ -115,10 +118,10 @@ Live evidence:
 
 Recent content counts:
 
-- Articles ingested last `2h`: `3`
-- Videos ingested last `2h`: `16`
-- Articles ingested last `24h`: `148`
-- Videos ingested last `24h`: `135`
+- Articles ingested last `2h`: `6`
+- Videos ingested last `2h`: `4`
+- Articles ingested last `24h`: `120`
+- Videos ingested last `24h`: `123`
 
 Assessment:
 
@@ -171,8 +174,8 @@ Live probe highlights:
 - Videos:
   - `/api/v1/videos/recent?limit=5`
   - item count: `5`
-  - newest created in response: `2026-03-31T20:04:04.657047`
-  - newest published in response: `2026-03-31T19:15:49`
+- newest created in response: `2026-04-01T01:18:41.839531`
+- newest published in response: `2026-04-01T01:00:23`
   - direct feed cache behavior: healthy
 - Reels:
   - `/api/v1/videos/reels?limit=10`
@@ -357,19 +360,19 @@ Findings:
 
 ### Content counts and freshness health
 
-Public inventory health at `2026-03-31T23:19:41.456194`:
+Public inventory health at `2026-04-01T03:17:09.011945+00:00`:
 
 - Articles:
-  - `fresh_count=161`
-  - `recent_refresh_count=161`
+  - `fresh_count=155`
+  - `recent_refresh_count=155`
   - `is_healthy=true`
 - Videos:
-  - `fresh_count=114`
-  - `recent_refresh_count=88`
+  - `fresh_count=120`
+  - `recent_refresh_count=85`
   - `is_healthy=true`
 - Reels:
-  - `fresh_count=107`
-  - `recent_refresh_count=3`
+  - `fresh_count=105`
+  - `recent_refresh_count=2`
   - `recent_refresh_threshold=12`
   - `is_healthy=false`
 
@@ -416,12 +419,12 @@ Behavior:
 
 ### B. On app resume after 1 hour
 
-- Resume refresh currently targets the visible tab only.
-- The app does not force all three feeds to refresh immediately on resume.
+- Repo state after fix: yes, resume now refreshes Articles, Videos, and Reels together after a long background interval.
+- This closes the earlier current-tab-only gap in code.
 
-Impact:
+Operational note:
 
-- A backgrounded user returning to a non-current tab later can still see older data until tab entry or polling refreshes it.
+- The fix is pushed and test-covered, but it is not live for users until the next mobile release ships.
 
 ### C. On tab switch
 
@@ -444,7 +447,7 @@ Operational note:
 Assessment:
 
 - Mobile feed refresh wiring is now materially better in repo state.
-- Remaining gap: resume refresh is still current-tab-only.
+- Remaining gap: the fixes are not live-user-effective until the next mobile release ships.
 
 ## 6. Root Causes / Risks
 
@@ -455,7 +458,7 @@ Assessment:
 
 ### Refresh gaps
 
-- Mobile resume refresh does not immediately fan out to all three surfaces.
+- Live mobile builds may still have the older resume behavior until the next release is shipped.
 - Reels need stronger top-up and/or ingestion recovery to meet the recent-refresh policy.
 
 ### Silent errors
@@ -480,15 +483,15 @@ Assessment:
 
 ### Service restarts due to resource constraints
 
-- This is confirmed.
-- Worker is repeatedly OOM-killed on the `starter` `512Mi` plan.
+- This is historically confirmed.
+- Worker was repeatedly OOM-killed on the `starter` `512Mi` plan and has now been resized to Render `standard`; live stability after the resize still needs verification over time.
 
 ## 7. Recommended Fixes
 
 ### Critical
 
-- [ ] Increase worker memory or move worker off the current `starter` memory tier.
-  Status: still pending. This is the clearest confirmed production stability issue, but it changes spend and needs an explicit infra decision before rollout.
+- [x] Increase worker memory or move worker off the current `starter` memory tier.
+  Status: completed in production. `blips-worker` was moved to Render `standard` and redeployed at `2026-04-01T04:24:53Z`; the remaining work is observation and validation, not the resize decision itself.
 - [x] Investigate and reduce worker peak memory during ingestion and promotion runs.
   Status: in progress and partially implemented in repo. Immediate post-ingestion AI now runs with a lighter cap and skips the heavier maintenance pass so the fetch cycle does less work on the memory-constrained worker.
 - [x] Triage signal-ingestion deadlocks.
@@ -498,8 +501,8 @@ Assessment:
 
 - [x] Reduce scheduler overlap pressure.
   Status: first mitigation implemented in repo. The immediate freshness pass after ingestion is now lightweight instead of running the full AI retry maintenance workload every cycle.
-- [ ] Add alerting for worker OOM events, reels freshness underfill, deadlock frequency, and repeated scheduler overlap skips.
-  Status: pending. The need is clear from the audit, but the alerting mechanism still needs to be wired up.
+- [x] Add alerting for worker OOM events, reels freshness underfill, deadlock frequency, and repeated scheduler overlap skips.
+  Status: implemented in repo. Scheduler overlap and deadlock alerts are now wired through the backend alerting service, inventory-health alerts are scheduled, and a dedicated Render runtime monitor workflow/script has been added for worker failure detection. Secrets still need to be configured before those alerts are live.
 - [x] Fix recurring article image repair type errors.
   Status: fixed in repo. The article-image fallback path now accepts the actual string return shape from the LLM extractor instead of dereferencing `.image_url` on a string-like result.
 - [ ] Ship the mobile tab-entry refresh fix in the next app release.
@@ -507,12 +510,12 @@ Assessment:
 
 ### Medium
 
-- [ ] Expand `/health` or `/ops/status` with resource and restart signals.
-  Status: in progress. Current health still misses memory pressure and recent restart count, but scheduler-status semantics have been tightened for API-only external-worker deployments via an explicit `EXTERNAL_SCHEDULER_EXPECTED` production knob.
+- [x] Expand `/health` or `/ops/status` with resource and restart signals.
+  Status: partially completed in repo. `/ops/status` now includes process runtime diagnostics including RSS, peak RSS, PID, hostname, Python version, and uptime. Restart history still comes from external Render events rather than the health payload itself.
 - [ ] Add a post-deploy operational smoke check that runs automatically.
   Status: in progress. `src/backend/scripts/operational_check.py` now supports failing on anomalies/admin failures, checks detail and starters endpoints, and a dedicated GitHub Actions workflow has been added for scheduled/manual smoke runs. The workflow stays strict while temporarily tolerating the already-known reels inventory degradation.
-- [ ] Add automation that pages on repeated worker `server_failed` OOM events from Render.
-  Status: pending.
+- [x] Add automation that pages on repeated worker `server_failed` OOM events from Render.
+  Status: implemented in repo via `src/backend/scripts/render_runtime_check.py` and `.github/workflows/backend_render_runtime_monitor.yml`. It still needs `RENDER_API_TOKEN` and `ALERT_WEBHOOK_URL` secrets configured to go live.
 - [ ] Reassess noisy and permanently failing sources.
   Status: pending. Some RSS and extraction failures are source-specific and may be better disabled, quarantined, or deprioritized.
 - [ ] Broaden mobile resume refresh to all three surfaces when the app returns from a long background interval.
@@ -530,13 +533,15 @@ Assessment:
 - [x] March 31, 2026: upgraded the operational probe to fail on anomalies and added a dedicated backend operational smoke workflow.
 - [x] March 31, 2026: expanded the operational probe to cover detail and starters endpoints and adjusted the smoke workflow to tolerate only the known reels degradation instead of turning the whole gate permanently red.
 - [x] April 1, 2026: fixed `/health` scheduler-status semantics for API services that expect an external worker so missing leader-lock visibility degrades health instead of incorrectly reporting the scheduler as disabled.
-- [ ] Next: deploy the new backend checkpoint to Render and verify whether worker overlap, deadlock warnings, and reels freshness improve under live load.
+- [x] April 1, 2026: resized `blips-worker` to Render `standard` and verified a fresh `service_updated` deploy completed at `2026-04-01T04:24:53Z`.
+- [x] April 1, 2026: added repo-side alerting for degraded inventory surfaces, scheduler overlap/errors, signal deadlocks, process RSS visibility in `/ops/status`, and a scheduled Render runtime monitor workflow.
+- [ ] Next: deploy the new backend checkpoint to Render and verify whether overlap alerts stay quiet, deadlock frequency drops, worker restarts stop, and reels freshness improves under live load.
 
 ## Test / Automation Gap Analysis
 
 Current gaps:
 
-- No automated Render-runtime guard for OOM or restart regressions.
+- Render-runtime guard now exists in repo, but it is not live until the required GitHub secrets are configured.
 - No always-on post-deploy smoke gate tied to freshness thresholds.
 - No automated deadlock-frequency detection for signal ingestion.
 - No production telemetry in this workspace to prove mobile shipped-build refresh timing.

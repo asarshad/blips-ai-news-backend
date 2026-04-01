@@ -94,3 +94,16 @@ def test_fetch_job_is_delayed_after_startup_initial_fetch(mock_scheduler_cls, mo
     next_run_time = call.kwargs["next_run_time"]
 
     assert before + timedelta(minutes=10) <= next_run_time <= after + timedelta(minutes=10)
+
+
+@patch("app.scheduler.BackgroundScheduler")
+def test_inventory_health_job_and_scheduler_listener_registered(mock_scheduler_cls):
+    mock_scheduler = MagicMock()
+    mock_scheduler_cls.return_value = mock_scheduler
+
+    from app.scheduler import init_scheduler
+
+    init_scheduler()
+
+    _job_call_from_calls(mock_scheduler, "inventory_health_check")
+    assert mock_scheduler.add_listener.called

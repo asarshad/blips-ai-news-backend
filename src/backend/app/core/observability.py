@@ -9,6 +9,8 @@ Provides:
 """
 
 import os
+import socket
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -168,6 +170,53 @@ class MetricsCollector:
 
 # Singleton instance
 metrics_collector = MetricsCollector()
+
+
+def _current_rss_bytes() -> int | None:
+    """Best-effort current resident memory usage for Linux hosts."""
+    try:
+        with open("/proc/self/status", "r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("VmRSS:"):
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        return int(parts[1]) * 1024
+    except OSError:
+        return None
+    return None
+
+
+def _peak_rss_bytes() -> int | None:
+    """Best-effort peak resident memory usage for the current process."""
+    try:
+        import resource
+
+        max_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        if max_rss <= 0:
+            return None
+        # Linux reports kibibytes; macOS reports bytes.
+        return int(max_rss if sys.platform == "darwin" else max_rss * 1024)
+    except Exception:
+        return None
+
+
+def get_process_runtime_stats() -> Dict[str, Any]:
+    """Return lightweight process runtime diagnostics for ops endpoints."""
+    rss_bytes = _current_rss_bytes()
+    peak_rss_bytes = _peak_rss_bytes()
+    uptime_seconds = round((datetime.utcnow() - metrics_collector._start_time).total_seconds(), 2)
+    return {
+        "pid": os.getpid(),
+        "hostname": socket.gethostname(),
+        "python_version": sys.version.split()[0],
+        "uptime_seconds": uptime_seconds,
+        "rss_bytes": rss_bytes,
+        "rss_mb": round(rss_bytes / (1024 * 1024), 2) if rss_bytes is not None else None,
+        "peak_rss_bytes": peak_rss_bytes,
+        "peak_rss_mb": round(peak_rss_bytes / (1024 * 1024), 2)
+        if peak_rss_bytes is not None
+        else None,
+    }
 
 
 def _redis_health_check() -> Dict[str, Any]:
@@ -353,6 +402,7 @@ def get_operational_status() -> Dict[str, Any]:
     return {
         "status": health["status"],
         "timestamp": datetime.utcnow().isoformat(),
+        "process": get_process_runtime_stats(),
         "request_metrics": metrics_collector.get_stats_summary(),
         "health_checks": health["checks"],
         "redis_pool": get_redis_pool_stats(),

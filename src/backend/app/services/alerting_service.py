@@ -296,6 +296,59 @@ def alert_low_inventory(
     )
 
 
+def alert_inventory_surface_degraded(
+    *,
+    surface: str,
+    issues: list[str],
+    recent_refresh_count: int | None = None,
+    recent_refresh_threshold: int | None = None,
+    newest_item_age_seconds: int | None = None,
+) -> bool:
+    """Send alert for an operationally degraded inventory surface."""
+    message = f"Inventory degraded: {surface} surface below freshness guardrails"
+    context: Dict[str, Any] = {
+        "surface": surface,
+        "issues": "; ".join(issues[:3]) if issues else "unknown",
+    }
+    if recent_refresh_count is not None:
+        context["recent_refresh_count"] = recent_refresh_count
+    if recent_refresh_threshold is not None:
+        context["recent_refresh_threshold"] = recent_refresh_threshold
+    if newest_item_age_seconds is not None:
+        context["newest_item_age_seconds"] = newest_item_age_seconds
+
+    return send_alert(
+        severity=AlertSeverity.WARNING,
+        message=message,
+        context=context,
+        alert_key=f"inventory_degraded_{surface}",
+    )
+
+
+def alert_scheduler_job_issue(
+    *,
+    job_id: str,
+    issue_type: str,
+    details: str | None = None,
+    severity: AlertSeverity = AlertSeverity.WARNING,
+) -> bool:
+    """Send alert for scheduler overlaps, misses, or job failures."""
+    message = f"Scheduler issue: {job_id} ({issue_type})"
+    context: Dict[str, Any] = {
+        "job_id": job_id,
+        "issue_type": issue_type,
+    }
+    if details:
+        context["details"] = details[:500]
+
+    return send_alert(
+        severity=severity,
+        message=message,
+        context=context,
+        alert_key=f"scheduler_{job_id}_{issue_type}",
+    )
+
+
 def alert_llm_quota_exceeded(
     daily_spend: float,
     ceiling: float,

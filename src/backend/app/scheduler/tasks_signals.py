@@ -63,6 +63,16 @@ def run_signal_ingestion_job() -> None:
         )
         if result.errors:
             stats.errors.extend(result.errors)
+            deadlock_errors = [err for err in result.errors if "deadlock" in err.lower()]
+            if deadlock_errors:
+                from app.services.alerting_service import AlertSeverity, alert_scheduler_job_issue
+
+                alert_scheduler_job_issue(
+                    job_id="signal_ingestion",
+                    issue_type="deadlock_detected",
+                    details=deadlock_errors[0],
+                    severity=AlertSeverity.CRITICAL,
+                )
 
     except Exception as exc:
         stats.errors.append(str(exc))

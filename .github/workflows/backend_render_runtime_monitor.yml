@@ -1,0 +1,40 @@
+name: Backend (Render runtime monitor)
+
+on:
+  workflow_dispatch:
+    inputs:
+      recent_hours:
+        description: Hours of Render events to inspect
+        required: false
+        default: "24"
+  schedule:
+    - cron: "15 * * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check Render worker runtime events
+        env:
+          RENDER_API_TOKEN: ${{ secrets.RENDER_API_TOKEN }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          RECENT_HOURS: ${{ inputs.recent_hours || '24' }}
+          WORKER_SERVICE_ID: ${{ vars.RENDER_WORKER_SERVICE_ID || 'srv-d6hvve8gjchc73d0cq70' }}
+        run: |
+          set -euo pipefail
+
+          python src/backend/scripts/render_runtime_check.py \
+            --service-id "$WORKER_SERVICE_ID" \
+            --recent-hours "$RECENT_HOURS" \
+            --fail-on-anomaly \
+            --pretty
