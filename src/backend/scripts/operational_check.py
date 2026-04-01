@@ -251,13 +251,131 @@ def _check_feed(
     return result
 
 
-def run(base_url: str, *, timeout: float, admin_key: str | None) -> dict[str, Any]:
+def _normalize_surface_set(values: list[str] | None) -> set[str]:
+    return {value.strip().lower() for value in (values or []) if value and value.strip()}
+
+
+def _unexpected_unhealthy_surfaces(
+    inventory_payload: Any,
+    *,
+    allowed_surfaces: set[str],
+) -> list[str]:
+    if not isinstance(inventory_payload, dict):
+        return []
+
+    surfaces = inventory_payload.get("surfaces", {})
+    unhealthy = [
+        str(surface).lower()
+        for surface, details in surfaces.items()
+        if isinstance(details, dict) and details.get("is_healthy") is False
+    ]
+    return [surface for surface in unhealthy if surface not in allowed_surfaces]
+
+
+def _check_content_endpoint(
+    base_url: str,
+    *,
+    name: str,
+    path: str,
+    headers: dict[str, str],
+    timeout: float,
+    anomalies: list[str],
+) -> dict[str, Any]:
+    status, response_headers, payload = _request_json(
+        base_url,
+        path,
+        headers=headers,
+        timeout=timeout,
+    )
+    result = {
+        "status_code": status,
+        "headers": _interesting_headers(response_headers),
+        "payload": payload,
+    }
+    if status != 200 or not isinstance(payload, dict):
+        anomalies.append(f"{name}: unexpected status {status}")
+    return result
+
+
+def _record_detail_and_starter_checks(
+    report: dict[str, Any],
+    *,
+    base_url: str,
+    auth_headers: dict[str, str],
+    timeout: float,
+    anomalies: list[str],
+) -> None:
+    feeds = report.get("feeds", {})
+    if not isinstance(feeds, dict):
+        return
+
+    derived: dict[str, Any] = {}
+
+    article_items = feeds.get("session_articles", {}).get("top_items", [])
+    if article_items:
+        article_id = article_items[0].get("id")
+        if article_id is not None:
+            derived["article_detail"] = _check_content_endpoint(
+                base_url,
+                name="article_detail",
+                path=f"/api/v1/articles/{article_id}",
+                headers=auth_headers,
+                timeout=timeout,
+                anomalies=anomalies,
+            )
+            derived["article_starters"] = _check_content_endpoint(
+                base_url,
+                name="article_starters",
+                path=f"/api/v1/starters/{article_id}",
+                headers={},
+                timeout=timeout,
+                anomalies=anomalies,
+            )
+
+    video_candidates = []
+    for feed_name in ("session_videos", "reels"):
+        items = feeds.get(feed_name, {}).get("top_items", [])
+        if items:
+            video_candidates = items
+            break
+    if video_candidates:
+        video_id = video_candidates[0].get("id")
+        if video_id is not None:
+            derived["video_detail"] = _check_content_endpoint(
+                base_url,
+                name="video_detail",
+                path=f"/api/v1/videos/{video_id}",
+                headers=auth_headers,
+                timeout=timeout,
+                anomalies=anomalies,
+            )
+            derived["video_starters"] = _check_content_endpoint(
+                base_url,
+                name="video_starters",
+                path=f"/api/v1/starters/{video_id}",
+                headers={},
+                timeout=timeout,
+                anomalies=anomalies,
+            )
+
+    if derived:
+        report["details"] = derived
+
+
+def run(
+    base_url: str,
+    *,
+    timeout: float,
+    admin_key: str | None,
+    allowed_unhealthy_surfaces: set[str] | None = None,
+) -> dict[str, Any]:
     anomalies: list[str] = []
     report: dict[str, Any] = {
         "checked_at": _utcnow(),
         "base_url": base_url.rstrip("/"),
         "anomalies": anomalies,
     }
+    allowed_surfaces = _normalize_surface_set(list(allowed_unhealthy_surfaces or []))
 
     health_status, health_headers, health_payload = _request_json(
         base_url,
@@ -282,20 +400,20 @@ def run(base_url: str, *, timeout: float, admin_key: str | None) -> dict[str, An
         "status_code": inventory_status,
         "headers": _interesting_headers(inventory_headers),
         "payload": inventory_payload,
+        "allowed_unhealthy_surfaces": sorted(allowed_surfaces),
     }
     if inventory_status != 200:
         anomalies.append("/api/v1/inventory/health failed")
     elif isinstance(inventory_payload, dict) and inventory_payload.get("is_healthy") is False:
-        surfaces = inventory_payload.get("surfaces", {})
-        unhealthy = [
-            surface
-            for surface, details in surfaces.items()
-            if isinstance(details, dict) and details.get("is_healthy") is False
-        ]
-        anomalies.append(
-            "inventory unhealthy"
-            + (f" ({', '.join(unhealthy)})" if unhealthy else "")
+        unexpected_unhealthy = _unexpected_unhealthy_surfaces(
+            inventory_payload,
+            allowed_surfaces=allowed_surfaces,
         )
+        if unexpected_unhealthy:
+            anomalies.append(
+                "inventory unhealthy"
+                + (f" ({', '.join(unexpected_unhealthy)})" if unexpected_unhealthy else "")
+            )
 
     session_status, _session_headers, session_payload = _request_json(
         base_url,
@@ -332,6 +450,13 @@ def run(base_url: str, *, timeout: float, admin_key: str | None) -> dict[str, An
             anomalies=anomalies,
         )
     report["feeds"] = feed_results
+    _record_detail_and_starter_checks(
+        report,
+        base_url=base_url,
+        auth_headers=auth_headers,
+        timeout=timeout,
+        anomalies=anomalies,
+    )
 
     session_articles = feed_results.get("session_articles", {})
     same_session_id = session_articles.get("session_id")
@@ -409,7 +534,47 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Pretty-print the JSON report",
     )
+    parser.add_argument(
+        "--fail-on-anomaly",
+        action="store_true",
+        help="Exit non-zero when anomalies are detected",
+    )
+    parser.add_argument(
+        "--require-admin-success",
+        action="store_true",
+        help="Exit non-zero when admin checks are skipped or fail",
+    )
+    parser.add_argument(
+        "--allow-unhealthy-surface",
+        action="append",
+        default=[],
+        help="Surface name to tolerate as known degraded inventory without failing",
+    )
     return parser.parse_args(argv)
+
+
+def evaluate_report_failures(
+    report: dict[str, Any],
+    *,
+    fail_on_anomaly: bool,
+    require_admin_success: bool,
+) -> list[str]:
+    failures: list[str] = []
+    if fail_on_anomaly:
+        failures.extend(str(item) for item in report.get("anomalies", []) if item)
+
+    if require_admin_success:
+        admin = report.get("admin")
+        if not isinstance(admin, dict) or admin.get("skipped"):
+            failures.append("admin checks skipped")
+        else:
+            for name, details in admin.items():
+                if not isinstance(details, dict):
+                    continue
+                if int(details.get("status_code", 0) or 0) != 200:
+                    failures.append(f"admin check failed: {name}")
+
+    return failures
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -418,11 +583,21 @@ def main(argv: list[str] | None = None) -> int:
         args.base_url,
         timeout=float(args.timeout),
         admin_key=args.admin_key,
+        allowed_unhealthy_surfaces=_normalize_surface_set(args.allow_unhealthy_surface),
     )
     if args.pretty:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
         print(json.dumps(report, sort_keys=True))
+    failures = evaluate_report_failures(
+        report,
+        fail_on_anomaly=bool(args.fail_on_anomaly),
+        require_admin_success=bool(args.require_admin_success),
+    )
+    if failures:
+        for failure in failures:
+            print(f"FAIL: {failure}", file=sys.stderr)
+        return 1
     return 0
 
 

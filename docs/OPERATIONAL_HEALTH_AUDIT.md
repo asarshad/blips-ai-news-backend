@@ -510,13 +510,13 @@ Assessment:
 - [ ] Expand `/health` or `/ops/status` with resource and restart signals.
   Status: pending. Current health still misses memory pressure and recent restart count.
 - [ ] Add a post-deploy operational smoke check that runs automatically.
-  Status: partially prepared. `src/backend/scripts/operational_check.py` exists and is useful now, but it is not wired into deploy automation yet.
+  Status: in progress. `src/backend/scripts/operational_check.py` now supports failing on anomalies/admin failures, checks detail and starters endpoints, and a dedicated GitHub Actions workflow has been added for scheduled/manual smoke runs. The workflow stays strict while temporarily tolerating the already-known reels inventory degradation.
 - [ ] Add automation that pages on repeated worker `server_failed` OOM events from Render.
   Status: pending.
 - [ ] Reassess noisy and permanently failing sources.
   Status: pending. Some RSS and extraction failures are source-specific and may be better disabled, quarantined, or deprioritized.
 - [ ] Broaden mobile resume refresh to all three surfaces when the app returns from a long background interval.
-  Status: pending. Current repo state still refreshes only the visible tab on resume.
+  Status: fixed in repo and test-covered. `FeedShellPage` now silently refreshes Articles, Videos, and Reels on app resume; still needs to ship in a mobile release.
 
 ### Active Work Log
 
@@ -525,14 +525,18 @@ Assessment:
 - [x] March 31, 2026: split immediate post-ingestion AI work from heavier retry maintenance so the fetch job does less work per cycle.
 - [x] March 31, 2026: added smaller commit batches to signal ingestion to reduce deadlock exposure.
 - [x] March 31, 2026: added or updated targeted unit coverage for the fixes above.
-- [ ] Next: deploy these backend changes to Render and verify whether worker overlap, deadlock warnings, and reels freshness improve under live load.
+- [x] March 31, 2026: broadened mobile app-resume refresh to revalidate all three feed surfaces, with widget and notifier test coverage.
+- [x] March 31, 2026: mobile resume-refresh batch reviewed by subagent with no findings.
+- [x] March 31, 2026: upgraded the operational probe to fail on anomalies and added a dedicated backend operational smoke workflow.
+- [x] March 31, 2026: expanded the operational probe to cover detail and starters endpoints and adjusted the smoke workflow to tolerate only the known reels degradation instead of turning the whole gate permanently red.
+- [ ] Next: deploy the new backend checkpoint to Render and verify whether worker overlap, deadlock warnings, and reels freshness improve under live load.
 
 ## Test / Automation Gap Analysis
 
 Current gaps:
 
 - No automated Render-runtime guard for OOM or restart regressions.
-- No post-deploy smoke test tied to freshness thresholds.
+- No always-on post-deploy smoke gate tied to freshness thresholds.
 - No automated deadlock-frequency detection for signal ingestion.
 - No production telemetry in this workspace to prove mobile shipped-build refresh timing.
 
@@ -567,5 +571,4 @@ What is stale:
 
 What is not being triggered as expected:
 
-- mobile resume still refreshes only the current tab
-- mobile tab-entry refresh is fixed in repo, but not yet proven in a shipped app build
+- mobile resume and tab-entry refresh fixes are in repo, but neither is proven in a shipped app build yet

@@ -1,0 +1,53 @@
+name: Backend (operational smoke)
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Base URL to probe
+        required: false
+        default: https://api.blips.tech
+      strict:
+        description: Fail the workflow when anomalies are detected
+        required: false
+        default: true
+        type: boolean
+  schedule:
+    - cron: "0 */6 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run operational smoke probe
+        env:
+          BASE_URL: ${{ inputs.base_url || vars.OPS_BASE_URL || 'https://api.blips.tech' }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+          STRICT_MODE: ${{ github.event_name == 'schedule' || inputs.strict }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            src/backend/scripts/operational_check.py
+            --base-url "$BASE_URL"
+            --timeout 20
+            --pretty
+          )
+          if [ "$STRICT_MODE" = "true" ]; then
+            args+=(--fail-on-anomaly --allow-unhealthy-surface reels)
+          fi
+          if [ -n "${ADMIN_API_KEY:-}" ]; then
+            args+=(--admin-key "$ADMIN_API_KEY")
+          fi
+
+          python "${args[@]}"
