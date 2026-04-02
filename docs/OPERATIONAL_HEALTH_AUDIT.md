@@ -4,9 +4,9 @@ Audit date: March 31, 2026
 Primary live target: `https://api.blips.tech`  
 Scope: backend runtime health, scheduler and ingestion behavior, Render runtime stability, endpoint freshness, mobile refresh wiring, and operational automation gaps.
 
-Render verification update: April 2, 2026 00:50 UTC
+Render verification update: April 2, 2026 01:05 UTC
 
-- Backend fixes are deployed live on Render through commit `e1a9901`.
+- Backend fixes are deployed live on Render through commit `5aa1c12`.
 - Render worker `blips-worker` was resized to Render `standard` and redeployed at `2026-04-01T04:24:53Z`.
 - Mobile refresh fixes are committed and pushed through commit `656a914`, but mobile runtime behavior in users' hands still depends on shipping a new app build.
 - Evidence sources used in this report:
@@ -17,28 +17,28 @@ Render verification update: April 2, 2026 00:50 UTC
 
 ## 1. Executive Summary
 
-Overall operational status: mostly healthy with one remaining worker-startup reliability gap.
+Overall operational status: mostly healthy with one remaining reels-freshness reliability gap.
 
 - The API is live, DB and Redis are reachable, anonymous session bootstrap works, and Articles, Videos, and Reels all return coherent non-empty data.
 - The improved `/health` response is live in production and now reports database, Redis, scheduler lock state, and ingestion freshness.
 - The scheduler-health semantics fix is also live: the API now correctly reflects the external worker lock instead of implying scheduling is disabled.
 - Articles and Videos are healthy right now.
-- Reels are now serving fresh enough inventory again, and the live inventory-health endpoint is fully healthy across Articles, Videos, and Reels.
-- The main production risk remains worker stability. The worker has now been moved off the `512Mi` starter plan to `standard`, and the OOM pattern has not reappeared in recent Render events, but I observed the scheduler leader lock flap during worker startup and temporarily degrade `/health` before recovering.
+- Reels improved materially after the latest live threshold/config changes, but they remain borderline and can still dip just below the recent-refresh threshold.
+- The main production risk remains worker stability. The worker has now been moved off the `512Mi` starter plan to `standard`, the OOM pattern has not reappeared in recent Render events, and the latest startup-lock patch is now live and verified to keep `/health` stable after worker startup.
 
 Release confidence level: Medium.
 
 - Feed delivery is working.
 - Observability is materially better than before and the new health contract is live.
-- Confidence is reduced by recent worker OOM history and the observed scheduler leader-lock flap during worker startup.
+- Confidence is reduced by recent worker OOM history and reels freshness staying close to its minimum threshold.
 
 Top current operational risks:
 
-- Worker was repeatedly OOM-killed on Render before the `2026-04-01T04:24:53Z` resize to `standard`; the next risk is the observed post-deploy lock flap where `/health` temporarily reports no visible scheduler leader lock even though recent Render worker events show no fresh crash.
-- I found and confirmed a concrete startup-lock root cause in repo state: the worker performs a synchronous startup fetch before its normal lock-refresh maintenance begins, so the leader lock can expire during a long initial fetch and then recover only after the main loop starts.
-- Reels freshness recovered after the `f997dff` production change (`Lower reel auto-promotion threshold`), but that improvement should be watched over time rather than assumed permanent.
+- Worker was repeatedly OOM-killed on Render before the `2026-04-01T04:24:53Z` resize to `standard`; the new live question is whether the `5aa1c12` startup-lock patch keeps scheduler health stable across future restarts.
+- I found and confirmed a concrete startup-lock root cause in repo state: the worker performs a synchronous startup fetch before its normal lock-refresh maintenance begins, so the leader lock can expire during a long initial fetch and then recover only after the main loop starts. That patch is now live.
+- Reels freshness improved after the `f997dff` / `4c8e1cc` production changes, but the latest inventory sample still shows `recent_refresh_count=11` against threshold `12`, so it remains borderline.
 - Worker logs show scheduler overlap warnings and deadlock errors in signal ingestion.
-- Before the current repo patch, the dedicated worker could also silently idle forever on lock-acquisition or scheduler-init failure, leaving Render green while `/health` degraded. That is now fixed in repo and pending deploy.
+- Before the current repo patch, the dedicated worker could also silently idle forever on lock-acquisition or scheduler-init failure, leaving Render green while `/health` degraded. That is now fixed and live.
 - Mobile repo wiring is now better, including all-surface resume refresh and tab-entry refresh, but those fixes are not production-mobile-effective until the next app release.
 
 ## 2. Backend Runtime Health
@@ -54,8 +54,8 @@ Current live behavior:
   - Redis reachability
   - scheduler leadership state via Redis lock visibility
   - ingestion freshness via latest successful ingestion timestamp and recent counts
-- `GET /health` now alternates between healthy and degraded during worker startup windows.
-- Example degraded sample from the operational smoke probe at `2026-04-02T00:47:46.883582Z`:
+- `GET /health` previously alternated between healthy and degraded during worker startup windows.
+- Historical degraded sample from the operational smoke probe at `2026-04-02T00:47:46.883582Z` before the latest startup-lock patch:
   - `status=degraded`
   - `database.status=ok`
   - `redis.status=ok`
@@ -67,10 +67,14 @@ Current live behavior:
   - `last_successful_ingestion_at=2026-04-02T00:36:04.969726+00:00`
   - `articles_ingested_last_24h=221`
   - `videos_ingested_last_24h=136`
-- Example healthy sample at `2026-04-02T00:49:28.894741Z`:
+- Example healthy sample at `2026-04-02T00:49:28.894741Z` before the latest startup-lock patch:
   - `status=healthy`
   - `scheduler.leader_lock_present=true`
   - `scheduler.leader_lock_ttl_seconds=105`
+- Latest post-patch healthy sample at `2026-04-02T01:05:26.194192Z`:
+  - `status=healthy`
+  - `scheduler.leader_lock_present=true`
+  - `scheduler.leader_lock_ttl_seconds=106`
 
 Quality assessment:
 
@@ -95,11 +99,13 @@ Render services:
 Live scheduler evidence:
 
 - `/health` reports `scheduler.mode=external`, which is correct for the split API plus worker deployment model.
-- Repeated 15-second health samples captured the lock flap directly:
+- Repeated 15-second health samples captured the pre-fix lock flap directly:
   - `00:48:42Z`, `00:48:58Z`, `00:49:13Z`: degraded, no lock visible
   - `00:49:28Z`, `00:49:44Z`, `00:49:59Z`: healthy, lock visible with TTL `105`, `90`, `74`
-- The latest worker deploy is `dep-d76a7nea2pns73b810e0` for commit `e1a9901`, finished at `2026-04-01T04:51:36.917224Z`.
-- No fresh Render `server_failed` events have appeared since the resize and the `e1a9901` deploy, so the current issue is missing scheduler leadership visibility rather than a confirmed crash loop.
+- After deploying `5aa1c12`, eight 10-second samples from `01:03:54Z` through `01:05:07Z` all stayed healthy, and the leader-lock TTL refreshed upward (`108`, `97`, `117`, `106`, `96`, `116`, `106`, `95`) instead of decaying to zero.
+- Latest worker deploy `dep-d76rvn7fte5s73dujpg0` for commit `5aa1c12` finished at `2026-04-02T01:03:30.409254Z`.
+- Latest API deploy `dep-d76rvn7fte5s73dujq5g` for commit `5aa1c12` finished at `2026-04-02T01:04:47.720997Z`.
+- No fresh Render `server_failed` events have appeared since the resize, so the current issue is not crash churn; it is borderline reels freshness.
 
 Cadence status:
 
@@ -108,20 +114,20 @@ Cadence status:
 
 Assessment:
 
-- Scheduler configuration is correct, but worker leadership can temporarily disappear during startup without a corresponding Render crash event.
-- The remaining issue is no longer just resource pressure; it is that the current worker can disappear from scheduler visibility during startup fetch windows.
-- Repo state now includes a fail-loud worker patch so startup/runtime lock failures no longer silently park the process, plus a startup lock-maintenance patch to keep the leader lock alive while the initial fetch runs.
+- Scheduler configuration is correct, and the `5aa1c12` live rollout appears to have stabilized worker leadership through startup.
+- The remaining issue is no longer startup lock visibility; it is sustaining reels freshness above threshold consistently.
+- Repo state now includes a fail-loud worker patch so startup/runtime lock failures no longer silently park the process, plus the live startup lock-maintenance patch to keep the leader lock alive while the initial fetch runs.
 
 ### Ingestion Status
 
 Live evidence:
 
 - `/health` reports `hours_since_last_ingestion=0.53` and `is_stalled=false`.
-- The last successful ingestion timestamp in the latest sampled health response was `2026-04-02T00:36:04.969726+00:00`.
+- The last successful ingestion timestamp in the latest sampled health response was `2026-04-02T00:54:53.640751+00:00`.
 - Inventory health reports:
   - Articles healthy
   - Videos healthy
-  - Reels healthy again after the latest live promotion threshold change
+  - Reels improved after the latest live promotion threshold change, but currently borderline
 
 Recent content counts:
 
@@ -133,7 +139,7 @@ Recent content counts:
 Assessment:
 
 - Global ingestion is running and not stalled.
-- Reels are no longer the weak lane in the latest live sample: inventory health is green and `recent_refresh_count=12` meets threshold.
+- Reels are much healthier than earlier in the audit, but they are still the weakest lane operationally: the latest inventory sample shows `recent_refresh_count=11`, just below threshold `12`.
 - Repo follow-up found two concrete root causes: the bounded checkpoint scheduler was starving reels under the implicit two-worker layout, and the worker startup path could let the leader lock expire before steady-state refresh began.
 
 ### Cache Freshness
@@ -517,7 +523,7 @@ Assessment:
 - [x] Make the dedicated worker fail loud instead of silently idling on startup/runtime failure.
   Status: fixed in repo and review-covered. `app.worker` now exits nonzero when lock acquisition, scheduler initialization, or unrecoverable lock refresh fails, so Render can restart the process instead of leaving the service apparently up but operationally inert.
 - [x] Keep the worker leader lock alive during the synchronous startup fetch window.
-  Status: fixed in repo and review-covered. `app.worker` now runs a temporary lock-maintenance thread during the initial fetch so the leader lock does not expire before steady-state lock refresh begins.
+  Status: fixed, review-covered, and live in production via commit `5aa1c12`. Post-deploy health samples now show stable lock refresh instead of the earlier startup lock flap.
 - [x] Fix recurring article image repair type errors.
   Status: fixed in repo. The article-image fallback path now accepts the actual string return shape from the LLM extractor instead of dereferencing `.image_url` on a string-like result.
 - [ ] Ship the mobile tab-entry refresh fix in the next app release.
@@ -555,7 +561,8 @@ Assessment:
 - [x] April 1, 2026: hardened the dedicated worker so startup/runtime lock failures exit nonzero instead of idling forever, and taught the operational smoke probe to fail on degraded `/health` payloads and send webhook alerts.
 - [x] April 1, 2026: confirmed with live 15-second samples that the worker leader lock can disappear during startup and then recover later, matching the synchronous-startup-fetch lock-expiry theory.
 - [x] April 1, 2026: fixed the startup lock-maintenance gap in repo by keeping the worker lock refreshed during the initial synchronous fetch window.
-- [ ] Next: deploy the startup-lock fix to Render, verify that `/health` no longer flaps during worker startup, and confirm the new worker checkpoint stays healthy while reels freshness remains green.
+- [x] April 2, 2026: deployed `5aa1c12` to both Render services and verified eight consecutive healthy `/health` samples after startup, with the worker lock TTL refreshing upward instead of decaying to zero.
+- [ ] Next: watch at least another full ingestion window and confirm reels `recent_refresh_count` stays comfortably above threshold instead of oscillating between `11` and `12`.
 
 ## Test / Automation Gap Analysis
 
@@ -582,18 +589,18 @@ What is working:
 - DB and Redis are healthy
 - ingestion is active
 - Articles and Videos are fresh and operational
-- Reels are healthy again in the latest live inventory sample
+- worker leader-lock stability looks healthy after the `5aa1c12` rollout
 - direct feed cache freshness headers are now trustworthy
 - the repo now has stricter worker-failure handling and smoke-alerting safeguards ready for deploy
 
 What is broken:
 
-- `/health` can still flap to degraded during worker startup because the current live worker can lose its leader lock before steady-state refresh begins
+- reels still hover close to the recent-refresh floor and can dip below threshold
 - worker logs show deadlocks and overlapping ingestion windows
 
 What is stale:
 
-- the startup lock-maintenance fix is in repo but not yet live
+- reels freshness margin is still thin even after the recent live improvements
 - the document previously assumed stable worker lock visibility; that has now been corrected to the current sampled behavior
 
 What is not being triggered as expected:
