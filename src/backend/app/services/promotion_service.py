@@ -909,7 +909,7 @@ class PromotionService:
         config: PromotionConfig,
     ) -> float:
         if content_type == ContentType.REEL and bool(getattr(settings, "AUTO_PROMOTE_REELS", True)):
-            return min(config.min_score, float(getattr(settings, "AUTO_PROMOTE_REELS_MIN_SCORE", 0.30)))
+            return min(config.min_score, float(getattr(settings, "AUTO_PROMOTE_REELS_MIN_SCORE", 0.25)))
         return config.min_score
 
     def _get_source_profiles(self, items: List[ContentItem]) -> Dict[str, VideoSourceProfile]:

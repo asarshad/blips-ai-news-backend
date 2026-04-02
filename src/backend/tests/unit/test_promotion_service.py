@@ -44,7 +44,7 @@ def test_story_keyword_signal_recognizes_launch_framing():
 def test_reels_use_lower_auto_promote_threshold_by_default():
     service = PromotionService(MagicMock())
 
-    assert service._min_promotion_score(ContentType.REEL, _REEL_CONFIG) == 0.30
+    assert service._min_promotion_score(ContentType.REEL, _REEL_CONFIG) == 0.25
     assert service._min_promotion_score(ContentType.VIDEO, _VIDEO_CONFIG) == _VIDEO_CONFIG.min_score
 
 
