@@ -28,10 +28,15 @@ from sqlalchemy.orm import Session
 from app.article_hydration import display_article_title
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.models.content import ContentItem, ContentType, EventType
+from app.models.content import ContentItem, ContentType
 from app.repositories.user_repo import InteractionEventRepository
 from app.services.content_readiness import ready_content_filter
 from app.services.diversity_mixer import enforce_channel_caps, mix_feed
+from app.services.feed_freshness_strategies import (
+    CURRENT_STRATEGY,
+    FeedFreshnessStrategy,
+    feed_freshness_strategies,
+)
 from app.services.inventory_service import FreshnessTier, Surface, _get_surface_config
 from app.services.video_content_policy import apply_content_policy
 from app.services.video_duration_hydration import hydrate_missing_video_durations
@@ -47,20 +52,6 @@ CONSUMED_SUPPRESSION_HOURS = 24
 EXPOSED_DEMOTION_HOURS = 6
 NEGATIVE_ITEM_SUPPRESSION_HOURS = 24
 NEGATIVE_CREATOR_SUPPRESSION_HOURS = 168
-ARTICLE_CONSUMED_EVENTS = {
-    EventType.OPEN_SOURCE,
-    EventType.SHARE,
-    EventType.SAVE,
-    EventType.CHAT_START,
-    EventType.CHAT_MESSAGE,
-}
-VIDEO_CONSUMED_EVENTS = ARTICLE_CONSUMED_EVENTS | {
-    EventType.VIDEO_SAVE,
-    EventType.VIDEO_SHARE,
-    EventType.VIDEO_50PCT,
-    EventType.VIDEO_95PCT,
-}
-VIDEO_EXPOSED_EVENTS = {EventType.VIDEO_IMPRESSION}
 
 
 @dataclass
@@ -74,6 +65,10 @@ class FeedResponseMeta:
     tier_config: Dict[str, int]
     surface: str
     remaining_window_count: int = 0
+    strategy_name: str = CURRENT_STRATEGY
+    strategy_source: Optional[str] = None
+    resume_continuity_window_minutes: Optional[int] = None
+    resume_snapshot_after_remote_window: bool = True
 
 
 def _get_redis_client():
@@ -92,11 +87,12 @@ def _cache_key(
     limit: int,
     offset: int,
     hybrid_video_rerank: bool,
+    strategy_name: str = CURRENT_STRATEGY,
     device_id: Optional[str] = None,
 ) -> str:
     """Generate cache key for tiered feed."""
     base_key = (
-        f"blips:tiered_feed:{surface.value}:l{limit}:o{offset}:hybrid{int(hybrid_video_rerank)}"
+        f"blips:tiered_feed:{surface.value}:s{strategy_name}:l{limit}:o{offset}:hybrid{int(hybrid_video_rerank)}"
     )
     if not device_id:
         return base_key
@@ -229,6 +225,7 @@ def get_tiered_feed(
     now: Optional[datetime] = None,
     hybrid_video_rerank: bool = False,
     device_id: Optional[str] = None,
+    strategy: Optional[FeedFreshnessStrategy] = None,
 ) -> Tuple[List[TieredItem], bool, int]:
     """
     Get a tiered blend of content items for a surface.
@@ -251,6 +248,7 @@ def get_tiered_feed(
     now = now or datetime.utcnow()
     cfg = _get_surface_config(surface)
     content_type = _surface_to_content_type(surface)
+    strategy = strategy or feed_freshness_strategies.resolve(surface)
 
     fresh_cutoff = now - timedelta(hours=cfg["fresh_hours"])
     backfill_cutoff = now - timedelta(hours=cfg["backfill_hours"])
@@ -295,7 +293,13 @@ def get_tiered_feed(
 
     results: List[TieredItem] = []
     seen_ids = set()
-    consumed_ids, exposed_ids = _get_recent_feedback_ids(db, device_id, surface)
+    strategy = strategy or feed_freshness_strategies.resolve(surface)
+    consumed_ids, exposed_ids = _get_recent_feedback_ids(
+        db,
+        device_id,
+        surface,
+        strategy=strategy,
+    )
     negative_item_ids, negative_creator_keys = _get_recent_negative_feedback(db, device_id, surface)
     base_inventory_query = apply_content_policy(
         db.query(ContentItem).filter(base_filter),
@@ -320,18 +324,9 @@ def get_tiered_feed(
         eligible_inventory_query,
         fresh_window_filter=fresh_window_filter,
     )
-    tier_a_query = eligible_inventory_query.filter(fresh_window_filter)
-    if surface in (Surface.VIDEOS, Surface.REELS):
-        tier_a_query = tier_a_query.order_by(
-            desc(ContentItem.published_at),
-            desc(ContentItem.promotion_score),
-            desc(ContentItem.global_score),
-        )
-    else:
-        tier_a_query = tier_a_query.order_by(
-            desc(ContentItem.global_score),
-            desc(ContentItem.published_at),
-        )
+    tier_a_query = eligible_inventory_query.filter(fresh_window_filter).order_by(
+        *strategy.tier_a_order_clauses(surface=surface, offset=offset)
+    )
     tier_a_items = tier_a_query.limit(target_count * fetch_multiplier).all()
 
     for item in tier_a_items:
@@ -626,6 +621,7 @@ def get_cached_tiered_feed(
     offset: int = 0,
     hybrid_video_rerank: bool = False,
     device_id: Optional[str] = None,
+    strategy: Optional[FeedFreshnessStrategy] = None,
 ) -> Tuple[List[Dict[str, Any]], bool, FeedResponseMeta]:
     """
     Get tiered feed with Redis caching.
@@ -642,11 +638,18 @@ def get_cached_tiered_feed(
         Tuple of (list of item dicts, has_more, metadata)
     """
     now = datetime.utcnow()
+    strategy = strategy or feed_freshness_strategies.resolve(surface)
+    strategy_source = (
+        feed_freshness_strategies.strategy_source(surface)
+        if strategy is not None and strategy.name == feed_freshness_strategies.strategy_name(surface)
+        else "session_snapshot"
+    )
     cache_key = _cache_key(
         surface,
         limit,
         offset,
         hybrid_video_rerank,
+        strategy.name,
         device_id,
     )
     redis_client = _get_redis_client()
@@ -677,6 +680,14 @@ def get_cached_tiered_feed(
                     generated_at=generated_at,
                     tier_config=cfg,
                     surface=surface.value,
+                    strategy_name=str(data.get("freshness_strategy") or strategy.name),
+                    strategy_source=str(data.get("freshness_strategy_source") or strategy_source),
+                    resume_continuity_window_minutes=data.get(
+                        "resume_continuity_window_minutes"
+                    ),
+                    resume_snapshot_after_remote_window=bool(
+                        data.get("resume_snapshot_after_remote_window", True)
+                    ),
                 )
                 meta.remaining_window_count = int(data.get("remaining_window_count", 0) or 0)
                 return (
@@ -696,6 +707,7 @@ def get_cached_tiered_feed(
         offset=offset,
         hybrid_video_rerank=hybrid_video_rerank,
         device_id=device_id,
+        strategy=strategy,
     )
 
     duration_overrides: Dict[int, int] = {}
@@ -730,6 +742,14 @@ def get_cached_tiered_feed(
                     "has_more": has_more,
                     "remaining_window_count": remaining_window_count,
                     "generated_at": now.isoformat(),
+                    "freshness_strategy": strategy.name,
+                    "freshness_strategy_source": strategy_source,
+                    "resume_continuity_window_minutes": strategy.resume_continuity_window_minutes(
+                        surface=surface
+                    ),
+                    "resume_snapshot_after_remote_window": strategy.resume_snapshot_after_remote_window(
+                        surface=surface
+                    ),
                 }
             )
             redis_client.setex(cache_key, TIERED_FEED_CACHE_TTL, cache_data)
@@ -745,6 +765,14 @@ def get_cached_tiered_feed(
         tier_config=cfg,
         surface=surface.value,
         remaining_window_count=remaining_window_count,
+        strategy_name=strategy.name,
+        strategy_source=strategy_source,
+        resume_continuity_window_minutes=strategy.resume_continuity_window_minutes(
+            surface=surface
+        ),
+        resume_snapshot_after_remote_window=strategy.resume_snapshot_after_remote_window(
+            surface=surface
+        ),
     )
     return items, has_more, meta
 
@@ -753,24 +781,23 @@ def _get_recent_feedback_ids(
     db: Session,
     device_id: Optional[str],
     surface: Surface,
+    *,
+    strategy: Optional[FeedFreshnessStrategy] = None,
 ) -> Tuple[Set[int], Set[int]]:
     """Return consumed ids and exposed-only ids for device-scoped fresh sessions."""
     if not device_id:
         return set(), set()
 
     interaction_repo = InteractionEventRepository(db)
-    if surface == Surface.ARTICLES:
-        consumed_event_types = ARTICLE_CONSUMED_EVENTS
-        exposed_event_types: Set[EventType] = set()
-    else:
-        consumed_event_types = VIDEO_CONSUMED_EVENTS
-        exposed_event_types = VIDEO_EXPOSED_EVENTS
+    signals = (strategy or feed_freshness_strategies.resolve(surface)).feedback_signals(
+        surface=surface
+    )
 
     return interaction_repo.get_recent_feedback_ids(
         device_id=device_id,
-        consumed_event_types=consumed_event_types,
+        consumed_event_types=signals.consumed_event_types,
         consumed_hours=CONSUMED_SUPPRESSION_HOURS,
-        exposed_event_types=exposed_event_types,
+        exposed_event_types=signals.exposed_event_types,
         exposed_hours=EXPOSED_DEMOTION_HOURS,
     )
 

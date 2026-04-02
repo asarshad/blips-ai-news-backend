@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from app.models.content import ContentType
+from app.services.feed_freshness_strategies import FRESH_UNSEEN_V1_STRATEGY
 from app.services import tiered_feed_service
 from app.services.inventory_service import FreshnessTier, Surface
 from app.services.tiered_feed_service import (
@@ -87,6 +88,27 @@ def test_cache_key_includes_device_hash_when_personalized():
 
     assert personalized_key.startswith("blips:tiered_feed:videos:")
     assert ":d" in personalized_key
+
+
+def test_cache_key_separates_freshness_strategies():
+    current_key = _cache_key(
+        surface=SimpleNamespace(value="articles"),
+        limit=20,
+        offset=0,
+        hybrid_video_rerank=False,
+        strategy_name="current",
+    )
+    fresh_key = _cache_key(
+        surface=SimpleNamespace(value="articles"),
+        limit=20,
+        offset=0,
+        hybrid_video_rerank=False,
+        strategy_name=FRESH_UNSEEN_V1_STRATEGY,
+    )
+
+    assert current_key != fresh_key
+    assert ":scurrent:" in current_key
+    assert f":s{FRESH_UNSEEN_V1_STRATEGY}:" in fresh_key
 
 
 def test_prioritize_unseen_items_only_uses_demoted_fill_when_needed():

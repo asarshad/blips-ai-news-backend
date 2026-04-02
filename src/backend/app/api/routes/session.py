@@ -33,6 +33,7 @@ from app.repositories.user_repo import (
     UserProfileRepository,
 )
 from app.services.freshness_metrics_service import record_feed_served
+from app.services.feed_freshness_strategies import feed_freshness_strategies
 from app.services.inventory_service import Surface
 from app.services.personalization_service import PersonalizationService
 from app.services.playlist_service import PlaylistService
@@ -138,6 +139,10 @@ class PlaylistResponse(BaseModel):
     newest_published_at: Optional[str] = None
     newest_created_at: Optional[str] = None
     remaining_count: int = 0
+    freshness_strategy: Optional[str] = None
+    freshness_strategy_source: Optional[str] = None
+    resume_continuity_window_minutes: Optional[int] = None
+    resume_snapshot_after_remote_window: bool = True
 
 
 # ============================================================================
@@ -171,17 +176,26 @@ def get_personalization_service(db: Session = Depends(get_db)) -> Personalizatio
 
 def _tiered_surfaces_for_interaction(content_item, event_type: EventType) -> List[Surface]:
     """Map an interaction to the device-scoped tiered feed caches it affects."""
-    effective_type = effective_content_type(content_item)
-    if effective_type == ContentType.ARTICLE:
-        return [Surface.ARTICLES]
-
     if event_type == EventType.LESS_FROM_CREATOR:
         return [Surface.VIDEOS, Surface.REELS]
 
-    if effective_type == ContentType.REEL:
-        return [Surface.REELS]
+    effective_type = effective_content_type(content_item)
+    if event_type == EventType.VIDEO_SKIP_LT_2S:
+        return [Surface.REELS] if effective_type == ContentType.REEL else [Surface.VIDEOS]
 
-    return [Surface.VIDEOS]
+    if effective_type == ContentType.ARTICLE:
+        surfaces = [Surface.ARTICLES]
+    elif effective_type == ContentType.REEL:
+        surfaces = [Surface.REELS]
+    else:
+        surfaces = [Surface.VIDEOS]
+
+    affected: List[Surface] = []
+    for surface in surfaces:
+        signals = feed_freshness_strategies.resolve(surface).feedback_signals(surface=surface)
+        if event_type in signals.consumed_event_types or event_type in signals.exposed_event_types:
+            affected.append(surface)
+    return affected
 
 
 # ============================================================================
@@ -248,6 +262,14 @@ def get_playlist(
             ContentType.REEL: "reels",
         }[content_type],
         feed_version=result.get("feed_version"),
+        strategy_name=result.get("freshness_strategy"),
+        strategy_source=result.get("freshness_strategy_source"),
+        resume_continuity_window_minutes=result.get(
+            "resume_continuity_window_minutes"
+        ),
+        resume_snapshot_after_remote_window=result.get(
+            "resume_snapshot_after_remote_window"
+        ),
     )
     newest_published_at, newest_created_at = feed_meta.get_newest_dates()
     feed_meta.add_headers(response)
@@ -274,6 +296,12 @@ def get_playlist(
         newest_published_at=newest_published_at,
         newest_created_at=newest_created_at,
         remaining_count=int(result.get("remaining_count", 0) or 0),
+        freshness_strategy=result.get("freshness_strategy"),
+        freshness_strategy_source=result.get("freshness_strategy_source"),
+        resume_continuity_window_minutes=result.get("resume_continuity_window_minutes"),
+        resume_snapshot_after_remote_window=bool(
+            result.get("resume_snapshot_after_remote_window", True)
+        ),
     )
 
 
@@ -316,8 +344,10 @@ def record_interaction(
     if not event:
         return InteractionResponse(success=False, message="Failed to record interaction")
 
-    # Invalidate playlist cache on significant interactions
+    content_item = None
     if event_type in (
+        EventType.VIEW_10S,
+        EventType.VIDEO_IMPRESSION,
         EventType.SAVE,
         EventType.SHARE,
         EventType.OPEN_SOURCE,
@@ -330,12 +360,12 @@ def record_interaction(
         EventType.CHAT_MESSAGE,
         EventType.LESS_FROM_CREATOR,
     ):
-        playlist_service.invalidate_user_cache(session.device_id)
-
-    if event_type in (EventType.VIDEO_SKIP_LT_2S, EventType.LESS_FROM_CREATOR):
         content_item = personalization_service.content_repo.get_by_id(request.content_item_id)
         if content_item:
-            for surface in _tiered_surfaces_for_interaction(content_item, event_type):
+            affected_surfaces = _tiered_surfaces_for_interaction(content_item, event_type)
+            if affected_surfaces:
+                playlist_service.invalidate_user_cache(session.device_id)
+            for surface in affected_surfaces:
                 invalidate_tiered_feed_cache(surface=surface, device_id=session.device_id)
 
     return InteractionResponse(success=True, event_id=event.id)

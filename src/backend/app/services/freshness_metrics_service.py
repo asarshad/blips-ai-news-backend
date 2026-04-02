@@ -14,9 +14,16 @@ from app.services.inventory_service import FreshnessTier, Surface, _get_surface_
 
 _COUNTER_KEYS = {
     "resume_position_restored",
+    "resume_path_restored_snapshot",
+    "resume_path_latest_head",
+    "resume_path_fresh_continuation",
     "new_content_available",
     "new_content_opened",
     "feed_version_changed",
+    "strategy_resolved_redis",
+    "strategy_resolved_env",
+    "strategy_resolved_default",
+    "strategy_fallback_unknown",
     "stale_feed_served",
     "topup_triggered",
     "topup_completed",

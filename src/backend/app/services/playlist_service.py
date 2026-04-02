@@ -22,10 +22,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.article_hydration import display_article_title
-from app.core.config import get_settings
 from app.core.feature_flags import FeatureFlags
 from app.core.logging import get_logger
-from app.models.content import ContentItem, ContentType, EventType
+from app.models.content import ContentItem, ContentType
 from app.ranking.feed_score import rerank_feed
 from app.repositories.content_repo import ContentItemRepository
 from app.repositories.user_repo import (
@@ -34,6 +33,7 @@ from app.repositories.user_repo import (
     UserPreferenceRepository,
     UserProfileRepository,
 )
+from app.services.feed_freshness_strategies import CURRENT_STRATEGY, feed_freshness_strategies
 from app.services.feed_version import compute_feed_version
 from app.services.inventory_service import Surface
 from app.services.multi_factor_ranking_service import MultiFactorRankingService
@@ -43,8 +43,6 @@ from app.services.video_duration_hydration import hydrate_missing_video_duration
 from app.video_surface_rules import effective_content_type, has_explicit_shorts_url
 
 logger = get_logger(__name__)
-
-settings = get_settings()
 
 
 # Playlist configuration
@@ -70,21 +68,6 @@ EXPOSED_DEMOTION_HOURS = 6
 EXPOSED_ONLY_DEMOTION_MULTIPLIER = 0.65
 NEGATIVE_ITEM_SUPPRESSION_HOURS = 24
 NEGATIVE_CREATOR_SUPPRESSION_HOURS = 168
-
-ARTICLE_CONSUMED_EVENTS = {
-    EventType.OPEN_SOURCE,
-    EventType.SHARE,
-    EventType.SAVE,
-    EventType.CHAT_START,
-    EventType.CHAT_MESSAGE,
-}
-VIDEO_CONSUMED_EVENTS = ARTICLE_CONSUMED_EVENTS | {
-    EventType.VIDEO_SAVE,
-    EventType.VIDEO_SHARE,
-    EventType.VIDEO_50PCT,
-    EventType.VIDEO_95PCT,
-}
-VIDEO_EXPOSED_EVENTS = {EventType.VIDEO_IMPRESSION}
 
 # Cache configuration
 PLAYLIST_CACHE_TTL_SECONDS = 300  # 5 minutes
@@ -235,7 +218,12 @@ class PlaylistService:
             session_id = str(uuid.uuid4())[:8]
 
         # Get or generate session snapshot
-        cache_key = self._get_session_cache_key(device_id, content_type, session_id)
+        strategy_name = self._strategy_name_for_content_type(content_type)
+        cache_key = self._get_session_cache_key(
+            device_id,
+            content_type,
+            session_id,
+        )
 
         snapshot = None
         if self.redis:
@@ -288,6 +276,20 @@ class PlaylistService:
                     source="db",
                     cache_key=cache_key,
                     cache_hit=False,
+                    freshness_strategy=strategy_name,
+                    freshness_strategy_source=feed_freshness_strategies.strategy_source(
+                        _surface_for_content_type(content_type)
+                    ),
+                    resume_continuity_window_minutes=feed_freshness_strategies.for_name(
+                        strategy_name
+                    ).resume_continuity_window_minutes(
+                        surface=_surface_for_content_type(content_type)
+                    ),
+                    resume_snapshot_after_remote_window=feed_freshness_strategies.for_name(
+                        strategy_name
+                    ).resume_snapshot_after_remote_window(
+                        surface=_surface_for_content_type(content_type)
+                    ),
                 )
 
             if not snapshot["items"]:
@@ -296,7 +298,14 @@ class PlaylistService:
             # Cache the session snapshot + latest fallback snapshot
             if self.redis and snapshot["items"]:
                 self._set_session_cache(cache_key, snapshot)
-                self._set_cache(self._get_cache_key(device_id, content_type), snapshot)
+                self._set_cache(
+                    self._get_cache_key(
+                        device_id,
+                        content_type,
+                        strategy_name=strategy_name,
+                    ),
+                    snapshot,
+                )
 
         # Cursor-based pagination
         start_cursor = cursor or 0
@@ -329,6 +338,14 @@ class PlaylistService:
             "source": snapshot.get("source", "db"),
             "cache_key": snapshot.get("cache_key", cache_key),
             "cache_hit": bool(snapshot.get("cache_hit", False)),
+            "freshness_strategy": snapshot.get("freshness_strategy", strategy_name),
+            "freshness_strategy_source": snapshot.get("freshness_strategy_source"),
+            "resume_continuity_window_minutes": snapshot.get(
+                "resume_continuity_window_minutes"
+            ),
+            "resume_snapshot_after_remote_window": bool(
+                snapshot.get("resume_snapshot_after_remote_window", True)
+            ),
         }
 
     def _supports_tiered_snapshots(self) -> bool:
@@ -381,6 +398,14 @@ class PlaylistService:
             cache_hit=meta.cache_hit,
             remaining_count=meta.remaining_window_count,
             has_more=_has_more,
+            freshness_strategy=getattr(meta, "strategy_name", CURRENT_STRATEGY),
+            freshness_strategy_source=getattr(meta, "strategy_source", None),
+            resume_continuity_window_minutes=feed_freshness_strategies.for_name(
+                getattr(meta, "strategy_name", CURRENT_STRATEGY)
+            ).resume_continuity_window_minutes(surface=surface),
+            resume_snapshot_after_remote_window=feed_freshness_strategies.for_name(
+                getattr(meta, "strategy_name", CURRENT_STRATEGY)
+            ).resume_snapshot_after_remote_window(surface=surface),
         )
 
     def _snapshot_from_items(
@@ -394,6 +419,10 @@ class PlaylistService:
         cache_hit: bool = False,
         remaining_count: int = 0,
         has_more: bool = False,
+        freshness_strategy: str = CURRENT_STRATEGY,
+        freshness_strategy_source: Optional[str] = None,
+        resume_continuity_window_minutes: Optional[int] = None,
+        resume_snapshot_after_remote_window: bool = True,
     ) -> Dict[str, Any]:
         newest_published_at, newest_created_at = self._newest_dates(items)
         return {
@@ -408,6 +437,10 @@ class PlaylistService:
             "source": source,
             "cache_key": cache_key,
             "cache_hit": cache_hit,
+            "freshness_strategy": freshness_strategy,
+            "freshness_strategy_source": freshness_strategy_source,
+            "resume_continuity_window_minutes": resume_continuity_window_minutes,
+            "resume_snapshot_after_remote_window": resume_snapshot_after_remote_window,
         }
 
     def _snapshot_from_cached_payload(
@@ -454,6 +487,26 @@ class PlaylistService:
             newest_published_at, newest_created_at = self._newest_dates(items)
             snapshot.setdefault("newest_published_at", newest_published_at)
             snapshot.setdefault("newest_created_at", newest_created_at)
+            snapshot.setdefault(
+                "freshness_strategy",
+                self._strategy_name_for_content_type(content_type),
+            )
+            snapshot.setdefault(
+                "freshness_strategy_source",
+                feed_freshness_strategies.strategy_source(
+                    _surface_for_content_type(content_type)
+                ),
+            )
+            strategy = feed_freshness_strategies.for_name(snapshot.get("freshness_strategy"))
+            surface = _surface_for_content_type(content_type)
+            snapshot.setdefault(
+                "resume_continuity_window_minutes",
+                strategy.resume_continuity_window_minutes(surface=surface),
+            )
+            snapshot.setdefault(
+                "resume_snapshot_after_remote_window",
+                strategy.resume_snapshot_after_remote_window(surface=surface),
+            )
             snapshot["cache_key"] = cache_key or snapshot.get("cache_key")
             snapshot["cache_hit"] = True
             snapshot.setdefault("source", "redis")
@@ -473,6 +526,20 @@ class PlaylistService:
                 cache_key=cache_key,
                 cache_hit=True,
                 has_more=False,
+                freshness_strategy=self._strategy_name_for_content_type(content_type),
+                freshness_strategy_source=feed_freshness_strategies.strategy_source(
+                    _surface_for_content_type(content_type)
+                ),
+                resume_continuity_window_minutes=feed_freshness_strategies.for_name(
+                    self._strategy_name_for_content_type(content_type)
+                ).resume_continuity_window_minutes(
+                    surface=_surface_for_content_type(content_type)
+                ),
+                resume_snapshot_after_remote_window=feed_freshness_strategies.for_name(
+                    self._strategy_name_for_content_type(content_type)
+                ).resume_snapshot_after_remote_window(
+                    surface=_surface_for_content_type(content_type)
+                ),
             )
 
         return None
@@ -505,7 +572,11 @@ class PlaylistService:
 
     def _load_fallback_snapshot(self, device_id: str, content_type: ContentType) -> Dict[str, Any]:
         if self.redis:
-            cache_key = self._get_cache_key(device_id, content_type)
+            cache_key = self._get_cache_key(
+                device_id,
+                content_type,
+                strategy_name=self._strategy_name_for_content_type(content_type),
+            )
             cached = self._get_from_cache(cache_key)
             snapshot = self._snapshot_from_cached_payload(
                 cached,
@@ -528,6 +599,20 @@ class PlaylistService:
             source="db",
             cache_hit=False,
             has_more=False,
+            freshness_strategy=self._strategy_name_for_content_type(content_type),
+            freshness_strategy_source=feed_freshness_strategies.strategy_source(
+                _surface_for_content_type(content_type)
+            ),
+            resume_continuity_window_minutes=feed_freshness_strategies.for_name(
+                self._strategy_name_for_content_type(content_type)
+            ).resume_continuity_window_minutes(
+                surface=_surface_for_content_type(content_type)
+            ),
+            resume_snapshot_after_remote_window=feed_freshness_strategies.for_name(
+                self._strategy_name_for_content_type(content_type)
+            ).resume_snapshot_after_remote_window(
+                surface=_surface_for_content_type(content_type)
+            ),
         )
 
     def _ensure_snapshot_depth(
@@ -549,6 +634,9 @@ class PlaylistService:
 
         db = self.content_repo.db
         surface = _surface_for_content_type(content_type)
+        snapshot_strategy = feed_freshness_strategies.for_name(
+            snapshot.get("freshness_strategy")
+        )
         hybrid_video_rerank = content_type in (
             ContentType.VIDEO,
             ContentType.REEL,
@@ -566,6 +654,7 @@ class PlaylistService:
                 offset=offset,
                 hybrid_video_rerank=hybrid_video_rerank,
                 device_id=device_id,
+                strategy=snapshot_strategy,
             )
             if not next_items:
                 has_more = False
@@ -589,6 +678,10 @@ class PlaylistService:
             item_count=len(expanded_items),
             remaining_count=remaining_count,
             offset=0,
+        )
+        updated_snapshot.setdefault(
+            "freshness_strategy",
+            snapshot_strategy.name,
         )
         if self.redis:
             self._set_session_cache(cache_key, updated_snapshot)
@@ -714,7 +807,11 @@ class PlaylistService:
     def _load_fallback_playlist(self, device_id: str, content_type: ContentType) -> List[Dict]:
         """Load fallback playlist from cache or widened historical window."""
         if self.redis:
-            cache_key = self._get_cache_key(device_id, content_type)
+            cache_key = self._get_cache_key(
+                device_id,
+                content_type,
+                strategy_name=self._strategy_name_for_content_type(content_type),
+            )
             cached = self._get_from_cache(cache_key)
             if isinstance(cached, dict) and isinstance(cached.get("items"), list):
                 cached_items = cached["items"]
@@ -853,18 +950,14 @@ class PlaylistService:
         if not self.interaction_repo:
             return set(), set()
 
-        if content_type == ContentType.ARTICLE:
-            consumed_event_types = ARTICLE_CONSUMED_EVENTS
-            exposed_event_types: Set[EventType] = set()
-        else:
-            consumed_event_types = VIDEO_CONSUMED_EVENTS
-            exposed_event_types = VIDEO_EXPOSED_EVENTS
+        surface = _surface_for_content_type(content_type)
+        signals = feed_freshness_strategies.resolve(surface).feedback_signals(surface=surface)
 
         return self.interaction_repo.get_recent_feedback_ids(
             device_id=device_id,
-            consumed_event_types=consumed_event_types,
+            consumed_event_types=signals.consumed_event_types,
             consumed_hours=CONSUMED_SUPPRESSION_HOURS,
-            exposed_event_types=exposed_event_types,
+            exposed_event_types=signals.exposed_event_types,
             exposed_hours=EXPOSED_DEMOTION_HOURS,
         )
 
@@ -1152,14 +1245,22 @@ class PlaylistService:
         end = start + size
         return items[start:end]
 
-    def _get_cache_key(self, device_id: str, content_type: ContentType) -> str:
+    def _get_cache_key(
+        self, device_id: str, content_type: ContentType, *, strategy_name: str
+    ) -> str:
         """Generate cache key for playlist."""
         # Use hash of device_id for privacy
         device_hash = hashlib.md5(device_id.encode()).hexdigest()[:12]
-        return f"{self._cache_prefix(content_type)}{device_hash}:{content_type.value}"
+        return (
+            f"{self._cache_prefix(content_type)}"
+            f"{device_hash}:{content_type.value}:s:{strategy_name}"
+        )
 
     def _get_session_cache_key(
-        self, device_id: str, content_type: ContentType, session_id: str
+        self,
+        device_id: str,
+        content_type: ContentType,
+        session_id: str,
     ) -> str:
         """Generate cache key for session snapshot."""
         device_hash = hashlib.md5(device_id.encode()).hexdigest()[:12]
@@ -1173,6 +1274,9 @@ class PlaylistService:
         if content_type in (ContentType.VIDEO, ContentType.REEL):
             return VIDEO_REEL_PLAYLIST_CACHE_PREFIX
         return PLAYLIST_CACHE_PREFIX
+
+    def _strategy_name_for_content_type(self, content_type: ContentType) -> str:
+        return feed_freshness_strategies.strategy_name(_surface_for_content_type(content_type))
 
     def _get_from_cache(self, key: str) -> Optional[Any]:
         """Get playlist from Redis cache."""

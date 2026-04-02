@@ -35,6 +35,10 @@ class FeedMetadata:
     surface: str = ""
     tier_config: Optional[Dict[str, int]] = None
     feed_version: Optional[str] = None
+    strategy_name: Optional[str] = None
+    strategy_source: Optional[str] = None
+    resume_continuity_window_minutes: Optional[int] = None
+    resume_snapshot_after_remote_window: Optional[bool] = None
 
     def get_newest_dates(self) -> tuple:
         """Extract newest published_at and created_at from items."""
@@ -77,3 +81,15 @@ class FeedMetadata:
 
         if self.feed_version:
             response.headers["X-Feed-Version"] = self.feed_version
+        if self.strategy_name:
+            response.headers["X-Freshness-Strategy"] = self.strategy_name
+        if self.strategy_source:
+            response.headers["X-Freshness-Strategy-Source"] = self.strategy_source
+        if self.resume_continuity_window_minutes is not None:
+            response.headers["X-Resume-Window-Minutes"] = str(
+                self.resume_continuity_window_minutes
+            )
+        if self.resume_snapshot_after_remote_window is not None:
+            response.headers["X-Resume-Snapshot-After-Window"] = str(
+                self.resume_snapshot_after_remote_window
+            ).lower()

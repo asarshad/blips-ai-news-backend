@@ -85,6 +85,7 @@ def get_recent_articles(
         Surface.ARTICLES,
         limit=limit,
         offset=offset,
+        device_id=session.device_id,
     )
 
     # ── Personalised re-ranking ───────────────────────────────────────────
@@ -127,6 +128,10 @@ def get_recent_articles(
         surface="articles",
         tier_config=meta.tier_config,
         feed_version=compute_feed_version(articles, meta.generated_at),
+        strategy_name=meta.strategy_name,
+        strategy_source=meta.strategy_source,
+        resume_continuity_window_minutes=meta.resume_continuity_window_minutes,
+        resume_snapshot_after_remote_window=meta.resume_snapshot_after_remote_window,
     )
     feed_meta.add_headers(response)
 

@@ -137,3 +137,135 @@ def test_generate_playlist_items_filters_negative_item_and_creator_feedback():
     selected = service._generate_playlist_items("device-1", ContentType.VIDEO, 3)
 
     assert [item.id for item in selected] == [3]
+
+
+def test_playlist_cache_keys_separate_freshness_strategies():
+    service = PlaylistService(
+        content_repo=MagicMock(),
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=MagicMock(),
+        redis_client=None,
+    )
+
+    current_key = service._get_cache_key(
+        "device-1",
+        ContentType.ARTICLE,
+        strategy_name="current",
+    )
+    fresh_key = service._get_cache_key(
+        "device-1",
+        ContentType.ARTICLE,
+        strategy_name="fresh_unseen_v1",
+    )
+
+    assert current_key != fresh_key
+    assert current_key.endswith(":ARTICLE:s:current")
+    assert fresh_key.endswith(":ARTICLE:s:fresh_unseen_v1")
+
+
+def test_playlist_session_cache_key_stays_stable_across_strategy_flips():
+    service = PlaylistService(
+        content_repo=MagicMock(),
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=MagicMock(),
+        redis_client=None,
+    )
+
+    session_key = service._get_session_cache_key(
+        "device-1",
+        ContentType.ARTICLE,
+        "session-1234",
+    )
+
+    assert session_key.endswith(":ARTICLE:session-1234")
+
+
+def test_ensure_snapshot_depth_keeps_snapshot_strategy_when_extending(monkeypatch):
+    service = PlaylistService(
+        content_repo=MagicMock(db=object()),
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=MagicMock(),
+        redis_client=None,
+    )
+    service._supports_tiered_snapshots = lambda: True
+
+    recorded = {}
+
+    def _fake_get_cached_tiered_feed(
+        _db,
+        _surface,
+        *,
+        limit,
+        offset,
+        hybrid_video_rerank=False,
+        device_id=None,
+        strategy=None,
+    ):
+        recorded["strategy_name"] = getattr(strategy, "name", None)
+        return (
+            [
+                {
+                    "id": 2,
+                    "type": "ARTICLE",
+                    "source": "Example",
+                    "source_url": "https://example.com/2",
+                    "title": "Article 2",
+                    "description": None,
+                    "summary": "summary",
+                    "image_url": None,
+                    "video_url": None,
+                    "duration": None,
+                    "topics": ["Technology"],
+                    "entities": [],
+                    "published_at": "2026-04-01T10:00:00",
+                    "created_at": "2026-04-01T10:05:00",
+                    "conversation_starters": {},
+                }
+            ],
+            False,
+            SimpleNamespace(remaining_window_count=0),
+        )
+
+    monkeypatch.setattr(
+        "app.services.playlist_service.get_cached_tiered_feed",
+        _fake_get_cached_tiered_feed,
+    )
+
+    snapshot = {
+        "items": [
+            {
+                "id": 1,
+                "type": "ARTICLE",
+                "source": "Example",
+                "source_url": "https://example.com/1",
+                "title": "Article 1",
+                "description": None,
+                "summary": "summary",
+                "image_url": None,
+                "video_url": None,
+                "duration": None,
+                "topics": ["Technology"],
+                "entities": [],
+                "published_at": "2026-04-01T11:00:00",
+                "created_at": "2026-04-01T11:05:00",
+                "conversation_starters": {},
+            }
+        ],
+        "has_more": True,
+        "remaining_count": 1,
+        "freshness_strategy": "fresh_unseen_v1",
+    }
+
+    updated = service._ensure_snapshot_depth(
+        device_id="device-1",
+        content_type=ContentType.ARTICLE,
+        snapshot=snapshot,
+        required_count=2,
+        cache_key="ignored",
+    )
+
+    assert recorded["strategy_name"] == "fresh_unseen_v1"
+    assert [item["id"] for item in updated["items"]] == [1, 2]

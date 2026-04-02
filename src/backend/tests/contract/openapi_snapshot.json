@@ -2513,6 +2513,28 @@
             ],
             "title": "Feed Version"
           },
+          "freshness_strategy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freshness Strategy"
+          },
+          "freshness_strategy_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freshness Strategy Source"
+          },
           "has_more": {
             "title": "Has More",
             "type": "boolean"
@@ -2561,6 +2583,22 @@
             "default": 0,
             "title": "Remaining Count",
             "type": "integer"
+          },
+          "resume_continuity_window_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resume Continuity Window Minutes"
+          },
+          "resume_snapshot_after_remote_window": {
+            "default": true,
+            "title": "Resume Snapshot After Remote Window",
+            "type": "boolean"
           },
           "served_at": {
             "anyOf": [
@@ -10156,7 +10194,7 @@
     },
     "/health": {
       "get": {
-        "description": "Health check endpoint for monitoring.\n\nValidates DB and Redis connectivity for Render's readiness probe.\nReturns 503 if any critical dependency is unreachable.",
+        "description": "Health check endpoint for monitoring.\n\nValidates DB and Redis connectivity plus scheduler / ingestion runtime\nsignals. Returns 503 only when critical dependencies are unreachable.\nScheduler or ingestion issues surface as a degraded 200 response so Render\ndoes not restart a healthy API process for an external worker failure.",
         "operationId": "health_check_health_get",
         "responses": {
           "200": {

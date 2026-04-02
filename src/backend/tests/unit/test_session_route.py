@@ -6,7 +6,7 @@ from fastapi import Response
 
 from app.api.routes import session as session_module
 from app.core.session_auth import AuthenticatedSession
-from app.models.content import ContentType
+from app.models.content import ContentType, EventType
 
 
 def _session(device_id: str) -> AuthenticatedSession:
@@ -109,6 +109,145 @@ def test_record_interaction_invalidates_tiered_cache_for_fast_skip(monkeypatch):
     assert invalidations == [("reels", "device-abcdefgh")]
 
 
+def test_record_interaction_invalidates_article_tiered_cache_for_view_demotion(monkeypatch):
+    invalidations = []
+    playlist_invalidations = []
+
+    monkeypatch.setattr(
+        session_module,
+        "invalidate_tiered_feed_cache",
+        lambda surface=None, device_id=None: invalidations.append((surface.value, device_id)),
+    )
+    monkeypatch.setattr(
+        session_module.feed_freshness_strategies,
+        "resolve",
+        lambda _surface: SimpleNamespace(
+            feedback_signals=lambda **_kwargs: SimpleNamespace(
+                consumed_event_types=set(),
+                exposed_event_types={EventType.VIEW_10S},
+            )
+        ),
+    )
+
+    personalization_service = SimpleNamespace(
+        record_interaction=lambda **_kwargs: SimpleNamespace(id=103),
+        content_repo=SimpleNamespace(
+            get_by_id=lambda _content_item_id: SimpleNamespace(
+                type=ContentType.ARTICLE,
+                video_url=None,
+                source_url="https://example.com/article",
+                canonical_url="https://example.com/article",
+            )
+        ),
+    )
+    playlist_service = SimpleNamespace(
+        invalidate_user_cache=lambda device_id: playlist_invalidations.append(device_id)
+    )
+
+    request = session_module.InteractionRequest(
+        content_item_id=9,
+        event_type=session_module.EventTypeParam.VIEW_10S,
+        extra_data=None,
+    )
+
+    response = session_module.record_interaction(
+        request,
+        session=_session("device-fresh-1"),
+        personalization_service=personalization_service,
+        playlist_service=playlist_service,
+    )
+
+    assert response.success is True
+    assert playlist_invalidations == ["device-fresh-1"]
+    assert invalidations == [("articles", "device-fresh-1")]
+
+
+def test_record_interaction_invalidates_video_tiered_cache_for_video_impression(monkeypatch):
+    invalidations = []
+    playlist_invalidations = []
+
+    monkeypatch.setattr(
+        session_module,
+        "invalidate_tiered_feed_cache",
+        lambda surface=None, device_id=None: invalidations.append((surface.value, device_id)),
+    )
+
+    personalization_service = SimpleNamespace(
+        record_interaction=lambda **_kwargs: SimpleNamespace(id=104),
+        content_repo=SimpleNamespace(
+            get_by_id=lambda _content_item_id: SimpleNamespace(
+                type=ContentType.VIDEO,
+                video_url="https://www.youtube.com/watch?v=abc123",
+                source_url="https://www.youtube.com/watch?v=abc123",
+                canonical_url=None,
+            )
+        ),
+    )
+    playlist_service = SimpleNamespace(
+        invalidate_user_cache=lambda device_id: playlist_invalidations.append(device_id)
+    )
+
+    request = session_module.InteractionRequest(
+        content_item_id=10,
+        event_type=session_module.EventTypeParam.VIDEO_IMPRESSION,
+        extra_data=None,
+    )
+
+    response = session_module.record_interaction(
+        request,
+        session=_session("device-video-impression"),
+        personalization_service=personalization_service,
+        playlist_service=playlist_service,
+    )
+
+    assert response.success is True
+    assert playlist_invalidations == ["device-video-impression"]
+    assert invalidations == [("videos", "device-video-impression")]
+
+
+def test_record_interaction_invalidates_reel_tiered_cache_for_video_impression(monkeypatch):
+    invalidations = []
+    playlist_invalidations = []
+
+    monkeypatch.setattr(
+        session_module,
+        "invalidate_tiered_feed_cache",
+        lambda surface=None, device_id=None: invalidations.append((surface.value, device_id)),
+    )
+
+    personalization_service = SimpleNamespace(
+        record_interaction=lambda **_kwargs: SimpleNamespace(id=105),
+        content_repo=SimpleNamespace(
+            get_by_id=lambda _content_item_id: SimpleNamespace(
+                type=ContentType.REEL,
+                video_url="https://www.youtube.com/shorts/abc123",
+                source_url="https://www.youtube.com/shorts/abc123",
+                canonical_url=None,
+            )
+        ),
+    )
+    playlist_service = SimpleNamespace(
+        invalidate_user_cache=lambda device_id: playlist_invalidations.append(device_id)
+    )
+
+    request = session_module.InteractionRequest(
+        content_item_id=11,
+        event_type=session_module.EventTypeParam.VIDEO_IMPRESSION,
+        extra_data=None,
+    )
+
+    response = session_module.record_interaction(
+        request,
+        session=_session("device-reel-impression"),
+        personalization_service=personalization_service,
+        playlist_service=playlist_service,
+    )
+
+    assert response.success is True
+    assert playlist_invalidations == ["device-reel-impression"]
+    assert invalidations == [("reels", "device-reel-impression")]
+
+
 class _CountDeleteQuery:
     def __init__(self, *, count_value: int = 0, delete_value: int = 0):
         self._count_value = count_value
@@ -208,6 +347,10 @@ def test_get_playlist_uses_current_page_dates_for_headers_and_body(monkeypatch):
             "source": "redis",
             "cache_key": "playlist:test",
             "cache_hit": True,
+            "freshness_strategy": "fresh_unseen_v1",
+            "freshness_strategy_source": "redis",
+            "resume_continuity_window_minutes": 10,
+            "resume_snapshot_after_remote_window": False,
         }
     )
 
@@ -228,3 +371,10 @@ def test_get_playlist_uses_current_page_dates_for_headers_and_body(monkeypatch):
     assert body.newest_created_at == "2026-03-31T10:05:00"
     assert response.headers["X-Newest-Published-At"] == "2026-03-31T10:00:00"
     assert response.headers["X-Newest-Created-At"] == "2026-03-31T10:05:00"
+    assert response.headers["X-Freshness-Strategy"] == "fresh_unseen_v1"
+    assert response.headers["X-Freshness-Strategy-Source"] == "redis"
+    assert response.headers["X-Resume-Window-Minutes"] == "10"
+    assert response.headers["X-Resume-Snapshot-After-Window"] == "false"
+    assert body.freshness_strategy_source == "redis"
+    assert body.resume_continuity_window_minutes == 10
+    assert body.resume_snapshot_after_remote_window is False

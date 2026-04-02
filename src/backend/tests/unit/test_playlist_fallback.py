@@ -351,6 +351,7 @@ def test_get_playlist_extends_session_snapshot_beyond_initial_100_items(monkeypa
         offset,
         hybrid_video_rerank,  # noqa: ARG001
         device_id,  # noqa: ARG001
+        strategy=None,  # noqa: ARG001
     ):
         calls.append((limit, offset))
         if offset == 0:
@@ -437,6 +438,102 @@ def test_get_playlist_extends_session_snapshot_beyond_initial_100_items(monkeypa
     assert [item["id"] for item in third_page["items"]] == list(range(101, 121))
     assert all(item["type"] == ContentType.ARTICLE.value for item in third_page["items"])
     assert calls == [(100, 0), (100, 100)]
+
+
+def test_tiered_article_session_remains_stable_across_strategy_flip(monkeypatch):
+    content_repo = MagicMock()
+    content_repo.db = MagicMock()
+    content_repo.db.query = MagicMock()
+    personalization = MagicMock()
+    personalization.compute_personalization_scores.return_value = {}
+
+    from app.services import playlist_service as playlist_service_module
+
+    strategy_state = {"name": "current"}
+    calls = []
+
+    def _fake_strategy_name(_content_type):
+        return strategy_state["name"]
+
+    def _fake_get_cached_tiered_feed(
+        db,  # noqa: ARG001
+        surface,  # noqa: ARG001
+        limit,
+        offset,
+        hybrid_video_rerank=False,  # noqa: ARG001
+        device_id=None,  # noqa: ARG001
+        strategy=None,
+    ):
+        strategy_name = getattr(strategy, "name", "current")
+        calls.append((strategy_name, offset))
+
+        if strategy_name == "current":
+            start = 1 if offset == 0 else 101
+        else:
+            start = 1001 if offset == 0 else 1101
+
+        count = 100 if offset == 0 else 50
+        items = [
+            {
+                "id": idx,
+                "title": f"{strategy_name} item {idx}",
+                "source": "Tiered Source",
+                "source_url": f"https://example.com/{idx}",
+                "conversation_starters": {"starters": [], "fallback": []},
+            }
+            for idx in range(start, start + count)
+        ]
+        meta = SimpleNamespace(
+            generated_at=datetime.now(timezone.utc),
+            source="db",
+            cache_key=f"tiered:articles:{strategy_name}:{offset}",
+            cache_hit=False,
+            remaining_window_count=60 if offset == 0 else 10,
+            strategy_name=strategy_name,
+            strategy_source="test",
+            resume_continuity_window_minutes=None if strategy_name == "current" else 10,
+            resume_snapshot_after_remote_window=(strategy_name == "current"),
+        )
+        return items, offset == 0, meta
+
+    monkeypatch.setattr(
+        playlist_service_module, "get_cached_tiered_feed", _fake_get_cached_tiered_feed
+    )
+
+    service = PlaylistService(
+        content_repo=content_repo,
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=personalization,
+        redis_client=_MemoryRedis(),
+    )
+    service._supports_tiered_snapshots = lambda: True
+    monkeypatch.setattr(service, "_strategy_name_for_content_type", _fake_strategy_name)
+
+    first_page = service.get_playlist("device-flip", ContentType.ARTICLE, size=50)
+    strategy_state["name"] = "fresh_unseen_v1"
+    second_page = service.get_playlist(
+        "device-flip",
+        ContentType.ARTICLE,
+        size=50,
+        session_id=first_page["session_id"],
+        cursor=50,
+    )
+    third_page = service.get_playlist(
+        "device-flip",
+        ContentType.ARTICLE,
+        size=20,
+        session_id=first_page["session_id"],
+        cursor=100,
+    )
+
+    assert [item["id"] for item in first_page["items"]] == list(range(1, 51))
+    assert [item["id"] for item in second_page["items"]] == list(range(51, 101))
+    assert [item["id"] for item in third_page["items"]] == list(range(101, 121))
+    assert third_page["freshness_strategy"] == "current"
+    assert third_page["resume_continuity_window_minutes"] is None
+    assert third_page["resume_snapshot_after_remote_window"] is True
+    assert calls == [("current", 0), ("current", 100)]
 
 
 def test_tiered_article_snapshot_items_are_normalized_for_session_schema(monkeypatch):
