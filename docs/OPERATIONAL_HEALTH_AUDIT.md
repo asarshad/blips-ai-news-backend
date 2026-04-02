@@ -562,6 +562,7 @@ Assessment:
 - [x] April 1, 2026: confirmed with live 15-second samples that the worker leader lock can disappear during startup and then recover later, matching the synchronous-startup-fetch lock-expiry theory.
 - [x] April 1, 2026: fixed the startup lock-maintenance gap in repo by keeping the worker lock refreshed during the initial synchronous fetch window.
 - [x] April 2, 2026: deployed `5aa1c12` to both Render services and verified eight consecutive healthy `/health` samples after startup, with the worker lock TTL refreshing upward instead of decaying to zero.
+- [x] April 2, 2026: reviewed the separate local freshness-strategy worktree diff without merging it. Targeted tests pass, but it still has cache invalidation gaps for article `VIEW_10S` and video/reel `VIDEO_IMPRESSION`, so that work should not be merged as-is.
 - [ ] Next: watch at least another full ingestion window and confirm reels `recent_refresh_count` stays comfortably above threshold instead of oscillating between `11` and `12`.
 
 ## Test / Automation Gap Analysis
