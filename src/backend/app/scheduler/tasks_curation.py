@@ -68,12 +68,14 @@ def run_clustering_job(*, trigger: str = "scheduled"):
 
     stats = log_job_start("clustering")
     job_key = FETCH_NEWS_INLINE_CLUSTERING if trigger == "fetch_news" else CLUSTERING_JOB
-    run_started_at = mark_job_started(job_key)
+    run_started_at = None
     run_success = False
-    log_memory_snapshot(logger, f"{job_key}:start")
+    db = None
 
-    db = SessionLocal()
     try:
+        run_started_at = mark_job_started(job_key)
+        log_memory_snapshot(logger, f"{job_key}:start")
+        db = SessionLocal()
         from app.clustering import ClusteringService
         from app.repositories.content_repo import ContentItemRepository
 
@@ -90,8 +92,10 @@ def run_clustering_job(*, trigger: str = "scheduled"):
         logger.error(f"[clustering] Error: {str(e)}")
     finally:
         log_memory_snapshot(logger, f"{job_key}:finished")
-        mark_job_finished(job_key, run_started_at, success=run_success)
-        db.close()
+        if run_started_at is not None:
+            mark_job_finished(job_key, run_started_at, success=run_success)
+        if db is not None:
+            db.close()
         stats.complete()
         stats.log_summary()
 

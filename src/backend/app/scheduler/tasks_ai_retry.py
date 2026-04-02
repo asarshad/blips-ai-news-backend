@@ -23,12 +23,10 @@ from app.scheduler.runtime import (
     AI_RETRY_JOB,
     FETCH_NEWS_INLINE_AI_RETRY,
     FETCH_NEWS_JOB,
-    get_followup_cooldown_seconds,
     is_job_active,
     log_memory_snapshot,
     mark_job_finished,
     mark_job_started,
-    succeeded_within,
 )
 
 logger = get_logger(__name__)
@@ -38,7 +36,7 @@ def process_ai_summaries(
     *,
     max_items: int | None = None,
     include_maintenance: bool = True,
-    trigger: str = "scheduled",
+    trigger: str = "manual",
 ):
     """Summarise all unprocessed content items via the LLM pipeline.
 
@@ -55,21 +53,17 @@ def process_ai_summaries(
         if is_job_active(FETCH_NEWS_JOB):
             logger.info("[ai_retry] SKIPPED - fetch_news is still active")
             return
-        if succeeded_within(
-            FETCH_NEWS_INLINE_AI_RETRY,
-            within_seconds=get_followup_cooldown_seconds(),
-        ):
-            logger.info("[ai_retry] SKIPPED - recent inline AI summarization already ran")
-            return
 
     stats = log_job_start("ai_retry")
     job_key = FETCH_NEWS_INLINE_AI_RETRY if trigger == "fetch_news" else AI_RETRY_JOB
-    run_started_at = mark_job_started(job_key)
+    run_started_at = None
     run_success = False
-    log_memory_snapshot(logger, f"{job_key}:start")
+    db = None
 
-    db = SessionLocal()
     try:
+        run_started_at = mark_job_started(job_key)
+        log_memory_snapshot(logger, f"{job_key}:start")
+        db = SessionLocal()
         from app.article_hydration import ArticleHydrationService, bounded_article_summary_text
         from app.integrations import LLMClient
         from app.integrations.llm_client import (
@@ -237,8 +231,10 @@ def process_ai_summaries(
         logger.error(f"[ai_retry] Fatal error: {str(e)}")
     finally:
         log_memory_snapshot(logger, f"{job_key}:finished")
-        mark_job_finished(job_key, run_started_at, success=run_success)
-        db.close()
+        if run_started_at is not None:
+            mark_job_finished(job_key, run_started_at, success=run_success)
+        if db is not None:
+            db.close()
         stats.complete()
         stats.log_summary()
 

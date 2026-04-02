@@ -51,11 +51,13 @@ def run_promotion_job(*, trigger: str = "scheduled") -> None:
 
     stats = log_job_start("promotion")
     job_key = FETCH_NEWS_INLINE_PROMOTION if trigger == "fetch_news" else PROMOTION_JOB
-    run_started_at = mark_job_started(job_key)
+    run_started_at = None
     run_success = False
-    log_memory_snapshot(logger, f"{job_key}:start")
-    db = SessionLocal()
+    db = None
     try:
+        run_started_at = mark_job_started(job_key)
+        log_memory_snapshot(logger, f"{job_key}:start")
+        db = SessionLocal()
         from app.scheduler.tasks_content_events import run_content_event_dispatch_job
         from app.services.promotion_service import PromotionService
 
@@ -78,10 +80,13 @@ def run_promotion_job(*, trigger: str = "scheduled") -> None:
     except Exception as exc:
         stats.errors.append(str(exc))
         logger.error("[promotion] Fatal error: %s", exc)
-        db.rollback()
+        if db is not None:
+            db.rollback()
     finally:
         log_memory_snapshot(logger, f"{job_key}:finished")
-        mark_job_finished(job_key, run_started_at, success=run_success)
-        db.close()
+        if run_started_at is not None:
+            mark_job_finished(job_key, run_started_at, success=run_success)
+        if db is not None:
+            db.close()
         stats.complete()
         stats.log_summary()

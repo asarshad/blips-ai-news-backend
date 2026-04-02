@@ -526,14 +526,14 @@ Assessment:
 - [ ] Verify whether `2Gi` is now sufficient after overlap control lands, or whether the worker still needs another memory-tier increase.
   Status: pending live validation after the latest repo-side overlap mitigation is deployed.
 - [ ] Investigate and reduce worker peak memory during ingestion and promotion runs.
-  Status: partially implemented in repo. Immediate post-ingestion AI now runs with a lighter cap, and scheduled follow-up jobs now defer to the inline fetch cycle instead of bunching on top of it. Live validation is still needed.
+  Status: partially implemented in repo. Immediate post-ingestion AI now runs with a lighter cap, scheduled `ai_retry` is staggered away from `fetch_news`, and clustering/promotion now defer to the inline fetch cycle instead of bunching on top of it. Live validation is still needed.
 - [x] Triage signal-ingestion deadlocks.
   Status: first mitigation implemented in repo. Signal ingestion now commits in smaller batches to reduce transaction scope and lock hold time; live validation is still needed after deploy.
 
 ### High
 
 - [x] Reduce scheduler overlap pressure.
-  Status: materially expanded in repo. The immediate freshness pass after ingestion is lightweight, and scheduled `ai_retry`, `clustering`, and `promotion` now skip while `fetch_news` is active or when the matching inline follow-up phase already completed recently.
+  Status: materially expanded in repo. The immediate freshness pass after ingestion is lightweight, scheduled `ai_retry` is now staggered away from the fetch cycle and still skips while `fetch_news` is active, and scheduled `clustering` / `promotion` now skip while `fetch_news` is active or when the matching inline phase already completed recently.
 - [x] Fix reel-row starvation in the checkpoint scheduler when running with the default two-worker layout.
   Status: fixed in repo and review-covered. The scheduler now shares the video slot with reels only for the implicit two-worker fallback case, while still respecting explicit operator caps such as `INGESTION_MAX_WORKERS_REEL=0`.
 - [x] Add alerting for worker OOM events, reels freshness underfill, deadlock frequency, and repeated scheduler overlap skips.
@@ -586,7 +586,8 @@ Assessment:
 - [x] April 2, 2026: stored the current operating assumptions explicitly in this audit doc: Blips is still pre-production, and worker stability is workload-driven rather than DAU-driven.
 - [x] April 2, 2026: confirmed from Render events that the worker still OOM-kills at `2Gi`, so the resize alone did not solve the problem.
 - [x] April 2, 2026: identified a concrete overlap root cause in code. `fetch_news` already runs clustering, promotion, and immediate AI summarization inline, while the scheduler was also launching those jobs independently on nearby cadences.
-- [x] April 2, 2026: added repo-side control for that overlap. Scheduled `ai_retry`, `clustering`, and `promotion` now defer to an active or recently completed inline `fetch_news` follow-up phase, and the worker logs process RSS snapshots around heavy phases for the next live correlation pass.
+- [x] April 2, 2026: added repo-side control for that overlap. Scheduled `ai_retry` is now staggered away from the fetch cycle and still defers while `fetch_news` is active, scheduled `clustering` / `promotion` defer to an active or recently completed inline `fetch_news` phase, and the worker logs process RSS snapshots around heavy phases for the next live correlation pass.
+- [x] April 2, 2026: folded in reviewer findings before finalizing the patch. The runtime state now clears correctly on early initialization failures, and `ai_retry` no longer suppresses its own catch-up and maintenance path merely because a lightweight inline pass ran recently.
 - [ ] Next: deploy the overlap-control patch, then watch at least one full day of worker events to see whether the `2Gi` OOM pattern stops and whether reels stay above threshold.
 
 ## Test / Automation Gap Analysis

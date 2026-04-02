@@ -42,49 +42,53 @@ def fetch_and_process_news():
         return
 
     stats = log_job_start("fetch_news")
-    run_started_at = mark_job_started(FETCH_NEWS_JOB)
+    run_started_at = None
     fetch_success = False
-    log_memory_snapshot(logger, "fetch_news:start")
-
-    db = SessionLocal()
+    db = None
     try:
-        _run_curation_ingestion_with_stats(db, stats)
-        fetch_success = not stats.errors
-    except Exception as e:
-        stats.errors.append(str(e))
-        logger.error(f"[fetch_news] Fatal error: {str(e)}")
-        db.rollback()
-        fetch_success = False
-    finally:
-        db.close()
-        stats.complete()
-        stats.log_summary()
-        log_memory_snapshot(logger, "fetch_news:after_curation")
+        run_started_at = mark_job_started(FETCH_NEWS_JOB)
+        log_memory_snapshot(logger, "fetch_news:start")
 
-    # Phase 2: immediately summarise newly-ingested items so they appear
-    # in the feed right away instead of waiting for the next ai_retry tick.
-    try:
-        from app.scheduler.tasks_ai_retry import process_ai_summaries
+        db = SessionLocal()
+        try:
+            _run_curation_ingestion_with_stats(db, stats)
+            fetch_success = not stats.errors
+        except Exception as e:
+            stats.errors.append(str(e))
+            logger.error(f"[fetch_news] Fatal error: {str(e)}")
+            db.rollback()
+            fetch_success = False
+        finally:
+            if db is not None:
+                db.close()
+            log_memory_snapshot(logger, "fetch_news:after_curation")
 
-        immediate_limit = _resolve_immediate_ai_summary_max_items()
-        logger.info(
-            "[fetch_news] Running immediate AI summarization (max_items=%s, maintenance=false)…",
-            immediate_limit,
-        )
-        process_ai_summaries(
-            max_items=immediate_limit,
-            include_maintenance=False,
-            trigger="fetch_news",
-        )
-        logger.info("[fetch_news] AI summarization complete")
-        fetch_success = fetch_success and True
-    except Exception as e:
-        # Non-fatal — the periodic ai_retry job will pick them up later.
-        logger.warning(f"[fetch_news] Immediate AI summarization failed (non-fatal): {e}")
-        fetch_success = False
+        # Phase 2: immediately summarise newly-ingested items so they appear
+        # in the feed right away instead of waiting for the next ai_retry tick.
+        try:
+            from app.scheduler.tasks_ai_retry import process_ai_summaries
+
+            immediate_limit = _resolve_immediate_ai_summary_max_items()
+            logger.info(
+                "[fetch_news] Running immediate AI summarization (max_items=%s, maintenance=false)…",
+                immediate_limit,
+            )
+            process_ai_summaries(
+                max_items=immediate_limit,
+                include_maintenance=False,
+                trigger="fetch_news",
+            )
+            logger.info("[fetch_news] AI summarization complete")
+        except Exception as e:
+            # Non-fatal — the periodic ai_retry job will pick them up later.
+            logger.warning(f"[fetch_news] Immediate AI summarization failed (non-fatal): {e}")
+            fetch_success = False
     finally:
         log_memory_snapshot(logger, "fetch_news:finished")
-        mark_job_finished(FETCH_NEWS_JOB, run_started_at, success=fetch_success)
+        if run_started_at is not None:
+            mark_job_finished(FETCH_NEWS_JOB, run_started_at, success=fetch_success)
+        stats.complete()
+        stats.log_summary()
 
 
 def _run_curation_ingestion_with_stats(db, stats: JobStats):

@@ -107,3 +107,23 @@ def test_inventory_health_job_and_scheduler_listener_registered(mock_scheduler_c
 
     _job_call_from_calls(mock_scheduler, "inventory_health_check")
     assert mock_scheduler.add_listener.called
+
+
+@patch("app.scheduler.BackgroundScheduler")
+def test_ai_retry_job_is_staggered_away_from_fetch_news(mock_scheduler_cls, monkeypatch):
+    mock_scheduler = MagicMock()
+    mock_scheduler_cls.return_value = mock_scheduler
+    monkeypatch.setenv("INGESTION_SCHEDULER_MINUTES", "15")
+    monkeypatch.setenv("AI_RETRY_OFFSET_MINUTES", "10")
+
+    from app.scheduler import init_scheduler
+
+    before = datetime.now(timezone.utc)
+    init_scheduler()
+    after = datetime.now(timezone.utc)
+
+    retry_call = _job_call_from_calls(mock_scheduler, "ai_retry_job")
+    next_run_time = retry_call.kwargs["next_run_time"]
+
+    assert before + timedelta(minutes=25) <= next_run_time <= after + timedelta(minutes=25)
+    assert retry_call.kwargs["kwargs"] == {"trigger": "scheduled"}

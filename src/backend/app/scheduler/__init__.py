@@ -128,6 +128,17 @@ def _initial_fetch_next_run(minutes: int) -> datetime:
     return datetime.now(timezone.utc) + timedelta(minutes=minutes)
 
 
+def _initial_ai_retry_next_run(fetch_minutes: int) -> datetime:
+    """Stagger the first scheduled AI retry away from the fetch cycle."""
+    default_offset = 10 if fetch_minutes >= 15 else max(1, fetch_minutes - 1)
+    raw = os.getenv("AI_RETRY_OFFSET_MINUTES", str(default_offset))
+    try:
+        offset_minutes = max(1, min(14, int(raw)))
+    except ValueError:
+        offset_minutes = default_offset
+    return _initial_fetch_next_run(fetch_minutes) + timedelta(minutes=offset_minutes)
+
+
 def init_scheduler() -> Optional[BackgroundScheduler]:
     """
     Initialize and start the background scheduler.
@@ -194,10 +205,12 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             retry_ai_processing,
             IntervalTrigger(minutes=15),
             id="ai_retry_job",
+            kwargs={"trigger": "scheduled"},
             replace_existing=True,
             max_instances=1,
             coalesce=True,
             misfire_grace_time=300,
+            next_run_time=_initial_ai_retry_next_run(fetch_minutes),
         )
 
         scheduler.add_job(
