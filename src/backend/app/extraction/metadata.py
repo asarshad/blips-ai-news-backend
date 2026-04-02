@@ -118,6 +118,8 @@ _NON_EDITORIAL_CONTEXT_KEYWORDS = (
     "logo",
     "icon",
     "avatar",
+    "rounded-full",
+    "rounded_full",
     "badge",
     "emoji",
     "favicon",
@@ -593,6 +595,14 @@ def _score_body_image_candidate(tag, candidate_url: str, position: int) -> float
         score += 12.0 - (position * 3.0)
     else:
         score -= min(18.0, (position - 2) * 2.5)
+
+    fetchpriority = str(context_tag.get("fetchpriority") or "").strip().lower()
+    if fetchpriority == "high":
+        score += 24.0
+
+    loading = str(context_tag.get("loading") or "").strip().lower()
+    if loading == "lazy":
+        score -= 8.0
 
     context = " ".join(
         filter(

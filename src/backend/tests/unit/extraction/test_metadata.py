@@ -222,6 +222,70 @@ class TestImageExtraction:
         assert meta.image_url == "https://example.com/images/article-hero.jpg"
         assert meta.image_source == "body"
 
+    def test_rounded_full_body_avatar_does_not_beat_og_hero(self):
+        html = """<!DOCTYPE html>
+<html>
+  <head>
+    <title>Avatar before hero</title>
+    <meta
+      property="og:image"
+      content="https://cdn.example.com/images/backrooms-hero.jpg"
+    />
+  </head>
+  <body>
+    <article>
+      <img
+        src="https://cdn.example.com/images/author-80.jpg"
+        class="size-full rounded-full object-cover object-center"
+        alt=""
+      />
+      <img
+        src="https://cdn.example.com/images/backrooms-inline.jpg"
+        class="object-cover object-center"
+        alt=""
+      />
+    </article>
+  </body>
+</html>"""
+        meta = extract_metadata(html, "https://example.com/story")
+        assert meta.image_url == "https://cdn.example.com/images/backrooms-hero.jpg"
+        assert meta.image_source == "og"
+
+    def test_fetchpriority_high_body_hero_beats_late_lazy_related_cards(self):
+        html = """<!DOCTYPE html>
+<html>
+  <head><title>Body hero priority</title></head>
+  <body>
+    <article>
+      <img
+        src="https://cdn.example.com/images/user-uploaded/backrooms-hero.jpg"
+        class="object-cover object-center"
+        fetchpriority="high"
+        alt=""
+      />
+      <img
+        src="https://cdn.example.com/images/related-story.jpg"
+        class="object-cover object-center"
+        loading="lazy"
+        width="896"
+        height="504"
+        alt=""
+      />
+      <img
+        src="https://cdn.example.com/images/another-related.jpg"
+        class="object-cover object-center"
+        loading="lazy"
+        width="896"
+        height="504"
+        alt=""
+      />
+    </article>
+  </body>
+</html>"""
+        meta = extract_metadata(html, "https://example.com/story")
+        assert meta.image_url == "https://cdn.example.com/images/user-uploaded/backrooms-hero.jpg"
+        assert meta.image_source == "body"
+
     def test_same_site_og_beats_later_body_inline_image(self):
         html = """<!DOCTYPE html>
 <html>

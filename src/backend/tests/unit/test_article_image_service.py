@@ -325,6 +325,46 @@ def test_repair_article_image_metadata_replaces_suspicious_images(monkeypatch):
     assert result["updated"] == 1
     assert result["replaced_suspicious"] == 1
     assert repaired.image_url == "https://cdn.example.com/article-hero.jpg"
+
+
+def test_repair_single_article_image_forces_reconcile(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    ContentItem.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        id=294886,
+        type=ContentType.ARTICLE,
+        source="Engadget",
+        source_url="https://example.com/story",
+        canonical_url="https://example.com/story",
+        image_url="https://cdn.example.com/wrong-small.jpg",
+        published_at=datetime(2026, 4, 1, 4, 0, 0),
+        title="Backrooms",
+        curation_status=ContentStatus.PROMOTED,
+        created_at=datetime(2026, 4, 1, 4, 5, 0),
+        updated_at=datetime(2026, 4, 1, 4, 5, 0),
+        article_image_status="VERIFIED",
+    )
+    db.add(item)
+    db.commit()
+
+    monkeypatch.setattr(
+        "app.article_hydration.ArticleHydrationService.refresh_existing_article_metadata",
+        lambda self, item, source_url, force_reconcile_image: (
+            setattr(item, "image_url", "https://cdn.example.com/correct-hero.jpg") or True
+        ),
+    )
+
+    result = article_image_service.repair_single_article_image(db, content_id=294886)
+    repaired = db.get(ContentItem, 294886)
+
+    assert result["content_id"] == 294886
+    assert result["changed"] is True
+    assert result["previous_image_url"] == "https://cdn.example.com/wrong-small.jpg"
+    assert result["image_url"] == "https://cdn.example.com/correct-hero.jpg"
+    assert repaired.image_url == "https://cdn.example.com/correct-hero.jpg"
     assert repaired.article_image_status == "VERIFIED"
 
 

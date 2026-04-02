@@ -138,6 +138,47 @@ def repair_article_image_metadata(
     }
 
 
+def repair_single_article_image(
+    db: Session,
+    *,
+    content_id: int,
+) -> Dict[str, Any]:
+    """Force-refresh image metadata for a specific article row."""
+    hydrator = ArticleHydrationService()
+    hydrator.fetch_article_page_metadata = fetch_article_page_metadata
+
+    item = db.get(ContentItem, int(content_id))
+    if item is None or item.type != ContentType.ARTICLE:
+        raise ValueError(f"Article {content_id} not found")
+
+    previous_image_url = (item.image_url or "").strip() or None
+    previous_verification_status = (getattr(item, "article_image_status", None) or "").strip() or None
+    previous_readiness_status = (getattr(item, "readiness_status", None) or "").strip() or None
+    source_url = (item.canonical_url or item.source_url or "").strip()
+
+    changed = hydrator.refresh_existing_article_metadata(
+        item,
+        source_url=source_url,
+        force_reconcile_image=True,
+    )
+    finalize_article_image_verification(item)
+    sync_content_readiness(db, item)
+    db.commit()
+    db.refresh(item)
+
+    return {
+        "content_id": item.id,
+        "source_url": source_url or None,
+        "changed": bool(changed or (item.image_url or "").strip() != (previous_image_url or "")),
+        "previous_image_url": previous_image_url,
+        "image_url": (item.image_url or "").strip() or None,
+        "previous_article_image_status": previous_verification_status,
+        "article_image_status": (getattr(item, "article_image_status", None) or "").strip() or None,
+        "previous_readiness_status": previous_readiness_status,
+        "readiness_status": (getattr(item, "readiness_status", None) or "").strip() or None,
+    }
+
+
 def evaluate_llm_article_image_recovery(
     db: Session,
     *,

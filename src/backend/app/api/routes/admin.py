@@ -67,6 +67,12 @@ class ArticleImageRecoveryEvalRequest(BaseModel):
     apply: bool = False
 
 
+class ArticleImageRepairRequest(BaseModel):
+    """Admin request body for repairing one article image by content ID."""
+
+    content_id: int
+
+
 @router.get("/ads/config", response_model=AdsConfigAdminResponse)
 def get_ads_config(
     ad_config_service: AdConfigService = Depends(get_ad_config_service),
@@ -374,6 +380,27 @@ def trigger_image_repair():
         return {"status": "ok", "result": result}
     except Exception as e:
         logger.error(f"Image repair failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    finally:
+        db.close()
+
+
+@router.post("/trigger-article-image-repair")
+def trigger_article_image_repair(payload: ArticleImageRepairRequest):
+    """Force-refresh image metadata for a specific article row."""
+    from app.db.base import SessionLocal
+    from app.services.article_image_service import repair_single_article_image
+
+    db = SessionLocal()
+    try:
+        result = repair_single_article_image(db, content_id=payload.content_id)
+        return {"status": "ok", "result": result}
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as e:
+        db.rollback()
+        logger.error("Targeted article image repair failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from e
     finally:
         db.close()
