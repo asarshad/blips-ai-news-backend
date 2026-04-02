@@ -3,6 +3,13 @@ from unittest.mock import MagicMock
 
 from app.models.content import ContentType
 from app.scheduler import tasks_ai_retry
+from app.scheduler.runtime import (
+    FETCH_NEWS_INLINE_AI_RETRY,
+    FETCH_NEWS_JOB,
+    mark_job_finished,
+    mark_job_started,
+    reset_job_runtime_state,
+)
 
 
 class _FakeStats:
@@ -18,6 +25,10 @@ class _FakeStats:
 
     def log_summary(self):
         return None
+
+
+def setup_function():
+    reset_job_runtime_state()
 
 
 def test_process_ai_summaries_uses_article_hydrator_for_articles(monkeypatch):
@@ -260,6 +271,33 @@ def test_process_ai_summaries_skips_empty_article_input_without_error(monkeypatc
     # in the feed (evaluate_content_readiness checks for non-empty summary).
     repo.mark_ai_processed.assert_called_once_with(15, summary="", topics=[])
     llm_client.summarize_article.assert_not_called()
+
+
+def test_process_ai_summaries_skips_when_fetch_news_is_active(monkeypatch):
+    fetch_started_at = mark_job_started(FETCH_NEWS_JOB)
+    try:
+        repo_factory = MagicMock()
+        monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
+        monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", repo_factory)
+
+        tasks_ai_retry.process_ai_summaries()
+
+        repo_factory.assert_not_called()
+    finally:
+        mark_job_finished(FETCH_NEWS_JOB, fetch_started_at, success=False)
+
+
+def test_process_ai_summaries_skips_after_recent_inline_run(monkeypatch):
+    inline_started_at = mark_job_started(FETCH_NEWS_INLINE_AI_RETRY)
+    mark_job_finished(FETCH_NEWS_INLINE_AI_RETRY, inline_started_at, success=True)
+
+    repo_factory = MagicMock()
+    monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
+    monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", repo_factory)
+
+    tasks_ai_retry.process_ai_summaries()
+
+    repo_factory.assert_not_called()
 
 
 def test_process_ai_summaries_persists_extracted_article_fields_before_summary(monkeypatch):

@@ -6,6 +6,11 @@ Scope: backend runtime health, scheduler and ingestion behavior, Render runtime 
 
 Render verification update: April 2, 2026 01:05 UTC
 
+Status note:
+
+- Blips is not in production yet. This document audits the current pre-production, production-like Render environment.
+- Worker stability and memory sizing are workload-driven here, not DAU-driven. The relevant drivers are ingestion cadence, source breadth, extraction cost, AI summarization volume, and scheduler overlap.
+
 - Backend fixes are deployed live on Render through commit `5aa1c12`.
 - Render worker `blips-worker` was resized to Render `standard` and redeployed at `2026-04-01T04:24:53Z`.
 - Mobile refresh fixes are committed and pushed through commit `656a914`, but mobile runtime behavior in users' hands still depends on shipping a new app build.
@@ -17,25 +22,26 @@ Render verification update: April 2, 2026 01:05 UTC
 
 ## 1. Executive Summary
 
-Overall operational status: mostly healthy with one remaining reels-freshness reliability gap.
+Overall operational status: pre-production environment mostly healthy with one remaining reels-freshness reliability gap and one unresolved worker-memory risk.
 
 - The API is live, DB and Redis are reachable, anonymous session bootstrap works, and Articles, Videos, and Reels all return coherent non-empty data.
 - The improved `/health` response is live in production and now reports database, Redis, scheduler lock state, and ingestion freshness.
 - The scheduler-health semantics fix is also live: the API now correctly reflects the external worker lock instead of implying scheduling is disabled.
 - Articles and Videos are healthy right now.
 - Reels improved materially after the latest live threshold/config changes, but they remain borderline and can still dip just below the recent-refresh threshold.
-- The main production risk remains worker stability. The worker has now been moved off the `512Mi` starter plan to `standard`, the OOM pattern has not reappeared in recent Render events, and the latest startup-lock patch is now live and verified to keep `/health` stable after worker startup.
+- The main release risk remains worker stability. The worker has now been moved off the `512Mi` starter plan to `standard`, but Render still recorded post-resize `2Gi` OOM events on `2026-04-01T11:58:54Z`, `2026-04-01T19:18:33Z`, and `2026-04-02T13:53:16Z`.
 
 Release confidence level: Medium.
 
 - Feed delivery is working.
 - Observability is materially better than before and the new health contract is live.
-- Confidence is reduced by recent worker OOM history and reels freshness staying close to its minimum threshold.
+- Confidence is reduced by confirmed post-resize worker OOMs and reels freshness staying close to its minimum threshold.
 
 Top current operational risks:
 
-- Worker was repeatedly OOM-killed on Render before the `2026-04-01T04:24:53Z` resize to `standard`; the new live question is whether the `5aa1c12` startup-lock patch keeps scheduler health stable across future restarts.
+- Worker was repeatedly OOM-killed on Render before the `2026-04-01T04:24:53Z` resize to `standard`, and it has still OOM-killed at the `2Gi` limit after the resize.
 - I found and confirmed a concrete startup-lock root cause in repo state: the worker performs a synchronous startup fetch before its normal lock-refresh maintenance begins, so the leader lock can expire during a long initial fetch and then recover only after the main loop starts. That patch is now live.
+- I found and confirmed a separate worker-memory root cause in repo state: `fetch_and_process_news()` already performs checkpointed ingestion, optional video discovery, clustering, promotion, and immediate AI summarization inline, while the scheduler also independently schedules `clustering` every 15 minutes, `ai_retry` every 15 minutes, and `promotion` every 30 minutes. Those heavy phases can bunch on the same single worker and amplify peak RSS.
 - Reels freshness improved after the `f997dff` / `4c8e1cc` production changes, but the latest inventory sample still shows `recent_refresh_count=11` against threshold `12`, so it remains borderline.
 - Worker logs show scheduler overlap warnings and deadlock errors in signal ingestion.
 - Before the current repo patch, the dedicated worker could also silently idle forever on lock-acquisition or scheduler-init failure, leaving Render green while `/health` degraded. That is now fixed and live.
@@ -105,7 +111,10 @@ Live scheduler evidence:
 - After deploying `5aa1c12`, eight 10-second samples from `01:03:54Z` through `01:05:07Z` all stayed healthy, and the leader-lock TTL refreshed upward (`108`, `97`, `117`, `106`, `96`, `116`, `106`, `95`) instead of decaying to zero.
 - Latest worker deploy `dep-d76rvn7fte5s73dujpg0` for commit `5aa1c12` finished at `2026-04-02T01:03:30.409254Z`.
 - Latest API deploy `dep-d76rvn7fte5s73dujq5g` for commit `5aa1c12` finished at `2026-04-02T01:04:47.720997Z`.
-- No fresh Render `server_failed` events have appeared since the resize, so the current issue is not crash churn; it is borderline reels freshness.
+- Render events prove the resize alone did not eliminate worker crash churn:
+  - `2026-04-01T11:58:54.956170Z` worker `server_failed`, `oomKilled.memoryLimit=2Gi`
+  - `2026-04-01T19:18:33.170081Z` worker `server_failed`, `oomKilled.memoryLimit=2Gi`
+  - `2026-04-02T13:53:16.130578Z` worker `server_failed`, `oomKilled.memoryLimit=2Gi`
 
 Cadence status:
 
@@ -115,7 +124,7 @@ Cadence status:
 Assessment:
 
 - Scheduler configuration is correct, and the `5aa1c12` live rollout appears to have stabilized worker leadership through startup.
-- The remaining issue is no longer startup lock visibility; it is sustaining reels freshness above threshold consistently.
+- Startup lock visibility is materially better after `5aa1c12`, but the remaining runtime issue is now split between worker peak-memory control and sustaining reels freshness above threshold consistently.
 - Repo state now includes a fail-loud worker patch so startup/runtime lock failures no longer silently park the process, plus the live startup lock-maintenance patch to keep the leader lock alive while the initial fetch runs.
 
 ### Ingestion Status
@@ -140,7 +149,7 @@ Assessment:
 
 - Global ingestion is running and not stalled.
 - Reels are much healthier than earlier in the audit, but they are still the weakest lane operationally: the latest inventory sample shows `recent_refresh_count=11`, just below threshold `12`.
-- Repo follow-up found two concrete root causes: the bounded checkpoint scheduler was starving reels under the implicit two-worker layout, and the worker startup path could let the leader lock expire before steady-state refresh began.
+- Repo follow-up found three concrete root causes: the bounded checkpoint scheduler was starving reels under the implicit two-worker layout, the worker startup path could let the leader lock expire before steady-state refresh began, and heavy scheduled follow-up jobs could bunch on top of the inline `fetch_news` cycle on the same worker.
 
 ### Cache Freshness
 
@@ -216,6 +225,9 @@ Render worker events show repeated OOM-kill failures:
 - `2026-03-30T23:59:24.938103Z` worker `server_failed`, `oomKilled.memoryLimit=512Mi`
 - `2026-03-30T17:56:31.545192Z` worker `server_failed`, `oomKilled.memoryLimit=512Mi`
 - `2026-03-30T11:43:40.730480Z` worker `server_failed`, `oomKilled.memoryLimit=512Mi`
+- `2026-04-01T11:58:54.956170Z` worker `server_failed`, `oomKilled.memoryLimit=2Gi`
+- `2026-04-01T19:18:33.170081Z` worker `server_failed`, `oomKilled.memoryLimit=2Gi`
+- `2026-04-02T13:53:16.130578Z` worker `server_failed`, `oomKilled.memoryLimit=2Gi`
 
 Render API service events:
 
@@ -225,7 +237,9 @@ Render API service events:
 Assessment:
 
 - API runtime looks stable.
-- Worker memory pressure was real on `512Mi`, but after the move to `standard` the newest operational issue is different: the worker is not currently exposing a leader lock even though recent Render events do not show a fresh crash.
+- Worker memory pressure was real on `512Mi`, and it is still real on `2Gi`.
+- The startup-lock bug was a real but separate issue; it is no longer the best explanation for the current OOMs.
+- The strongest current root-cause theory is heavy job bunching on one worker: inline fetch follow-up work plus independently scheduled `ai_retry`, `clustering`, and `promotion` phases.
 
 ## 3. Log Audit
 
@@ -475,6 +489,7 @@ Assessment:
 - Live mobile builds may still have the older resume behavior until the next release is shipped.
 - Reels need stronger top-up and/or ingestion recovery to meet the recent-refresh policy.
 - The checkpoint scheduler's implicit two-worker default starved reel rows by treating `REEL=0` as "disabled" instead of "share the video slot"; this is fixed in repo and pending deploy.
+- Before the current repo patch, scheduled `ai_retry`, `clustering`, and `promotion` could run on top of an active or just-finished `fetch_news` cycle even though `fetch_news` already runs those follow-up phases inline.
 
 ### Silent errors
 
@@ -498,24 +513,27 @@ Assessment:
 
 ### Service restarts due to resource constraints
 
-- This is historically confirmed.
-- Worker was repeatedly OOM-killed on the `starter` `512Mi` plan and has now been resized to Render `standard`; live stability after the resize still needs verification over time.
+- This is currently confirmed, not just historical.
+- Worker was repeatedly OOM-killed on the `starter` `512Mi` plan, then continued to OOM-kill after the resize at the `2Gi` limit.
+- Current evidence points to workload shape and heavy-phase overlap, not DAU load.
 
 ## 7. Recommended Fixes
 
 ### Critical
 
 - [x] Increase worker memory or move worker off the current `starter` memory tier.
-  Status: completed in production. `blips-worker` was moved to Render `standard` and redeployed at `2026-04-01T04:24:53Z`; the remaining work is observation and validation, not the resize decision itself.
-- [x] Investigate and reduce worker peak memory during ingestion and promotion runs.
-  Status: in progress and partially implemented in repo. Immediate post-ingestion AI now runs with a lighter cap and skips the heavier maintenance pass so the fetch cycle does less work on the memory-constrained worker.
+  Status: completed in the pre-production Render environment. `blips-worker` was moved to Render `standard` and redeployed at `2026-04-01T04:24:53Z`, but the resize alone did not eliminate OOMs.
+- [ ] Verify whether `2Gi` is now sufficient after overlap control lands, or whether the worker still needs another memory-tier increase.
+  Status: pending live validation after the latest repo-side overlap mitigation is deployed.
+- [ ] Investigate and reduce worker peak memory during ingestion and promotion runs.
+  Status: partially implemented in repo. Immediate post-ingestion AI now runs with a lighter cap, and scheduled follow-up jobs now defer to the inline fetch cycle instead of bunching on top of it. Live validation is still needed.
 - [x] Triage signal-ingestion deadlocks.
   Status: first mitigation implemented in repo. Signal ingestion now commits in smaller batches to reduce transaction scope and lock hold time; live validation is still needed after deploy.
 
 ### High
 
 - [x] Reduce scheduler overlap pressure.
-  Status: first mitigation implemented in repo. The immediate freshness pass after ingestion is now lightweight instead of running the full AI retry maintenance workload every cycle.
+  Status: materially expanded in repo. The immediate freshness pass after ingestion is lightweight, and scheduled `ai_retry`, `clustering`, and `promotion` now skip while `fetch_news` is active or when the matching inline follow-up phase already completed recently.
 - [x] Fix reel-row starvation in the checkpoint scheduler when running with the default two-worker layout.
   Status: fixed in repo and review-covered. The scheduler now shares the video slot with reels only for the implicit two-worker fallback case, while still respecting explicit operator caps such as `INGESTION_MAX_WORKERS_REEL=0`.
 - [x] Add alerting for worker OOM events, reels freshness underfill, deadlock frequency, and repeated scheduler overlap skips.
@@ -533,6 +551,8 @@ Assessment:
 
 - [x] Expand `/health` or `/ops/status` with resource and restart signals.
   Status: partially completed in repo. `/ops/status` now includes process runtime diagnostics including RSS, peak RSS, PID, hostname, Python version, and uptime. Restart history still comes from external Render events rather than the health payload itself.
+- [x] Add explicit runtime evidence for future worker memory debugging.
+  Status: implemented in repo. Heavy worker phases now emit process RSS and peak-RSS snapshots at start and finish so the next live OOM can be correlated to a concrete code path.
 - [ ] Add a post-deploy operational smoke check that runs automatically.
   Status: in progress. `src/backend/scripts/operational_check.py` now fails on degraded `/health` payloads, supports webhook alerts, checks detail and starters endpoints, and the scheduled smoke workflow now runs hourly with admin checks when credentials are present. It is still a scheduled guardrail rather than a true deploy-gated smoke step.
 - [x] Add automation that pages on repeated worker `server_failed` OOM events from Render.
@@ -563,7 +583,11 @@ Assessment:
 - [x] April 1, 2026: fixed the startup lock-maintenance gap in repo by keeping the worker lock refreshed during the initial synchronous fetch window.
 - [x] April 2, 2026: deployed `5aa1c12` to both Render services and verified eight consecutive healthy `/health` samples after startup, with the worker lock TTL refreshing upward instead of decaying to zero.
 - [x] April 2, 2026: reviewed the separate local freshness-strategy worktree diff without merging it. Targeted tests pass, but it still has cache invalidation gaps for article `VIEW_10S` and video/reel `VIDEO_IMPRESSION`, so that work should not be merged as-is.
-- [ ] Next: watch at least another full ingestion window and confirm reels `recent_refresh_count` stays comfortably above threshold instead of oscillating between `11` and `12`.
+- [x] April 2, 2026: stored the current operating assumptions explicitly in this audit doc: Blips is still pre-production, and worker stability is workload-driven rather than DAU-driven.
+- [x] April 2, 2026: confirmed from Render events that the worker still OOM-kills at `2Gi`, so the resize alone did not solve the problem.
+- [x] April 2, 2026: identified a concrete overlap root cause in code. `fetch_news` already runs clustering, promotion, and immediate AI summarization inline, while the scheduler was also launching those jobs independently on nearby cadences.
+- [x] April 2, 2026: added repo-side control for that overlap. Scheduled `ai_retry`, `clustering`, and `promotion` now defer to an active or recently completed inline `fetch_news` follow-up phase, and the worker logs process RSS snapshots around heavy phases for the next live correlation pass.
+- [ ] Next: deploy the overlap-control patch, then watch at least one full day of worker events to see whether the `2Gi` OOM pattern stops and whether reels stay above threshold.
 
 ## Test / Automation Gap Analysis
 
@@ -586,24 +610,26 @@ Added artifact:
 
 What is working:
 
-- production API is up
+- the pre-production API environment is up
 - DB and Redis are healthy
 - ingestion is active
 - Articles and Videos are fresh and operational
 - worker leader-lock stability looks healthy after the `5aa1c12` rollout
 - direct feed cache freshness headers are now trustworthy
-- the repo now has stricter worker-failure handling and smoke-alerting safeguards ready for deploy
+- the repo now has stricter worker-failure handling, overlap control, and memory instrumentation ready for deploy
 
 What is broken:
 
 - reels still hover close to the recent-refresh floor and can dip below threshold
+- worker still OOM-kills at `2Gi`
 - worker logs show deadlocks and overlapping ingestion windows
 
 What is stale:
 
 - reels freshness margin is still thin even after the recent live improvements
-- the document previously assumed stable worker lock visibility; that has now been corrected to the current sampled behavior
+- earlier versions of this document assumed the resize removed worker OOMs; that has now been corrected to the current Render event evidence
 
 What is not being triggered as expected:
 
 - mobile resume and tab-entry refresh fixes are in repo, but neither is proven in a shipped app build yet
+- before the current repo patch, scheduled heavy follow-up jobs could still trigger even though the same work had just run inline inside `fetch_news`

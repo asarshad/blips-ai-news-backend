@@ -6,11 +6,22 @@ from app.core.feature_flags import feature_flags
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.scheduler.job_stats import log_job_start
+from app.scheduler.runtime import (
+    FETCH_NEWS_INLINE_PROMOTION,
+    FETCH_NEWS_JOB,
+    PROMOTION_JOB,
+    get_followup_cooldown_seconds,
+    is_job_active,
+    log_memory_snapshot,
+    mark_job_finished,
+    mark_job_started,
+    succeeded_within,
+)
 
 logger = get_logger(__name__)
 
 
-def run_promotion_job() -> None:
+def run_promotion_job(*, trigger: str = "scheduled") -> None:
     """Score CANDIDATE items and promote top-N to PROMOTED.
 
     Cadence: every 30 minutes (runs right after signal ingestion completes
@@ -27,7 +38,22 @@ def run_promotion_job() -> None:
         logger.info("[promotion] SKIPPED – 'promotion' feature flag disabled")
         return
 
+    if trigger == "scheduled":
+        if is_job_active(FETCH_NEWS_JOB):
+            logger.info("[promotion] SKIPPED - fetch_news is still active")
+            return
+        if succeeded_within(
+            FETCH_NEWS_INLINE_PROMOTION,
+            within_seconds=get_followup_cooldown_seconds(),
+        ):
+            logger.info("[promotion] SKIPPED - recent inline promotion already ran")
+            return
+
     stats = log_job_start("promotion")
+    job_key = FETCH_NEWS_INLINE_PROMOTION if trigger == "fetch_news" else PROMOTION_JOB
+    run_started_at = mark_job_started(job_key)
+    run_success = False
+    log_memory_snapshot(logger, f"{job_key}:start")
     db = SessionLocal()
     try:
         from app.scheduler.tasks_content_events import run_content_event_dispatch_job
@@ -47,12 +73,15 @@ def run_promotion_job() -> None:
         )
         if result.errors:
             stats.errors.extend(result.errors)
+        run_success = not stats.errors
 
     except Exception as exc:
         stats.errors.append(str(exc))
         logger.error("[promotion] Fatal error: %s", exc)
         db.rollback()
     finally:
+        log_memory_snapshot(logger, f"{job_key}:finished")
+        mark_job_finished(job_key, run_started_at, success=run_success)
         db.close()
         stats.complete()
         stats.log_summary()

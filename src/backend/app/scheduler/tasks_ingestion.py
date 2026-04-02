@@ -9,6 +9,7 @@ from app.core.feature_flags import feature_flags
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.scheduler.job_stats import JobStats, log_job_start
+from app.scheduler.runtime import FETCH_NEWS_JOB, log_memory_snapshot, mark_job_finished, mark_job_started
 from app.services.video_content_policy import youtube_discovery_enabled
 
 logger = get_logger(__name__)
@@ -41,18 +42,24 @@ def fetch_and_process_news():
         return
 
     stats = log_job_start("fetch_news")
+    run_started_at = mark_job_started(FETCH_NEWS_JOB)
+    fetch_success = False
+    log_memory_snapshot(logger, "fetch_news:start")
 
     db = SessionLocal()
     try:
         _run_curation_ingestion_with_stats(db, stats)
+        fetch_success = not stats.errors
     except Exception as e:
         stats.errors.append(str(e))
         logger.error(f"[fetch_news] Fatal error: {str(e)}")
         db.rollback()
+        fetch_success = False
     finally:
         db.close()
         stats.complete()
         stats.log_summary()
+        log_memory_snapshot(logger, "fetch_news:after_curation")
 
     # Phase 2: immediately summarise newly-ingested items so they appear
     # in the feed right away instead of waiting for the next ai_retry tick.
@@ -64,11 +71,20 @@ def fetch_and_process_news():
             "[fetch_news] Running immediate AI summarization (max_items=%s, maintenance=false)…",
             immediate_limit,
         )
-        process_ai_summaries(max_items=immediate_limit, include_maintenance=False)
+        process_ai_summaries(
+            max_items=immediate_limit,
+            include_maintenance=False,
+            trigger="fetch_news",
+        )
         logger.info("[fetch_news] AI summarization complete")
+        fetch_success = fetch_success and True
     except Exception as e:
         # Non-fatal — the periodic ai_retry job will pick them up later.
         logger.warning(f"[fetch_news] Immediate AI summarization failed (non-fatal): {e}")
+        fetch_success = False
+    finally:
+        log_memory_snapshot(logger, "fetch_news:finished")
+        mark_job_finished(FETCH_NEWS_JOB, run_started_at, success=fetch_success)
 
 
 def _run_curation_ingestion_with_stats(db, stats: JobStats):
@@ -100,8 +116,8 @@ def _run_curation_ingestion_with_stats(db, stats: JobStats):
             logger.info("[fetch_news] Curated-only mode active; discovery ingestion skipped")
 
         logger.info("[fetch_news] Running clustering before promotion")
-        run_clustering_job()
+        run_clustering_job(trigger="fetch_news")
         logger.info("[fetch_news] Running promotion immediately after ingestion")
-        run_promotion_job()
+        run_promotion_job(trigger="fetch_news")
     except Exception as e:
         stats.errors.append(f"Curation ingestion: {str(e)}")

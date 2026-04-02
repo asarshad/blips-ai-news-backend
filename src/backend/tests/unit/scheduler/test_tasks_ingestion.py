@@ -69,4 +69,4 @@ def test_fetch_and_process_news_uses_lightweight_immediate_ai(monkeypatch):
 
     tasks_ingestion.fetch_and_process_news()
 
-    assert ai_calls == [{"max_items": 7, "include_maintenance": False}]
+    assert ai_calls == [{"max_items": 7, "include_maintenance": False, "trigger": "fetch_news"}]

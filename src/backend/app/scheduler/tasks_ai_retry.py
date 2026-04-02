@@ -19,6 +19,17 @@ from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.scheduler.config import LLM_RATE_LIMIT_DELAY, MAX_ITEMS_PER_RUN, MAX_LLM_CALLS_PER_RUN
 from app.scheduler.job_stats import log_job_start
+from app.scheduler.runtime import (
+    AI_RETRY_JOB,
+    FETCH_NEWS_INLINE_AI_RETRY,
+    FETCH_NEWS_JOB,
+    get_followup_cooldown_seconds,
+    is_job_active,
+    log_memory_snapshot,
+    mark_job_finished,
+    mark_job_started,
+    succeeded_within,
+)
 
 logger = get_logger(__name__)
 
@@ -27,6 +38,7 @@ def process_ai_summaries(
     *,
     max_items: int | None = None,
     include_maintenance: bool = True,
+    trigger: str = "scheduled",
 ):
     """Summarise all unprocessed content items via the LLM pipeline.
 
@@ -39,7 +51,22 @@ def process_ai_summaries(
         logger.info("[ai_retry] SKIPPED - summarization feature is disabled")
         return
 
+    if trigger == "scheduled":
+        if is_job_active(FETCH_NEWS_JOB):
+            logger.info("[ai_retry] SKIPPED - fetch_news is still active")
+            return
+        if succeeded_within(
+            FETCH_NEWS_INLINE_AI_RETRY,
+            within_seconds=get_followup_cooldown_seconds(),
+        ):
+            logger.info("[ai_retry] SKIPPED - recent inline AI summarization already ran")
+            return
+
     stats = log_job_start("ai_retry")
+    job_key = FETCH_NEWS_INLINE_AI_RETRY if trigger == "fetch_news" else AI_RETRY_JOB
+    run_started_at = mark_job_started(job_key)
+    run_success = False
+    log_memory_snapshot(logger, f"{job_key}:start")
 
     db = SessionLocal()
     try:
@@ -203,11 +230,14 @@ def process_ai_summaries(
         from app.scheduler.tasks_content_events import run_content_event_dispatch_job
 
         run_content_event_dispatch_job()
+        run_success = not stats.errors
 
     except Exception as e:
         stats.errors.append(str(e))
         logger.error(f"[ai_retry] Fatal error: {str(e)}")
     finally:
+        log_memory_snapshot(logger, f"{job_key}:finished")
+        mark_job_finished(job_key, run_started_at, success=run_success)
         db.close()
         stats.complete()
         stats.log_summary()
