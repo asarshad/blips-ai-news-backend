@@ -51,6 +51,67 @@ def test_acquire_lock_with_retry_retries_redis_unavailability(monkeypatch):
     assert waits == [5.0]
 
 
+def test_run_worker_refreshes_lock_during_startup_fetch(monkeypatch):
+    _patch_signal_handlers(monkeypatch)
+    worker._stop_event.clear()
+    monkeypatch.setenv("SCHEDULER_ENABLED", "true")
+    monkeypatch.setattr(worker, "_acquire_lock_with_retry", lambda: True)
+
+    class DummyScheduler:
+        def shutdown(self, wait=False):  # noqa: ARG002
+            return None
+
+    monkeypatch.setattr(worker, "init_scheduler", lambda: DummyScheduler())
+    monkeypatch.setattr(worker, "fetch_and_process_news", lambda: None)
+
+    started_threads: list[tuple[object, bool | None, str | None]] = []
+    joined_threads: list[tuple[str | None, float | None]] = []
+
+    class DummyThread:
+        def __init__(self, target=None, daemon=None, name=None):
+            self.target = target
+            self.daemon = daemon
+            self.name = name
+
+        def start(self):
+            started_threads.append((self.target, self.daemon, self.name))
+
+        def join(self, timeout=None):
+            joined_threads.append((self.name, timeout))
+
+    monkeypatch.setattr(worker.threading, "Thread", DummyThread)
+    monkeypatch.setattr(
+        worker,
+        "_maintain_worker_lock",
+        lambda *args, **kwargs: worker._stop_event.set() or 0,
+    )
+    monkeypatch.setattr(worker, "release_worker_lock", lambda: True)
+
+    exit_code = worker.run_worker()
+
+    assert exit_code == 0
+    assert any(name == "worker-startup-lock-refresher" and daemon for _, daemon, name in started_threads)
+    assert ("worker-startup-lock-refresher", None) in joined_threads
+
+
+def test_maintain_worker_lock_exits_nonzero_when_reacquire_fails(monkeypatch):
+    worker._stop_event.clear()
+    stop_event = worker.threading.Event()
+
+    monkeypatch.setattr(stop_event, "wait", lambda timeout=None: False)
+    monkeypatch.setattr(worker, "refresh_worker_lock", lambda: False)
+    monkeypatch.setattr(worker, "_attempt_lock_reacquire", lambda: False)
+
+    assert (
+        worker._maintain_worker_lock(
+            stop_event,
+            refresh_interval_seconds=0,
+            phase="test",
+        )
+        == 1
+    )
+
+
 def test_run_worker_releases_lock_and_exits_nonzero_when_scheduler_init_fails(monkeypatch):
     _patch_signal_handlers(monkeypatch)
     worker._stop_event.clear()
@@ -80,8 +141,21 @@ def test_run_worker_exits_nonzero_when_lock_recovery_fails(monkeypatch):
 
     monkeypatch.setattr(worker, "init_scheduler", lambda: DummyScheduler())
     monkeypatch.setattr(worker, "fetch_and_process_news", lambda: None)
-    monkeypatch.setattr(worker, "refresh_worker_lock", lambda: False)
-    monkeypatch.setattr(worker, "_attempt_lock_reacquire", lambda: False)
+
+    class DummyThread:
+        def __init__(self, target=None, daemon=None, name=None):  # noqa: ARG002
+            self.target = target
+            self.daemon = daemon
+            self.name = name
+
+        def start(self):
+            return None
+
+        def join(self, timeout=None):  # noqa: ARG002
+            return None
+
+    monkeypatch.setattr(worker.threading, "Thread", DummyThread)
+    monkeypatch.setattr(worker, "_maintain_worker_lock", lambda *args, **kwargs: 1)
 
     release_calls: list[str] = []
     monkeypatch.setattr(worker, "release_worker_lock", lambda: release_calls.append("release") or True)

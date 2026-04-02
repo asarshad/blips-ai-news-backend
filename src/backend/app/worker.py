@@ -70,8 +70,23 @@ _worker_lock_token: str = f"{os.getpid()}:{uuid.uuid4()}"
 
 WORKER_LOCK_KEY = os.getenv("SCHEDULER_LEADER_LOCK_KEY", "scheduler_lock")
 WORKER_LOCK_TTL = int(os.getenv("SCHEDULER_LOCK_TTL_SECONDS", "120"))
+WORKER_LOCK_REFRESH_SECONDS = max(
+    5,
+    min(int(os.getenv("SCHEDULER_LOCK_REFRESH_SECONDS", "30")), max(5, WORKER_LOCK_TTL - 1)),
+)
 LOCK_REACQUIRE_ATTEMPTS = 3
 LOCK_REACQUIRE_DELAY_SECONDS = 5.0
+
+
+def _request_worker_stop() -> None:
+    """Propagate graceful-stop intent to worker and ingestion helpers."""
+    _stop_event.set()
+    try:
+        from app.ingestion.checkpointing import STOP_EVENT
+
+        STOP_EVENT.set()
+    except Exception:
+        pass
 
 
 def signal_handler(signum, _frame):
@@ -82,14 +97,7 @@ def signal_handler(signum, _frame):
     tear down the APScheduler.
     """
     logger.info(f"Received signal {signum}, requesting graceful shutdown…")
-    _stop_event.set()
-    # Also propagate to the ingestion checkpointing module.
-    try:
-        from app.ingestion.checkpointing import STOP_EVENT
-
-        STOP_EVENT.set()
-    except Exception:
-        pass
+    _request_worker_stop()
 
 
 def acquire_worker_lock() -> bool | None:
@@ -266,6 +274,54 @@ def _acquire_lock_with_retry(max_attempts: int = 10, base_delay: float = 5.0) ->
     return False
 
 
+def _maintain_worker_lock(
+    stop_event: threading.Event,
+    *,
+    refresh_interval_seconds: float,
+    phase: str,
+) -> int:
+    """Refresh the distributed worker lock until stopped or a fatal failure occurs."""
+    max_redis_failures = 5
+    redis_failure_count = 0
+
+    while not _stop_event.is_set() and not stop_event.is_set():
+        if stop_event.wait(timeout=refresh_interval_seconds):
+            return 0
+        if _stop_event.is_set():
+            return 0
+
+        result = refresh_worker_lock()
+        if result is True:
+            redis_failure_count = 0
+            continue
+
+        if result is None:
+            redis_failure_count += 1
+            logger.warning(
+                "Redis refresh failed during %s (%s/%s); will retry next cycle",
+                phase,
+                redis_failure_count,
+                max_redis_failures,
+            )
+            if redis_failure_count >= max_redis_failures:
+                logger.error(
+                    "Redis unreachable for %s consecutive lock refresh cycles during %s — shutting down",
+                    redis_failure_count,
+                    phase,
+                )
+                return 1
+            continue
+
+        logger.warning("Worker lock refresh reported ownership loss during %s; validating state", phase)
+        if _attempt_lock_reacquire():
+            redis_failure_count = 0
+            continue
+        logger.error("Lost worker lock during %s and recovery failed — shutting down", phase)
+        return 1
+
+    return 0
+
+
 def run_worker():
     """Main worker entry point."""
     global _scheduler
@@ -351,6 +407,26 @@ def run_worker():
         sys.stdout.flush()
 
         # Run initial fetch (catch ALL errors so it never kills the worker)
+        startup_lock_stop_event = threading.Event()
+        startup_lock_failures: list[int] = []
+
+        def _maintain_lock_during_startup_fetch() -> None:
+            exit_status = _maintain_worker_lock(
+                startup_lock_stop_event,
+                refresh_interval_seconds=float(WORKER_LOCK_REFRESH_SECONDS),
+                phase="startup fetch",
+            )
+            if exit_status != 0:
+                startup_lock_failures.append(exit_status)
+                _request_worker_stop()
+
+        startup_lock_thread = threading.Thread(
+            target=_maintain_lock_during_startup_fetch,
+            daemon=True,
+            name="worker-startup-lock-refresher",
+        )
+        startup_lock_thread.start()
+
         logger.info("Running initial news fetch...")
         sys.stdout.flush()
         try:
@@ -358,53 +434,28 @@ def run_worker():
             logger.info("Initial fetch completed")
         except Exception as e:
             logger.error(f"Initial fetch failed (non-fatal): {e}\n" + traceback.format_exc())
+        finally:
+            startup_lock_stop_event.set()
+            startup_lock_thread.join()
         sys.stdout.flush()
+        if startup_lock_failures:
+            logger.error("Worker lock maintenance failed during startup fetch — exiting for restart")
+            sys.stdout.flush()
+            return 1
 
         # Keep the worker running and refresh lock.
-        # Tolerate transient Redis errors (returns None) — only exit on a
-        # definitive lock-lost (returns False) or sustained unavailability.
-        _MAX_REDIS_FAILURES = 5  # ~5 minutes of Redis unavailability before giving up
-        _redis_failure_count = 0
-
         logger.info("Worker running. Press Ctrl+C to stop.")
         sys.stdout.flush()
-        while not _stop_event.is_set():
-            result = refresh_worker_lock()
-            if result is True:
-                # Healthy — reset the failure counter
-                _redis_failure_count = 0
-            elif result is None:
-                # Transient Redis error — allow a few consecutive misses before
-                # treating it as fatal (one blip should never kill the worker).
-                _redis_failure_count += 1
-                logger.warning(
-                    f"Redis refresh failed ({_redis_failure_count}/{_MAX_REDIS_FAILURES}); "
-                    "will retry next cycle"
-                )
-                if _redis_failure_count >= _MAX_REDIS_FAILURES:
-                    logger.error(
-                        f"Redis unreachable for {_redis_failure_count} consecutive cycles "
-                        "— shutting down"
-                    )
-                    exit_code = 1
-                    break
-            else:
-                # result is False — refresh CAS failed. Attempt a safe recovery
-                # if the lock key was evicted/expired, but still exit if another
-                # process definitively owns the lock.
-                logger.warning("Worker lock refresh reported ownership loss; validating state")
-                if _attempt_lock_reacquire():
-                    _redis_failure_count = 0
-                    continue
-                logger.error("Lost worker lock and recovery failed — shutting down")
-                exit_code = 1
-                break
-            _stop_event.wait(timeout=60)  # Wakes immediately on signal
+        exit_code = _maintain_worker_lock(
+            _stop_event,
+            refresh_interval_seconds=float(WORKER_LOCK_REFRESH_SECONDS),
+            phase="steady-state operation",
+        )
     except (KeyboardInterrupt, SystemExit):
         pass
     finally:
         logger.info("Worker shutting down…")
-        _stop_event.set()  # Ensure everything knows we're stopping
+        _request_worker_stop()
         if _scheduler:
             _scheduler.shutdown(wait=False)
         if lock_acquired:
