@@ -122,6 +122,17 @@ def _request_json(
         )
 
 
+def _post_webhook(webhook_url: str, payload: dict[str, Any], *, timeout: float) -> None:
+    request = urllib.request.Request(
+        webhook_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout):
+        return
+
+
 def _interesting_headers(headers: dict[str, str]) -> dict[str, str]:
     filtered: dict[str, str] = {}
     for key, value in headers.items():
@@ -272,6 +283,28 @@ def _unexpected_unhealthy_surfaces(
     return [surface for surface in unhealthy if surface not in allowed_surfaces]
 
 
+def _health_status_anomaly(health_payload: Any) -> str | None:
+    if not isinstance(health_payload, dict):
+        return None
+
+    status = str(health_payload.get("status") or "").lower()
+    if not status or status == "healthy":
+        return None
+
+    detail = None
+    checks = health_payload.get("checks")
+    if isinstance(checks, dict):
+        scheduler = checks.get("scheduler")
+        if isinstance(scheduler, dict) and scheduler.get("detail"):
+            detail = str(scheduler["detail"])
+        if not detail:
+            ingestion = checks.get("ingestion")
+            if isinstance(ingestion, dict) and ingestion.get("error"):
+                detail = str(ingestion["error"])
+
+    return f"/health reported {status}" + (f": {detail}" if detail else "")
+
+
 def _check_content_endpoint(
     base_url: str,
     *,
@@ -390,6 +423,9 @@ def run(
     if health_status != 200 or not isinstance(health_payload, dict):
         anomalies.append("/health failed")
         return report
+    health_anomaly = _health_status_anomaly(health_payload)
+    if health_anomaly:
+        anomalies.append(health_anomaly)
 
     inventory_status, inventory_headers, inventory_payload = _request_json(
         base_url,
@@ -550,6 +586,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=[],
         help="Surface name to tolerate as known degraded inventory without failing",
     )
+    parser.add_argument(
+        "--alert-webhook-url",
+        default=os.getenv("ALERT_WEBHOOK_URL"),
+        help="Optional webhook URL for posting operational failures",
+    )
     return parser.parse_args(argv)
 
 
@@ -577,6 +618,26 @@ def evaluate_report_failures(
     return failures
 
 
+def build_alert_payload(
+    report: dict[str, Any],
+    *,
+    failures: list[str],
+) -> dict[str, str]:
+    health_payload = report.get("health", {}).get("payload", {})
+    health_status = (
+        str(health_payload.get("status"))
+        if isinstance(health_payload, dict) and health_payload.get("status") is not None
+        else "unknown"
+    )
+    lines = [
+        f"Blips operational smoke detected {len(failures)} failure(s) for {report.get('base_url', DEFAULT_BASE_URL)}.",
+        f"Health status: {health_status}",
+    ]
+    for failure in failures[:6]:
+        lines.append(f"- {failure}")
+    return {"text": "\n".join(lines)}
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     report = run(
@@ -594,6 +655,15 @@ def main(argv: list[str] | None = None) -> int:
         fail_on_anomaly=bool(args.fail_on_anomaly),
         require_admin_success=bool(args.require_admin_success),
     )
+    if failures and args.alert_webhook_url:
+        try:
+            _post_webhook(
+                str(args.alert_webhook_url),
+                build_alert_payload(report, failures=failures),
+                timeout=float(args.timeout),
+            )
+        except urllib.error.URLError as exc:
+            print(f"WARN: failed to post operational alert: {exc}", file=sys.stderr)
     if failures:
         for failure in failures:
             print(f"FAIL: {failure}", file=sys.stderr)

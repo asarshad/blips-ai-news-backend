@@ -4,9 +4,9 @@ Audit date: March 31, 2026
 Primary live target: `https://api.blips.tech`  
 Scope: backend runtime health, scheduler and ingestion behavior, Render runtime stability, endpoint freshness, mobile refresh wiring, and operational automation gaps.
 
-Render verification update: April 1, 2026 04:44 UTC
+Render verification update: April 1, 2026 05:06 UTC
 
-- Backend fixes are deployed live on Render through commit `47402f8`.
+- Backend fixes are deployed live on Render through commit `e1a9901`.
 - Render worker `blips-worker` was resized to Render `standard` and redeployed at `2026-04-01T04:24:53Z`.
 - Mobile refresh fixes are committed and pushed through commit `656a914`, but mobile runtime behavior in users' hands still depends on shipping a new app build.
 - Evidence sources used in this report:
@@ -24,20 +24,21 @@ Overall operational status: partially healthy.
 - The scheduler-health semantics fix is also live: the API now correctly reflects the external worker lock instead of implying scheduling is disabled.
 - Articles and Videos are healthy right now.
 - Reels are serving data, but the backend's own inventory health still reports reels unhealthy because recent refresh volume is below threshold.
-- The main production risk remains worker stability, but the worker has now been moved off the `512Mi` starter plan to `standard` and needs an observation window to prove the OOM pattern is gone.
+- The main production risk remains worker stability. The worker has now been moved off the `512Mi` starter plan to `standard`, and the OOM pattern has not reappeared in recent Render events, but the live API is still degraded because no scheduler leader lock is currently visible after the latest worker deploy.
 
 Release confidence level: Medium.
 
 - Feed delivery is working.
 - Observability is materially better than before and the new health contract is live.
-- Confidence is reduced by recent worker OOM history, ingestion overlap pressure, and reels freshness underfill.
+- Confidence is reduced by recent worker OOM history, the missing live worker leader lock after the latest deploy, and reels freshness underfill.
 
 Top current operational risks:
 
-- Worker was repeatedly OOM-killed on Render before the `2026-04-01T04:24:53Z` resize to `standard`; the next risk is whether that upgrade actually eliminates restart churn.
+- Worker was repeatedly OOM-killed on Render before the `2026-04-01T04:24:53Z` resize to `standard`; the next risk is the current post-deploy state where `/health` reports no visible scheduler leader lock even though recent Render worker events show no fresh crash.
 - Reels freshness is below target: `recent_refresh_count=2` against threshold `12` in the last `24h`.
-- I found a concrete scheduler root cause for that underfill in repo state: with `INGESTION_MAX_WORKERS=2`, the checkpoint scheduler's default caps effectively starved `youtube_reel` rows even though the comment claimed reels should share the video slot. A fix is now prepared locally and pending deploy.
+- I found a concrete scheduler root cause for that underfill in repo state: with `INGESTION_MAX_WORKERS=2`, the checkpoint scheduler's default caps effectively starved `youtube_reel` rows even though the comment claimed reels should share the video slot. That fix is now live in commit `e1a9901`, but backend freshness has not improved yet.
 - Worker logs show scheduler overlap warnings and deadlock errors in signal ingestion.
+- Before the current repo patch, the dedicated worker could also silently idle forever on lock-acquisition or scheduler-init failure, leaving Render green while `/health` degraded. That is now fixed in repo and pending deploy.
 - Mobile repo wiring is now better, including all-surface resume refresh and tab-entry refresh, but those fixes are not production-mobile-effective until the next app release.
 
 ## 2. Backend Runtime Health
@@ -54,23 +55,24 @@ Current live behavior:
   - scheduler leadership state via Redis lock visibility
   - ingestion freshness via latest successful ingestion timestamp and recent counts
 - `GET /health` returned `200` with:
-  - `status=healthy`
+  - `status=degraded`
   - `database.status=ok`
   - `redis.status=ok`
-  - `scheduler.status=ok`
+  - `scheduler.status=degraded`
   - `scheduler.mode=external`
-  - `scheduler.leader_lock_present=true`
-  - `scheduler.leader_lock_ttl_seconds=16-17`
+  - `scheduler.leader_lock_present=false`
+  - `scheduler.leader_lock_ttl_seconds=null`
   - `ingestion.status=ok`
-  - `last_successful_ingestion_at=2026-03-31T23:16:48.642572+00:00`
-  - `articles_ingested_last_24h=148`
-  - `videos_ingested_last_24h=135`
+  - `last_successful_ingestion_at=2026-04-01T04:33:37.697730+00:00`
+  - `articles_ingested_last_24h=137`
+  - `videos_ingested_last_24h=122`
 
 Quality assessment:
 
 - `/health` is now materially useful for operations.
 - `/ops/status` has also been expanded in repo state to include process RSS, peak RSS, uptime, PID, hostname, and Python version.
 - Restart history still comes from external Render events rather than the health payload itself.
+- The operational smoke probe in repo now treats payload `status != healthy` as a real anomaly instead of only checking HTTP 200.
 
 Protected ops endpoint:
 
@@ -88,13 +90,9 @@ Render services:
 Live scheduler evidence:
 
 - `/health` reports `scheduler.mode=external`, which is correct for the split API plus worker deployment model.
-- `/health` also reports `leader_lock_present=true`, proving the worker leadership lock is active in Redis.
-- The live response now shows `scheduler.status=ok` with `external_scheduler_expected=true`, which matches the intended API plus worker deployment model.
-- Worker logs after deploy show active lock lifecycle messages and ingestion work:
-  - `Lease claimed`
-  - `Lease released`
-  - `ingestion.task_picked`
-  - `ingestion.task_done`
+- The latest live response now shows `scheduler.status=degraded` with `external_scheduler_expected=true` because `leader_lock_present=false`.
+- The latest worker deploy is `dep-d76a7nea2pns73b810e0` for commit `e1a9901`, finished at `2026-04-01T04:51:36.917224Z`.
+- No fresh Render `server_failed` events have appeared since the resize and the `e1a9901` deploy, so the current issue is missing scheduler leadership visibility rather than a confirmed crash loop.
 
 Cadence status:
 
@@ -103,16 +101,16 @@ Cadence status:
 
 Assessment:
 
-- Scheduler is running.
-- Leadership is visible.
-- The remaining issue is not scheduler absence; it is scheduler pressure and worker stability under load.
+- Scheduler configuration is correct, but live worker leadership is not currently visible.
+- The remaining issue is no longer just resource pressure; it is also that the current worker can disappear from scheduler visibility without a corresponding Render crash event.
+- Repo state now includes a fail-loud worker patch so startup/runtime lock failures no longer silently park the process.
 
 ### Ingestion Status
 
 Live evidence:
 
-- `/health` reports `hours_since_last_ingestion=0.01` and `is_stalled=false`.
-- Worker logs show fresh ingestion activity after the latest deploy.
+- `/health` reports `hours_since_last_ingestion=0.53` and `is_stalled=false`.
+- The last successful ingestion timestamp `2026-04-01T04:33:37.697730+00:00` is older than the latest worker deploy, so no successful post-deploy ingestion has been proven yet.
 - Inventory health reports:
   - Articles healthy
   - Videos healthy
@@ -129,7 +127,7 @@ Assessment:
 
 - Global ingestion is running and not stalled.
 - Reels ingestion is the weak lane operationally, not the entire ingestion system.
-- Repo follow-up found a likely root cause: the bounded checkpoint scheduler was not actually dispatching `youtube_reel` rows under the default two-worker layout.
+- Repo follow-up found a likely root cause: the bounded checkpoint scheduler was not actually dispatching `youtube_reel` rows under the default two-worker layout. That fix is live, but the live worker still needs to reacquire healthy scheduler leadership before its effect can be validated.
 
 ### Cache Freshness
 
@@ -214,7 +212,7 @@ Render API service events:
 Assessment:
 
 - API runtime looks stable.
-- Worker runtime is not stable enough on current memory limits.
+- Worker memory pressure was real on `512Mi`, but after the move to `standard` the newest operational issue is different: the worker is not currently exposing a leader lock even though recent Render events do not show a fresh crash.
 
 ## 3. Log Audit
 
@@ -509,6 +507,8 @@ Assessment:
   Status: fixed in repo and review-covered. The scheduler now shares the video slot with reels only for the implicit two-worker fallback case, while still respecting explicit operator caps such as `INGESTION_MAX_WORKERS_REEL=0`.
 - [x] Add alerting for worker OOM events, reels freshness underfill, deadlock frequency, and repeated scheduler overlap skips.
   Status: implemented in repo. Scheduler overlap and deadlock alerts are now wired through the backend alerting service, inventory-health alerts are scheduled, and a dedicated Render runtime monitor workflow/script has been added for worker failure detection. Secrets still need to be configured before those alerts are live.
+- [x] Make the dedicated worker fail loud instead of silently idling on startup/runtime failure.
+  Status: fixed in repo and review-covered. `app.worker` now exits nonzero when lock acquisition, scheduler initialization, or unrecoverable lock refresh fails, so Render can restart the process instead of leaving the service apparently up but operationally inert.
 - [x] Fix recurring article image repair type errors.
   Status: fixed in repo. The article-image fallback path now accepts the actual string return shape from the LLM extractor instead of dereferencing `.image_url` on a string-like result.
 - [ ] Ship the mobile tab-entry refresh fix in the next app release.
@@ -519,7 +519,7 @@ Assessment:
 - [x] Expand `/health` or `/ops/status` with resource and restart signals.
   Status: partially completed in repo. `/ops/status` now includes process runtime diagnostics including RSS, peak RSS, PID, hostname, Python version, and uptime. Restart history still comes from external Render events rather than the health payload itself.
 - [ ] Add a post-deploy operational smoke check that runs automatically.
-  Status: in progress. `src/backend/scripts/operational_check.py` now supports failing on anomalies/admin failures, checks detail and starters endpoints, and a dedicated GitHub Actions workflow has been added for scheduled/manual smoke runs. The workflow stays strict while temporarily tolerating the already-known reels inventory degradation.
+  Status: in progress. `src/backend/scripts/operational_check.py` now fails on degraded `/health` payloads, supports webhook alerts, checks detail and starters endpoints, and the scheduled smoke workflow now runs hourly with admin checks when credentials are present. It is still a scheduled guardrail rather than a true deploy-gated smoke step.
 - [x] Add automation that pages on repeated worker `server_failed` OOM events from Render.
   Status: implemented in repo via `src/backend/scripts/render_runtime_check.py` and `.github/workflows/backend_render_runtime_monitor.yml`. The monitor now ignores superseded canceled deploys and only alerts on freshly observed anomalies so hourly runs do not re-page the same incident. It still needs `RENDER_API_TOKEN` and `ALERT_WEBHOOK_URL` secrets configured to go live.
 - [ ] Reassess noisy and permanently failing sources.
@@ -543,7 +543,8 @@ Assessment:
 - [x] April 1, 2026: added repo-side alerting for degraded inventory surfaces, scheduler overlap/errors, signal deadlocks, process RSS visibility in `/ops/status`, and a scheduled Render runtime monitor workflow.
 - [x] April 1, 2026: tightened the Render runtime monitor so it ignores superseded canceled deploys and only pages on newly observed anomalies instead of re-alerting historical incidents on adjacent hourly runs.
 - [x] April 1, 2026: identified and fixed a reel scheduler starvation bug in repo state. Under the default `INGESTION_MAX_WORKERS=2` layout, the checkpoint scheduler now shares the video slot with reels as intended, while explicit `REEL=0` operator caps still disable reel dispatch.
-- [ ] Next: deploy the new backend checkpoint to Render and verify whether overlap alerts stay quiet, deadlock frequency drops, worker restarts stop, and reels freshness improves under live load.
+- [x] April 1, 2026: hardened the dedicated worker so startup/runtime lock failures exit nonzero instead of idling forever, and taught the operational smoke probe to fail on degraded `/health` payloads and send webhook alerts.
+- [ ] Next: deploy the new worker-fail-loud and smoke-alert checkpoint to Render, confirm the worker regains scheduler leadership, and then validate whether reels freshness improves under live load.
 
 ## Test / Automation Gap Analysis
 
@@ -568,20 +569,21 @@ What is working:
 
 - production API is up
 - DB and Redis are healthy
-- scheduler leadership is visible
 - ingestion is active
 - Articles and Videos are fresh and operational
 - direct feed cache freshness headers are now trustworthy
+- the repo now has stricter worker-failure handling and smoke-alerting safeguards ready for deploy
 
 What is broken:
 
-- worker runtime is unstable due to repeated OOM kills
+- live `/health` is degraded because the external worker leader lock is currently not visible
 - reels freshness is below the backend's own health threshold
 - worker logs show deadlocks and overlapping ingestion windows
 
 What is stale:
 
 - reels recent refresh volume, not the entire feed surface
+- the document previously assumed healthy worker lock visibility; that has now been corrected to the current live state
 
 What is not being triggered as expected:
 

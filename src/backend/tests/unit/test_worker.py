@@ -1,0 +1,92 @@
+"""Unit tests for the dedicated background worker entrypoint."""
+
+from __future__ import annotations
+
+import app.worker as worker
+
+
+def _patch_signal_handlers(monkeypatch):
+    monkeypatch.setattr(worker.signal, "signal", lambda *_args, **_kwargs: None)
+
+
+def test_run_worker_returns_zero_when_scheduler_disabled(monkeypatch):
+    _patch_signal_handlers(monkeypatch)
+    worker._stop_event.clear()
+    monkeypatch.setenv("SCHEDULER_ENABLED", "false")
+
+    idle_calls: list[str] = []
+    monkeypatch.setattr(worker, "_idle_forever", lambda: idle_calls.append("idle"))
+
+    exit_code = worker.run_worker()
+
+    assert exit_code == 0
+    assert idle_calls == ["idle"]
+
+
+def test_run_worker_exits_nonzero_when_lock_never_acquired(monkeypatch):
+    _patch_signal_handlers(monkeypatch)
+    worker._stop_event.clear()
+    monkeypatch.setenv("SCHEDULER_ENABLED", "true")
+    monkeypatch.setattr(worker, "_acquire_lock_with_retry", lambda: False)
+    monkeypatch.setattr(worker, "_idle_forever", lambda: (_ for _ in ()).throw(AssertionError()))
+
+    exit_code = worker.run_worker()
+
+    assert exit_code == 1
+
+
+def test_acquire_lock_with_retry_retries_redis_unavailability(monkeypatch):
+    worker._stop_event.clear()
+    attempts = iter([None, True])
+    waits: list[float] = []
+
+    monkeypatch.setattr(worker, "acquire_worker_lock", lambda: next(attempts))
+    monkeypatch.setattr(
+        worker._stop_event,
+        "wait",
+        lambda timeout=None: waits.append(timeout) or False,
+    )
+
+    assert worker._acquire_lock_with_retry(max_attempts=3, base_delay=5.0) is True
+    assert waits == [5.0]
+
+
+def test_run_worker_releases_lock_and_exits_nonzero_when_scheduler_init_fails(monkeypatch):
+    _patch_signal_handlers(monkeypatch)
+    worker._stop_event.clear()
+    monkeypatch.setenv("SCHEDULER_ENABLED", "true")
+    monkeypatch.setattr(worker, "_acquire_lock_with_retry", lambda: True)
+    monkeypatch.setattr(worker, "init_scheduler", lambda: None)
+    monkeypatch.setattr(worker._stop_event, "wait", lambda timeout=None: False)
+
+    release_calls: list[str] = []
+    monkeypatch.setattr(worker, "release_worker_lock", lambda: release_calls.append("release") or True)
+
+    exit_code = worker.run_worker()
+
+    assert exit_code == 1
+    assert release_calls == ["release"]
+
+
+def test_run_worker_exits_nonzero_when_lock_recovery_fails(monkeypatch):
+    _patch_signal_handlers(monkeypatch)
+    worker._stop_event.clear()
+    monkeypatch.setenv("SCHEDULER_ENABLED", "true")
+    monkeypatch.setattr(worker, "_acquire_lock_with_retry", lambda: True)
+
+    class DummyScheduler:
+        def shutdown(self, wait=False):  # noqa: ARG002
+            return None
+
+    monkeypatch.setattr(worker, "init_scheduler", lambda: DummyScheduler())
+    monkeypatch.setattr(worker, "fetch_and_process_news", lambda: None)
+    monkeypatch.setattr(worker, "refresh_worker_lock", lambda: False)
+    monkeypatch.setattr(worker, "_attempt_lock_reacquire", lambda: False)
+
+    release_calls: list[str] = []
+    monkeypatch.setattr(worker, "release_worker_lock", lambda: release_calls.append("release") or True)
+
+    exit_code = worker.run_worker()
+
+    assert exit_code == 1
+    assert release_calls == ["release"]

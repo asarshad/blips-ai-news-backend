@@ -13,7 +13,7 @@ on:
         default: true
         type: boolean
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: "45 * * * *"
 
 permissions:
   contents: read
@@ -33,6 +33,7 @@ jobs:
         env:
           BASE_URL: ${{ inputs.base_url || vars.OPS_BASE_URL || 'https://api.blips.tech' }}
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
           STRICT_MODE: ${{ github.event_name == 'schedule' || inputs.strict }}
         run: |
           set -euo pipefail
@@ -47,7 +48,10 @@ jobs:
             args+=(--fail-on-anomaly --allow-unhealthy-surface reels)
           fi
           if [ -n "${ADMIN_API_KEY:-}" ]; then
-            args+=(--admin-key "$ADMIN_API_KEY")
+            args+=(--admin-key "$ADMIN_API_KEY" --require-admin-success)
+          fi
+          if [ -n "${ALERT_WEBHOOK_URL:-}" ] && [ "$STRICT_MODE" = "true" ]; then
+            args+=(--alert-webhook-url "$ALERT_WEBHOOK_URL")
           fi
 
           python "${args[@]}"

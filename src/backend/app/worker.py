@@ -92,13 +92,14 @@ def signal_handler(signum, _frame):
         pass
 
 
-def acquire_worker_lock() -> bool:
+def acquire_worker_lock() -> bool | None:
     """
     Acquire a distributed lock to ensure only one worker runs.
     Uses a unique token so only the owning process can refresh/release.
 
     Returns:
-        True if lock acquired, False otherwise
+        True if lock acquired, False if another worker owns it,
+        None if Redis was unavailable while checking
     """
     try:
         redis_client = get_redis()
@@ -111,7 +112,7 @@ def acquire_worker_lock() -> bool:
         return bool(acquired)
     except RedisError as e:
         logger.error(f"Failed to acquire worker lock: {e}")
-        return False
+        return None
 
 
 # Lua script: only refresh TTL if caller still owns the lock (CAS).
@@ -205,7 +206,7 @@ def _attempt_lock_reacquire() -> bool:
             logger.error("Worker lock is owned by another process; cannot reacquire safely")
             return False
 
-        if acquire_worker_lock():
+        if acquire_worker_lock() is True:
             logger.warning(
                 "Worker lock was missing and has been reacquired "
                 f"(attempt {attempt}/{LOCK_REACQUIRE_ATTEMPTS})"
@@ -237,21 +238,31 @@ def _acquire_lock_with_retry(max_attempts: int = 10, base_delay: float = 5.0) ->
     """
     for attempt in range(1, max_attempts + 1):
         try:
-            if acquire_worker_lock():
+            lock_result = acquire_worker_lock()
+            if lock_result is True:
                 return True
-            delay = min(base_delay * (2 ** (attempt - 1)), WORKER_LOCK_TTL)
-            logger.warning(
-                f"Lock held by another process (attempt {attempt}/{max_attempts}). "
-                f"Retrying in {delay:.0f}s …"
-            )
-            time.sleep(delay)
+            delay_cap = 60 if lock_result is None else WORKER_LOCK_TTL
+            delay = min(base_delay * (2 ** (attempt - 1)), delay_cap)
+            if lock_result is None:
+                logger.warning(
+                    f"Redis unavailable during worker lock acquisition "
+                    f"(attempt {attempt}/{max_attempts}). Retrying in {delay:.0f}s …"
+                )
+            else:
+                logger.warning(
+                    f"Lock held by another process (attempt {attempt}/{max_attempts}). "
+                    f"Retrying in {delay:.0f}s …"
+                )
+            if _stop_event.wait(timeout=delay):
+                return False
         except Exception as e:
             delay = min(base_delay * (2 ** (attempt - 1)), 60)
             logger.warning(
                 f"Lock acquisition error (attempt {attempt}/{max_attempts}): {e}. "
                 f"Retrying in {delay:.0f}s …"
             )
-            time.sleep(delay)
+            if _stop_event.wait(timeout=delay):
+                return False
     return False
 
 
@@ -259,6 +270,7 @@ def run_worker():
     """Main worker entry point."""
     global _scheduler
     lock_acquired = False
+    exit_code = 0
 
     # Register signal handlers as early as possible so SIGTERM during lock
     # acquisition is handled gracefully rather than causing an immediate exit.
@@ -290,63 +302,72 @@ def run_worker():
         logger.info("Worker idling (SCHEDULER_ENABLED=false).")
         sys.stdout.flush()
         _idle_forever()
-        return
+        return 0
 
     # Try to acquire the worker lock (with retry / back-off)
     if not _acquire_lock_with_retry():
-        logger.error("Could not acquire worker lock after retries — idling")
+        if _stop_event.is_set():
+            logger.info("Worker startup interrupted while acquiring lock")
+            sys.stdout.flush()
+            return 0
+        logger.error("Could not acquire worker lock after retries — exiting for restart")
         sys.stdout.flush()
-        _idle_forever()
-        return
+        return 1
 
     lock_acquired = True
     logger.info("Worker lock acquired successfully")
     sys.stdout.flush()
 
-    # Initialize scheduler (retry on transient failure)
-    for attempt in range(1, 4):
+    try:
+        # Initialize scheduler (retry on transient failure)
+        for attempt in range(1, 4):
+            try:
+                _scheduler = init_scheduler()
+            except Exception as sched_exc:
+                logger.error(
+                    f"Scheduler init exception (attempt {attempt}/3): {sched_exc}\n"
+                    + traceback.format_exc()
+                )
+                _scheduler = None
+            if _scheduler:
+                break
+            if _stop_event.is_set():
+                logger.info("Worker startup interrupted during scheduler initialization")
+                sys.stdout.flush()
+                return 0
+            logger.warning(f"Scheduler init failed (attempt {attempt}/3), retrying in 10s …")
+            sys.stdout.flush()
+            if _stop_event.wait(timeout=10):
+                logger.info("Worker startup interrupted during scheduler retry backoff")
+                sys.stdout.flush()
+                return 0
+
+        if not _scheduler:
+            logger.error("Failed to initialize scheduler after 3 attempts — exiting for restart")
+            sys.stdout.flush()
+            return 1
+
+        logger.info("Scheduler initialized successfully")
+        sys.stdout.flush()
+
+        # Run initial fetch (catch ALL errors so it never kills the worker)
+        logger.info("Running initial news fetch...")
+        sys.stdout.flush()
         try:
-            _scheduler = init_scheduler()
-        except Exception as sched_exc:
-            logger.error(
-                f"Scheduler init exception (attempt {attempt}/3): {sched_exc}\n"
-                + traceback.format_exc()
-            )
-            _scheduler = None
-        if _scheduler:
-            break
-        logger.warning(f"Scheduler init failed (attempt {attempt}/3), retrying in 10s …")
+            fetch_and_process_news()
+            logger.info("Initial fetch completed")
+        except Exception as e:
+            logger.error(f"Initial fetch failed (non-fatal): {e}\n" + traceback.format_exc())
         sys.stdout.flush()
-        time.sleep(10)
 
-    if not _scheduler:
-        logger.error("Failed to initialize scheduler after 3 attempts — idling")
+        # Keep the worker running and refresh lock.
+        # Tolerate transient Redis errors (returns None) — only exit on a
+        # definitive lock-lost (returns False) or sustained unavailability.
+        _MAX_REDIS_FAILURES = 5  # ~5 minutes of Redis unavailability before giving up
+        _redis_failure_count = 0
+
+        logger.info("Worker running. Press Ctrl+C to stop.")
         sys.stdout.flush()
-        _idle_forever()
-        return
-
-    logger.info("Scheduler initialized successfully")
-    sys.stdout.flush()
-
-    # Run initial fetch (catch ALL errors so it never kills the worker)
-    logger.info("Running initial news fetch...")
-    sys.stdout.flush()
-    try:
-        fetch_and_process_news()
-        logger.info("Initial fetch completed")
-    except Exception as e:
-        logger.error(f"Initial fetch failed (non-fatal): {e}\n" + traceback.format_exc())
-    sys.stdout.flush()
-
-    # Keep the worker running and refresh lock.
-    # Tolerate transient Redis errors (returns None) — only exit on a
-    # definitive lock-lost (returns False) or sustained unavailability.
-    _MAX_REDIS_FAILURES = 5  # ~5 minutes of Redis unavailability before giving up
-    _redis_failure_count = 0
-
-    logger.info("Worker running. Press Ctrl+C to stop.")
-    sys.stdout.flush()
-    try:
         while not _stop_event.is_set():
             result = refresh_worker_lock()
             if result is True:
@@ -365,6 +386,7 @@ def run_worker():
                         f"Redis unreachable for {_redis_failure_count} consecutive cycles "
                         "— shutting down"
                     )
+                    exit_code = 1
                     break
             else:
                 # result is False — refresh CAS failed. Attempt a safe recovery
@@ -375,6 +397,7 @@ def run_worker():
                     _redis_failure_count = 0
                     continue
                 logger.error("Lost worker lock and recovery failed — shutting down")
+                exit_code = 1
                 break
             _stop_event.wait(timeout=60)  # Wakes immediately on signal
     except (KeyboardInterrupt, SystemExit):
@@ -391,6 +414,7 @@ def run_worker():
                 logger.info("Worker lock not released (already lost or Redis unavailable)")
         logger.info("Worker shutdown complete")
         sys.stdout.flush()
+    return exit_code
 
 
 def _idle_forever():
@@ -404,7 +428,7 @@ def _idle_forever():
 
 if __name__ == "__main__":
     try:
-        run_worker()
+        sys.exit(run_worker())
     except Exception as exc:  # noqa: BLE001
         logger.critical(
             "Unhandled exception in run_worker — worker is exiting: %s\n%s",
