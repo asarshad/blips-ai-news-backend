@@ -7,7 +7,7 @@ Should be protected in production (e.g., behind internal network or auth).
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.auth import require_admin_key
@@ -18,6 +18,7 @@ from app.core.youtube_quota import YouTubeQuotaBudget
 from app.schemas.ads import AdsConfigAdminResponse, AdsRuntimeConfigPatch
 from app.schemas.push import PushConfigAdminResponse, PushRuntimeConfigPatch, PushSendResponse
 from app.services.ad_config_service import AdConfigService
+from app.services.playlist_service import refresh_cached_playlist_items
 from app.services.push_config_service import PushConfigService
 from app.services.push_service import (
     PushNotificationError,
@@ -71,6 +72,12 @@ class ArticleImageRepairRequest(BaseModel):
     """Admin request body for repairing one article image by content ID."""
 
     content_id: int
+
+
+class ContentTouchRequest(BaseModel):
+    """Admin request body for targeted content touch invalidation."""
+
+    content_ids: list[int] = Field(default_factory=list)
 
 
 @router.get("/ads/config", response_model=AdsConfigAdminResponse)
@@ -431,7 +438,7 @@ def trigger_image_recovery_eval(payload: ArticleImageRecoveryEvalRequest):
 
 
 @router.post("/trigger-content-touch")
-def trigger_content_touch():
+def trigger_content_touch(payload: Optional[ContentTouchRequest] = None):
     """Force-bump updated_at for recently repaired/fixed content, then bust feed cache.
 
     Touches:
@@ -455,6 +462,29 @@ def trigger_content_touch():
     try:
         now = datetime.utcnow()
         cutoff = now - timedelta(days=30)
+        targeted_ids = sorted(
+            {
+                int(content_id)
+                for content_id in ((payload.content_ids if payload else []) or [])
+                if int(content_id) > 0
+            }
+        )
+
+        if targeted_ids:
+            touch_result = db.execute(
+                update(ContentItem).where(ContentItem.id.in_(targeted_ids)).values(updated_at=now)
+            )
+            db.commit()
+            invalidate_tiered_feed_cache()
+            cache_refresh = refresh_cached_playlist_items(db, content_ids=targeted_ids)
+            return {
+                "status": "ok",
+                "mode": "targeted",
+                "content_ids": targeted_ids,
+                "content_items_touched": touch_result.rowcount,
+                "cache_busted": True,
+                "playlist_cache_refresh": cache_refresh,
+            }
 
         article_result = db.execute(
             update(ContentItem)

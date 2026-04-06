@@ -153,7 +153,9 @@ def repair_single_article_image(
         raise ValueError(f"Article {content_id} not found")
 
     previous_image_url = (item.image_url or "").strip() or None
-    previous_verification_status = (getattr(item, "article_image_status", None) or "").strip() or None
+    previous_verification_status = (
+        getattr(item, "article_image_status", None) or ""
+    ).strip() or None
     previous_readiness_status = (getattr(item, "readiness_status", None) or "").strip() or None
     source_url = (item.canonical_url or item.source_url or "").strip()
 
