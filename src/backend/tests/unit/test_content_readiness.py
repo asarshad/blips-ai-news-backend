@@ -37,7 +37,7 @@ def test_article_requires_ai_summary_to_be_ready():
     assert decision.surfaces == ("articles",)
 
 
-def test_video_is_ready_without_summary_when_core_fields_exist():
+def test_video_requires_ai_summary_to_be_ready():
     video = SimpleNamespace(
         id=2,
         type=ContentType.VIDEO,
@@ -47,12 +47,35 @@ def test_video_is_ready_without_summary_when_core_fields_exist():
         title="Fresh promoted video",
         source_url="https://www.youtube.com/watch?v=test123",
         video_url="https://www.youtube.com/watch?v=test123",
+        ai_processed=False,
+        summary=None,
     )
 
     decision = evaluate_content_readiness(video)
 
-    assert decision.status == ContentReadinessStatus.READY
-    assert decision.reason == "video_ready"
+    assert decision.status == ContentReadinessStatus.PENDING
+    assert decision.reason == "awaiting_video_ai_processing"
+    assert decision.surfaces == ("videos",)
+
+
+def test_video_requires_non_empty_summary_after_ai_processing():
+    video = SimpleNamespace(
+        id=3,
+        type=ContentType.VIDEO,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        promotion_reason=None,
+        title="Fresh promoted video",
+        source_url="https://www.youtube.com/watch?v=test123",
+        video_url="https://www.youtube.com/watch?v=test123",
+        ai_processed=True,
+        summary="   ",
+    )
+
+    decision = evaluate_content_readiness(video)
+
+    assert decision.status == ContentReadinessStatus.PENDING
+    assert decision.reason == "missing_video_summary"
     assert decision.surfaces == ("videos",)
 
 
@@ -157,6 +180,8 @@ def test_build_content_ready_event_payload_includes_delivery_metadata():
         title="Video ready",
         source_url="https://www.youtube.com/watch?v=abc123",
         video_url="https://www.youtube.com/watch?v=abc123",
+        ai_processed=True,
+        summary="A verified AI summary that is ready for client delivery.",
         published_at=now,
         created_at=now,
         ready_at=now,
@@ -195,3 +220,29 @@ def test_build_content_unready_event_payload_preserves_reason_metadata():
     assert payload["effective_type"] == ContentType.ARTICLE.value
     assert payload["surfaces"] == ["articles"]
     assert payload["readiness_reason"] == "awaiting_ai_processing"
+
+
+def test_build_content_unready_event_payload_uses_video_summary_reason():
+    now = datetime(2026, 3, 23, 18, 0, 0)
+    video = SimpleNamespace(
+        id=11,
+        type=ContentType.VIDEO,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        promotion_reason=None,
+        title="Video pending summary",
+        source_url="https://www.youtube.com/watch?v=abc123",
+        video_url="https://www.youtube.com/watch?v=abc123",
+        ai_processed=True,
+        summary=None,
+        published_at=now,
+        created_at=now,
+        ready_at=None,
+    )
+
+    payload = build_content_unready_event_payload(video)
+
+    assert payload["content_id"] == 11
+    assert payload["effective_type"] == ContentType.VIDEO.value
+    assert payload["surfaces"] == ["videos"]
+    assert payload["readiness_reason"] == "missing_video_summary"

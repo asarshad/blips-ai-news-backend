@@ -431,6 +431,80 @@ class TestEditorialServiceApproval:
         hydrator.hydrate_article_candidate.assert_called_once_with(item)
         repo.promote.assert_called_once_with(14, actor="reviewer")
 
+    def test_approve_blocks_video_without_ai_summary(self):
+        repo = MagicMock()
+        item = FakeContentItem(
+            id=17,
+            type=ContentType.VIDEO,
+            source_url="https://www.youtube.com/watch?v=thin123",
+            video_url="https://www.youtube.com/watch?v=thin123",
+            title="Candidate video",
+            summary=None,
+            ai_processed=False,
+        )
+        repo.get_content_by_id.return_value = item
+        repo.approve.return_value = item
+
+        svc = self._make_service(repo)
+        hydrator = MagicMock()
+        hydrator.needs_hydration.return_value = False
+        svc._article_hydrator = hydrator
+
+        with pytest.raises(EditorialApprovalBlockedError) as excinfo:
+            svc.approve_content(17, actor="reviewer")
+
+        assert excinfo.value.readiness_reason == "awaiting_video_ai_processing"
+        repo.approve.assert_not_called()
+
+    def test_approve_publish_blocks_video_without_ai_summary(self):
+        repo = MagicMock()
+        item = FakeContentItem(
+            id=18,
+            type=ContentType.VIDEO,
+            source_url="https://www.youtube.com/watch?v=thin456",
+            video_url="https://www.youtube.com/watch?v=thin456",
+            title="Candidate video",
+            summary=None,
+            ai_processed=False,
+        )
+        repo.get_content_by_id.return_value = item
+        repo.approve_and_publish.return_value = item
+
+        svc = self._make_service(repo)
+        hydrator = MagicMock()
+        hydrator.needs_hydration.return_value = False
+        svc._article_hydrator = hydrator
+
+        with pytest.raises(EditorialApprovalBlockedError) as excinfo:
+            svc.approve_and_publish(18, actor="reviewer")
+
+        assert excinfo.value.readiness_reason == "awaiting_video_ai_processing"
+        repo.approve_and_publish.assert_not_called()
+
+    def test_approve_allows_ready_video(self):
+        repo = MagicMock()
+        item = FakeContentItem(
+            id=19,
+            type=ContentType.VIDEO,
+            source_url="https://www.youtube.com/watch?v=ready123",
+            video_url="https://www.youtube.com/watch?v=ready123",
+            title="Ready video",
+            summary="A ready AI summary with enough substance for feed delivery.",
+            ai_processed=True,
+        )
+        repo.get_content_by_id.return_value = item
+        repo.approve.return_value = item
+
+        svc = self._make_service(repo)
+        hydrator = MagicMock()
+        hydrator.needs_hydration.return_value = False
+        svc._article_hydrator = hydrator
+
+        result = svc.approve_content(19, actor="reviewer")
+
+        assert result is item
+        repo.approve.assert_called_once_with(19, actor="reviewer", note=None)
+
     def test_approve_skips_llm_when_item_is_already_processed(self):
         repo = MagicMock()
         item = FakeContentItem(

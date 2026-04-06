@@ -21,6 +21,8 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from sqlalchemy.orm import Session
+
 from app.article_hydration import display_article_title
 from app.core.feature_flags import FeatureFlags
 from app.core.logging import get_logger
@@ -36,6 +38,7 @@ from app.repositories.user_repo import (
 from app.services.feed_freshness_strategies import CURRENT_STRATEGY, feed_freshness_strategies
 from app.services.feed_version import compute_feed_version
 from app.services.inventory_service import Surface
+from app.services.content_readiness import is_ready_for_surface, surface_name_for_item
 from app.services.multi_factor_ranking_service import MultiFactorRankingService
 from app.services.personalization_service import PersonalizationService
 from app.services.tiered_feed_service import get_cached_tiered_feed
@@ -72,8 +75,18 @@ NEGATIVE_CREATOR_SUPPRESSION_HOURS = 168
 # Cache configuration
 PLAYLIST_CACHE_TTL_SECONDS = 300  # 5 minutes
 PLAYLIST_CACHE_PREFIX = "playlist:"
-VIDEO_REEL_PLAYLIST_CACHE_PREFIX = "playlist:video-reel-v3:"
+VIDEO_REEL_PLAYLIST_CACHE_PREFIX = "playlist:video-reel-v4:"
 SESSION_SNAPSHOT_TTL_SECONDS = 3600  # 1 hour for session snapshots
+
+
+def _get_playlist_redis_client():
+    try:
+        from app.core.dependencies import get_redis
+
+        return get_redis()
+    except Exception as exc:
+        logger.debug("Redis unavailable for playlist cache refresh: %s", exc)
+        return None
 
 
 def _surface_for_content_type(content_type: ContentType) -> Surface:
@@ -151,6 +164,229 @@ def _normalize_conversation_starters(value: Any) -> Dict[str, List[str]]:
     return {
         "starters": starters,
         "fallback": fallback,
+    }
+
+
+def _serialize_content_item_for_cached_payload(
+    item: ContentItem,
+    *,
+    existing: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Refresh a cached playlist item with the latest DB-backed content fields."""
+    cached = dict(existing or {})
+    item_type = effective_content_type(item)
+    topics = _string_terms(item.topics)
+    entities = _string_terms(item.entities)
+    duration_seconds = _optional_int(item.duration_seconds)
+
+    cached.update(
+        {
+            "id": item.id,
+            "type": item_type.value,
+            "source": _optional_text(item.source) or "Unknown",
+            "source_url": _optional_text(item.source_url),
+            "title": (
+                _optional_text(
+                    display_article_title(
+                        item.title,
+                        getattr(item, "canonical_url", None) or item.source_url,
+                    )
+                )
+                or "Untitled article"
+            )
+            if item_type == ContentType.ARTICLE
+            else (_optional_text(item.title) or "Untitled"),
+            "description": _optional_text(item.description),
+            "summary": _optional_text(item.summary),
+            "image_url": _optional_text(item.image_url),
+            "video_url": _optional_text(item.video_url),
+            "thumbnail_url": _optional_text(item.image_url),
+            "duration": duration_seconds,
+            "duration_seconds": duration_seconds,
+            "category": topics[0] if topics else None,
+            "topics": topics,
+            "entities": entities,
+            "published_at": item.published_at.isoformat() if item.published_at else None,
+            "published_date": item.published_at.date().isoformat() if item.published_at else None,
+            "created_at": item.created_at.isoformat()
+            if getattr(item, "created_at", None)
+            else None,
+            "updated_at": getattr(item, "updated_at", None).isoformat()
+            if getattr(item, "updated_at", None)
+            else None,
+            "read_time_minutes": max(1, len(item.summary or "") // 200)
+            if item_type == ContentType.ARTICLE
+            else None,
+            "conversation_starters": _normalize_conversation_starters(item.conversation_starters),
+        }
+    )
+    return cached
+
+
+def _cache_patterns_for_types(content_types: Set[ContentType]) -> List[str]:
+    patterns: List[str] = []
+    if ContentType.ARTICLE in content_types:
+        patterns.append(f"{PLAYLIST_CACHE_PREFIX}*:ARTICLE:*")
+    if ContentType.VIDEO in content_types:
+        patterns.append(f"{VIDEO_REEL_PLAYLIST_CACHE_PREFIX}*:VIDEO:*")
+    if ContentType.REEL in content_types:
+        patterns.append(f"{VIDEO_REEL_PLAYLIST_CACHE_PREFIX}*:REEL:*")
+    return patterns
+
+
+def _ttl_for_cache_key(redis_client, key: str) -> int:
+    try:
+        ttl = int(redis_client.ttl(key))
+        if ttl > 0:
+            return ttl
+    except Exception:
+        pass
+    return SESSION_SNAPSHOT_TTL_SECONDS if ":session:" in key else PLAYLIST_CACHE_TTL_SECONDS
+
+
+def _patch_cached_playlist_payload(
+    payload: Any,
+    *,
+    items_by_id: Dict[int, ContentItem],
+) -> tuple[bool, Any, int]:
+    changed = False
+    updated_entries = 0
+
+    def _patch_items(items: List[Any]) -> List[Any]:
+        nonlocal changed, updated_entries
+        patched_items: List[Any] = []
+        for raw in items:
+            if not isinstance(raw, dict):
+                patched_items.append(raw)
+                continue
+            content_id = _optional_int(raw.get("id"))
+            item = items_by_id.get(content_id or -1)
+            if item is None:
+                patched_items.append(raw)
+                continue
+            if not is_ready_for_surface(item, surface_name_for_item(item)):
+                changed = True
+                updated_entries += 1
+                continue
+            patched = _serialize_content_item_for_cached_payload(item, existing=raw)
+            if patched != raw:
+                changed = True
+                updated_entries += 1
+            patched_items.append(patched)
+        return patched_items
+
+    if isinstance(payload, dict):
+        items = payload.get("items")
+        if not isinstance(items, list):
+            return False, payload, 0
+        patched_payload = dict(payload)
+        patched_items = _patch_items(items)
+        if not changed:
+            return False, payload, 0
+        patched_payload["items"] = patched_items
+        generated_at_raw = patched_payload.get("generated_at")
+        try:
+            generated_at = (
+                datetime.fromisoformat(generated_at_raw)
+                if isinstance(generated_at_raw, str) and generated_at_raw
+                else datetime.utcnow()
+            )
+        except ValueError:
+            generated_at = datetime.utcnow()
+        patched_payload["feed_version"] = compute_feed_version(patched_items, generated_at)
+        return True, patched_payload, updated_entries
+
+    if isinstance(payload, list):
+        patched_items = _patch_items(payload)
+        if not changed:
+            return False, payload, 0
+        return True, patched_items, updated_entries
+
+    return False, payload, 0
+
+
+def refresh_cached_playlist_items(
+    db: Session,
+    *,
+    content_ids: List[int],
+    redis_client=None,
+) -> Dict[str, int]:
+    """Rewrite cached playlist/session payloads for specific content IDs."""
+    normalized_ids = sorted({int(content_id) for content_id in content_ids if int(content_id) > 0})
+    if not normalized_ids:
+        return {
+            "content_ids": 0,
+            "cache_keys_scanned": 0,
+            "cache_keys_updated": 0,
+            "cached_items_updated": 0,
+        }
+
+    redis_client = redis_client or _get_playlist_redis_client()
+    if not redis_client:
+        return {
+            "content_ids": len(normalized_ids),
+            "cache_keys_scanned": 0,
+            "cache_keys_updated": 0,
+            "cached_items_updated": 0,
+        }
+
+    items = db.query(ContentItem).filter(ContentItem.id.in_(normalized_ids)).all()
+    items_by_id = {item.id: item for item in items}
+    if not items_by_id:
+        return {
+            "content_ids": len(normalized_ids),
+            "cache_keys_scanned": 0,
+            "cache_keys_updated": 0,
+            "cached_items_updated": 0,
+        }
+
+    patterns = _cache_patterns_for_types({effective_content_type(item) for item in items_by_id.values()})
+    keys: List[str] = []
+    for pattern in patterns:
+        try:
+            keys.extend(redis_client.keys(pattern))
+        except Exception as exc:
+            logger.warning("Playlist cache scan failed for %s: %s", pattern, exc)
+
+    deduped_keys = list(dict.fromkeys(keys))
+    cache_keys_updated = 0
+    cached_items_updated = 0
+
+    for key in deduped_keys:
+        try:
+            raw = redis_client.get(key)
+        except Exception as exc:
+            logger.warning("Playlist cache get failed for %s: %s", key, exc)
+            continue
+        if not raw:
+            continue
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            continue
+
+        changed, patched_payload, updated_entries = _patch_cached_playlist_payload(
+            payload,
+            items_by_id=items_by_id,
+        )
+        if not changed:
+            continue
+
+        ttl = _ttl_for_cache_key(redis_client, key)
+        try:
+            redis_client.setex(key, ttl, json.dumps(patched_payload))
+            cache_keys_updated += 1
+            cached_items_updated += updated_entries
+        except Exception as exc:
+            logger.warning("Playlist cache update failed for %s: %s", key, exc)
+
+    return {
+        "content_ids": len(normalized_ids),
+        "cache_keys_scanned": len(deduped_keys),
+        "cache_keys_updated": cache_keys_updated,
+        "cached_items_updated": cached_items_updated,
     }
 
 

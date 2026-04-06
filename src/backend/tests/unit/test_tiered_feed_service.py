@@ -16,7 +16,7 @@ from app.services.tiered_feed_service import (
 )
 
 
-def test_tiered_item_to_dict_falls_back_to_video_description_when_summary_missing():
+def test_tiered_item_to_dict_does_not_leak_video_description_when_summary_missing():
     item = SimpleNamespace(
         id=42,
         type=ContentType.VIDEO,
@@ -53,7 +53,7 @@ def test_tiered_item_to_dict_falls_back_to_video_description_when_summary_missin
 
     result = tiered_item_to_dict(tiered)
 
-    assert result["summary"].startswith("This is a detailed video description")
+    assert result["summary"] == ""
     assert result["video_url"] == "https://www.youtube.com/watch?v=test123"
     assert result["conversation_starters"]["fallback"]
 

@@ -216,8 +216,8 @@ def evaluate_push_eligibility(item: ContentItem) -> PushEligibilityDecision:
             reason=readiness.reason,
         )
 
-    # Videos are feed-ready without a summary (they play immediately), but push
-    # notifications must include a summary so the card is not blank on open.
+    # Keep an explicit guard here so push remains safe even if readiness rules
+    # drift in the future.
     if effective_type == ContentType.VIDEO:
         summary = (getattr(item, "summary", None) or "").strip()
         if not summary:

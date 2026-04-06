@@ -55,4 +55,11 @@ def __getattr__(name):
         value = getattr(import_module(module_name), attr_name)
         globals()[name] = value
         return value
+    try:
+        module = import_module(f"{__name__}.{name}")
+    except ModuleNotFoundError:
+        module = None
+    if module is not None:
+        globals()[name] = module
+        return module
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

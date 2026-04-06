@@ -109,9 +109,9 @@ class TestArticlesDiagnosticHeaders:
 
 
 class TestVideosFeedReadiness:
-    """Videos remain visible immediately, but via readiness rather than a route flag."""
+    """Videos must satisfy the shared readiness contract before delivery."""
 
-    def test_video_with_title_and_url_is_ready_without_summary(self):
+    def test_video_without_ai_summary_is_not_ready(self):
         from app.models.content import ContentReadinessStatus, ContentStatus, ContentType
         from app.services.content_readiness import evaluate_content_readiness
 
@@ -124,12 +124,14 @@ class TestVideosFeedReadiness:
             title="Fresh promoted video",
             source_url="https://www.youtube.com/watch?v=test123",
             video_url="https://www.youtube.com/watch?v=test123",
+            ai_processed=False,
+            summary=None,
         )
 
         decision = evaluate_content_readiness(item)
 
-        assert decision.status == ContentReadinessStatus.READY
-        assert decision.reason == "video_ready"
+        assert decision.status == ContentReadinessStatus.PENDING
+        assert decision.reason == "awaiting_video_ai_processing"
 
     def test_videos_returns_cursor_envelope_instead_of_404(self):
         import inspect

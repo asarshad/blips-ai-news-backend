@@ -70,12 +70,16 @@ def process_ai_summaries(
             is_video_summary_acceptable,
             normalize_video_summary_output,
         )
+        from app.services.content_readiness import sync_content_readiness
+        from app.services.playlist_service import refresh_cached_playlist_items
+        from app.services.tiered_feed_service import invalidate_tiered_feed_cache
         from app.models.content import ContentType
         from app.repositories.content_repo import ContentItemRepository
 
         content_repo = ContentItemRepository(db)
         llm_client = LLMClient()
         article_hydrator = ArticleHydrationService(llm_client=llm_client)
+        touched_content_ids: set[int] = set()
 
         if not llm_client.is_configured():
             logger.warning(
@@ -129,6 +133,7 @@ def process_ai_summaries(
             try:
                 if item.type == ContentType.REEL:
                     content_repo.mark_ai_processed(item.id, summary="", topics=item.topics or [])
+                    touched_content_ids.add(int(item.id))
                     stats.items_processed += 1
                     continue
 
@@ -195,6 +200,7 @@ def process_ai_summaries(
                 )
                 if summary_is_valid:
                     content_repo.mark_ai_processed(item.id, summary=summary, topics=topics)
+                    touched_content_ids.add(int(item.id))
                     if starters and not item.conversation_starters:
                         item.conversation_starters = starters
                         db.commit()
@@ -202,7 +208,9 @@ def process_ai_summaries(
                 elif classification_only:
                     item.ai_processed = True
                     item.summary = None
+                    sync_content_readiness(db, item)
                     db.commit()
+                    touched_content_ids.add(int(item.id))
                     stats.items_processed += 1
                 else:
                     stats.items_failed += 1
@@ -214,6 +222,14 @@ def process_ai_summaries(
                 stats.items_failed += 1
                 stats.errors.append(f"{item.title[:50]}: {str(e)}")
                 continue
+
+        if touched_content_ids:
+            invalidate_tiered_feed_cache()
+            cache_refresh = refresh_cached_playlist_items(
+                db,
+                content_ids=sorted(touched_content_ids),
+            )
+            logger.info("[ai_retry] Refreshed playlist caches: %s", cache_refresh)
 
         if include_maintenance:
             _backfill_starters(db, llm_client, stats)

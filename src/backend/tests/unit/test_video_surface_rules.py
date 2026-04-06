@@ -39,6 +39,14 @@ def _make_item(
         readiness_status=ContentReadinessStatus.READY.value,
         readiness_reason="video_ready" if item_type != ContentType.REEL else "reel_ready",
         is_suppressed=False,
+        ai_processed=True if item_type == ContentType.VIDEO else False,
+        summary=(
+            "This is a valid promoted video summary with enough concrete detail to satisfy the "
+            "delivery gate. It gives the user meaningful context about the story, the platform "
+            "changes involved, and the practical takeaway for teams following the topic."
+        )
+        if item_type == ContentType.VIDEO
+        else None,
         created_at=now,
         ready_at=now,
         readiness_updated_at=now,

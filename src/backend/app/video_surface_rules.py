@@ -86,13 +86,22 @@ def effective_content_type(item: Any):
 
 def _reel_signal_clause():
     shorts_url_clause = or_(
-        ContentItem.video_url.ilike("%youtube.com/shorts/%"),
-        ContentItem.source_url.ilike("%youtube.com/shorts/%"),
-        ContentItem.canonical_url.ilike("%youtube.com/shorts/%"),
+        and_(
+            ContentItem.video_url.is_not(None),
+            ContentItem.video_url.ilike("%youtube.com/shorts/%"),
+        ),
+        and_(
+            ContentItem.source_url.is_not(None),
+            ContentItem.source_url.ilike("%youtube.com/shorts/%"),
+        ),
+        and_(
+            ContentItem.canonical_url.is_not(None),
+            ContentItem.canonical_url.ilike("%youtube.com/shorts/%"),
+        ),
     )
     shorts_hashtag_clause = or_(
-        ContentItem.title.ilike("%#shorts%"),
-        ContentItem.title.ilike("%#short%"),
+        and_(ContentItem.title.is_not(None), ContentItem.title.ilike("%#shorts%")),
+        and_(ContentItem.title.is_not(None), ContentItem.title.ilike("%#short%")),
     )
     clauses = [shorts_url_clause, shorts_hashtag_clause]
     if _SHORTS_CHANNEL_IDS:

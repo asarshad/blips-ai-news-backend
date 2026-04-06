@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import JSONB
@@ -16,6 +16,10 @@ def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
     return "TEXT"
 
 
+def _recent_dt(*, hours_ago: int = 0, minutes_ago: int = 0) -> datetime:
+    return datetime.utcnow() - timedelta(hours=hours_ago, minutes=minutes_ago)
+
+
 def test_repair_article_image_metadata_backfills_recent_article_rows(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     ContentItem.__table__.create(bind=engine)
@@ -26,11 +30,11 @@ def test_repair_article_image_metadata_backfills_recent_article_rows(monkeypatch
         type=ContentType.ARTICLE,
         source="Ars Technica",
         source_url="https://example.com/story",
-        published_at=datetime(2026, 3, 20, 10, 0, 0),
+        published_at=_recent_dt(hours_ago=2),
         title="Support wait times backfire",
         curation_status=ContentStatus.PROMOTED,
-        created_at=datetime(2026, 3, 20, 10, 5, 0),
-        updated_at=datetime(2026, 3, 20, 10, 5, 0),
+        created_at=_recent_dt(hours_ago=1, minutes_ago=55),
+        updated_at=_recent_dt(hours_ago=1, minutes_ago=55),
     )
     db.add(item)
     db.commit()
@@ -65,11 +69,11 @@ def test_repair_article_image_metadata_skips_when_no_metadata_found(monkeypatch)
         type=ContentType.ARTICLE,
         source="Example",
         source_url="https://example.com/story",
-        published_at=datetime(2026, 3, 20, 10, 0, 0),
+        published_at=_recent_dt(hours_ago=2),
         title="No metadata available",
         curation_status=ContentStatus.PROMOTED,
-        created_at=datetime(2026, 3, 20, 10, 5, 0),
-        updated_at=datetime(2026, 3, 20, 10, 5, 0),
+        created_at=_recent_dt(hours_ago=1, minutes_ago=55),
+        updated_at=_recent_dt(hours_ago=1, minutes_ago=55),
     )
     db.add(item)
     db.commit()
@@ -104,11 +108,11 @@ def test_repair_article_image_metadata_uses_llm_fallback_when_metadata_has_no_im
         source="Example",
         source_url="https://example.com/story",
         canonical_url="https://example.com/story",
-        published_at=datetime(2026, 3, 20, 10, 0, 0),
+        published_at=_recent_dt(hours_ago=2),
         title="Fallback image available via LLM",
         curation_status=ContentStatus.PROMOTED,
-        created_at=datetime(2026, 3, 20, 10, 5, 0),
-        updated_at=datetime(2026, 3, 20, 10, 5, 0),
+        created_at=_recent_dt(hours_ago=1, minutes_ago=55),
+        updated_at=_recent_dt(hours_ago=1, minutes_ago=55),
     )
     db.add(item)
     db.commit()
@@ -148,22 +152,22 @@ def test_evaluate_llm_article_image_recovery_reports_success_rate(monkeypatch):
         source="Example",
         source_url="https://example.com/one",
         canonical_url="https://example.com/one",
-        published_at=datetime(2026, 3, 20, 10, 0, 0),
+        published_at=_recent_dt(hours_ago=2),
         title="One",
         curation_status=ContentStatus.PROMOTED,
-        created_at=datetime(2026, 3, 20, 10, 5, 0),
-        updated_at=datetime(2026, 3, 20, 10, 5, 0),
+        created_at=_recent_dt(hours_ago=1, minutes_ago=55),
+        updated_at=_recent_dt(hours_ago=1, minutes_ago=55),
     )
     second = ContentItem(
         type=ContentType.ARTICLE,
         source="Example",
         source_url="https://example.com/two",
         canonical_url="https://example.com/two",
-        published_at=datetime(2026, 3, 20, 9, 0, 0),
+        published_at=_recent_dt(hours_ago=3),
         title="Two",
         curation_status=ContentStatus.PROMOTED,
-        created_at=datetime(2026, 3, 20, 9, 5, 0),
-        updated_at=datetime(2026, 3, 20, 9, 5, 0),
+        created_at=_recent_dt(hours_ago=2, minutes_ago=55),
+        updated_at=_recent_dt(hours_ago=2, minutes_ago=55),
     )
     db.add_all([first, second])
     db.commit()
@@ -206,11 +210,11 @@ def test_evaluate_llm_article_image_recovery_reports_failure_reasons(monkeypatch
         source="Example",
         source_url="https://example.com/one",
         canonical_url="https://example.com/one",
-        published_at=datetime(2026, 3, 20, 10, 0, 0),
+        published_at=_recent_dt(hours_ago=2),
         title="One",
         curation_status=ContentStatus.PROMOTED,
-        created_at=datetime(2026, 3, 20, 10, 5, 0),
-        updated_at=datetime(2026, 3, 20, 10, 5, 0),
+        created_at=_recent_dt(hours_ago=1, minutes_ago=55),
+        updated_at=_recent_dt(hours_ago=1, minutes_ago=55),
     )
     db.add(item)
     db.commit()
@@ -252,11 +256,11 @@ def test_repair_article_image_metadata_replaces_generic_images(monkeypatch):
         source_url="https://example.com/story",
         canonical_url="https://example.com/story",
         image_url="https://cdn.example.com/social-share.png",
-        published_at=datetime(2026, 3, 20, 10, 0, 0),
+        published_at=_recent_dt(hours_ago=2),
         title="Replaced generic image",
         curation_status=ContentStatus.PROMOTED,
-        created_at=datetime(2026, 3, 20, 10, 5, 0),
-        updated_at=datetime(2026, 3, 20, 10, 5, 0),
+        created_at=_recent_dt(hours_ago=1, minutes_ago=55),
+        updated_at=_recent_dt(hours_ago=1, minutes_ago=55),
     )
     db.add(item)
     db.commit()
@@ -298,11 +302,11 @@ def test_repair_article_image_metadata_replaces_suspicious_images(monkeypatch):
         source_url="https://example.com/story",
         canonical_url="https://example.com/story",
         image_url="https://metrics.example.com/g/collect?tid=G-TEST&cid=123",
-        published_at=datetime(2026, 3, 20, 10, 0, 0),
+        published_at=_recent_dt(hours_ago=2),
         title="Replaced suspicious image",
         curation_status=ContentStatus.PROMOTED,
-        created_at=datetime(2026, 3, 20, 10, 5, 0),
-        updated_at=datetime(2026, 3, 20, 10, 5, 0),
+        created_at=_recent_dt(hours_ago=1, minutes_ago=55),
+        updated_at=_recent_dt(hours_ago=1, minutes_ago=55),
     )
     db.add(item)
     db.commit()
@@ -340,11 +344,11 @@ def test_repair_single_article_image_forces_reconcile(monkeypatch):
         source_url="https://example.com/story",
         canonical_url="https://example.com/story",
         image_url="https://cdn.example.com/wrong-small.jpg",
-        published_at=datetime(2026, 4, 1, 4, 0, 0),
+        published_at=_recent_dt(hours_ago=5),
         title="Backrooms",
         curation_status=ContentStatus.PROMOTED,
-        created_at=datetime(2026, 4, 1, 4, 5, 0),
-        updated_at=datetime(2026, 4, 1, 4, 5, 0),
+        created_at=_recent_dt(hours_ago=4, minutes_ago=55),
+        updated_at=_recent_dt(hours_ago=4, minutes_ago=55),
         article_image_status="VERIFIED",
     )
     db.add(item)
@@ -366,6 +370,7 @@ def test_repair_single_article_image_forces_reconcile(monkeypatch):
     assert result["image_url"] == "https://cdn.example.com/correct-hero.jpg"
     assert repaired.image_url == "https://cdn.example.com/correct-hero.jpg"
     assert repaired.article_image_status == "VERIFIED"
+    assert result["cache_refresh"]["content_ids"] == 1
 
 
 def test_fetch_article_page_metadata_uses_final_fetched_url_for_relative_assets(monkeypatch):

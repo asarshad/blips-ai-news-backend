@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import and_
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.models.content import ContentItem, ContentReadinessStatus, ContentStatus, ContentType
@@ -32,6 +32,8 @@ _READINESS_REASON_DESCRIPTIONS = {
     "missing_article_summary": "This article does not yet have a usable summary.",
     "missing_video_title": "This video is missing a title.",
     "missing_video_url": "This video is missing a playable URL.",
+    "awaiting_video_ai_processing": "This video still needs AI summarization before delivery.",
+    "missing_video_summary": "This video does not yet have a usable summary.",
     "article_ready": "This article is ready for client delivery.",
     "video_ready": "This video is ready for client delivery.",
     "reel_ready": "This reel is ready for client delivery.",
@@ -87,13 +89,27 @@ def describe_readiness_reason(reason: str | None) -> str:
 
 def ready_content_filter(surface_name: str):
     """Shared SQL filter for user-facing, ready-for-delivery content."""
-    return and_(
+    filters = [
         surface_content_filter(surface_name),
         visible_promotion_filter(),
         ContentItem.is_suppressed.is_(False),
         ContentItem.curation_status == ContentStatus.PROMOTED,
         ContentItem.readiness_status == ContentReadinessStatus.READY.value,
-    )
+    ]
+
+    if surface_name == "videos":
+        # Keep stale persisted READY rows out of delivery until they have a
+        # validated AI summary under the current policy.
+        filters.extend(
+            [
+                ContentItem.ai_processed.is_(True),
+                _sql_non_empty(ContentItem.title),
+                _sql_non_empty(func.coalesce(ContentItem.video_url, ContentItem.source_url)),
+                _sql_non_empty(ContentItem.summary),
+            ]
+        )
+
+    return and_(*filters)
 
 
 def is_ready_for_surface(item: Any, surface_name: str) -> bool:
@@ -206,6 +222,23 @@ def evaluate_content_readiness(item: Any) -> ContentReadinessDecision:
             effective_type=effective_type,
             surfaces=surfaces,
         )
+
+    if effective_type == ContentType.VIDEO:
+        if not bool(getattr(item, "ai_processed", False)):
+            return ContentReadinessDecision(
+                status=ContentReadinessStatus.PENDING,
+                reason="awaiting_video_ai_processing",
+                effective_type=effective_type,
+                surfaces=surfaces,
+            )
+
+        if not _trimmed(getattr(item, "summary", None)):
+            return ContentReadinessDecision(
+                status=ContentReadinessStatus.PENDING,
+                reason="missing_video_summary",
+                effective_type=effective_type,
+                surfaces=surfaces,
+            )
 
     ready_reason = "reel_ready" if effective_type == ContentType.REEL else "video_ready"
     return ContentReadinessDecision(
@@ -354,6 +387,11 @@ def _normalize_status(value: Any) -> ContentReadinessStatus:
         if normalized == ContentReadinessStatus.READY.value:
             return ContentReadinessStatus.READY
     return ContentReadinessStatus.PENDING
+
+
+def _sql_non_empty(value):
+    """Return a SQL predicate that rejects null, blank, and whitespace-only text."""
+    return func.nullif(func.trim(func.coalesce(value, "")), "").isnot(None)
 
 
 def _surfaces_for_type(content_type: ContentType) -> tuple[str, ...]:

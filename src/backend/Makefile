@@ -1,7 +1,8 @@
 # Blips backend development tasks.
 # Run `make help` to see all targets.
 
-PYTHON     := venv/bin/python
+VENV_DIR   ?= $(if $(wildcard .venv/bin/python),.venv,venv)
+PYTHON     := $(VENV_DIR)/bin/python
 PYTEST     := $(PYTHON) -m pytest
 RUFF       := $(PYTHON) -m ruff
 PYTHONPATH ?= .

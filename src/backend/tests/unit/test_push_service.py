@@ -177,6 +177,46 @@ def test_evaluate_push_eligibility_rejects_thin_promoted_article():
     assert decision.reason == "awaiting_ai_processing"
 
 
+def test_evaluate_push_eligibility_rejects_video_without_ai_summary():
+    thin_video = SimpleNamespace(
+        id=78,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        type=ContentType.VIDEO,
+        title="Thin video",
+        source_url="https://www.youtube.com/watch?v=thin123",
+        video_url="https://www.youtube.com/watch?v=thin123",
+        ai_processed=False,
+        summary=None,
+        promotion_reason=None,
+    )
+
+    decision = evaluate_push_eligibility(thin_video)
+
+    assert decision.eligible is False
+    assert decision.reason == "awaiting_video_ai_processing"
+
+
+def test_evaluate_push_eligibility_accepts_ready_video():
+    ready_video = SimpleNamespace(
+        id=79,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        type=ContentType.VIDEO,
+        title="Ready video",
+        source_url="https://www.youtube.com/watch?v=ready123",
+        video_url="https://www.youtube.com/watch?v=ready123",
+        ai_processed=True,
+        summary="A ready AI summary that makes this video safe for feed and push delivery.",
+        promotion_reason=None,
+    )
+
+    decision = evaluate_push_eligibility(ready_video)
+
+    assert decision.eligible is True
+    assert decision.reason == "push_ready"
+
+
 def test_notification_uses_app_name_for_title():
     service = PushNotificationService(
         db=MagicMock(),

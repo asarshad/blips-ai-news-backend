@@ -505,9 +505,6 @@ def tiered_item_to_dict(
         else item.duration_seconds
     )
     summary = item.summary or ""
-    if not summary and item_type == ContentType.VIDEO:
-        description = item.description or ""
-        summary = description[:320]
 
     # Base fields (backward compatible)
     result = {

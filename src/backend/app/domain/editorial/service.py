@@ -510,9 +510,6 @@ class EditorialService:
 
     def _ensure_ready_for_manual_promotion(self, item: ContentItem) -> None:
         """Prevent manual approval flows from promoting content that still cannot ship."""
-        if item.type != ContentType.ARTICLE:
-            return
-
         preview = SimpleNamespace(
             id=getattr(item, "id", None),
             type=item.type,

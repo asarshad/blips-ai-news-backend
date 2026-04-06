@@ -436,6 +436,14 @@ def test_process_ai_summaries_rejects_short_video_summary(monkeypatch):
     monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: _FakeStats())
     monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(tasks_ai_retry, "_run_article_image_verification", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        "app.services.tiered_feed_service.invalidate_tiered_feed_cache",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "app.services.playlist_service.refresh_cached_playlist_items",
+        lambda *_a, **_k: None,
+    )
     monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
     monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
     monkeypatch.setattr(tasks_ai_retry.time, "sleep", lambda *_args, **_kwargs: None)
@@ -478,12 +486,22 @@ def test_process_ai_summaries_marks_non_tech_video_processed_without_summary(mon
         tech_relevance_reason="General-news roundup without a tech angle.",
         is_mixed_roundup=True,
     )
+    refresh_calls = []
+    invalidation_calls = []
 
     monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
     monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
     monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: _FakeStats())
     monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(tasks_ai_retry, "_run_article_image_verification", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        "app.services.tiered_feed_service.invalidate_tiered_feed_cache",
+        lambda *_a, **_k: invalidation_calls.append("invalidate"),
+    )
+    monkeypatch.setattr(
+        "app.services.playlist_service.refresh_cached_playlist_items",
+        lambda _db, *, content_ids: refresh_calls.append(content_ids) or {},
+    )
     monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
     monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
     monkeypatch.setattr(tasks_ai_retry.time, "sleep", lambda *_args, **_kwargs: None)
@@ -496,6 +514,78 @@ def test_process_ai_summaries_marks_non_tech_video_processed_without_summary(mon
     assert item.tech_relevance == "none"
     assert item.is_mixed_roundup is True
     db.commit.assert_called()
+    assert invalidation_calls == ["invalidate"]
+    assert refresh_calls == [[56]]
+
+
+def test_process_ai_summaries_refreshes_caches_after_valid_video_summary(monkeypatch):
+    db = MagicMock()
+    repo = MagicMock()
+    item = SimpleNamespace(
+        id=57,
+        type=ContentType.VIDEO,
+        content_text="A detailed rundown of Apple Vision updates and developer tooling changes.",
+        description=None,
+        title="Vision Pro developer update",
+        topics=["video"],
+        conversation_starters=None,
+        summary=None,
+        ai_processed=False,
+        tech_relevance=None,
+        tech_relevance_confidence=None,
+        tech_relevance_reason=None,
+        is_mixed_roundup=None,
+    )
+    repo.get_unprocessed_by_ai.return_value = [item]
+    repo.get_articles_with_short_summaries.return_value = []
+    repo.get_articles_with_long_summaries.return_value = []
+    repo.get_videos_with_short_summaries.return_value = []
+
+    llm_client = MagicMock()
+    llm_client.is_configured.return_value = True
+    llm_client.summarize_video.return_value = SimpleNamespace(
+        summary=(
+            "Apple outlined new Vision Pro developer tools, interface updates, deployment steps, "
+            "testing workflows, simulator improvements, performance guidance, and release details "
+            "that matter for teams building spatial apps this year. The video walks through API "
+            "changes, practical developer setup tips, and the shipping constraints teams need to "
+            "plan around before they commit product roadmaps to the platform."
+        ),
+        conversation_starters={"starters": ["Which Vision Pro API matters most here?"]},
+        tech_relevance="primary",
+        tech_relevance_confidence=0.94,
+        tech_relevance_reason="The full story is about Apple platform tooling.",
+        is_mixed_roundup=False,
+    )
+    refresh_calls = []
+    invalidation_calls = []
+
+    monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
+    monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
+    monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: _FakeStats())
+    monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tasks_ai_retry, "_run_article_image_verification", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        "app.services.tiered_feed_service.invalidate_tiered_feed_cache",
+        lambda *_a, **_k: invalidation_calls.append("invalidate"),
+    )
+    monkeypatch.setattr(
+        "app.services.playlist_service.refresh_cached_playlist_items",
+        lambda _db, *, content_ids: refresh_calls.append(content_ids) or {},
+    )
+    monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
+    monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
+    monkeypatch.setattr(
+        "app.scheduler.tasks_content_events.run_content_event_dispatch_job",
+        lambda: None,
+    )
+    monkeypatch.setattr(tasks_ai_retry.time, "sleep", lambda *_args, **_kwargs: None)
+
+    tasks_ai_retry.process_ai_summaries()
+
+    repo.mark_ai_processed.assert_called_once()
+    assert invalidation_calls == ["invalidate"]
+    assert refresh_calls == [[57]]
 
 
 def test_process_ai_summaries_skips_maintenance_for_immediate_runs(monkeypatch):
