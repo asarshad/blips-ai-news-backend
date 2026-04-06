@@ -20,6 +20,7 @@ from app.extraction.metadata import PageMetadata, is_probably_generic_image_url
 from app.extraction.normalize import is_suspicious_image_url
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.services.content_readiness import sync_content_readiness
+from app.services.playlist_service import refresh_cached_playlist_items
 
 logger = get_logger(__name__)
 
@@ -165,6 +166,7 @@ def repair_single_article_image(
     sync_content_readiness(db, item)
     db.commit()
     db.refresh(item)
+    cache_refresh = refresh_cached_playlist_items(db, content_ids=[item.id])
 
     return {
         "content_id": item.id,
@@ -176,6 +178,7 @@ def repair_single_article_image(
         "article_image_status": (getattr(item, "article_image_status", None) or "").strip() or None,
         "previous_readiness_status": previous_readiness_status,
         "readiness_status": (getattr(item, "readiness_status", None) or "").strip() or None,
+        "cache_refresh": cache_refresh,
     }
 
 

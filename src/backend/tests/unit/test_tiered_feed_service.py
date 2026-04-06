@@ -170,7 +170,9 @@ def test_get_tiered_feed_applies_hybrid_rerank_to_reels_when_enabled(monkeypatch
         lambda **_kwargs: SimpleNamespace(fresh=True, backfill=True, evergreen_tier=True),
     )
     monkeypatch.setattr(
-        tiered_feed_service, "_get_recent_feedback_ids", lambda *_args: (set(), set())
+        tiered_feed_service,
+        "_get_recent_feedback_ids",
+        lambda *_args, **_kwargs: (set(), set()),
     )
     monkeypatch.setattr(
         tiered_feed_service,
@@ -275,7 +277,9 @@ def test_get_tiered_feed_filters_recent_negative_feedback(monkeypatch):
         lambda **_kwargs: SimpleNamespace(fresh=True, backfill=True, evergreen_tier=True),
     )
     monkeypatch.setattr(
-        tiered_feed_service, "_get_recent_feedback_ids", lambda *_args: (set(), set())
+        tiered_feed_service,
+        "_get_recent_feedback_ids",
+        lambda *_args, **_kwargs: (set(), set()),
     )
     monkeypatch.setattr(
         tiered_feed_service,
