@@ -47,10 +47,21 @@ _IMAGE_URL_RESPONSE_RE = re.compile(
 )
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 _VIDEO_TECH_RELEVANCE_VALUES = {"none", "incidental", "meaningful", "primary"}
+_VIDEO_CLASSIFIER_PAYLOAD_MARKERS = (
+    '"tech_relevance"',
+    '"confidence"',
+    '"is_mixed_roundup"',
+    '"reason"',
+    '"summary"',
+    '"starters"',
+)
 
 
 def normalize_video_summary_output(summary_text: Optional[str]) -> Optional[str]:
     """Normalize generated video summaries while enforcing configured bounds."""
+    if not isinstance(summary_text, str):
+        return None
+
     cleaned = " ".join((summary_text or "").split()).strip()
     if not cleaned:
         return None
@@ -96,6 +107,19 @@ def normalize_video_classifier_reason(value: Optional[str]) -> Optional[str]:
     if not cleaned:
         return None
     return cleaned[:255]
+
+
+def looks_like_video_classifier_payload(text: Optional[str]) -> bool:
+    """Detect classifier JSON blobs so they never leak into user-facing summaries."""
+    if not isinstance(text, str):
+        return False
+
+    cleaned = " ".join(text.split()).strip().lower()
+    if not cleaned:
+        return False
+
+    marker_hits = sum(1 for marker in _VIDEO_CLASSIFIER_PAYLOAD_MARKERS if marker in cleaned)
+    return marker_hits >= 3 or (cleaned.startswith("{") and marker_hits >= 2)
 
 
 def _strip_json_fence(payload: str) -> str:
@@ -638,6 +662,13 @@ Starter rules:
 - Each starter must be at most 120 characters.
 - Each starter should encourage deeper discussion.
 
+Before sending the response, verify that it is valid JSON:
+- Use double quotes for all keys and string values.
+- Do not include trailing commas.
+- Make sure braces and brackets are balanced.
+- Do not add markdown fences, commentary, or any text before or after the JSON object.
+- If the draft is not valid JSON, fix it before sending.
+
 Return JSON only. Do not wrap it in markdown.
 """
 
@@ -697,6 +728,9 @@ Return JSON only. Do not wrap it in markdown.
 
                 should_skip_summary = bool(is_mixed_roundup) or tech_relevance == "none"
             except json.JSONDecodeError:
+                if looks_like_video_classifier_payload(text):
+                    raise ValueError("Malformed JSON returned from LLM for video summary")
+
                 tech_relevance = None
                 confidence = None
                 is_mixed_roundup = None
@@ -730,6 +764,9 @@ Return JSON only. Do not wrap it in markdown.
                         ) or ""
                 else:
                     normalized_summary = normalize_video_summary_output(text) or ""
+
+            if looks_like_video_classifier_payload(normalized_summary):
+                raise ValueError("Structured classifier payload leaked into video summary")
 
             if not should_skip_summary and not normalized_summary:
                 raise ValueError("Empty summary returned from LLM for tech-relevant video")

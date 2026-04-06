@@ -240,6 +240,69 @@ def test_trigger_image_recovery_eval_returns_service_result(monkeypatch):
     assert result == {"status": "ok", "result": expected}
 
 
+def test_trigger_broken_video_summary_repair_dry_run_returns_matches(monkeypatch):
+    monkeypatch.setattr(
+        "scripts.repair_broken_video_summaries.find_matching_broken_video_summary_ids",
+        lambda **kwargs: [426834, 427112],
+    )
+
+    result = admin_module.trigger_broken_video_summary_repair(
+        admin_module.BrokenVideoSummaryRepairRequest(
+            hours_back=720,
+            limit=50,
+            dry_run=True,
+        )
+    )
+
+    assert result == {
+        "status": "ok",
+        "result": {
+            "scope": "last 720h",
+            "matched": 2,
+            "sample_ids": [426834, 427112],
+            "dry_run": True,
+        },
+    }
+
+
+def test_trigger_broken_video_summary_repair_executes_service(monkeypatch):
+    monkeypatch.setattr(
+        "scripts.repair_broken_video_summaries.find_matching_broken_video_summary_ids",
+        lambda **kwargs: [426834],
+    )
+    monkeypatch.setattr(
+        "scripts.repair_broken_video_summaries.repair_broken_video_summaries",
+        lambda **kwargs: SimpleNamespace(
+            matched=1,
+            scanned=1,
+            regenerated=1,
+            excluded=0,
+            skipped=0,
+            failed=0,
+        ),
+    )
+
+    result = admin_module.trigger_broken_video_summary_repair(
+        admin_module.BrokenVideoSummaryRepairRequest(
+            hours_back=720,
+            limit=50,
+            dry_run=False,
+        )
+    )
+
+    assert result == {
+        "status": "ok",
+        "result": {
+            "matched": 1,
+            "scanned": 1,
+            "regenerated": 1,
+            "excluded": 0,
+            "skipped": 0,
+            "failed": 0,
+        },
+    }
+
+
 def test_list_content_passes_has_image_filter(monkeypatch):
     _FakeEditorialRepo.last_list_args = None
     monkeypatch.setattr(admin_routes, "EditorialRepository", _FakeEditorialRepo)

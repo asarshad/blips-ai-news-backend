@@ -80,6 +80,14 @@ class ContentTouchRequest(BaseModel):
     content_ids: list[int] = Field(default_factory=list)
 
 
+class BrokenVideoSummaryRepairRequest(BaseModel):
+    """Admin request body for repairing malformed persisted video summaries."""
+
+    hours_back: Optional[int] = None
+    limit: int = 250
+    dry_run: bool = False
+
+
 @router.get("/ads/config", response_model=AdsConfigAdminResponse)
 def get_ads_config(
     ad_config_service: AdConfigService = Depends(get_ad_config_service),
@@ -435,6 +443,41 @@ def trigger_image_recovery_eval(payload: ArticleImageRecoveryEvalRequest):
         raise HTTPException(status_code=500, detail=str(e)) from e
     finally:
         db.close()
+
+
+@router.post("/trigger-broken-video-summary-repair")
+def trigger_broken_video_summary_repair(payload: BrokenVideoSummaryRepairRequest):
+    """Dry-run or execute repair for persisted broken video summaries."""
+    from scripts.repair_broken_video_summaries import (
+        find_matching_broken_video_summary_ids,
+        repair_broken_video_summaries,
+    )
+
+    try:
+        matches = find_matching_broken_video_summary_ids(
+            hours_back=payload.hours_back,
+            limit=payload.limit,
+        )
+        if payload.dry_run:
+            scope = f"last {payload.hours_back}h" if payload.hours_back is not None else "all time"
+            return {
+                "status": "ok",
+                "result": {
+                    "scope": scope,
+                    "matched": len(matches),
+                    "sample_ids": matches[:10],
+                    "dry_run": True,
+                },
+            }
+
+        result = repair_broken_video_summaries(
+            hours_back=payload.hours_back,
+            limit=payload.limit,
+        )
+        return {"status": "ok", "result": result.__dict__}
+    except Exception as e:
+        logger.error("Broken video summary repair failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/trigger-content-touch")

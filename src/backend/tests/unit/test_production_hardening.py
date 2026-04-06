@@ -336,6 +336,8 @@ class TestSummaryLengthPrompting:
             f"{settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words"
         ) in prompt
         assert f"Never exceed {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words" in prompt
+        assert "Before sending the response, verify that it is valid JSON" in prompt
+        assert "Do not add markdown fences, commentary, or any text before or after the JSON object." in prompt
         assert "exactly 85-90 words" not in prompt
 
     def test_legacy_openai_client_article_summary_prompt_targets_60_to_70_words(self):

@@ -101,3 +101,19 @@ def test_summarize_video_parses_structured_classifier_payload():
     assert result.tech_relevance_reason == "Technology materially shapes why the story matters."
     assert result.summary
     assert result.conversation_starters["starters"][0].startswith("How central")
+
+
+def test_summarize_video_rejects_malformed_json_classifier_payload():
+    import pytest
+
+    from app.integrations.llm_client import LLMClient
+
+    client = LLMClient(provider="openai", api_key="sk-test-fake-key-12345678901234567890")
+    client.chat = Mock(
+        return_value=SimpleNamespace(
+            content='{"tech_relevance":"primary","confidence":0.66,"is_mixed_roundup":false,"reason":"Mainly about Macs","summary":"Broken'
+        )
+    )
+
+    with pytest.raises(ValueError, match="Malformed JSON returned from LLM for video summary"):
+        client.summarize_video("Apple's 2026 Macs have LEAKED!", "New Mac rumors and performance claims")
