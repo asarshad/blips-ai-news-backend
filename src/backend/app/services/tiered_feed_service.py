@@ -37,7 +37,12 @@ from app.services.feed_freshness_strategies import (
     FeedFreshnessStrategy,
     feed_freshness_strategies,
 )
-from app.services.inventory_service import FreshnessTier, Surface, _get_surface_config
+from app.services.inventory_service import (
+    FreshnessTier,
+    Surface,
+    _get_surface_config,
+    evergreen_min_global_score,
+)
 from app.services.video_content_policy import apply_content_policy
 from app.services.video_duration_hydration import hydrate_missing_video_durations
 from app.services.video_hybrid_rerank import rerank_video_candidates
@@ -364,10 +369,11 @@ def get_tiered_feed(
     # TIER C: Evergreen (older high-quality content)
     # =========================================================================
     if len(results) < target_count * fetch_multiplier:
+        evergreen_min_score = evergreen_min_global_score(surface)
         tier_c_items = (
             eligible_inventory_query.filter(
                 evergreen_tier_filter,
-                ContentItem.global_score >= 0.3,  # Quality threshold
+                ContentItem.global_score >= evergreen_min_score,
             )
             .order_by(
                 desc(ContentItem.promotion_score),

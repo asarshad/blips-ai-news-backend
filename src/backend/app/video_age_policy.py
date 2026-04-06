@@ -15,7 +15,9 @@ from app.integrations.youtube_channels import (
     get_channel_by_name,
     get_enabled_channels,
 )
+from app.core.config import settings
 from app.models.content import ContentItem
+from app.models.content import ContentType
 
 
 @dataclass(frozen=True)
@@ -80,13 +82,19 @@ def classify_item_age_bucket(
     *,
     now: datetime,
     default_policy: SurfaceAgePolicy,
-    evergreen_quality_floor: float = 0.3,
+    evergreen_quality_floor: float | None = None,
 ) -> str | None:
     """Classify an item into fresh/backfill/evergreen using per-channel policy."""
     policy = resolve_item_age_policy(item, default_policy=default_policy)
     published_at = getattr(item, "published_at", None)
     created_at = getattr(item, "created_at", None)
     global_score = float(getattr(item, "global_score", 0.0) or 0.0)
+    if evergreen_quality_floor is None:
+        effective_type = getattr(item, "type", None)
+        if effective_type == ContentType.REEL:
+            evergreen_quality_floor = settings.EVERGREEN_MIN_GLOBAL_SCORE_REELS
+        else:
+            evergreen_quality_floor = settings.EVERGREEN_MIN_GLOBAL_SCORE_VIDEOS
     if published_at is None:
         return None
     fresh_cutoff = now - timedelta(hours=policy.fresh_hours)

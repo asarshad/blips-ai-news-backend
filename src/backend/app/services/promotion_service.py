@@ -93,7 +93,9 @@ class PromotionConfig:
     discovery_lane_penalty: float = 0.0
 
 
-_DEFAULT_CONFIG = PromotionConfig()
+_DEFAULT_CONFIG = PromotionConfig(
+    min_score=settings.PROMOTION_MIN_SCORE_ARTICLES,
+)
 _VIDEO_CONFIG = PromotionConfig(
     w_source=0.18,
     w_cluster=0.14,
@@ -105,7 +107,7 @@ _VIDEO_CONFIG = PromotionConfig(
     w_category_gap=0.05,
     w_creator_fatigue=0.04,
     w_story=0.16,
-    min_score=0.30,
+    min_score=settings.PROMOTION_MIN_SCORE_VIDEOS,
     top_n_per_type=80,
     window_hours=168,
     recency_half_life_hours=72.0,
@@ -122,7 +124,7 @@ _REEL_CONFIG = PromotionConfig(
     w_category_gap=0.04,
     w_creator_fatigue=0.05,
     w_story=0.22,
-    min_score=0.25,
+    min_score=settings.PROMOTION_MIN_SCORE_REELS,
     top_n_per_type=120,
     window_hours=168,
     recency_half_life_hours=48.0,
@@ -909,7 +911,16 @@ class PromotionService:
         config: PromotionConfig,
     ) -> float:
         if content_type == ContentType.REEL and bool(getattr(settings, "AUTO_PROMOTE_REELS", True)):
-            return min(config.min_score, float(getattr(settings, "AUTO_PROMOTE_REELS_MIN_SCORE", 0.25)))
+            return min(
+                config.min_score,
+                float(
+                    getattr(
+                        settings,
+                        "AUTO_PROMOTE_REELS_MIN_SCORE",
+                        settings.PROMOTION_MIN_SCORE_REELS,
+                    )
+                ),
+            )
         return config.min_score
 
     def _get_source_profiles(self, items: List[ContentItem]) -> Dict[str, VideoSourceProfile]:

@@ -10,7 +10,12 @@ from typing import Any, DefaultDict, Dict, Iterable, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.models.content import ContentItem, ContentStatus, ContentType, EventType, InteractionEvent
-from app.services.inventory_service import FreshnessTier, Surface, _get_surface_config
+from app.services.inventory_service import (
+    FreshnessTier,
+    Surface,
+    _get_surface_config,
+    evergreen_min_global_score,
+)
 
 _COUNTER_KEYS = {
     "resume_position_restored",
@@ -68,6 +73,7 @@ def _surface_for_item(item: ContentItem) -> Surface:
 def _classify_item(item: ContentItem, now: datetime) -> Optional[FreshnessTier]:
     surface = _surface_for_item(item)
     cfg = _get_surface_config(surface)
+    evergreen_min_score = evergreen_min_global_score(surface)
 
     fresh_cutoff = now - timedelta(hours=cfg["fresh_hours"])
     backfill_cutoff = now - timedelta(hours=cfg["backfill_hours"])
@@ -88,7 +94,7 @@ def _classify_item(item: ContentItem, now: datetime) -> Optional[FreshnessTier]:
         published_at
         and published_at < fresh_cutoff
         and published_at >= evergreen_cutoff
-        and float(item.global_score or 0.0) >= 0.3
+        and float(item.global_score or 0.0) >= evergreen_min_score
     ):
         return FreshnessTier.C
     return None

@@ -146,6 +146,15 @@ class InventoryHealth:
         }
 
 
+def evergreen_min_global_score(surface: Surface) -> float:
+    """Return the minimum global score allowed in the evergreen tier."""
+    if surface == Surface.ARTICLES:
+        return settings.EVERGREEN_MIN_GLOBAL_SCORE_ARTICLES
+    if surface == Surface.VIDEOS:
+        return settings.EVERGREEN_MIN_GLOBAL_SCORE_VIDEOS
+    return settings.EVERGREEN_MIN_GLOBAL_SCORE_REELS
+
+
 def _get_surface_config(surface: Surface) -> Dict[str, int]:
     """Get configuration values for a surface."""
     if surface == Surface.ARTICLES:
@@ -266,13 +275,13 @@ def compute_surface_health(
     )
 
     # Tier C: evergreen (older than fresh, within max age, high quality)
-    # We use global_score > 0.3 as quality threshold
+    evergreen_min_score = evergreen_min_global_score(surface)
     tier_c_count = (
         apply_content_policy(
             db.query(func.count(ContentItem.id)).select_from(ContentItem),
             content_type=content_type,
         )
-        .filter(base_filter, evergreen_tier_filter, ContentItem.global_score >= 0.3)
+        .filter(base_filter, evergreen_tier_filter, ContentItem.global_score >= evergreen_min_score)
         .scalar()
         or 0
     )

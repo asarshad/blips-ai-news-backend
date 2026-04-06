@@ -11,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models.content import ContentItem, ContentReadinessStatus, ContentStatus, ContentType
 from app.services.promotion_service import (
+    _DEFAULT_CONFIG,
     _REEL_CONFIG,
     _VIDEO_CONFIG,
     PromotionService,
@@ -26,9 +27,11 @@ def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
 def test_video_and_reel_configs_use_longer_half_lives():
     assert _VIDEO_CONFIG.window_hours == 168
     assert _REEL_CONFIG.window_hours == 168
+    assert _DEFAULT_CONFIG.min_score == 0.25
     assert _VIDEO_CONFIG.recency_half_life_hours == 72.0
     assert _REEL_CONFIG.recency_half_life_hours == 48.0
-    assert _REEL_CONFIG.min_score == 0.25
+    assert _VIDEO_CONFIG.min_score == 0.25
+    assert _REEL_CONFIG.min_score == 0.22
     assert _VIDEO_CONFIG.w_story > 0.0
     assert _REEL_CONFIG.w_story > 0.0
 
@@ -45,7 +48,7 @@ def test_story_keyword_signal_recognizes_launch_framing():
 def test_reels_use_lower_auto_promote_threshold_by_default():
     service = PromotionService(MagicMock())
 
-    assert service._min_promotion_score(ContentType.REEL, _REEL_CONFIG) == 0.25
+    assert service._min_promotion_score(ContentType.REEL, _REEL_CONFIG) == 0.22
     assert service._min_promotion_score(ContentType.VIDEO, _VIDEO_CONFIG) == _VIDEO_CONFIG.min_score
 
 

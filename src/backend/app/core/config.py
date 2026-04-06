@@ -104,6 +104,15 @@ class Settings(BaseSettings):
     DAILY_TARGET_VIDEOS: int = 60
     DAILY_TARGET_REELS: int = 40
 
+    # Promotion / evergreen score thresholds
+    PROMOTION_MIN_SCORE_ARTICLES: float = 0.25
+    PROMOTION_MIN_SCORE_VIDEOS: float = 0.25
+    PROMOTION_MIN_SCORE_REELS: float = 0.22
+    AUTO_PROMOTE_REELS_MIN_SCORE: float = 0.22
+    EVERGREEN_MIN_GLOBAL_SCORE_ARTICLES: float = 0.25
+    EVERGREEN_MIN_GLOBAL_SCORE_VIDEOS: float = 0.25
+    EVERGREEN_MIN_GLOBAL_SCORE_REELS: float = 0.22
+
     # Editorial / review pipeline
     # When enabled, content that would normally enter the review queue as
     # CANDIDATE is promoted immediately instead.

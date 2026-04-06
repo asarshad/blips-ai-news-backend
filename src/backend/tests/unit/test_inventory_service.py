@@ -12,6 +12,7 @@ from app.services.inventory_service import (
     Surface,
     SurfaceHealth,
     TierCounts,
+    evergreen_min_global_score,
 )
 
 
@@ -189,3 +190,9 @@ class TestHealthCaching:
         invalidate_health_cache()
 
         assert inventory_service._cached_health is None
+
+
+def test_evergreen_min_global_score_uses_surface_specific_thresholds():
+    assert evergreen_min_global_score(Surface.ARTICLES) == 0.25
+    assert evergreen_min_global_score(Surface.VIDEOS) == 0.25
+    assert evergreen_min_global_score(Surface.REELS) == 0.22
