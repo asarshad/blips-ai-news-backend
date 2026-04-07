@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from html import unescape
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -92,6 +93,8 @@ _GENERIC_URL_SUBSTRINGS = (
     "/.netlify/images",
     "/_gatsby/image",
 )
+
+
 def _generic_keyword_pattern(keyword: str) -> re.Pattern[str]:
     escaped = re.escape(keyword)
     escaped = escaped.replace(r"\-", "[^a-z0-9]+").replace(r"\_", "[^a-z0-9]+")
@@ -99,8 +102,7 @@ def _generic_keyword_pattern(keyword: str) -> re.Pattern[str]:
 
 
 _GENERIC_URL_KEYWORD_PATTERNS = tuple(
-    _generic_keyword_pattern(keyword)
-    for keyword in _GENERIC_URL_KEYWORDS
+    _generic_keyword_pattern(keyword) for keyword in _GENERIC_URL_KEYWORDS
 )
 _EDITORIAL_URL_KEYWORDS = (
     "hero",
@@ -186,6 +188,8 @@ _SRCSET_CANDIDATE_RE = re.compile(
     """,
     re.VERBOSE,
 )
+_RAW_TAG_RE = re.compile(r"<(?P<tag>meta|link)\b[^>]*>", re.IGNORECASE)
+_RAW_ATTR_RE = re.compile(r'([A-Za-z_:.-]+)\s*=\s*(["\'])(.*?)\2', re.IGNORECASE)
 
 
 def extract_metadata(html: str, source_url: str) -> PageMetadata:
@@ -219,23 +223,33 @@ def extract_metadata(html: str, source_url: str) -> PageMetadata:
     if canonical_tag and canonical_tag.get("href"):
         raw = canonical_tag["href"].strip()
         meta.canonical_url = make_absolute_url(raw, source_url)
+    elif raw_canonical := _raw_link_href(html, rel="canonical"):
+        meta.canonical_url = make_absolute_url(raw_canonical, source_url)
 
     # ── Title (priority: og:title → twitter:title → <title>) ─────────────
-    og_title = _meta_content(head, prop="og:title")
-    tw_title = _meta_content(head, attrs={"name": "twitter:title"})
+    og_title = _meta_content(head, prop="og:title") or _raw_meta_content(html, prop="og:title")
+    tw_title = _meta_content(head, attrs={"name": "twitter:title"}) or _raw_meta_content(
+        html, attrs={"name": "twitter:title"}
+    )
     html_title = head.find("title")
 
     meta.title = og_title or tw_title or (html_title.get_text(strip=True) if html_title else None)
 
     # ── Description ───────────────────────────────────────────────────────
-    og_desc = _meta_content(head, prop="og:description")
-    meta_desc = _meta_content(head, attrs={"name": "description"})
+    og_desc = _meta_content(head, prop="og:description") or _raw_meta_content(
+        html, prop="og:description"
+    )
+    meta_desc = _meta_content(head, attrs={"name": "description"}) or _raw_meta_content(
+        html, attrs={"name": "description"}
+    )
     meta.description = og_desc or meta_desc
 
     # ── Image URL (rank head metadata against body/editorial candidates) ──
     head_candidates = []
-    og_image = _meta_content(head, prop="og:image")
-    tw_image = _meta_content(head, attrs={"name": "twitter:image"})
+    og_image = _meta_content(head, prop="og:image") or _raw_meta_content(html, prop="og:image")
+    tw_image = _meta_content(head, attrs={"name": "twitter:image"}) or _raw_meta_content(
+        html, attrs={"name": "twitter:image"}
+    )
 
     if og_image:
         candidate = _build_head_image_candidate(og_image, "og", source_url)
@@ -269,6 +283,10 @@ def extract_metadata(html: str, source_url: str) -> PageMetadata:
         "pubdate",
     ]:
         val = _meta_content(head, prop=attr_name) or _meta_content(head, attrs={"name": attr_name})
+        if not val:
+            val = _raw_meta_content(html, prop=attr_name) or _raw_meta_content(
+                html, attrs={"name": attr_name}
+            )
         if val:
             meta.published_at_str = val.strip()
             break
@@ -337,6 +355,59 @@ def _meta_content(
     except Exception:
         pass
     return None
+
+
+def _raw_meta_content(
+    html: str,
+    *,
+    prop: Optional[str] = None,
+    attrs: Optional[dict] = None,
+) -> Optional[str]:
+    """Fallback meta-content extraction for streamed or malformed markup."""
+    if not html:
+        return None
+
+    expected_attr = "property" if prop else next(iter(attrs or {}), None)
+    expected_value = prop or ((attrs or {}).get(expected_attr) if expected_attr else None)
+    if not expected_attr or not expected_value:
+        return None
+
+    for match in _RAW_TAG_RE.finditer(html):
+        if match.group("tag").lower() != "meta":
+            continue
+        attr_map = _raw_tag_attributes(match.group(0))
+        if (attr_map.get(expected_attr.lower()) or "").strip() != expected_value:
+            continue
+        content = (attr_map.get("content") or "").strip()
+        if content:
+            return content
+    return None
+
+
+def _raw_link_href(html: str, *, rel: str) -> Optional[str]:
+    """Fallback link href extraction for canonical URLs."""
+    if not html:
+        return None
+
+    expected_rel = rel.strip().lower()
+    for match in _RAW_TAG_RE.finditer(html):
+        if match.group("tag").lower() != "link":
+            continue
+        attr_map = _raw_tag_attributes(match.group(0))
+        if (attr_map.get("rel") or "").strip().lower() != expected_rel:
+            continue
+        href = (attr_map.get("href") or "").strip()
+        if href:
+            return href
+    return None
+
+
+def _raw_tag_attributes(tag_html: str) -> dict[str, str]:
+    """Parse quoted HTML attributes from a raw tag string."""
+    attrs: dict[str, str] = {}
+    for attr_match in _RAW_ATTR_RE.finditer(tag_html):
+        attrs[attr_match.group(1).lower()] = unescape(attr_match.group(3)).strip()
+    return attrs
 
 
 def _build_head_image_candidate(
@@ -460,6 +531,21 @@ def _tag_candidate_url(tag) -> Optional[str]:
 
 def _attribute_candidate_url(tag) -> Optional[str]:
     """Pick the best candidate URL from a single HTML node."""
+    srcset_value = tag.get("srcset")
+    if srcset_value and str(srcset_value).strip():
+        srcset_candidate = _best_srcset_candidate(str(srcset_value))
+    else:
+        srcset_candidate = None
+
+    src_value = tag.get("src")
+    src_candidate = str(src_value).strip() if src_value and str(src_value).strip() else None
+
+    absolute_fallback_candidate = None
+    for candidate in (srcset_candidate, src_candidate):
+        if candidate and _looks_like_absolute_candidate(candidate):
+            absolute_fallback_candidate = candidate
+            break
+
     for attr in (
         "data-src",
         "data-lazy-src",
@@ -477,9 +563,17 @@ def _attribute_candidate_url(tag) -> Optional[str]:
             if candidate := _best_srcset_candidate(str(value)):
                 return candidate
             continue
-        return str(value).strip()
+        candidate = str(value).strip()
+        if absolute_fallback_candidate and not _looks_like_absolute_candidate(candidate):
+            return absolute_fallback_candidate
+        return candidate
 
     return None
+
+
+def _looks_like_absolute_candidate(value: str) -> bool:
+    parsed = urlparse(str(value).strip())
+    return bool((parsed.scheme and parsed.netloc) or str(value).startswith("//"))
 
 
 def _best_srcset_candidate(srcset: str) -> Optional[str]:

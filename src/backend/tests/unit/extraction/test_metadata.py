@@ -145,6 +145,19 @@ class TestImageExtraction:
         assert meta.image_url == "https://cdn.example.com/tw.jpg"
         assert meta.image_source == "twitter"
 
+    def test_raw_meta_fallback_handles_streamed_markup(self):
+        html = """<!DOCTYPE html>
+<html>
+  <body>
+    <meta property="og:image" content="https://example.com/api/opengraph-image?name=Growth" />
+    <meta property="og:title" content="Streamed title" />
+  </body>
+</html>"""
+        meta = extract_metadata(html, "https://example.com/story")
+        assert meta.image_url == "https://example.com/api/opengraph-image?name=Growth"
+        assert meta.image_source == "og"
+        assert meta.title == "Streamed title"
+
     def test_relative_image_made_absolute(self):
         html = _html_with_head('<meta property="og:image" content="/images/hero.jpg" />')
         meta = extract_metadata(html, "https://example.com/article")
@@ -205,6 +218,33 @@ class TestImageExtraction:
         assert meta.image_url == "https://example.com/images/hero-1280.jpg"
         assert meta.image_source == "body"
 
+    def test_absolute_src_beats_ambiguous_relative_data_src(self):
+        html = """<!DOCTYPE html>
+<html>
+  <head>
+    <title>Absolute src should win</title>
+    <meta property="og:image" content="https://cdn.example.com/og.jpg" />
+  </head>
+  <body>
+    <article>
+      <img
+        alt="Figure 1"
+        class="zoom-image"
+        data-src="articles/story/en/resources/figure-1.jpg"
+        src="https://imgopt.example.com/fit-in/3000x4000/articles/story/en/resources/figure-1.jpg"
+        width="1644"
+        height="683"
+      />
+    </article>
+  </body>
+</html>"""
+        meta = extract_metadata(html, "https://example.com/articles/story/")
+        assert (
+            meta.image_url
+            == "https://imgopt.example.com/fit-in/3000x4000/articles/story/en/resources/figure-1.jpg"
+        )
+        assert meta.image_source == "body"
+
     def test_body_image_beats_generic_head_share_image(self):
         html = """<!DOCTYPE html>
 <html>
@@ -249,6 +289,27 @@ class TestImageExtraction:
 </html>"""
         meta = extract_metadata(html, "https://example.com/story")
         assert meta.image_url == "https://cdn.example.com/images/backrooms-hero.jpg"
+        assert meta.image_source == "og"
+
+    def test_svg_body_image_falls_back_to_raster_og_candidate(self):
+        html = """<!DOCTYPE html>
+<html>
+  <head>
+    <meta property="og:image" content="https://example.com/api/opengraph-illustration?name=Growth" />
+  </head>
+  <body>
+    <article>
+      <img
+        src="https://cdn.example.com/images/hero.svg"
+        width="1000"
+        height="1000"
+        alt="Hero"
+      />
+    </article>
+  </body>
+</html>"""
+        meta = extract_metadata(html, "https://example.com/story")
+        assert meta.image_url == "https://example.com/api/opengraph-illustration?name=Growth"
         assert meta.image_source == "og"
 
     def test_fetchpriority_high_body_hero_beats_late_lazy_related_cards(self):

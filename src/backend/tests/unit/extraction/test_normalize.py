@@ -144,6 +144,21 @@ class TestValidateImageUrl:
         url = "https://cdn.example.com/image.jpg"
         assert validate_image_url(url) == url
 
+    def test_substack_proxy_unwraps_to_original_image(self):
+        proxy = (
+            "https://substackcdn.com/image/fetch/$s_!DbYa!,w_120,h_120,c_fill,f_webp,q_auto:good,"
+            "fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages"
+            "%2F30b79ed6-8654-446e-ad5c-adf2389a0558_570x570.png"
+        )
+        assert (
+            validate_image_url(proxy)
+            == "https://substack-post-media.s3.amazonaws.com/public/images/"
+            "30b79ed6-8654-446e-ad5c-adf2389a0558_570x570.png"
+        )
+
+    def test_svg_urls_rejected(self):
+        assert validate_image_url("https://cdn.example.com/image.svg") is None
+
 
 class TestSuspiciousImageUrl:
     def test_tracker_host_flagged(self):

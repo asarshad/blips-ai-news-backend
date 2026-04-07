@@ -16,12 +16,13 @@ import ipaddress
 import re
 import socket
 from typing import Optional
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import parse_qs, unquote, urljoin, urlparse
 
 # ── Image URL validation ──────────────────────────────────────────────────────
 
 _INVALID_IMAGE_PREFIXES = ("data:", "blob:", "javascript:", "about:")
 _VALID_SCHEMES = {"http", "https"}
+_UNSUPPORTED_IMAGE_EXTENSIONS = {".svg", ".svgz"}
 _TRACKING_IMAGE_HOST_KEYWORDS = (
     "google-analytics.com",
     "analytics.google.com",
@@ -132,6 +133,14 @@ def _unwrap_image_proxy_url(url: str) -> str:
     if cf_match:
         return _resolve(cf_match.group(1))
 
+    # ── Substack Image CDN ────────────────────────────────────────────────────
+    # substackcdn.com/image/fetch/<transform>/<encoded-absolute-url>
+    if host.endswith("substackcdn.com") and path.startswith("/image/fetch/"):
+        encoded_inner = path.rsplit("/", 1)[-1].strip()
+        inner = unquote(encoded_inner)
+        if inner.startswith("http://") or inner.startswith("https://"):
+            return inner
+
     return url
 
 
@@ -172,6 +181,9 @@ def validate_image_url(url: Optional[str]) -> Optional[str]:
     host = (parsed.hostname or "").lower()
     path = (parsed.path or "").lower()
     query_keys = {key.lower() for key in parse_qs(parsed.query).keys()}
+
+    if any(path.endswith(ext) for ext in _UNSUPPORTED_IMAGE_EXTENSIONS):
+        return None
 
     if any(keyword in host for keyword in _TRACKING_IMAGE_HOST_KEYWORDS):
         return None
