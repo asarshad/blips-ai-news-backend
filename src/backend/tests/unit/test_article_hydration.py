@@ -117,6 +117,21 @@ def test_prepare_rss_article_returns_none_for_blocked_direct_domain():
     assert prepared is None
 
 
+def test_prepare_rss_article_returns_none_for_direct_binary_asset_url():
+    hydrator = ArticleHydrationService()
+
+    prepared = hydrator.prepare_rss_article(
+        source_url="https://example.com/files/incident-report.pdf",
+        title="Incident report",
+        description="Binary asset that should not be scraped as an article.",
+        image_url=None,
+        published_at=None,
+        include_text=False,
+    )
+
+    assert prepared is None
+
+
 def test_refresh_existing_article_metadata_prefers_page_metadata_over_rss_image(monkeypatch):
     hydrator = ArticleHydrationService()
     item = hydrator.build_article_stub(

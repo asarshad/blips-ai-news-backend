@@ -111,10 +111,13 @@ class TestFetchUrlHappyPath:
     def test_200_returns_html(self):
         mock_resp = self._mock_http_response(200)
         with self._mock_public_host():
-            with patch("app.extraction.fetcher._get_client") as mock_client:
-                mock_client.return_value.get.return_value = mock_resp
-                with patch("app.extraction.fetcher._rate_limit_domain"):
-                    result = fetch_url("https://example.com/article")
+            with patch("app.extraction.fetcher._get_client", return_value=MagicMock()):
+                with patch(
+                    "app.extraction.fetcher._get_with_validated_redirects"
+                ) as mock_httpx_get:
+                    mock_httpx_get.return_value = (mock_resp, 10.0)
+                    with patch("app.extraction.fetcher._rate_limit_domain"):
+                        result = fetch_url("https://example.com/article")
 
         assert result.status_code == 200
         assert "Hi" in result.html
@@ -127,17 +130,65 @@ class TestFetchUrlHappyPath:
         mock_resp.status_code = 304
         mock_resp.headers = {"ETag": '"abc123"', "Last-Modified": "Mon, 01 Jan 2024 00:00:00 GMT"}
         with self._mock_public_host():
-            with patch("app.extraction.fetcher._get_client") as mock_client:
-                mock_client.return_value.get.return_value = mock_resp
-                with patch("app.extraction.fetcher._rate_limit_domain"):
-                    result = fetch_url(
-                        "https://example.com/article",
-                        etag='"abc123"',
-                    )
+            with patch("app.extraction.fetcher._get_client", return_value=MagicMock()):
+                with patch(
+                    "app.extraction.fetcher._get_with_validated_redirects"
+                ) as mock_httpx_get:
+                    mock_httpx_get.return_value = (mock_resp, 10.0)
+                    with patch("app.extraction.fetcher._rate_limit_domain"):
+                        result = fetch_url(
+                            "https://example.com/article",
+                            etag='"abc123"',
+                        )
 
         assert result.status_code == 304
         assert result.not_modified is True
         assert result.error is None
+
+    def test_image_response_returns_content_type_without_buffering_html(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.headers = {"Content-Type": "image/jpeg"}
+        mock_resp.url = "https://cdn.example.com/hero.jpg"
+        mock_resp.encoding = "utf-8"
+
+        with self._mock_public_host():
+            with patch("app.extraction.fetcher._get_client") as mock_client:
+                mock_client.return_value = MagicMock()
+                with patch(
+                    "app.extraction.fetcher._get_with_validated_redirects"
+                ) as mock_httpx_get:
+                    mock_httpx_get.return_value = (mock_resp, 8.0)
+                    with patch("app.extraction.fetcher._rate_limit_domain"):
+                        result = fetch_url("https://cdn.example.com/hero.jpg")
+
+        assert result.status_code == 200
+        assert result.content_type == "image/jpeg"
+        assert result.html == ""
+        assert result.error is None
+
+    def test_streaming_reader_caps_response_bytes(self):
+        chunks = [b"a" * (2 * 1024 * 1024), b"b" * (4 * 1024 * 1024)]
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.headers = {"Content-Type": "text/html; charset=utf-8"}
+        mock_resp.url = "https://example.com/article"
+        mock_resp.encoding = "utf-8"
+        mock_resp.iter_bytes.return_value = iter(chunks)
+
+        with self._mock_public_host():
+            with patch("app.extraction.fetcher._get_client") as mock_client:
+                mock_client.return_value = MagicMock()
+                with patch(
+                    "app.extraction.fetcher._get_with_validated_redirects"
+                ) as mock_httpx_get:
+                    mock_httpx_get.return_value = (mock_resp, 12.0)
+                    with patch("app.extraction.fetcher._rate_limit_domain"):
+                        result = fetch_url("https://example.com/article")
+
+        assert result.status_code == 200
+        assert len(result.html) == 5 * 1024 * 1024
+        mock_resp.close.assert_called()
 
     def test_elapsed_always_defined_when_max_retries_zero(self):
         """elapsed_ms must be set even when max_retries=0 (loop body never runs)."""
@@ -168,7 +219,10 @@ class TestFetchUrlHappyPath:
             ],
         ):
             with patch("app.extraction.fetcher._get_client") as mock_client:
-                mock_client.return_value.get.return_value = first_response
+                client = MagicMock()
+                client.build_request.return_value = object()
+                client.send.return_value = first_response
+                mock_client.return_value = client
                 with patch("app.extraction.fetcher._rate_limit_domain"):
                     result = fetch_url("https://example.com/article")
 
@@ -192,7 +246,10 @@ class TestFetchUrlHappyPath:
             ],
         ):
             with patch("app.extraction.fetcher._get_client") as mock_client:
-                mock_client.return_value.get.side_effect = [redirect_response, final_response]
+                client = MagicMock()
+                client.build_request.return_value = object()
+                client.send.side_effect = [redirect_response, final_response]
+                mock_client.return_value = client
                 with patch("app.extraction.fetcher._rate_limit_domain"):
                     result = fetch_url("https://example.com/article")
 

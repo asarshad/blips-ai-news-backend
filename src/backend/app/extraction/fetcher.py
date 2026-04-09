@@ -53,6 +53,21 @@ _PLAIN_TEXT_FALLBACK_HINTS = (
     "text/plain",
     "text/markdown",
 )
+_BINARY_CONTENT_TYPE_PREFIXES = (
+    "audio/",
+    "font/",
+    "image/",
+    "video/",
+)
+_BINARY_CONTENT_TYPE_HINTS = (
+    "application/gzip",
+    "application/octet-stream",
+    "application/pdf",
+    "application/vnd",
+    "application/x-gzip",
+    "application/x-tar",
+    "application/zip",
+)
 _BOT_PROTECTION_TEXT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"just a moment", re.IGNORECASE), "cloudflare_challenge"),
     (re.compile(r"attention required", re.IGNORECASE), "cloudflare_challenge"),
@@ -198,6 +213,7 @@ def fetch_url(
     if target_error is not None:
         return FetchResult(url=url, error=target_error)
 
+    safe_url = _safe_url_for_log(url)
     s = get_settings()
     max_retries = int(getattr(s, "EXTRACTION_MAX_RETRIES", 3))
     domain_min_interval = float(getattr(s, "EXTRACTION_DOMAIN_MIN_INTERVAL", 1.0))
@@ -275,14 +291,21 @@ def fetch_url(
                     elapsed_ms=elapsed,
                 )
 
-            # Success path — truncate on raw bytes for a real byte-level cap
-            raw = resp.content
-            if len(raw) > MAX_RESPONSE_BYTES:
-                raw = raw[:MAX_RESPONSE_BYTES]
+            ct = resp.headers.get("Content-Type", "")
+            if _is_binary_content_type(ct):
+                return FetchResult(
+                    url=str(resp.url),
+                    status_code=resp.status_code,
+                    content_type=ct,
+                    etag=resp.headers.get("ETag"),
+                    last_modified=resp.headers.get("Last-Modified"),
+                    elapsed_ms=elapsed,
+                )
+
+            raw = _read_response_bytes_limited(resp, max_bytes=MAX_RESPONSE_BYTES)
             encoding = resp.encoding or "utf-8"
             html_text = raw.decode(encoding, errors="replace")
 
-            ct = resp.headers.get("Content-Type", "")
             return FetchResult(
                 url=str(resp.url),
                 status_code=resp.status_code,
@@ -296,26 +319,40 @@ def fetch_url(
         except httpx.TimeoutException as exc:
             elapsed = (time.monotonic() - t0) * 1000
             last_error = f"Timeout: {exc}"
-            logger.warning(f"[fetch] Timeout fetching {url} (attempt {attempt}): {exc}")
+            logger.warning("[fetch] Timeout fetching %s (attempt %s): %s", safe_url, attempt, exc)
             _backoff(attempt)
 
         except httpx.HTTPError as exc:
             elapsed = (time.monotonic() - t0) * 1000
             last_error = f"HTTP error: {exc}"
-            logger.warning(f"[fetch] HTTP error fetching {url} (attempt {attempt}): {exc}")
+            logger.warning(
+                "[fetch] HTTP error fetching %s (attempt %s): %s", safe_url, attempt, exc
+            )
             _backoff(attempt)
 
         except ValueError as exc:
             elapsed = (time.monotonic() - t0) * 1000
             last_error = str(exc)
-            logger.warning(f"[fetch] Request blocked for {url} (attempt {attempt}): {exc}")
+            logger.warning(
+                "[fetch] Request blocked for %s (attempt %s): %s", safe_url, attempt, exc
+            )
             break
 
         except Exception as exc:
             elapsed = (time.monotonic() - t0) * 1000
             last_error = f"Unexpected: {exc}"
-            logger.error(f"[fetch] Unexpected error fetching {url} (attempt {attempt}): {exc}")
+            logger.error(
+                "[fetch] Unexpected error fetching %s (attempt %s): %s",
+                safe_url,
+                attempt,
+                exc,
+            )
             break  # Non-transient — don't retry
+        finally:
+            try:
+                resp.close()
+            except Exception:
+                pass
 
     return FetchResult(
         url=url,
@@ -331,18 +368,43 @@ def _backoff(attempt: int) -> None:
     time.sleep(min(base**attempt, 30.0))
 
 
+def _safe_url_for_log(url: str, *, max_length: int = 200) -> str:
+    """Return a log-safe URL string without dumping large inline payloads."""
+    if not url:
+        return url
+
+    parsed = urlparse(url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme == "data":
+        prefix, _, _ = url.partition(",")
+        return f"{prefix},<omitted>"
+
+    if len(url) <= max_length:
+        return url
+
+    if scheme in {"http", "https"}:
+        condensed = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        if parsed.query:
+            condensed = f"{condensed}?..."
+        if len(condensed) <= max_length:
+            return condensed
+
+    return f"{url[: max_length - 3]}..."
+
+
 def _validate_fetch_target(url: str) -> Optional[str]:
     """Return an SSRF/validation error string for an invalid target, else None."""
     parsed = urlparse(url)
     scheme = (parsed.scheme or "").lower()
     host = parsed.hostname or ""
+    safe_url = _safe_url_for_log(url)
 
     if scheme not in {"http", "https"}:
-        logger.warning("[fetch] Unsupported URL scheme blocked: %r", url)
+        logger.warning("[fetch] Unsupported URL scheme blocked: %s", safe_url)
         return f"Unsupported URL scheme {scheme!r}"
 
     if host and _is_private_host(host):
-        logger.warning(f"[fetch] SSRF blocked: {url!r} resolves to a private address")
+        logger.warning("[fetch] SSRF blocked: %s resolves to a private address", safe_url)
         return f"SSRF: host {host!r} resolves to a private/internal address"
 
     return None
@@ -358,6 +420,46 @@ def _build_browser_fallback_headers(headers: dict[str, str]) -> dict[str, str]:
     browser_headers["Accept-Language"] = "en-US,en;q=0.9"
     browser_headers["Upgrade-Insecure-Requests"] = "1"
     return browser_headers
+
+
+def _is_binary_content_type(content_type: str) -> bool:
+    """Return True when the response advertises a binary/non-document payload."""
+    lowered = (content_type or "").strip().lower()
+    if not lowered:
+        return False
+    return lowered.startswith(_BINARY_CONTENT_TYPE_PREFIXES) or any(
+        hint in lowered for hint in _BINARY_CONTENT_TYPE_HINTS
+    )
+
+
+def _read_response_bytes_limited(response, *, max_bytes: int) -> bytes:
+    """Read at most ``max_bytes`` from a response without buffering the whole body."""
+    reader = getattr(response, "iter_bytes", None)
+    if callable(reader):
+        chunks: list[bytes] = []
+        total = 0
+        try:
+            for chunk in reader():
+                if not chunk:
+                    continue
+                remaining = max_bytes - total
+                if remaining <= 0:
+                    break
+                if len(chunk) > remaining:
+                    chunks.append(chunk[:remaining])
+                    total = max_bytes
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total >= max_bytes:
+                    break
+        except Exception:
+            chunks.clear()
+        if chunks:
+            return b"".join(chunks)
+
+    raw = getattr(response, "content", b"") or b""
+    return raw[:max_bytes]
 
 
 def _should_try_requests_browser_fallback(response: httpx.Response) -> bool:
@@ -382,7 +484,10 @@ def _response_prefers_browser_variant(response) -> bool:
         if not any(hint in content_type for hint in _HTML_CONTENT_TYPE_HINTS):
             return False
 
-    raw = response.content[:4096]
+    raw = getattr(response, "content", b"") or b""
+    if not isinstance(raw, (bytes, bytearray)):
+        raw = b""
+    raw = raw[:4096]
     encoding = response.encoding or "utf-8"
     text = raw.decode(encoding, errors="replace").lstrip().lower()
     if "<html" in text or text.startswith("<!doctype html"):
@@ -397,6 +502,8 @@ def _detect_bot_protection_response(response) -> Optional[str]:
     server = str(headers.get("Server", "") or "").lower()
     content_type = str(headers.get("Content-Type", "") or "").lower()
     raw = getattr(response, "content", b"") or b""
+    if not isinstance(raw, (bytes, bytearray)):
+        raw = b""
     encoding = getattr(response, "encoding", None) or "utf-8"
     text = raw[:8192].decode(encoding, errors="replace").lower()
 
@@ -425,7 +532,8 @@ def _get_with_validated_redirects(
 
     for _ in range(_MAX_REDIRECTS + 1):
         t0 = time.monotonic()
-        response = client.get(current_url, headers=headers)
+        request = client.build_request("GET", current_url, headers=headers)
+        response = client.send(request, stream=True)
         total_elapsed_ms += (time.monotonic() - t0) * 1000
 
         if response.status_code not in _REDIRECT_STATUS:
@@ -438,8 +546,10 @@ def _get_with_validated_redirects(
         next_url = urljoin(str(response.url), location)
         target_error = _validate_fetch_target(next_url)
         if target_error is not None:
+            response.close()
             raise ValueError(target_error)
 
+        response.close()
         current_url = next_url
 
     raise ValueError("Too many redirects")

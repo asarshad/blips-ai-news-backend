@@ -142,3 +142,28 @@ def test_get_runtime_health_reports_degraded_when_external_worker_expected(monke
     assert health["status"] == "degraded"
     assert health["checks"]["scheduler"]["status"] == "degraded"
     assert health["checks"]["scheduler"]["external_scheduler_expected"] is True
+
+
+def test_get_runtime_health_can_skip_ingestion_checks_for_lightweight_probe(monkeypatch):
+    monkeypatch.setenv("SCHEDULER_ENABLED", "false")
+    monkeypatch.setenv("INGESTION_ENABLED", "true")
+    monkeypatch.setattr(observability, "_database_health_check", lambda: {"status": "ok"})
+    monkeypatch.setattr(observability, "_redis_health_check", lambda: {"status": "ok"})
+    monkeypatch.setattr(
+        "app.core.dependencies.get_redis",
+        lambda: _FakeRedisClient(lock_owner=b"worker-1", ttl=120),
+    )
+
+    called = {"ingestion": 0}
+
+    def _boom():
+        called["ingestion"] += 1
+        raise AssertionError("ingestion checks should be skipped")
+
+    monkeypatch.setattr(observability, "get_ingestion_health_status", _boom)
+
+    health = observability.get_runtime_health(include_ingestion_checks=False)
+
+    assert called["ingestion"] == 0
+    assert health["status"] == "healthy"
+    assert health["checks"]["ingestion"]["status"] == "skipped"

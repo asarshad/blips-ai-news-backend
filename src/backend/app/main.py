@@ -24,7 +24,6 @@ from redis.exceptions import RedisError
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api import api_router
@@ -512,14 +511,15 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 def health_check():
     """Health check endpoint for monitoring.
 
-    Validates DB and Redis connectivity plus scheduler / ingestion runtime
-    signals. Returns 503 only when critical dependencies are unreachable.
-    Scheduler or ingestion issues surface as a degraded 200 response so Render
-    does not restart a healthy API process for an external worker failure.
+    Validates DB and Redis connectivity plus scheduler visibility. Render polls
+    this endpoint frequently, so we intentionally skip the heavier ingestion
+    metrics queries here to avoid turning a transient database issue into API
+    pool starvation. Deeper ingestion diagnostics remain available via the
+    admin ops endpoints.
     """
     from app.core.observability import get_runtime_health
 
-    health = get_runtime_health()
+    health = get_runtime_health(include_ingestion_checks=False)
 
     if health["status"] == "unhealthy":
         # Send alert for health check failure

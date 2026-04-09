@@ -361,20 +361,26 @@ def get_db_pool_stats() -> Dict[str, Any]:
         return {"status": "error", "error": str(e)}
 
 
-def get_runtime_health() -> Dict[str, Any]:
+def get_runtime_health(*, include_ingestion_checks: bool = True) -> Dict[str, Any]:
     """Return request-safe runtime health for health checks and ops endpoints."""
     database = _database_health_check()
     redis = _redis_health_check()
     scheduler = get_scheduler_status()
-    ingestion = get_ingestion_health_status()
+    ingestion = (
+        get_ingestion_health_status()
+        if include_ingestion_checks
+        else {
+            "status": "skipped",
+            "detail": "Omitted from lightweight health probe",
+        }
+    )
 
     status = "healthy"
     if database["status"] != "ok" or redis["status"] != "ok":
         status = "unhealthy"
-    elif scheduler.get("status") in {"degraded", "unhealthy", "error"} or ingestion.get("status") in {
-        "stalled",
-        "error",
-    }:
+    elif scheduler.get("status") in {"degraded", "unhealthy", "error"} or (
+        include_ingestion_checks and ingestion.get("status") in {"stalled", "error"}
+    ):
         status = "degraded"
 
     return {

@@ -54,6 +54,40 @@ _INLINE_IMAGE_URL_RE = re.compile(
     r"https?://[^\s\"'<>]+?\.(?:jpg|jpeg|png|webp|gif|avif)(?:\?[^\s\"'<>]*)?",
     re.IGNORECASE,
 )
+_BLOCKED_DIRECT_ARTICLE_EXTENSIONS = {
+    ".7z",
+    ".avi",
+    ".csv",
+    ".doc",
+    ".docx",
+    ".epub",
+    ".gif",
+    ".gz",
+    ".jpeg",
+    ".jpg",
+    ".json",
+    ".m4a",
+    ".m4v",
+    ".mov",
+    ".mp3",
+    ".mp4",
+    ".mpeg",
+    ".mpg",
+    ".pdf",
+    ".png",
+    ".ppt",
+    ".pptx",
+    ".tar",
+    ".tgz",
+    ".txt",
+    ".wav",
+    ".webm",
+    ".webp",
+    ".xls",
+    ".xlsx",
+    ".xml",
+    ".zip",
+}
 
 
 @dataclass(frozen=True)
@@ -1129,7 +1163,16 @@ class ArticleHydrationService:
     def is_direct_article_url_allowed(article_url: Optional[str]) -> bool:
         """Return True when a URL is not on the hard-blocked non-editorial list."""
         normalized = (article_url or "").strip()
-        return bool(normalized and get_domain_tier(normalized) != DomainTier.BLOCKED)
+        if not normalized or get_domain_tier(normalized) == DomainTier.BLOCKED:
+            return False
+
+        parsed = urlparse(normalized)
+        path = (unquote(parsed.path or "")).lower()
+        for ext in _BLOCKED_DIRECT_ARTICLE_EXTENSIONS:
+            if path.endswith(ext):
+                return False
+
+        return True
 
     def summarize_article(self, item: ContentItem, article_text: str):
         """Return a best-effort summary result, or None when the LLM is unavailable."""
