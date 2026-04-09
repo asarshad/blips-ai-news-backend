@@ -43,6 +43,10 @@ class UsageRepository(BaseRepository[Usage]):
 
         return result or 0
 
+    def get_article_usage(self, device_id: str, article_id: int) -> int:
+        """Backward-compatible alias for per-content quota checks."""
+        return self.get_content_usage(device_id, article_id)
+
     def record_usage(
         self, device_id: str, content_item_id: Optional[int] = None, tokens: int = 0
     ) -> Usage:

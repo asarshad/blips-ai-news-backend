@@ -117,3 +117,89 @@ def test_summarize_video_rejects_malformed_json_classifier_payload():
 
     with pytest.raises(ValueError, match="Malformed JSON returned from LLM for video summary"):
         client.summarize_video("Apple's 2026 Macs have LEAKED!", "New Mac rumors and performance claims")
+
+
+def test_openai_chat_passes_previous_response_id_to_responses_api():
+    from app.integrations.llm_client import ChatMessage, OpenAILLMClient
+
+    client = OpenAILLMClient(api_key="sk-test-fake-key-12345678901234567890")
+    responses_api = Mock()
+    responses_api.create.return_value = SimpleNamespace(
+        output_text="follow-up",
+        usage=SimpleNamespace(total_tokens=12),
+        model="gpt-5-nano",
+        id="resp_new",
+    )
+    client._client = SimpleNamespace(responses=responses_api)
+
+    response = client.chat(
+        [
+            ChatMessage(role="system", content="You are helpful."),
+            ChatMessage(role="user", content="What else?"),
+        ],
+        previous_response_id="resp_prev",
+    )
+
+    assert response.response_id == "resp_new"
+    assert responses_api.create.call_args.kwargs["previous_response_id"] == "resp_prev"
+
+
+def test_generate_chat_response_prefers_previous_response_id_for_openai_followups():
+    from app.integrations.llm_client import LLMClient
+
+    client = LLMClient(provider="openai", api_key="sk-test-fake-key-12345678901234567890")
+    client.chat = Mock(
+        return_value=SimpleNamespace(
+            content="follow-up",
+            tokens_used=8,
+            response_id="resp_next",
+        )
+    )
+
+    response = client.generate_chat_response(
+        article_title="Test",
+        article_summary="Summary",
+        conversation_history=[
+            {"sender": "user", "message": "Tell me more"},
+            {"sender": "ai", "message": "Here are some details."},
+        ],
+        user_message="What else?",
+        previous_response_id="resp_prev",
+    )
+
+    messages = client.chat.call_args.args[0]
+    assert response.response_id == "resp_next"
+    assert [message.role for message in messages] == ["system", "user"]
+    assert client.chat.call_args.kwargs["previous_response_id"] == "resp_prev"
+
+
+def test_generate_chat_response_uses_legacy_history_when_response_id_missing():
+    from app.integrations.llm_client import LLMClient
+
+    client = LLMClient(provider="openai", api_key="sk-test-fake-key-12345678901234567890")
+    client.chat = Mock(
+        return_value=SimpleNamespace(
+            content="legacy-follow-up",
+            tokens_used=9,
+            response_id=None,
+        )
+    )
+
+    client.generate_chat_response(
+        article_title="Test",
+        article_summary="Summary",
+        conversation_history=[
+            {"sender": "user", "message": "Tell me more"},
+            {"sender": "ai", "message": "Here are some details."},
+        ],
+        user_message="What else?",
+    )
+
+    messages = client.chat.call_args.args[0]
+    assert [message.role for message in messages] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert "previous_response_id" not in client.chat.call_args.kwargs

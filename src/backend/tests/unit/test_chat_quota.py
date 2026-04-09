@@ -126,6 +126,18 @@ class TestQuotaCaching:
         # Cache should be cleared
         assert not redis_client.exists("quota:device-invalidate")
 
+    @freeze_time("2025-01-01 12:00:00")
+    def test_article_quota_uses_dedicated_cache_key(self):
+        """Article-specific checks should not reuse the plain device cache entry."""
+        redis_client = fakeredis.FakeRedis(decode_responses=True)
+        repo = FakeUsageRepo(daily_usage=1, article_usage=2)
+        manager = QuotaManager(repo, redis_client)
+
+        manager.check_quota("device-article", article_id=42)
+
+        assert redis_client.exists("quota:device-article:content:42")
+        assert not redis_client.exists("quota:device-article")
+
 
 class TestQuotaEdgeCases:
     """Test edge cases and error handling."""

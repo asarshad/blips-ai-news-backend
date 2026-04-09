@@ -60,7 +60,11 @@ class FakeLLMClient(BaseLLMClient):
         return self._last_messages
 
     def chat(
-        self, messages: List[ChatMessage], max_tokens: int = 300, temperature: float = 0.7
+        self,
+        messages: List[ChatMessage],
+        max_tokens: int = 300,
+        temperature: float = 0.7,
+        previous_response_id: str | None = None,
     ) -> ChatResponse:
         """
         Return deterministic chat response based on message content.

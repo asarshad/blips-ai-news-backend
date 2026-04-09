@@ -25,6 +25,7 @@ class AiChatService:
         user_message: str = "",
         history_limit: int = 3,
         history: Optional[List[Dict[str, str]]] = None,
+        previous_response_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate AI response to user message with content context.
@@ -64,9 +65,14 @@ class AiChatService:
                 article_summary=summary,
                 conversation_history=history_dicts,
                 user_message=user_message,
+                previous_response_id=previous_response_id,
             )
 
-            return {"response": response.content, "tokens_used": response.tokens_used}
+            return {
+                "response": response.content,
+                "tokens_used": response.tokens_used,
+                "response_id": response.response_id,
+            }
 
         except Exception as e:
             logger.error(f"Error generating AI response: {str(e)}")

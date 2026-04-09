@@ -17,6 +17,7 @@ class ConversationBase(BaseModel):
 class ConversationCreate(ConversationBase):
     content_item_id: int
     history: Optional[List[ChatMessage]] = None
+    previous_response_id: Optional[str] = None
 
 
 class ConversationOut(ConversationBase):

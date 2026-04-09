@@ -37,7 +37,7 @@ def test_quota_manager_caches_quota_with_ttl(monkeypatch):
         q2 = manager.check_quota("device-12345678", article_id=99)
         assert q2 == q1
 
-        ttl = redis_client.ttl("quota:device-12345678")
+        ttl = redis_client.ttl("quota:device-12345678:content:99")
         # fakeredis reports TTL in seconds; allow small drift.
         assert 240 <= ttl <= 300
 

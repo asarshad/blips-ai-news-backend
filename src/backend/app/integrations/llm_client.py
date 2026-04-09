@@ -169,6 +169,7 @@ class ChatResponse:
     tokens_used: int
     model: str
     provider: str
+    response_id: Optional[str] = None
 
 
 @dataclass
@@ -194,7 +195,11 @@ class BaseLLMClient(ABC):
 
     @abstractmethod
     def chat(
-        self, messages: List[ChatMessage], max_tokens: int = 300, temperature: float = 0.7
+        self,
+        messages: List[ChatMessage],
+        max_tokens: int = 300,
+        temperature: float = 0.7,
+        previous_response_id: Optional[str] = None,
     ) -> ChatResponse:
         """Send a chat completion request."""
         pass
@@ -266,7 +271,11 @@ class OpenAILLMClient(BaseLLMClient):
         reraise=True,
     )
     def chat(
-        self, messages: List[ChatMessage], max_tokens: int = 300, temperature: float = 0.7
+        self,
+        messages: List[ChatMessage],
+        max_tokens: int = 300,
+        temperature: float = 0.7,
+        previous_response_id: Optional[str] = None,
     ) -> ChatResponse:
         if not self.is_configured():
             raise RuntimeError(
@@ -292,6 +301,8 @@ class OpenAILLMClient(BaseLLMClient):
             }
             if instructions:
                 request_kwargs["instructions"] = instructions
+            if previous_response_id:
+                request_kwargs["previous_response_id"] = previous_response_id
             if temperature != 0.7:
                 logger.debug(
                     "Ignoring OpenAI temperature override for pinned GPT-5 model '%s'",
@@ -308,6 +319,7 @@ class OpenAILLMClient(BaseLLMClient):
                 tokens_used=response.usage.total_tokens if response.usage else 0,
                 model=getattr(response, "model", self.model),
                 provider="openai",
+                response_id=getattr(response, "id", None),
             )
         except tuple(self._RETRYABLE):
             raise  # let tenacity retry
@@ -361,7 +373,11 @@ class MistralLLMClient(BaseLLMClient):
         reraise=True,
     )
     def chat(
-        self, messages: List[ChatMessage], max_tokens: int = 300, temperature: float = 0.7
+        self,
+        messages: List[ChatMessage],
+        max_tokens: int = 300,
+        temperature: float = 0.7,
+        previous_response_id: Optional[str] = None,
     ) -> ChatResponse:
         if not self.is_configured():
             raise RuntimeError(
@@ -441,7 +457,11 @@ class LLMClient:
         return self._client.get_provider_name()
 
     def chat(
-        self, messages: List[ChatMessage], max_tokens: int = 300, temperature: float = 0.7
+        self,
+        messages: List[ChatMessage],
+        max_tokens: int = 300,
+        temperature: float = 0.7,
+        previous_response_id: Optional[str] = None,
     ) -> ChatResponse:
         """
         Send a chat completion request to the configured provider.
@@ -460,7 +480,12 @@ class LLMClient:
         # --- Daily cost ceiling check ---
         self._enforce_cost_ceiling()
 
-        response = self._client.chat(messages, max_tokens, temperature)
+        response = self._client.chat(
+            messages,
+            max_tokens,
+            temperature,
+            previous_response_id=previous_response_id,
+        )
 
         # --- Track token spend ---
         self._record_tokens(response.tokens_used, response.provider)
@@ -852,6 +877,7 @@ Article Document:
         article_summary: str,
         conversation_history: List[Dict[str, str]],
         user_message: str,
+        previous_response_id: Optional[str] = None,
     ) -> ChatResponse:
         """
         Generate an AI response for article chat.
@@ -876,6 +902,15 @@ If asked about topics unrelated to the article, politely redirect to the article
 """
 
         messages = [ChatMessage(role="system", content=system_prompt)]
+
+        if previous_response_id and self.get_provider() == "openai":
+            messages.append(ChatMessage(role="user", content=user_message))
+            return self.chat(
+                messages,
+                max_tokens=300,
+                temperature=0.7,
+                previous_response_id=previous_response_id,
+            )
 
         # Add conversation history
         for msg in conversation_history:

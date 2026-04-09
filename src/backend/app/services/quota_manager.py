@@ -35,7 +35,7 @@ class QuotaManager:
         Returns:
             Dict with 'remaining_daily_messages' and 'remaining_article_messages'
         """
-        cache_key = f"quota:{device_id}"
+        cache_key = self._cache_key(device_id, article_id)
 
         # Try cache first
         cached_data = self._get_cached_quota(cache_key)
@@ -73,8 +73,15 @@ class QuotaManager:
         self.usage_repo.record_usage(device_id, article_id, tokens)
 
         # Invalidate cache
-        cache_key = f"quota:{device_id}"
-        self.redis.delete(cache_key)
+        self.redis.delete(self._cache_key(device_id))
+        if article_id is not None:
+            self.redis.delete(self._cache_key(device_id, article_id))
+
+    def _cache_key(self, device_id: str, article_id: Optional[int] = None) -> str:
+        """Build the cache key for device-level or per-content quota checks."""
+        if article_id is None:
+            return f"quota:{device_id}"
+        return f"quota:{device_id}:content:{article_id}"
 
     def _get_cached_quota(self, cache_key: str) -> Optional[dict]:
         """Get quota data from cache."""

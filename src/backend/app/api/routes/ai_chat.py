@@ -24,10 +24,12 @@ from app.repositories.usage_repo import UsageRepository
 from app.schemas.conversation import ConversationCreate
 from app.services.ai_chat import AiChatService
 from app.services.quota_manager import QuotaManager
+from app.core.logging import get_logger
 
 _limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter()
+logger = get_logger(__name__)
 
 
 @router.post("/respond")
@@ -71,16 +73,33 @@ def get_ai_response(
             {"sender": "user" if msg.role == "user" else "ai", "message": msg.content}
             for msg in message.history
         ]
+    history_roles = [entry["sender"] for entry in history_dicts or []]
+
+    logger.info(
+        "AI chat request content_id=%s history_count=%s history_roles=%s has_previous_response_id=%s",
+        content_id,
+        len(history_dicts or []),
+        history_roles,
+        bool(message.previous_response_id),
+    )
 
     try:
         response = ai_service.get_ai_response(
             content_item_id=message.content_item_id,
             user_message=message.message,
             history=history_dicts,
+            previous_response_id=message.previous_response_id,
         )
     except ArticleNotFoundError:
         raise not_found_exception("Content item", content_id) from None
     except ChatGenerationError as e:
+        logger.error(
+            "AI chat generation failed content_id=%s history_count=%s has_previous_response_id=%s details=%s",
+            content_id,
+            len(history_dicts or []),
+            bool(message.previous_response_id),
+            e.details,
+        )
         raise internal_error_exception(f"Failed to generate response: {e.message}") from e
 
     # Note: Conversation persistence removed per requirement to keep chats device-only.
@@ -95,6 +114,7 @@ def get_ai_response(
 
     return {
         "response": response["response"],
+        "response_id": response.get("response_id"),
         "remaining_daily": quota["remaining_daily_messages"] - 1,
         "remaining_article": (quota["remaining_article_messages"] - 1)
         if quota["remaining_article_messages"] is not None
