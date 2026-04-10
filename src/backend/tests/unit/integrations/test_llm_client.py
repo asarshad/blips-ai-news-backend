@@ -138,10 +138,12 @@ def test_openai_chat_passes_previous_response_id_to_responses_api():
             ChatMessage(role="user", content="What else?"),
         ],
         previous_response_id="resp_prev",
+        store=True,
     )
 
     assert response.response_id == "resp_new"
     assert responses_api.create.call_args.kwargs["previous_response_id"] == "resp_prev"
+    assert responses_api.create.call_args.kwargs["store"] is True
 
 
 def test_generate_chat_response_prefers_previous_response_id_for_openai_followups():
@@ -171,6 +173,7 @@ def test_generate_chat_response_prefers_previous_response_id_for_openai_followup
     assert response.response_id == "resp_next"
     assert [message.role for message in messages] == ["system", "user"]
     assert client.chat.call_args.kwargs["previous_response_id"] == "resp_prev"
+    assert client.chat.call_args.kwargs["store"] is True
 
 
 def test_generate_chat_response_uses_legacy_history_when_response_id_missing():
@@ -203,3 +206,53 @@ def test_generate_chat_response_uses_legacy_history_when_response_id_missing():
         "user",
     ]
     assert "previous_response_id" not in client.chat.call_args.kwargs
+    assert client.chat.call_args.kwargs["store"] is True
+
+
+def test_generate_chat_response_falls_back_when_previous_response_id_is_missing():
+    from app.integrations.llm_client import LLMClient
+
+    class FakePreviousResponseNotFound(Exception):
+        def __init__(self):
+            super().__init__("previous response missing")
+            self.body = {
+                "error": {
+                    "code": "previous_response_not_found",
+                }
+            }
+
+    client = LLMClient(provider="openai", api_key="sk-test-fake-key-12345678901234567890")
+    client.chat = Mock(
+        side_effect=[
+            FakePreviousResponseNotFound(),
+            SimpleNamespace(
+                content="fallback-follow-up",
+                tokens_used=11,
+                response_id="resp_replayed",
+            ),
+        ]
+    )
+
+    response = client.generate_chat_response(
+        article_title="Test",
+        article_summary="Summary",
+        conversation_history=[
+            {"sender": "user", "message": "Tell me more"},
+            {"sender": "ai", "message": "Here are some details."},
+        ],
+        user_message="What else?",
+        previous_response_id="resp_prev",
+    )
+
+    first_call = client.chat.call_args_list[0]
+    second_call = client.chat.call_args_list[1]
+
+    assert response.response_id == "resp_replayed"
+    assert first_call.kwargs["previous_response_id"] == "resp_prev"
+    assert [message.role for message in second_call.args[0]] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+    ]
+    assert "previous_response_id" not in second_call.kwargs

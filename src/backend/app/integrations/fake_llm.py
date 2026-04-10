@@ -65,6 +65,7 @@ class FakeLLMClient(BaseLLMClient):
         max_tokens: int = 300,
         temperature: float = 0.7,
         previous_response_id: str | None = None,
+        store: bool = False,
     ) -> ChatResponse:
         """
         Return deterministic chat response based on message content.

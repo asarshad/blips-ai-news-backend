@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from redis.exceptions import RedisError
 from tenacity import (
@@ -126,6 +126,28 @@ def _strip_json_fence(payload: str) -> str:
     return _JSON_FENCE_RE.sub("", payload.strip())
 
 
+def _openai_error_code(error: Exception) -> Optional[str]:
+    """Extract a stable OpenAI API error code when available."""
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        nested = body.get("error")
+        if isinstance(nested, dict):
+            code = nested.get("code")
+            if isinstance(code, str) and code:
+                return code
+
+    code = getattr(error, "code", None)
+    if isinstance(code, str) and code:
+        return code
+
+    return None
+
+
+def _is_previous_response_not_found(error: Exception) -> bool:
+    """Return True when OpenAI rejects a chained response id lookup."""
+    return _openai_error_code(error) == "previous_response_not_found"
+
+
 def _load_mistral_client_class():
     """Resolve the Mistral SDK client across supported package layouts."""
     try:
@@ -200,6 +222,7 @@ class BaseLLMClient(ABC):
         max_tokens: int = 300,
         temperature: float = 0.7,
         previous_response_id: Optional[str] = None,
+        store: bool = False,
     ) -> ChatResponse:
         """Send a chat completion request."""
         pass
@@ -276,6 +299,7 @@ class OpenAILLMClient(BaseLLMClient):
         max_tokens: int = 300,
         temperature: float = 0.7,
         previous_response_id: Optional[str] = None,
+        store: bool = False,
     ) -> ChatResponse:
         if not self.is_configured():
             raise RuntimeError(
@@ -297,7 +321,7 @@ class OpenAILLMClient(BaseLLMClient):
                 "input": input_messages,
                 "max_output_tokens": max_tokens,
                 "reasoning": {"effort": self._REASONING_EFFORT},
-                "store": False,
+                "store": store,
             }
             if instructions:
                 request_kwargs["instructions"] = instructions
@@ -378,6 +402,7 @@ class MistralLLMClient(BaseLLMClient):
         max_tokens: int = 300,
         temperature: float = 0.7,
         previous_response_id: Optional[str] = None,
+        store: bool = False,
     ) -> ChatResponse:
         if not self.is_configured():
             raise RuntimeError(
@@ -462,6 +487,7 @@ class LLMClient:
         max_tokens: int = 300,
         temperature: float = 0.7,
         previous_response_id: Optional[str] = None,
+        store: bool = False,
     ) -> ChatResponse:
         """
         Send a chat completion request to the configured provider.
@@ -485,6 +511,7 @@ class LLMClient:
             max_tokens,
             temperature,
             previous_response_id=previous_response_id,
+            store=store,
         )
 
         # --- Track token spend ---
@@ -904,13 +931,26 @@ If asked about topics unrelated to the article, politely redirect to the article
         messages = [ChatMessage(role="system", content=system_prompt)]
 
         if previous_response_id and self.get_provider() == "openai":
-            messages.append(ChatMessage(role="user", content=user_message))
-            return self.chat(
-                messages,
-                max_tokens=300,
-                temperature=0.7,
-                previous_response_id=previous_response_id,
-            )
+            chained_messages = [
+                *messages,
+                ChatMessage(role="user", content=user_message),
+            ]
+            try:
+                return self.chat(
+                    chained_messages,
+                    max_tokens=300,
+                    temperature=0.7,
+                    previous_response_id=previous_response_id,
+                    store=True,
+                )
+            except Exception as error:
+                if _is_previous_response_not_found(error):
+                    logger.warning(
+                        "OpenAI previous_response_id=%s was not found; falling back to history replay",
+                        previous_response_id,
+                    )
+                else:
+                    raise
 
         # Add conversation history
         for msg in conversation_history:
@@ -920,7 +960,12 @@ If asked about topics unrelated to the article, politely redirect to the article
         # Add current user message
         messages.append(ChatMessage(role="user", content=user_message))
 
-        return self.chat(messages, max_tokens=300, temperature=0.7)
+        return self.chat(
+            messages,
+            max_tokens=300,
+            temperature=0.7,
+            store=self.get_provider() == "openai",
+        )
 
 
 # Convenience function for backward compatibility
