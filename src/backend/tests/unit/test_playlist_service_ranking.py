@@ -489,3 +489,259 @@ def test_generate_tiered_snapshot_skips_article_rerank_even_with_categories(monk
     snapshot = service._generate_tiered_snapshot("device-1", ContentType.ARTICLE)
 
     assert [item["id"] for item in snapshot["items"]] == [1, 2]
+
+
+def test_generate_tiered_snapshot_prioritizes_recent_video_head(monkeypatch):
+    service = PlaylistService(
+        content_repo=MagicMock(db=object()),
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=MagicMock(),
+        redis_client=None,
+    )
+
+    class _FakeCategoryRepo:
+        def __init__(self, _db):
+            pass
+
+        def get_selected_categories(self, _device_id):
+            return ["AI"]
+
+        def get_total_learned_weight(self, _device_id):
+            return 42.0
+
+    raw_items = [
+        {
+            "id": 11,
+            "type": "VIDEO",
+            "source": "Example",
+            "source_url": "https://example.com/11",
+            "title": "Fallback",
+            "summary": "summary",
+            "topics": ["Technology"],
+            "entities": [],
+            "published_at": "2026-04-08T11:00:00Z",
+            "created_at": "2026-04-08T11:05:00Z",
+            "freshness_tier": "C",
+            "promotion_score": 0.2,
+            "global_score": 0.3,
+            "video_url": "https://cdn.example.com/11.mp4",
+            "thumbnail_url": "https://cdn.example.com/11.jpg",
+            "conversation_starters": {},
+        },
+        {
+            "id": 12,
+            "type": "VIDEO",
+            "source": "Example",
+            "source_url": "https://example.com/12",
+            "title": "Yesterday lower",
+            "summary": "summary",
+            "topics": ["Technology"],
+            "entities": [],
+            "published_at": "2026-04-11T10:00:00Z",
+            "created_at": "2026-04-11T10:05:00Z",
+            "freshness_tier": "A",
+            "promotion_score": 0.4,
+            "global_score": 0.8,
+            "video_url": "https://cdn.example.com/12.mp4",
+            "thumbnail_url": "https://cdn.example.com/12.jpg",
+            "conversation_starters": {},
+        },
+        {
+            "id": 13,
+            "type": "VIDEO",
+            "source": "Example",
+            "source_url": "https://example.com/13",
+            "title": "Today higher",
+            "summary": "summary",
+            "topics": ["Technology"],
+            "entities": [],
+            "published_at": "2026-04-12T09:00:00Z",
+            "created_at": "2026-04-12T09:05:00Z",
+            "freshness_tier": "A",
+            "promotion_score": 0.9,
+            "global_score": 0.2,
+            "video_url": "https://cdn.example.com/13.mp4",
+            "thumbnail_url": "https://cdn.example.com/13.jpg",
+            "conversation_starters": {},
+        },
+        {
+            "id": 14,
+            "type": "VIDEO",
+            "source": "Example",
+            "source_url": "https://example.com/14",
+            "title": "Today lower",
+            "summary": "summary",
+            "topics": ["Technology"],
+            "entities": [],
+            "published_at": "2026-04-12T08:00:00Z",
+            "created_at": "2026-04-12T08:05:00Z",
+            "freshness_tier": "A",
+            "promotion_score": 0.3,
+            "global_score": 0.9,
+            "video_url": "https://cdn.example.com/14.mp4",
+            "thumbnail_url": "https://cdn.example.com/14.jpg",
+            "conversation_starters": {},
+        },
+    ]
+
+    monkeypatch.setattr(
+        "app.services.playlist_service.UserCategorySelectionRepository",
+        _FakeCategoryRepo,
+    )
+    monkeypatch.setattr(
+        "app.services.article_head_freshness._utcnow",
+        lambda: datetime(2026, 4, 12, 20, 0, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        "app.services.playlist_service.get_cached_tiered_feed",
+        lambda *_args, **_kwargs: (
+            raw_items,
+            False,
+            SimpleNamespace(
+                generated_at=datetime(2026, 4, 12, 12, 0, 0),
+                source="db",
+                cache_key="cache-key",
+                cache_hit=False,
+                remaining_window_count=0,
+                strategy_name="article_recent_head_v1",
+                strategy_source="default",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.playlist_service.rerank_feed",
+        lambda **_kwargs: list(reversed(_kwargs["items"])),
+    )
+
+    snapshot = service._generate_tiered_snapshot("device-1", ContentType.VIDEO)
+
+    assert [item["id"] for item in snapshot["items"][:4]] == [13, 14, 12, 11]
+
+
+def test_generate_tiered_snapshot_prioritizes_recent_reel_head(monkeypatch):
+    service = PlaylistService(
+        content_repo=MagicMock(db=object()),
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=MagicMock(),
+        redis_client=None,
+    )
+
+    class _FakeCategoryRepo:
+        def __init__(self, _db):
+            pass
+
+        def get_selected_categories(self, _device_id):
+            return ["AI"]
+
+        def get_total_learned_weight(self, _device_id):
+            return 11.0
+
+    raw_items = [
+        {
+            "id": 21,
+            "type": "REEL",
+            "source": "Example",
+            "source_url": "https://example.com/21",
+            "title": "Fallback",
+            "summary": "summary",
+            "topics": ["Technology"],
+            "entities": [],
+            "published_at": "2026-04-08T11:00:00Z",
+            "created_at": "2026-04-08T11:05:00Z",
+            "freshness_tier": "C",
+            "promotion_score": 0.2,
+            "global_score": 0.3,
+            "video_url": "https://cdn.example.com/21.mp4",
+            "thumbnail_url": "https://cdn.example.com/21.jpg",
+            "conversation_starters": {},
+        },
+        {
+            "id": 22,
+            "type": "REEL",
+            "source": "Example",
+            "source_url": "https://example.com/22",
+            "title": "Yesterday",
+            "summary": "summary",
+            "topics": ["Technology"],
+            "entities": [],
+            "published_at": "2026-04-11T11:00:00Z",
+            "created_at": "2026-04-11T11:05:00Z",
+            "freshness_tier": "A",
+            "promotion_score": 0.7,
+            "global_score": 0.7,
+            "video_url": "https://cdn.example.com/22.mp4",
+            "thumbnail_url": "https://cdn.example.com/22.jpg",
+            "conversation_starters": {},
+        },
+        {
+            "id": 23,
+            "type": "REEL",
+            "source": "Example",
+            "source_url": "https://example.com/23",
+            "title": "Today lower",
+            "summary": "summary",
+            "topics": ["Technology"],
+            "entities": [],
+            "published_at": "2026-04-12T08:00:00Z",
+            "created_at": "2026-04-12T08:05:00Z",
+            "freshness_tier": "A",
+            "promotion_score": 0.2,
+            "global_score": 0.9,
+            "video_url": "https://cdn.example.com/23.mp4",
+            "thumbnail_url": "https://cdn.example.com/23.jpg",
+            "conversation_starters": {},
+        },
+        {
+            "id": 24,
+            "type": "REEL",
+            "source": "Example",
+            "source_url": "https://example.com/24",
+            "title": "Today higher",
+            "summary": "summary",
+            "topics": ["Technology"],
+            "entities": [],
+            "published_at": "2026-04-12T09:00:00Z",
+            "created_at": "2026-04-12T09:05:00Z",
+            "freshness_tier": "A",
+            "promotion_score": 0.8,
+            "global_score": 0.2,
+            "video_url": "https://cdn.example.com/24.mp4",
+            "thumbnail_url": "https://cdn.example.com/24.jpg",
+            "conversation_starters": {},
+        },
+    ]
+
+    monkeypatch.setattr(
+        "app.services.playlist_service.UserCategorySelectionRepository",
+        _FakeCategoryRepo,
+    )
+    monkeypatch.setattr(
+        "app.services.article_head_freshness._utcnow",
+        lambda: datetime(2026, 4, 12, 20, 0, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        "app.services.playlist_service.get_cached_tiered_feed",
+        lambda *_args, **_kwargs: (
+            raw_items,
+            False,
+            SimpleNamespace(
+                generated_at=datetime(2026, 4, 12, 12, 0, 0),
+                source="db",
+                cache_key="cache-key",
+                cache_hit=False,
+                remaining_window_count=0,
+                strategy_name="article_recent_head_v1",
+                strategy_source="default",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.playlist_service.rerank_feed",
+        lambda **_kwargs: list(reversed(_kwargs["items"])),
+    )
+
+    snapshot = service._generate_tiered_snapshot("device-1", ContentType.REEL)
+
+    assert [item["id"] for item in snapshot["items"][:4]] == [24, 23, 22, 21]

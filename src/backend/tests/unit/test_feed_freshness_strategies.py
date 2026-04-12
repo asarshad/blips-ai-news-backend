@@ -21,7 +21,11 @@ def test_feed_freshness_strategies_default_articles_to_recent_head():
     strategies = FeedFreshnessStrategies(redis_client=None)
 
     assert strategies.strategy_name(Surface.ARTICLES) == ARTICLE_RECENT_HEAD_V1_STRATEGY
+    assert strategies.strategy_name(Surface.VIDEOS) == ARTICLE_RECENT_HEAD_V1_STRATEGY
+    assert strategies.strategy_name(Surface.REELS) == ARTICLE_RECENT_HEAD_V1_STRATEGY
     assert strategies.strategy_source(Surface.ARTICLES) == "default"
+    assert strategies.strategy_source(Surface.VIDEOS) == "default"
+    assert strategies.strategy_source(Surface.REELS) == "default"
 
 
 def test_feed_freshness_strategies_fallback_to_current_for_unknown_env(monkeypatch):

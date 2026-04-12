@@ -1,4 +1,4 @@
-"""Helpers for keeping the article head biased toward fresher inventory."""
+"""Helpers for keeping feed heads biased toward fresher inventory."""
 
 from __future__ import annotations
 
@@ -11,15 +11,15 @@ ARTICLE_RECENT_HEAD_CANDIDATE_LIMIT = 50
 T = TypeVar("T")
 
 
-def prioritize_article_head(
+def prioritize_recent_head(
     items: Sequence[T],
     *,
     head_size: int = ARTICLE_FRESH_HEAD_SIZE,
     now: datetime | None = None,
 ) -> list[T]:
-    """Build a recent article head from today and yesterday first.
+    """Build a recent feed head from today and yesterday first.
 
-    The top article slots should feel current and shared across devices:
+    The top feed slots should feel current and shared across devices:
     - today bucket first
     - then yesterday bucket
     - then the existing feed order as fallback when recent inventory is thin
@@ -63,6 +63,16 @@ def prioritize_article_head(
         *(item for _, item in head_selection),
         *(item for index, item in indexed_items if index not in selected_indexes),
     ]
+
+
+def prioritize_article_head(
+    items: Sequence[T],
+    *,
+    head_size: int = ARTICLE_FRESH_HEAD_SIZE,
+    now: datetime | None = None,
+) -> list[T]:
+    """Backward-compatible alias for article callers."""
+    return prioritize_recent_head(items, head_size=head_size, now=now)
 
 
 def _utcnow() -> datetime:

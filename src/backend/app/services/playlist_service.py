@@ -35,7 +35,7 @@ from app.repositories.user_repo import (
     UserPreferenceRepository,
     UserProfileRepository,
 )
-from app.services.article_head_freshness import prioritize_article_head
+from app.services.article_head_freshness import prioritize_recent_head
 from app.services.content_readiness import is_ready_for_surface, surface_name_for_item
 from app.services.feed_freshness_strategies import CURRENT_STRATEGY, feed_freshness_strategies
 from app.services.feed_version import compute_feed_version
@@ -664,8 +664,8 @@ class PlaylistService:
                     total_learned_weight=total_learned_weight,
                     window_size=max(len(items), 1),
                 )
-        if content_type == ContentType.ARTICLE:
-            items = prioritize_article_head(items)
+        if content_type in (ContentType.ARTICLE, ContentType.VIDEO, ContentType.REEL):
+            items = prioritize_recent_head(items)
 
         return self._snapshot_from_items(
             items,
@@ -1488,6 +1488,7 @@ class PlaylistService:
                 "added_age_seconds": _optional_int(normalized.get("added_age_seconds")),
                 "read_time_minutes": _optional_int(normalized.get("read_time_minutes")),
                 "global_score": _optional_float(normalized.get("global_score")),
+                "promotion_score": _optional_float(normalized.get("promotion_score")),
                 "cluster_id": _optional_text(normalized.get("cluster_id")),
                 "conversation_starters": _normalize_conversation_starters(
                     normalized.get("conversation_starters")
