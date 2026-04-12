@@ -115,10 +115,26 @@ def not_found_exception(resource: str, identifier: Union[str, int]) -> HTTPExcep
 
 def quota_exceeded_exception(quota_type: str = "daily") -> HTTPException:
     """Create a 429 Too Many Requests exception for quota exceeded."""
+    payload = quota_exceeded_payload(quota_type)
     return HTTPException(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        detail=f"{quota_type.capitalize()} message quota exceeded",
+        detail=payload["detail"],
     )
+
+
+def quota_exceeded_payload(quota_type: str = "daily") -> dict[str, str]:
+    """Return a mixed-version-safe 429 payload for chat quota exhaustion."""
+    normalized_quota_type = quota_type.lower().strip()
+    message = (
+        "Daily message quota exceeded"
+        if normalized_quota_type == "daily"
+        else "Article message quota exceeded"
+    )
+    return {
+        "detail": message,
+        "quota_type": normalized_quota_type,
+        "message": message,
+    }
 
 
 def internal_error_exception(message: str = "An internal server error occurred") -> HTTPException:

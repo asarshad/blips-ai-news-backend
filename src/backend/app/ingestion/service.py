@@ -53,6 +53,7 @@ from app.services.content_readiness import (
     seed_content_readiness,
     sync_content_readiness,
 )
+from app.services.conversation_starters import get_starters_service
 from app.services.video_discovery_provenance import build_discovered_via
 from app.video_surface_rules import classify_video_like_item
 
@@ -254,6 +255,11 @@ def build_video_content_item_from_entry(
         added_at=added_at,
         editorial_boost=editorial_boost,
     )
+    if summary and inline_starters and llm_client.is_configured():
+        try:
+            get_starters_service(llm_client).generate_answers_and_persist(content_item)
+        except Exception as exc:
+            logger.warning("Failed to precompute starter answers for video %s: %s", entry.title, exc)
     base_quality = compute_source_weight(source)
     content_item.quality_score = base_quality * quality_modifier
     content_item.recency_score = 1.0

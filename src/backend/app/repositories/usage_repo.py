@@ -34,10 +34,18 @@ class UsageRepository(BaseRepository[Usage]):
         return result or 0
 
     def get_content_usage(self, device_id: str, content_item_id: int) -> int:
-        """Get total message count for a device on a specific content item."""
+        """Get today's message count for a device on a specific content item."""
+        today = datetime.utcnow().date()
+        tomorrow = today + timedelta(days=1)
+
         result = (
             self.db.query(func.sum(Usage.message_count))
-            .filter(Usage.device_id == device_id, Usage.content_item_id == content_item_id)
+            .filter(
+                Usage.device_id == device_id,
+                Usage.content_item_id == content_item_id,
+                Usage.timestamp >= today,
+                Usage.timestamp < tomorrow,
+            )
             .scalar()
         )
 

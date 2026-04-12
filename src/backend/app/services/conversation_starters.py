@@ -23,6 +23,30 @@ DEFAULT_FALLBACK_STARTERS = [
 ]
 
 
+def normalize_starter_prompt(prompt: str) -> str:
+    """Normalize starter prompts for exact-match storage and lookup."""
+    return (prompt or "").strip()
+
+
+def extract_exact_starters(content_item: ContentItem) -> List[str]:
+    """Return the persisted starter prompts for a content item."""
+    raw = getattr(content_item, "conversation_starters", None)
+    if not isinstance(raw, dict):
+        return []
+    starters = raw.get("starters")
+    if not isinstance(starters, list):
+        return []
+
+    normalized: List[str] = []
+    for value in starters:
+        if not isinstance(value, str):
+            continue
+        prompt = normalize_starter_prompt(value)
+        if prompt:
+            normalized.append(prompt)
+    return normalized
+
+
 class StarterGenerationError(Exception):
     """Raised when starter generation fails."""
 
@@ -236,9 +260,178 @@ class ConversationStartersService:
         Returns:
             The generated starters
         """
+        previous_starters = extract_exact_starters(content_item)
         starters = self.generate_starters(content_item, force_regenerate)
         content_item.conversation_starters = starters
+        if force_regenerate or extract_exact_starters(content_item) != previous_starters:
+            content_item.starter_answers = None
         return starters
+
+    def get_cached_starter_answer(self, content_item: ContentItem, prompt: str) -> Optional[str]:
+        """Return a cached starter answer when the prompt exactly matches a persisted starter."""
+        normalized_prompt = normalize_starter_prompt(prompt)
+        if not normalized_prompt:
+            return None
+
+        starters = extract_exact_starters(content_item)
+        if normalized_prompt not in starters:
+            return None
+
+        raw_answers = getattr(content_item, "starter_answers", None)
+        if not isinstance(raw_answers, dict):
+            return None
+
+        answer = raw_answers.get(normalized_prompt)
+        if not isinstance(answer, str):
+            return None
+        answer = answer.strip()
+        return answer or None
+
+    def persist_starter_answer(
+        self,
+        content_item: ContentItem,
+        prompt: str,
+        answer: str,
+    ) -> bool:
+        """Persist a single starter answer when the prompt is a persisted starter."""
+        normalized_prompt = normalize_starter_prompt(prompt)
+        normalized_answer = (answer or "").strip()
+        if not normalized_prompt or not normalized_answer:
+            return False
+
+        starters = extract_exact_starters(content_item)
+        if normalized_prompt not in starters:
+            return False
+
+        raw_answers = getattr(content_item, "starter_answers", None)
+        answer_map = dict(raw_answers) if isinstance(raw_answers, dict) else {}
+        answer_map[normalized_prompt] = normalized_answer
+        content_item.starter_answers = {
+            starter: answer_map[starter]
+            for starter in starters
+            if isinstance(answer_map.get(starter), str) and answer_map[starter].strip()
+        }
+        return True
+
+    def generate_starter_answers(
+        self,
+        content_item: ContentItem,
+        force_regenerate: bool = False,
+    ) -> Dict[str, str]:
+        """Generate answers for the item's persisted starter prompts in one LLM call."""
+        starters = extract_exact_starters(content_item)
+        if not starters:
+            return {}
+
+        if not force_regenerate:
+            raw_answers = getattr(content_item, "starter_answers", None)
+            if isinstance(raw_answers, dict):
+                existing = {
+                    starter: raw_answers[starter].strip()
+                    for starter in starters
+                    if isinstance(raw_answers.get(starter), str) and raw_answers[starter].strip()
+                }
+                if len(existing) == len(starters):
+                    return existing
+
+        if not self.llm_client.is_configured():
+            logger.warning("LLM not configured, skipping starter answer generation")
+            return {}
+
+        summary = (content_item.summary or content_item.description or "").strip()
+        title = (content_item.title or "").strip()
+        content_type = getattr(content_item, "type", ContentType.ARTICLE)
+        content_label = (
+            content_type.value.lower() if isinstance(content_type, ContentType) else "content"
+        )
+
+        starter_lines = "\n".join(f"- {starter}" for starter in starters)
+        prompt = f"""You are a helpful assistant writing first-turn answers for a tech news app.
+
+Content type: {content_label}
+Title: {title}
+Summary: {summary or "No summary available"}
+
+Write a concise answer for each starter prompt below. Each answer must:
+- directly answer the specific starter prompt
+- stay grounded in the title and summary above
+- be at most 2 short paragraphs
+- avoid markdown lists unless necessary
+
+Return ONLY valid JSON as an object where each key is the exact starter prompt and each value is its answer.
+
+Starter prompts:
+{starter_lines}
+"""
+
+        try:
+            response = self.llm_client.chat(
+                messages=[ChatMessage(role="user", content=prompt)],
+                max_tokens=700,
+                temperature=0.4,
+            )
+            payload = _parse_starter_answers_response(response.content)
+        except Exception as exc:
+            logger.error(
+                "Failed to generate starter answers for content_id=%s: %s",
+                getattr(content_item, "id", None),
+                exc,
+            )
+            return {}
+
+        answers: Dict[str, str] = {}
+        for starter in starters:
+            answer = payload.get(starter)
+            if isinstance(answer, str) and answer.strip():
+                answers[starter] = answer.strip()
+        return answers
+
+    def generate_answers_and_persist(
+        self,
+        content_item: ContentItem,
+        force_regenerate: bool = False,
+    ) -> Dict[str, str]:
+        """Generate starter answers and persist them to the content item."""
+        answers = self.generate_starter_answers(
+            content_item,
+            force_regenerate=force_regenerate,
+        )
+        if not answers:
+            return {}
+
+        content_item.starter_answers = answers
+        return answers
+
+
+def _strip_json_fence(text: str) -> str:
+    """Remove optional markdown fences around JSON."""
+    stripped = text.strip()
+    if stripped.startswith("```json"):
+        stripped = stripped[7:]
+    elif stripped.startswith("```"):
+        stripped = stripped[3:]
+    if stripped.endswith("```"):
+        stripped = stripped[:-3]
+    return stripped.strip()
+
+
+def _parse_starter_answers_response(response_text: str) -> Dict[str, str]:
+    """Parse JSON response for starter-answer generation."""
+    data = json.loads(_strip_json_fence(response_text))
+    if not isinstance(data, dict):
+        raise StarterGenerationError("Starter answers response must be a JSON object")
+
+    answers: Dict[str, str] = {}
+    for key, value in data.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            continue
+        normalized_key = normalize_starter_prompt(key)
+        normalized_value = value.strip()
+        if normalized_key and normalized_value:
+            answers[normalized_key] = normalized_value
+    if not answers:
+        raise StarterGenerationError("No starter answers in response")
+    return answers
 
 
 # Singleton instance for convenience

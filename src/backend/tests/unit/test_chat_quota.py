@@ -16,8 +16,8 @@ from app.services.quota_manager import QuotaManager
 pytestmark = [pytest.mark.unit]
 
 # Pin quota limits so tests don't depend on env overrides
-_DAILY_LIMIT = 5
-_ARTICLE_LIMIT = 3
+_DAILY_LIMIT = 15
+_ARTICLE_LIMIT = 5
 
 
 class FakeUsageRepo:
@@ -62,7 +62,7 @@ class TestQuotaEnforcement:
 
     def test_user_near_limit_gets_warning(self):
         """User approaching limit should still have access but limited."""
-        manager = self._make_manager(daily_usage=4)
+        manager = self._make_manager(daily_usage=14)
         quota = manager.check_quota("active-device-123")
 
         assert 0 < quota["remaining_daily_messages"] <= 2
@@ -97,7 +97,7 @@ class TestQuotaCaching:
         quota1 = manager.check_quota("cache-test-device")
 
         # Verify cache was written
-        cached = redis_client.get("quota:cache-test-device")
+        cached = redis_client.get("quota:cache-test-device:day:2025-01-01")
         assert cached is not None
 
         # Second check should use cache (repo not called again)
@@ -118,13 +118,13 @@ class TestQuotaCaching:
         manager.check_quota("device-invalidate")
 
         # Verify cache exists
-        assert redis_client.exists("quota:device-invalidate")
+        assert redis_client.exists("quota:device-invalidate:day:2025-01-01")
 
         # Record usage - should invalidate cache
         manager.update_usage("device-invalidate", article_id=None, tokens=100)
 
         # Cache should be cleared
-        assert not redis_client.exists("quota:device-invalidate")
+        assert not redis_client.exists("quota:device-invalidate:day:2025-01-01")
 
     @freeze_time("2025-01-01 12:00:00")
     def test_article_quota_uses_dedicated_cache_key(self):
@@ -135,8 +135,8 @@ class TestQuotaCaching:
 
         manager.check_quota("device-article", article_id=42)
 
-        assert redis_client.exists("quota:device-article:content:42")
-        assert not redis_client.exists("quota:device-article")
+        assert redis_client.exists("quota:device-article:content:42:day:2025-01-01")
+        assert not redis_client.exists("quota:device-article:day:2025-01-01")
 
 
 class TestQuotaEdgeCases:
@@ -177,3 +177,24 @@ class TestQuotaEdgeCases:
 
         # Should not crash, should have full quota
         assert quota["remaining_daily_messages"] > 0
+
+    @freeze_time("2025-01-01 12:00:00")
+    def test_article_quota_cache_resets_by_day(self):
+        """Per-article quota should be recalculated when the day changes."""
+        redis_client = fakeredis.FakeRedis(decode_responses=True)
+        repo = FakeUsageRepo(daily_usage=0, article_usage=2)
+        manager = QuotaManager(repo, redis_client)
+        manager.max_per_day = _DAILY_LIMIT
+        manager.max_per_article = _ARTICLE_LIMIT
+
+        quota_today = manager.check_quota("device-reset", article_id=99)
+        assert quota_today["remaining_article_messages"] == (_ARTICLE_LIMIT - 2)
+        assert redis_client.exists("quota:device-reset:content:99:day:2025-01-01")
+
+        repo.article_usage = 0
+
+        with freeze_time("2025-01-02 12:00:00"):
+            quota_tomorrow = manager.check_quota("device-reset", article_id=99)
+
+        assert quota_tomorrow["remaining_article_messages"] == _ARTICLE_LIMIT
+        assert redis_client.exists("quota:device-reset:content:99:day:2025-01-02")

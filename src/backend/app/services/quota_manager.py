@@ -1,6 +1,7 @@
 """Quota management service for tracking user API usage."""
 
 import json
+from datetime import datetime
 from datetime import timedelta
 from typing import Optional
 
@@ -79,9 +80,10 @@ class QuotaManager:
 
     def _cache_key(self, device_id: str, article_id: Optional[int] = None) -> str:
         """Build the cache key for device-level or per-content quota checks."""
+        day_key = datetime.utcnow().date().isoformat()
         if article_id is None:
-            return f"quota:{device_id}"
-        return f"quota:{device_id}:content:{article_id}"
+            return f"quota:{device_id}:day:{day_key}"
+        return f"quota:{device_id}:content:{article_id}:day:{day_key}"
 
     def _get_cached_quota(self, cache_key: str) -> Optional[dict]:
         """Get quota data from cache."""

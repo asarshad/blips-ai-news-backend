@@ -80,8 +80,8 @@ class Settings(BaseSettings):
     ]
 
     # Quota settings
-    MAX_MESSAGES_PER_DAY: int = 5
-    MAX_MESSAGES_PER_ARTICLE: int = 3
+    MAX_MESSAGES_PER_DAY: int = 15
+    MAX_MESSAGES_PER_ARTICLE: int = 5
 
     # Scheduler settings
     NEWS_FETCH_INTERVAL_HOURS: int = 3

@@ -18,6 +18,7 @@ class ConversationCreate(ConversationBase):
     content_item_id: int
     history: Optional[List[ChatMessage]] = None
     previous_response_id: Optional[str] = None
+    starter_prompt: bool = False
 
 
 class ConversationOut(ConversationBase):

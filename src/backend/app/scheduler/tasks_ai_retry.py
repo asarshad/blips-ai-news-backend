@@ -169,7 +169,10 @@ def process_ai_summaries(
                         )
                         continue
 
-                    article_hydrator.populate_article_summary(item)
+                    article_hydrator.populate_article_summary(
+                        item,
+                        precompute_starter_answers=False,
+                    )
                     article_hydrator.refresh_article_annotations(item)
                     summary = item.summary
                     topics = item.topics
@@ -203,7 +206,25 @@ def process_ai_summaries(
                     touched_content_ids.add(int(item.id))
                     if starters and not item.conversation_starters:
                         item.conversation_starters = starters
-                        db.commit()
+                    if starters and not getattr(item, "starter_answers", None):
+                        from app.services.conversation_starters import get_starters_service
+
+                        if stats.llm_calls >= MAX_LLM_CALLS_PER_RUN:
+                            logger.warning(
+                                "[ai_retry] Starter-answer generation skipped for %s because the LLM cap was reached",
+                                item.id,
+                            )
+                        else:
+                            try:
+                                if get_starters_service(llm_client).generate_answers_and_persist(item):
+                                    stats.llm_calls += 1
+                            except Exception as exc:
+                                logger.warning(
+                                    "[ai_retry] Starter-answer generation failed for %s: %s",
+                                    item.id,
+                                    exc,
+                                )
+                    db.commit()
                     stats.items_processed += 1
                 elif classification_only:
                     item.ai_processed = True
@@ -233,6 +254,7 @@ def process_ai_summaries(
 
         if include_maintenance:
             _backfill_starters(db, llm_client, stats)
+            _backfill_starter_answers(db, llm_client, stats)
             image_repair = _run_article_image_verification(db)
             logger.info("[ai_retry] Article image verification: %s", image_repair)
         else:
@@ -348,6 +370,46 @@ def _backfill_starters(db: Session, llm_client, stats) -> None:
         except Exception as e:
             db.rollback()
             logger.warning(f"[ai_retry] Starters backfill failed for {item.id}: {e}")
+
+
+def _backfill_starter_answers(db: Session, llm_client, stats) -> None:
+    """Backfill starter answers for items that already have starters."""
+    from app.models.content import ContentItem, ContentType
+    from app.services.conversation_starters import get_starters_service
+
+    if not llm_client.is_configured():
+        return
+
+    items = (
+        db.query(ContentItem)
+        .filter(
+            ContentItem.ai_processed.is_(True),
+            ContentItem.conversation_starters.isnot(None),
+            ContentItem.starter_answers.is_(None),
+            ContentItem.type.in_([ContentType.ARTICLE, ContentType.VIDEO]),
+        )
+        .order_by(ContentItem.created_at.desc())
+        .limit(20)
+        .all()
+    )
+
+    if not items:
+        return
+
+    logger.info(f"[ai_retry] Backfilling starter answers for {len(items)} items")
+    starters_service = get_starters_service(llm_client)
+
+    for item in items:
+        if stats.llm_calls >= MAX_LLM_CALLS_PER_RUN:
+            break
+        try:
+            if starters_service.generate_answers_and_persist(item):
+                db.commit()
+                stats.llm_calls += 1
+                time.sleep(LLM_RATE_LIMIT_DELAY)
+        except Exception as e:
+            db.rollback()
+            logger.warning(f"[ai_retry] Starter-answer backfill failed for {item.id}: {e}")
 
 
 def _run_article_image_verification(db: Session) -> dict[str, int]:

@@ -222,6 +222,9 @@ class ContentItem(Base):
     # AI-generated conversation starters
     # Format: {"starters": ["Q1", "Q2", "Q3"], "fallback": ["Q1", "Q2"]}
     conversation_starters = Column(JSONB, nullable=True)
+    # Precomputed answers for exact starter prompts
+    # Format: {"Prompt text": "Answer text", ...}
+    starter_answers = Column(JSONB, nullable=True)
 
     # AI processing status
     ai_processed = Column(Boolean, default=False, nullable=False, index=True)

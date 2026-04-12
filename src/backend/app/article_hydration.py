@@ -27,6 +27,7 @@ from app.extraction.normalize import make_absolute_url
 from app.ingestion.canonical import canonical_key_for_article
 from app.ingestion.extractors import extract_entities, extract_source, extract_topics
 from app.models.content import ContentItem, ContentType
+from app.services.conversation_starters import get_starters_service
 from app.services.content_readiness import seed_content_readiness
 
 logger = get_logger(__name__)
@@ -460,7 +461,12 @@ class ArticleHydrationService:
         if looks_like_pending_title(item.title) or not (item.title or "").strip():
             item.title = display_article_title(item.title, source_url)
 
-    def populate_article_summary(self, item: ContentItem) -> bool:
+    def populate_article_summary(
+        self,
+        item: ContentItem,
+        *,
+        precompute_starter_answers: bool = True,
+    ) -> bool:
         """Generate article summary fields when the item still needs AI enrichment."""
         if item.type != ContentType.ARTICLE:
             return False
@@ -486,6 +492,16 @@ class ArticleHydrationService:
         starters = getattr(summary_result, "conversation_starters", None)
         if starters:
             item.conversation_starters = starters
+            llm_client = self._get_llm_client()
+            if precompute_starter_answers and llm_client is not None:
+                try:
+                    get_starters_service(llm_client).generate_answers_and_persist(item)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to precompute starter answers for article %s: %s",
+                        getattr(item, "id", None) or item.title[:80],
+                        exc,
+                    )
 
         tags = getattr(summary_result, "tags", None)
         if tags:

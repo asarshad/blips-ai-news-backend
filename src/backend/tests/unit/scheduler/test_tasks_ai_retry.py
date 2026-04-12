@@ -56,7 +56,7 @@ def test_process_ai_summaries_uses_article_hydrator_for_articles(monkeypatch):
     hydrator = MagicMock()
     hydrator.run_article_extraction.return_value = None  # don't corrupt item during retry-refresh
 
-    def _populate(target):
+    def _populate(target, *, precompute_starter_answers=True):
         target.summary = (
             "Hydrated article summary with enough detail to exceed the minimum length "
             "threshold for persisted summaries in the retry worker."
@@ -83,7 +83,10 @@ def test_process_ai_summaries_uses_article_hydrator_for_articles(monkeypatch):
 
     tasks_ai_retry.process_ai_summaries()
 
-    hydrator.populate_article_summary.assert_called_once_with(item)
+    hydrator.populate_article_summary.assert_called_once_with(
+        item,
+        precompute_starter_answers=False,
+    )
     hydrator.refresh_article_annotations.assert_called_once_with(item)
     repo.mark_ai_processed.assert_called_once_with(
         42,
@@ -118,7 +121,7 @@ def test_process_ai_summaries_retries_short_article_summaries(monkeypatch):
     hydrator = MagicMock()
     hydrator.run_article_extraction.return_value = None  # don't corrupt item during retry-refresh
 
-    def _populate(target):
+    def _populate(target, *, precompute_starter_answers=True):
         target.summary = (
             "This regenerated article summary is intentionally long enough to clear the new "
             "minimum word target while still staying concise and useful for the feed experience."
@@ -147,7 +150,10 @@ def test_process_ai_summaries_retries_short_article_summaries(monkeypatch):
 
     assert item.ai_processed is True
     assert item.summary.startswith("This regenerated article summary")
-    hydrator.populate_article_summary.assert_called_once_with(item)
+    hydrator.populate_article_summary.assert_called_once_with(
+        item,
+        precompute_starter_answers=False,
+    )
     repo.mark_ai_processed.assert_called_once_with(
         7,
         summary=item.summary,
@@ -179,7 +185,7 @@ def test_process_ai_summaries_retries_long_article_summaries(monkeypatch):
     hydrator = MagicMock()
     hydrator.run_article_extraction.return_value = None  # don't corrupt item during retry-refresh
 
-    def _populate(target):
+    def _populate(target, *, precompute_starter_answers=True):
         target.summary = (
             "OpenAI plans to expand its workforce this year, signaling heavier investment "
             "in research, product delivery, and go-to-market execution as demand for "
@@ -211,12 +217,86 @@ def test_process_ai_summaries_retries_long_article_summaries(monkeypatch):
 
     assert item.ai_processed is True
     assert len(item.summary.split()) <= 70
-    hydrator.populate_article_summary.assert_called_once_with(item)
+    hydrator.populate_article_summary.assert_called_once_with(
+        item,
+        precompute_starter_answers=False,
+    )
     repo.mark_ai_processed.assert_called_once_with(
         99,
         summary=item.summary,
         topics=["openai", "hiring"],
     )
+
+
+def test_process_ai_summaries_counts_starter_answer_generation_toward_llm_cap(monkeypatch):
+    db = MagicMock()
+    repo = MagicMock()
+    item = SimpleNamespace(
+        id=123,
+        type=ContentType.ARTICLE,
+        content_text=("Detailed article text about LLM budgeting and retries. " * 20),
+        description=None,
+        title="Starter answer accounting",
+        topics=["old-topic"],
+        conversation_starters=None,
+        starter_answers=None,
+        summary=None,
+        ai_processed=False,
+    )
+    repo.get_unprocessed_by_ai.return_value = [item]
+    repo.get_articles_with_short_summaries.return_value = []
+    repo.get_articles_with_long_summaries.return_value = []
+
+    llm_client = MagicMock()
+    llm_client.is_configured.return_value = True
+
+    hydrator = MagicMock()
+    hydrator.run_article_extraction.return_value = None
+
+    def _populate(target, *, precompute_starter_answers=True):
+        target.summary = (
+            "This article summary is long enough to be accepted and should trigger "
+            "starter answer generation as a second LLM-counted step in the retry worker."
+        )
+        target.topics = ["budget", "scheduler"]
+        target.conversation_starters = {
+            "starters": ["What changed in the retry budgeting logic?"]
+        }
+        target.starter_answers = None
+        target.ai_processed = True
+        return True
+
+    hydrator.populate_article_summary.side_effect = _populate
+
+    starters_service = MagicMock()
+    starters_service.generate_answers_and_persist.return_value = {
+        "What changed in the retry budgeting logic?": "Starter answer",
+    }
+
+    stats = _FakeStats()
+
+    monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
+    monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
+    monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: stats)
+    monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tasks_ai_retry, "_backfill_starter_answers", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tasks_ai_retry, "_run_article_image_verification", lambda *_a, **_k: {})
+    monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
+    monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
+    monkeypatch.setattr(
+        "app.article_hydration.ArticleHydrationService",
+        lambda llm_client=None: hydrator,
+    )
+    monkeypatch.setattr(
+        "app.services.conversation_starters.get_starters_service",
+        lambda _client: starters_service,
+    )
+    monkeypatch.setattr(tasks_ai_retry.time, "sleep", lambda *_args, **_kwargs: None)
+
+    tasks_ai_retry.process_ai_summaries()
+
+    assert stats.llm_calls == 2
+    starters_service.generate_answers_and_persist.assert_called_once_with(item)
 
 
 def test_process_ai_summaries_skips_empty_article_input_without_error(monkeypatch):
@@ -365,7 +445,7 @@ def test_process_ai_summaries_persists_extracted_article_fields_before_summary(m
     )
     hydrator.should_replace_article_image.return_value = True
 
-    def _populate(target):
+    def _populate(target, *, precompute_starter_answers=True):
         target.summary = (
             "Recovered article summary with enough detail to exceed the minimum "
             "length threshold and keep the retry worker happy."
