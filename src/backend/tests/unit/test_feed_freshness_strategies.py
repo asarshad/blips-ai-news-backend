@@ -1,5 +1,6 @@
 from app.models.content import EventType
 from app.services.feed_freshness_strategies import (
+    ARTICLE_RECENT_HEAD_V1_STRATEGY,
     CURRENT_STRATEGY,
     FRESH_UNSEEN_V1_STRATEGY,
     FeedFreshnessStrategies,
@@ -14,6 +15,13 @@ def test_feed_freshness_strategies_use_env_override(monkeypatch):
 
     assert strategies.strategy_name(Surface.ARTICLES) == FRESH_UNSEEN_V1_STRATEGY
     assert strategies.strategy_source(Surface.ARTICLES) == "env"
+
+
+def test_feed_freshness_strategies_default_articles_to_recent_head():
+    strategies = FeedFreshnessStrategies(redis_client=None)
+
+    assert strategies.strategy_name(Surface.ARTICLES) == ARTICLE_RECENT_HEAD_V1_STRATEGY
+    assert strategies.strategy_source(Surface.ARTICLES) == "default"
 
 
 def test_feed_freshness_strategies_fallback_to_current_for_unknown_env(monkeypatch):
@@ -46,3 +54,12 @@ def test_current_strategy_keeps_article_view_10s_out_of_exposed_events(monkeypat
     assert EventType.VIEW_10S not in signals.exposed_event_types
     assert strategy.resume_continuity_window_minutes(surface=Surface.ARTICLES) is None
     assert strategy.resume_snapshot_after_remote_window(surface=Surface.ARTICLES) is True
+
+
+def test_recent_head_strategy_uses_short_article_continuation_window():
+    strategy = FeedFreshnessStrategies(redis_client=None).resolve(Surface.ARTICLES)
+    signals = strategy.feedback_signals(surface=Surface.ARTICLES)
+
+    assert EventType.VIEW_10S not in signals.exposed_event_types
+    assert strategy.resume_continuity_window_minutes(surface=Surface.ARTICLES) == 10
+    assert strategy.resume_snapshot_after_remote_window(surface=Surface.ARTICLES) is False

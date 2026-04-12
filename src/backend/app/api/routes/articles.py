@@ -21,7 +21,6 @@ from app.models.content import ContentType
 from app.repositories.content_repo import ContentItemRepository
 from app.schemas.article import ArticleWithConversation
 from app.services.ad_mixer import inject_ads
-from app.services.article_head_freshness import prioritize_article_head
 from app.services.content_payloads import content_item_to_article_payload
 from app.services.content_readiness import is_ready_for_surface
 from app.services.freshness_metrics_service import record_feed_served
@@ -88,9 +87,6 @@ def get_recent_articles(
     )
 
     response.headers["X-Personalized"] = "false"
-
-    if page == 1:
-        articles = prioritize_article_head(articles)
 
     # Log tier distribution (from cached results)
     tier_counts = {}

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -297,13 +297,15 @@ def test_generate_tiered_snapshot_prioritizes_fresh_article_head(monkeypatch):
             "type": "ARTICLE",
             "source": "Example",
             "source_url": "https://example.com/1",
-            "title": "Evergreen 1",
+            "title": "Fallback 1",
             "summary": "summary",
             "topics": ["Technology"],
             "entities": [],
-            "published_at": "2026-04-01T11:00:00",
-            "created_at": "2026-04-01T11:05:00",
+            "published_at": "2026-04-08T11:00:00Z",
+            "created_at": "2026-04-08T11:05:00Z",
             "freshness_tier": "C",
+            "promotion_score": 0.2,
+            "global_score": 0.2,
             "conversation_starters": {},
         },
         {
@@ -311,13 +313,15 @@ def test_generate_tiered_snapshot_prioritizes_fresh_article_head(monkeypatch):
             "type": "ARTICLE",
             "source": "Example",
             "source_url": "https://example.com/2",
-            "title": "Evergreen 2",
+            "title": "Yesterday lower",
             "summary": "summary",
             "topics": ["Technology"],
             "entities": [],
-            "published_at": "2026-04-01T10:00:00",
-            "created_at": "2026-04-01T10:05:00",
-            "freshness_tier": "C",
+            "published_at": "2026-04-11T10:00:00Z",
+            "created_at": "2026-04-11T10:05:00Z",
+            "freshness_tier": "A",
+            "promotion_score": 0.4,
+            "global_score": 0.8,
             "conversation_starters": {},
         },
         {
@@ -325,13 +329,15 @@ def test_generate_tiered_snapshot_prioritizes_fresh_article_head(monkeypatch):
             "type": "ARTICLE",
             "source": "Example",
             "source_url": "https://example.com/3",
-            "title": "Fresh 1",
+            "title": "Fallback 2",
             "summary": "summary",
             "topics": ["Technology"],
             "entities": [],
-            "published_at": "2026-04-11T11:00:00",
-            "created_at": "2026-04-11T11:05:00",
-            "freshness_tier": "A",
+            "published_at": "2026-04-07T11:00:00Z",
+            "created_at": "2026-04-07T11:05:00Z",
+            "freshness_tier": "C",
+            "promotion_score": 0.3,
+            "global_score": 0.3,
             "conversation_starters": {},
         },
         {
@@ -339,13 +345,15 @@ def test_generate_tiered_snapshot_prioritizes_fresh_article_head(monkeypatch):
             "type": "ARTICLE",
             "source": "Example",
             "source_url": "https://example.com/4",
-            "title": "Backfill 1",
+            "title": "Today",
             "summary": "summary",
             "topics": ["Technology"],
             "entities": [],
-            "published_at": "2026-04-05T11:00:00",
-            "created_at": "2026-04-11T09:05:00",
-            "freshness_tier": "B",
+            "published_at": "2026-04-12T09:00:00Z",
+            "created_at": "2026-04-12T09:05:00Z",
+            "freshness_tier": "A",
+            "promotion_score": 0.3,
+            "global_score": 0.4,
             "conversation_starters": {},
         },
         {
@@ -353,13 +361,15 @@ def test_generate_tiered_snapshot_prioritizes_fresh_article_head(monkeypatch):
             "type": "ARTICLE",
             "source": "Example",
             "source_url": "https://example.com/5",
-            "title": "Fresh 2",
+            "title": "Yesterday higher",
             "summary": "summary",
             "topics": ["Technology"],
             "entities": [],
-            "published_at": "2026-04-11T10:00:00",
-            "created_at": "2026-04-11T10:05:00",
+            "published_at": "2026-04-11T12:00:00Z",
+            "created_at": "2026-04-11T12:05:00Z",
             "freshness_tier": "A",
+            "promotion_score": 0.7,
+            "global_score": 0.7,
             "conversation_starters": {},
         },
     ]
@@ -367,6 +377,10 @@ def test_generate_tiered_snapshot_prioritizes_fresh_article_head(monkeypatch):
     monkeypatch.setattr(
         "app.services.playlist_service.UserCategorySelectionRepository",
         _FakeCategoryRepo,
+    )
+    monkeypatch.setattr(
+        "app.services.article_head_freshness._utcnow",
+        lambda: datetime(2026, 4, 12, 20, 0, 0, tzinfo=timezone.utc),
     )
     monkeypatch.setattr(
         "app.services.playlist_service.get_cached_tiered_feed",
@@ -387,11 +401,11 @@ def test_generate_tiered_snapshot_prioritizes_fresh_article_head(monkeypatch):
 
     snapshot = service._generate_tiered_snapshot("device-1", ContentType.ARTICLE)
 
-    assert [item["id"] for item in snapshot["items"][:5]] == [3, 5, 4, 1, 2]
+    assert [item["id"] for item in snapshot["items"][:5]] == [4, 5, 2, 1, 3]
     assert [item["freshness_tier"] for item in snapshot["items"][:5]] == [
         "A",
         "A",
-        "B",
+        "A",
         "C",
         "C",
     ]

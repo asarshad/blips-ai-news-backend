@@ -24,6 +24,7 @@ logger = get_logger(__name__)
 
 CURRENT_STRATEGY = "current"
 FRESH_UNSEEN_V1_STRATEGY = "fresh_unseen_v1"
+ARTICLE_RECENT_HEAD_V1_STRATEGY = "article_recent_head_v1"
 
 REDIS_KEY_PREFIX = "blips:freshness_strategy:"
 STRATEGY_CACHE_TTL_SECONDS = 10
@@ -54,7 +55,7 @@ SURFACE_ENV_VARS = {
 }
 
 SURFACE_DEFAULTS = {
-    Surface.ARTICLES: CURRENT_STRATEGY,
+    Surface.ARTICLES: ARTICLE_RECENT_HEAD_V1_STRATEGY,
     Surface.VIDEOS: CURRENT_STRATEGY,
     Surface.REELS: CURRENT_STRATEGY,
 }
@@ -162,9 +163,38 @@ class FreshUnseenV1FeedFreshnessStrategy(CurrentFeedFreshnessStrategy):
         return True
 
 
+class ArticleRecentHeadV1FeedFreshnessStrategy(CurrentFeedFreshnessStrategy):
+    name = ARTICLE_RECENT_HEAD_V1_STRATEGY
+
+    def tier_a_order_clauses(self, *, surface: Surface, offset: int) -> Tuple[Any, ...]:
+        from app.models.content import ContentItem
+
+        if surface != Surface.ARTICLES:
+            return super().tier_a_order_clauses(surface=surface, offset=offset)
+
+        if offset <= 0:
+            return (
+                desc(ContentItem.published_at),
+                desc(ContentItem.promotion_score),
+                desc(ContentItem.global_score),
+            )
+        return super().tier_a_order_clauses(surface=surface, offset=offset)
+
+    def resume_continuity_window_minutes(self, *, surface: Surface) -> Optional[int]:
+        if surface == Surface.ARTICLES:
+            return 10
+        return None
+
+    def resume_snapshot_after_remote_window(self, *, surface: Surface) -> bool:
+        if surface == Surface.ARTICLES:
+            return False
+        return True
+
+
 STRATEGIES: Dict[str, FeedFreshnessStrategy] = {
     CURRENT_STRATEGY: CurrentFeedFreshnessStrategy(),
     FRESH_UNSEEN_V1_STRATEGY: FreshUnseenV1FeedFreshnessStrategy(),
+    ARTICLE_RECENT_HEAD_V1_STRATEGY: ArticleRecentHeadV1FeedFreshnessStrategy(),
 }
 
 
