@@ -35,10 +35,10 @@ from app.repositories.user_repo import (
     UserPreferenceRepository,
     UserProfileRepository,
 )
+from app.services.content_readiness import is_ready_for_surface, surface_name_for_item
 from app.services.feed_freshness_strategies import CURRENT_STRATEGY, feed_freshness_strategies
 from app.services.feed_version import compute_feed_version
 from app.services.inventory_service import Surface
-from app.services.content_readiness import is_ready_for_surface, surface_name_for_item
 from app.services.multi_factor_ranking_service import MultiFactorRankingService
 from app.services.personalization_service import PersonalizationService
 from app.services.tiered_feed_service import get_cached_tiered_feed
@@ -582,6 +582,49 @@ class PlaylistService:
             "resume_snapshot_after_remote_window": bool(
                 snapshot.get("resume_snapshot_after_remote_window", True)
             ),
+        }
+
+    def get_playlist_metadata(
+        self,
+        device_id: str,
+        content_type: ContentType,
+    ) -> Dict[str, Any]:
+        """Return cached head metadata without creating or advancing a session."""
+        strategy_name = self._strategy_name_for_content_type(content_type)
+        cache_key = self._get_cache_key(
+            device_id,
+            content_type,
+            strategy_name=strategy_name,
+        )
+
+        snapshot = None
+        if self.redis:
+            cached = self._get_from_cache(cache_key)
+            snapshot = self._snapshot_from_cached_payload(
+                cached,
+                content_type=content_type,
+                cache_key=cache_key,
+            )
+
+        if snapshot is None:
+            if self._supports_tiered_snapshots():
+                snapshot = self._generate_tiered_snapshot(device_id, content_type)
+            else:
+                snapshot = self._load_fallback_snapshot(device_id, content_type)
+
+            if self.redis and snapshot.get("items"):
+                self._set_cache(cache_key, snapshot)
+
+        return {
+            "served_at": snapshot.get("generated_at"),
+            "feed_version": snapshot.get("feed_version"),
+            "newest_published_at": snapshot.get("newest_published_at"),
+            "newest_created_at": snapshot.get("newest_created_at"),
+            "freshness_strategy": snapshot.get("freshness_strategy"),
+            "freshness_strategy_source": snapshot.get("freshness_strategy_source"),
+            "source": snapshot.get("source", "db"),
+            "cache_key": snapshot.get("cache_key", cache_key),
+            "cache_hit": bool(snapshot.get("cache_hit", False)),
         }
 
     def _supports_tiered_snapshots(self) -> bool:

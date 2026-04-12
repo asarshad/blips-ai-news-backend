@@ -19,8 +19,8 @@ from sqlalchemy.orm import Session
 from app.api.feed_headers import FeedMetadata
 from app.core.auth import require_admin_key
 from app.core.dependencies import get_db, get_redis
-from app.core.session_auth import AuthenticatedSession, require_session_token
 from app.core.logging import get_logger
+from app.core.session_auth import AuthenticatedSession, require_session_token
 from app.db.base import SessionLocal
 from app.models.content import ContentType, EventType, InteractionEvent, UserPreference, UserProfile
 from app.models.device_session import DeviceSession
@@ -32,8 +32,8 @@ from app.repositories.user_repo import (
     UserPreferenceRepository,
     UserProfileRepository,
 )
-from app.services.freshness_metrics_service import record_feed_served
 from app.services.feed_freshness_strategies import feed_freshness_strategies
+from app.services.freshness_metrics_service import record_feed_served
 from app.services.inventory_service import Surface
 from app.services.personalization_service import PersonalizationService
 from app.services.playlist_service import PlaylistService
@@ -143,6 +143,17 @@ class PlaylistResponse(BaseModel):
     freshness_strategy_source: Optional[str] = None
     resume_continuity_window_minutes: Optional[int] = None
     resume_snapshot_after_remote_window: bool = True
+
+
+class PlaylistMetadataResponse(BaseModel):
+    """Lightweight feed-head metadata for freshness checks."""
+
+    served_at: Optional[str] = None
+    feed_version: Optional[str] = None
+    newest_published_at: Optional[str] = None
+    newest_created_at: Optional[str] = None
+    freshness_strategy: Optional[str] = None
+    freshness_strategy_source: Optional[str] = None
 
 
 # ============================================================================
@@ -302,6 +313,56 @@ def get_playlist(
         resume_snapshot_after_remote_window=bool(
             result.get("resume_snapshot_after_remote_window", True)
         ),
+    )
+
+
+@router.get("/playlist/meta", response_model=PlaylistMetadataResponse)
+def get_playlist_metadata(
+    response: Response,
+    type: ContentTypeParam = Query(..., description="Content type"),
+    session: AuthenticatedSession = Depends(require_session_token),
+    playlist_service: PlaylistService = Depends(get_playlist_service),
+):
+    """Return lightweight head metadata without creating or advancing a session."""
+    content_type = ContentType[type.value]
+    result = playlist_service.get_playlist_metadata(
+        device_id=session.device_id,
+        content_type=content_type,
+    )
+
+    generated_at = (
+        datetime.fromisoformat(result["served_at"])
+        if result.get("served_at")
+        else datetime.utcnow()
+    )
+    feed_meta = FeedMetadata(
+        generated_at=generated_at,
+        source=result.get("source", "db"),
+        cache_key=result.get("cache_key"),
+        cache_hit=bool(result.get("cache_hit", False)),
+        items=[],
+        surface={
+            ContentType.ARTICLE: "articles",
+            ContentType.VIDEO: "videos",
+            ContentType.REEL: "reels",
+        }[content_type],
+        feed_version=result.get("feed_version"),
+        strategy_name=result.get("freshness_strategy"),
+        strategy_source=result.get("freshness_strategy_source"),
+    )
+    feed_meta.add_headers(response)
+    if result.get("newest_published_at"):
+        response.headers["X-Newest-Published-At"] = result["newest_published_at"]
+    if result.get("newest_created_at"):
+        response.headers["X-Newest-Created-At"] = result["newest_created_at"]
+
+    return PlaylistMetadataResponse(
+        served_at=result.get("served_at"),
+        feed_version=result.get("feed_version"),
+        newest_published_at=result.get("newest_published_at"),
+        newest_created_at=result.get("newest_created_at"),
+        freshness_strategy=result.get("freshness_strategy"),
+        freshness_strategy_source=result.get("freshness_strategy_source"),
     )
 
 

@@ -378,3 +378,38 @@ def test_get_playlist_uses_current_page_dates_for_headers_and_body(monkeypatch):
     assert body.freshness_strategy_source == "redis"
     assert body.resume_continuity_window_minutes == 10
     assert body.resume_snapshot_after_remote_window is False
+
+
+def test_get_playlist_metadata_returns_lightweight_head_fields_and_headers():
+    playlist_service = SimpleNamespace(
+        get_playlist_metadata=lambda **_kwargs: {
+            "served_at": "2026-04-11T17:15:00",
+            "feed_version": "feed-v2",
+            "newest_published_at": "2026-04-11T17:10:00",
+            "newest_created_at": "2026-04-11T17:12:00",
+            "freshness_strategy": "fresh_unseen_v1",
+            "freshness_strategy_source": "env",
+            "source": "redis",
+            "cache_key": "playlist:test:meta",
+            "cache_hit": True,
+        }
+    )
+
+    response = Response()
+    body = session_module.get_playlist_metadata(
+        response=response,
+        type=session_module.ContentTypeParam.ARTICLE,
+        session=_session("device-meta-1"),
+        playlist_service=playlist_service,
+    )
+
+    assert body.feed_version == "feed-v2"
+    assert body.newest_published_at == "2026-04-11T17:10:00"
+    assert body.newest_created_at == "2026-04-11T17:12:00"
+    assert body.freshness_strategy == "fresh_unseen_v1"
+    assert body.freshness_strategy_source == "env"
+    assert response.headers["X-Feed-Version"] == "feed-v2"
+    assert response.headers["X-Freshness-Strategy"] == "fresh_unseen_v1"
+    assert response.headers["X-Freshness-Strategy-Source"] == "env"
+    assert response.headers["X-Newest-Published-At"] == "2026-04-11T17:10:00"
+    assert response.headers["X-Newest-Created-At"] == "2026-04-11T17:12:00"
