@@ -653,7 +653,7 @@ class PlaylistService:
         )
         items = [self._normalize_tiered_item(item, content_type) for item in raw_items]
 
-        if items:
+        if items and content_type != ContentType.ARTICLE:
             category_repo = UserCategorySelectionRepository(db)
             selected_categories = category_repo.get_selected_categories(device_id)
             total_learned_weight = category_repo.get_total_learned_weight(device_id)

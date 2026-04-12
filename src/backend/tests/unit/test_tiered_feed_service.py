@@ -90,6 +90,25 @@ def test_cache_key_includes_device_hash_when_personalized():
     assert ":d" in personalized_key
 
 
+def test_cache_key_ignores_device_id_for_articles():
+    shared_key = _cache_key(
+        surface=Surface.ARTICLES,
+        limit=20,
+        offset=0,
+        hybrid_video_rerank=False,
+    )
+    article_key = _cache_key(
+        surface=Surface.ARTICLES,
+        limit=20,
+        offset=0,
+        hybrid_video_rerank=False,
+        device_id="device-12345678",
+    )
+
+    assert article_key == shared_key
+    assert ":d" not in article_key
+
+
 def test_cache_key_separates_freshness_strategies():
     current_key = _cache_key(
         surface=SimpleNamespace(value="articles"),
@@ -311,6 +330,77 @@ def test_get_tiered_feed_filters_recent_negative_feedback(monkeypatch):
     )
 
     assert [tiered.item.id for tiered in tiered_items] == [3]
+
+
+def test_get_tiered_feed_ignores_device_feedback_for_articles(monkeypatch):
+    now = datetime(2026, 3, 20, 12, 0, 0)
+    items = [
+        SimpleNamespace(
+            id=1,
+            source="Source 1",
+            channel_id="creator-1",
+            published_at=now - timedelta(hours=1),
+            created_at=now - timedelta(hours=1),
+        )
+    ]
+
+    class _FakeQuery:
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def order_by(self, *_args, **_kwargs):
+            return self
+
+        def limit(self, *_args, **_kwargs):
+            return self
+
+        def count(self):
+            return len(items)
+
+        def all(self):
+            return list(items)
+
+    class _FakeDB:
+        def query(self, *_args, **_kwargs):
+            return _FakeQuery()
+
+    feedback_calls = []
+
+    monkeypatch.setattr(tiered_feed_service, "apply_content_policy", lambda query, **_kwargs: query)
+    monkeypatch.setattr(
+        tiered_feed_service,
+        "_get_surface_config",
+        lambda _surface: {"fresh_hours": 168, "backfill_hours": 336, "evergreen_days": 30},
+    )
+    monkeypatch.setattr(
+        tiered_feed_service,
+        "_get_recent_feedback_ids",
+        lambda _db, device_id, *_args, **_kwargs: (
+            feedback_calls.append(device_id) or (set(), set())
+        ),
+    )
+    monkeypatch.setattr(
+        tiered_feed_service,
+        "mix_feed",
+        lambda feed_items, surface, target_size, session_seed=None: list(feed_items)[:target_size],
+    )
+    monkeypatch.setattr(
+        tiered_feed_service, "enforce_channel_caps", lambda feed_items, surface: feed_items
+    )
+
+    tiered_items, has_more, remaining = tiered_feed_service.get_tiered_feed(
+        _FakeDB(),
+        Surface.ARTICLES,
+        limit=1,
+        offset=0,
+        now=now,
+        device_id="device-1",
+    )
+
+    assert feedback_calls == [None]
+    assert [tiered.item.id for tiered in tiered_items] == [1]
+    assert has_more is False
+    assert remaining == 0
     assert has_more is False
     assert remaining == 0
 

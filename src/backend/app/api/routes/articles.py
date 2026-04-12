@@ -18,9 +18,7 @@ from app.core.logging import get_logger
 from app.core.session_auth import AuthenticatedSession, require_session_token
 from app.db.base import SessionLocal
 from app.models.content import ContentType
-from app.ranking.feed_score import rerank_feed
 from app.repositories.content_repo import ContentItemRepository
-from app.repositories.user_repo import UserCategorySelectionRepository
 from app.schemas.article import ArticleWithConversation
 from app.services.ad_mixer import inject_ads
 from app.services.article_head_freshness import prioritize_article_head
@@ -89,27 +87,7 @@ def get_recent_articles(
         device_id=session.device_id,
     )
 
-    # ── Personalised re-ranking ───────────────────────────────────────────
-    # Apply per-user interest_boost / staleness / dominance adjustments.
-    # This happens AFTER the cached retrieval, so the DB-level cache is
-    # shared across all users and only the lightweight in-memory sort is
-    # per-user.
-    if articles:
-        cat_repo = UserCategorySelectionRepository(db)
-        selected = cat_repo.get_selected_categories(session.device_id)
-        total_weight = cat_repo.get_total_learned_weight(session.device_id)
-        if selected:
-            articles = rerank_feed(
-                items=articles,
-                selected_categories=selected,
-                total_learned_weight=total_weight,
-                window_size=max(len(articles), 1),
-            )
-            response.headers["X-Personalized"] = "true"
-            response.headers["X-Selected-Categories"] = ",".join(selected[:5])
-        else:
-            response.headers["X-Personalized"] = "false"
-    # ─────────────────────────────────────────────────────────────────────
+    response.headers["X-Personalized"] = "false"
 
     if page == 1:
         articles = prioritize_article_head(articles)

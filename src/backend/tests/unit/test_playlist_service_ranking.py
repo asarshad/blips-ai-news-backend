@@ -395,3 +395,83 @@ def test_generate_tiered_snapshot_prioritizes_fresh_article_head(monkeypatch):
         "C",
         "C",
     ]
+
+
+def test_generate_tiered_snapshot_skips_article_rerank_even_with_categories(monkeypatch):
+    service = PlaylistService(
+        content_repo=MagicMock(db=object()),
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=MagicMock(),
+        redis_client=None,
+    )
+
+    class _FakeCategoryRepo:
+        def __init__(self, _db):
+            pass
+
+        def get_selected_categories(self, _device_id):
+            return ["AI"]
+
+        def get_total_learned_weight(self, _device_id):
+            return 99.0
+
+    raw_items = [
+        {
+            "id": 1,
+            "type": "ARTICLE",
+            "source": "Example",
+            "source_url": "https://example.com/1",
+            "title": "Article 1",
+            "summary": "summary",
+            "topics": ["Technology"],
+            "entities": [],
+            "published_at": "2026-04-11T11:00:00",
+            "created_at": "2026-04-11T11:05:00",
+            "freshness_tier": "A",
+            "conversation_starters": {},
+        },
+        {
+            "id": 2,
+            "type": "ARTICLE",
+            "source": "Example",
+            "source_url": "https://example.com/2",
+            "title": "Article 2",
+            "summary": "summary",
+            "topics": ["Technology"],
+            "entities": [],
+            "published_at": "2026-04-10T11:00:00",
+            "created_at": "2026-04-10T11:05:00",
+            "freshness_tier": "B",
+            "conversation_starters": {},
+        },
+    ]
+
+    monkeypatch.setattr(
+        "app.services.playlist_service.UserCategorySelectionRepository",
+        _FakeCategoryRepo,
+    )
+    monkeypatch.setattr(
+        "app.services.playlist_service.rerank_feed",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("article rerank should be disabled")),
+    )
+    monkeypatch.setattr(
+        "app.services.playlist_service.get_cached_tiered_feed",
+        lambda *_args, **_kwargs: (
+            raw_items,
+            False,
+            SimpleNamespace(
+                generated_at=datetime(2026, 4, 11, 12, 0, 0),
+                source="db",
+                cache_key="cache-key",
+                cache_hit=False,
+                remaining_window_count=0,
+                strategy_name="current",
+                strategy_source="default",
+            ),
+        ),
+    )
+
+    snapshot = service._generate_tiered_snapshot("device-1", ContentType.ARTICLE)
+
+    assert [item["id"] for item in snapshot["items"]] == [1, 2]

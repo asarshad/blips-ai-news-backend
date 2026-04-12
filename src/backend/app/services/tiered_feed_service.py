@@ -99,7 +99,7 @@ def _cache_key(
     base_key = (
         f"blips:tiered_feed:{surface.value}:s{strategy_name}:l{limit}:o{offset}:hybrid{int(hybrid_video_rerank)}"
     )
-    if not device_id:
+    if surface == Surface.ARTICLES or not device_id:
         return base_key
     device_hash = hashlib.md5(device_id.encode()).hexdigest()[:12]
     return f"{base_key}:d{device_hash}"
@@ -254,6 +254,7 @@ def get_tiered_feed(
     cfg = _get_surface_config(surface)
     content_type = _surface_to_content_type(surface)
     strategy = strategy or feed_freshness_strategies.resolve(surface)
+    personalized_device_id = None if surface == Surface.ARTICLES else device_id
 
     fresh_cutoff = now - timedelta(hours=cfg["fresh_hours"])
     backfill_cutoff = now - timedelta(hours=cfg["backfill_hours"])
@@ -301,11 +302,13 @@ def get_tiered_feed(
     strategy = strategy or feed_freshness_strategies.resolve(surface)
     consumed_ids, exposed_ids = _get_recent_feedback_ids(
         db,
-        device_id,
+        personalized_device_id,
         surface,
         strategy=strategy,
     )
-    negative_item_ids, negative_creator_keys = _get_recent_negative_feedback(db, device_id, surface)
+    negative_item_ids, negative_creator_keys = _get_recent_negative_feedback(
+        db, personalized_device_id, surface
+    )
     base_inventory_query = apply_content_policy(
         db.query(ContentItem).filter(base_filter),
         content_type=content_type,
@@ -642,6 +645,7 @@ def get_cached_tiered_feed(
     """
     now = datetime.utcnow()
     strategy = strategy or feed_freshness_strategies.resolve(surface)
+    personalized_device_id = None if surface == Surface.ARTICLES else device_id
     strategy_source = (
         feed_freshness_strategies.strategy_source(surface)
         if strategy is not None and strategy.name == feed_freshness_strategies.strategy_name(surface)
@@ -653,7 +657,7 @@ def get_cached_tiered_feed(
         offset,
         hybrid_video_rerank,
         strategy.name,
-        device_id,
+        personalized_device_id,
     )
     redis_client = _get_redis_client()
     cfg = _get_surface_config(surface)
@@ -709,7 +713,7 @@ def get_cached_tiered_feed(
         limit=limit,
         offset=offset,
         hybrid_video_rerank=hybrid_video_rerank,
-        device_id=device_id,
+        device_id=personalized_device_id,
         strategy=strategy,
     )
 
