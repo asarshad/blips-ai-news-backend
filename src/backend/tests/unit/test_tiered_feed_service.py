@@ -405,6 +405,106 @@ def test_get_tiered_feed_ignores_device_feedback_for_articles(monkeypatch):
     assert remaining == 0
 
 
+def test_get_tiered_feed_exhausts_recent_article_pool_before_older_evergreen(monkeypatch):
+    now = datetime(2026, 4, 16, 12, 0, 0)
+    tier_a_items = []
+    tier_b_items = []
+    recent_archive_items = [
+        SimpleNamespace(
+            id=101,
+            source="Source A",
+            channel_id="creator-a",
+            published_at=now - timedelta(days=3),
+            created_at=now - timedelta(days=3),
+            promotion_score=0.15,
+            global_score=0.20,
+        ),
+        SimpleNamespace(
+            id=102,
+            source="Source B",
+            channel_id="creator-b",
+            published_at=now - timedelta(days=5),
+            created_at=now - timedelta(days=5),
+            promotion_score=0.10,
+            global_score=0.15,
+        ),
+    ]
+    older_evergreen_items = [
+        SimpleNamespace(
+            id=201,
+            source="Source C",
+            channel_id="creator-c",
+            published_at=now - timedelta(days=9),
+            created_at=now - timedelta(days=9),
+            promotion_score=0.95,
+            global_score=0.95,
+        )
+    ]
+    all_batches = iter([tier_a_items, tier_b_items, recent_archive_items, older_evergreen_items])
+
+    class _FakeQuery:
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def order_by(self, *_args, **_kwargs):
+            return self
+
+        def limit(self, *_args, **_kwargs):
+            return self
+
+        def count(self):
+            return 0
+
+        def all(self):
+            return list(next(all_batches))
+
+    class _FakeDB:
+        def query(self, *_args, **_kwargs):
+            return _FakeQuery()
+
+    monkeypatch.setattr(tiered_feed_service, "apply_content_policy", lambda query, **_kwargs: query)
+    monkeypatch.setattr(
+        tiered_feed_service,
+        "_get_surface_config",
+        lambda _surface: {"fresh_hours": 36, "backfill_hours": 24, "evergreen_days": 14},
+    )
+    monkeypatch.setattr(
+        tiered_feed_service,
+        "_get_recent_feedback_ids",
+        lambda *_args, **_kwargs: (set(), set()),
+    )
+    monkeypatch.setattr(
+        tiered_feed_service,
+        "_get_recent_negative_feedback",
+        lambda *_args, **_kwargs: (set(), set()),
+    )
+    monkeypatch.setattr(
+        tiered_feed_service,
+        "mix_feed",
+        lambda feed_items, surface, target_size, session_seed=None: list(feed_items)[:target_size],
+    )
+    monkeypatch.setattr(
+        tiered_feed_service, "enforce_channel_caps", lambda feed_items, surface: feed_items
+    )
+
+    tiered_items, has_more, remaining = tiered_feed_service.get_tiered_feed(
+        _FakeDB(),
+        Surface.ARTICLES,
+        limit=3,
+        offset=0,
+        now=now,
+    )
+
+    assert [tiered.item.id for tiered in tiered_items] == [101, 102, 201]
+    assert [tiered.reason for tiered in tiered_items] == [
+        "recent_archive",
+        "recent_archive",
+        "evergreen",
+    ]
+    assert has_more is False
+    assert remaining == 0
+
+
 def test_get_cached_tiered_feed_hydrates_missing_video_durations(monkeypatch):
     now = datetime(2026, 3, 20, 12, 0, 0)
     item = SimpleNamespace(

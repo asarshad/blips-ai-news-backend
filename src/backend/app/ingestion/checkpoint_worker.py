@@ -43,6 +43,87 @@ def _yt_channel_config(yt, channel_name: str):
     return None
 
 
+def _should_pause_rss_source(progress, error: str) -> bool:
+    """Stop retrying degraded RSS rows for the rest of the ingestion day."""
+    retry_threshold = max(1, int(settings.ARTICLE_RSS_DEGRADED_RETRY_COUNT_THRESHOLD))
+    next_retry_count = int(getattr(progress, "retry_count", 0) or 0) + 1
+    if next_retry_count > retry_threshold:
+        return True
+    normalized_error = str(error or "").lower()
+    return "exhausted attempts" in normalized_error
+
+
+def _reallocate_rss_shortfall(db: Session, *, day_utc: date, failed_progress, rss, repo) -> dict | None:
+    """Shift the failed feed's remaining target to a healthy peer in the same role."""
+    from app.models.ingestion_progress import IngestionProgress
+
+    failed_cfg = _rss_feed_config(rss, failed_progress.feed_name)
+    if failed_cfg is None:
+        return None
+
+    shortfall = max(
+        0,
+        int(getattr(failed_progress, "target", 0) or 0)
+        - int(getattr(failed_progress, "items_ingested", 0) or 0),
+    )
+    if shortfall <= 0:
+        return None
+
+    peer_cfgs = [
+        cfg
+        for cfg in rss.feed_configs
+        if cfg.enabled and cfg.name != failed_progress.feed_name and cfg.role == failed_cfg.role
+    ]
+    if not peer_cfgs:
+        return None
+
+    peer_names = [cfg.name for cfg in peer_cfgs]
+    candidates = (
+        db.query(IngestionProgress)
+        .filter(
+            IngestionProgress.day_utc == day_utc,
+            IngestionProgress.source_type == "rss",
+            IngestionProgress.feed_name.in_(peer_names),
+        )
+        .all()
+    )
+
+    retry_threshold = max(1, int(settings.ARTICLE_RSS_DEGRADED_RETRY_COUNT_THRESHOLD))
+    healthy_candidates = [
+        row
+        for row in candidates
+        if row.status != "failed" and int(row.retry_count or 0) < retry_threshold
+    ]
+    if not healthy_candidates:
+        return None
+
+    recipient = min(
+        healthy_candidates,
+        key=lambda row: (
+            int(row.items_ingested or 0),
+            int(row.items_attempted or 0),
+            str(row.feed_name),
+        ),
+    )
+    updated = repo.add_target(
+        day_utc=day_utc,
+        source_type="rss",
+        feed_name=str(recipient.feed_name),
+        amount=shortfall,
+    )
+    if updated is None:
+        return None
+
+    logger.info(
+        "Reallocated RSS shortfall of %s from %s to %s for %s",
+        shortfall,
+        failed_progress.feed_name,
+        updated.feed_name,
+        day_utc.isoformat(),
+    )
+    return {"feed_name": updated.feed_name, "amount": shortfall}
+
+
 def _cursor_from_rss_entry(entry) -> str:
     return normalize_url(entry.url) if entry.url else ""
 
@@ -701,12 +782,23 @@ def process_progress_row_batch(
     except Exception as e:
         logger.exception("Ingestion failed for %s", scope_key)
         try:
-            retry_count = int(progress.retry_count or 0)
-            delay = min(
-                retry_max_seconds, max(retry_base_seconds, retry_base_seconds * (2**retry_count))
-            )
-            retry_at = datetime.utcnow() + timedelta(seconds=int(delay))
-            repo.schedule_retry(row_id=row_id, error=str(e), retry_at=retry_at)
+            if progress.source_type == "rss" and _should_pause_rss_source(progress, str(e)):
+                repo.mark_failed(row_id, f"Paused for day after repeated RSS failures: {str(e)}")
+                _reallocate_rss_shortfall(
+                    db,
+                    day_utc=day_utc,
+                    failed_progress=progress,
+                    rss=rss,
+                    repo=repo,
+                )
+            else:
+                retry_count = int(progress.retry_count or 0)
+                delay = min(
+                    retry_max_seconds,
+                    max(retry_base_seconds, retry_base_seconds * (2**retry_count)),
+                )
+                retry_at = datetime.utcnow() + timedelta(seconds=int(delay))
+                repo.schedule_retry(row_id=row_id, error=str(e), retry_at=retry_at)
         except Exception:
             pass
         return {

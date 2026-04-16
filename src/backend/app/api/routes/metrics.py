@@ -20,6 +20,7 @@ from app.extraction.metrics import extraction_metrics
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.ingestion_progress import IngestionProgress
 from app.models.source import SourceDailyStat
+from app.services.article_supply_metrics_service import compute_article_supply_metrics
 from app.services.ai_metrics import compute_ai_feed_metrics
 from app.services.feed_health import compute_inventory_health
 from app.services.freshness_metrics_service import compute_freshness_metrics
@@ -564,6 +565,19 @@ def get_freshness_metrics(
         return compute_freshness_metrics(db, hours=hours)
     except Exception as exc:
         logger.error("Error getting freshness metrics: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/articles/supply", dependencies=[Depends(require_admin_key)])
+def get_article_supply_metrics(
+    days: int = Query(14, ge=1, le=31, description="Look-back window in UTC days"),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Get per-day and per-source article supply breakdowns."""
+    try:
+        return compute_article_supply_metrics(db, days=days)
+    except Exception as exc:
+        logger.error("Error getting article supply metrics: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

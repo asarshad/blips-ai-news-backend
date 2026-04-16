@@ -62,3 +62,40 @@ def test_prioritize_article_head_fills_remaining_slots_from_existing_order():
     )
 
     assert [item["id"] for item in prioritized] == [2, 4, 1, 3, 5]
+
+
+def test_prioritize_article_head_orders_all_days_by_recency_then_score():
+    items = [
+        {
+            "id": 1,
+            "published_at": "2026-04-08T10:00:00Z",
+            "promotion_score": 0.95,
+            "global_score": 0.95,
+        },
+        {
+            "id": 2,
+            "published_at": "2026-04-10T09:00:00Z",
+            "promotion_score": 0.10,
+            "global_score": 0.10,
+        },
+        {
+            "id": 3,
+            "published_at": "2026-04-09T12:00:00Z",
+            "promotion_score": 0.90,
+            "global_score": 0.90,
+        },
+        {
+            "id": 4,
+            "published_at": "2026-04-10T07:00:00Z",
+            "promotion_score": 0.80,
+            "global_score": 0.40,
+        },
+    ]
+
+    prioritized = prioritize_article_head(
+        items,
+        head_size=4,
+        now=datetime(2026, 4, 12, 20, 0, tzinfo=timezone.utc),
+    )
+
+    assert [item["id"] for item in prioritized] == [4, 2, 3, 1]

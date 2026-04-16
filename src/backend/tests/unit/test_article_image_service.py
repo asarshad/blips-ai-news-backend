@@ -141,6 +141,72 @@ def test_repair_article_image_metadata_uses_llm_fallback_when_metadata_has_no_im
     assert repaired.article_image_status == "VERIFIED"
 
 
+def test_repair_article_image_metadata_can_focus_on_promoted_missing_image_backlog(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    ContentItem.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    promoted_pending = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/promoted",
+        published_at=_recent_dt(hours_ago=2),
+        title="Promoted pending image",
+        curation_status=ContentStatus.PROMOTED,
+        readiness_reason="missing_article_image",
+        created_at=_recent_dt(hours_ago=1, minutes_ago=55),
+        updated_at=_recent_dt(hours_ago=1, minutes_ago=55),
+    )
+    candidate_item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/candidate",
+        published_at=_recent_dt(hours_ago=2),
+        title="Candidate pending image",
+        curation_status=ContentStatus.CANDIDATE,
+        readiness_reason="missing_article_image",
+        created_at=_recent_dt(hours_ago=1, minutes_ago=55),
+        updated_at=_recent_dt(hours_ago=1, minutes_ago=55),
+    )
+    wrong_reason = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/summary",
+        published_at=_recent_dt(hours_ago=2),
+        title="Promoted wrong backlog",
+        curation_status=ContentStatus.PROMOTED,
+        readiness_reason="missing_article_summary",
+        created_at=_recent_dt(hours_ago=1, minutes_ago=55),
+        updated_at=_recent_dt(hours_ago=1, minutes_ago=55),
+    )
+    db.add_all([promoted_pending, candidate_item, wrong_reason])
+    db.commit()
+
+    monkeypatch.setattr(
+        article_image_service,
+        "fetch_article_page_metadata",
+        lambda article_url: PageMetadata(
+            canonical_url=article_url,
+            image_url="https://cdn.example.com/hero.jpg",
+            image_source="og",
+        ),
+    )
+
+    result = article_image_service.repair_article_image_metadata(
+        db,
+        lookback_days=7,
+        limit=50,
+        promoted_only=True,
+        readiness_reasons=("missing_article_image", "awaiting_article_image_verification"),
+    )
+
+    assert result["scanned"] == 1
+    assert db.get(ContentItem, promoted_pending.id).image_url == "https://cdn.example.com/hero.jpg"
+    assert db.get(ContentItem, candidate_item.id).image_url is None
+    assert db.get(ContentItem, wrong_reason.id).image_url is None
+
+
 def test_evaluate_llm_article_image_recovery_reports_success_rate(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     ContentItem.__table__.create(bind=engine)

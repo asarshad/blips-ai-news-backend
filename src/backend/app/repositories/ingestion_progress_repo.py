@@ -282,6 +282,37 @@ class IngestionProgressRepository:
         row.updated_at = datetime.utcnow()
         self.db.commit()
 
+    def add_target(
+        self,
+        *,
+        day_utc: date,
+        source_type: str,
+        feed_name: str,
+        amount: int,
+    ) -> Optional[IngestionProgress]:
+        row = (
+            self.db.query(IngestionProgress)
+            .filter(
+                IngestionProgress.day_utc == day_utc,
+                IngestionProgress.source_type == source_type,
+                IngestionProgress.feed_name == feed_name,
+            )
+            .one_or_none()
+        )
+        if row is None:
+            return None
+
+        increment = max(0, int(amount or 0))
+        if increment <= 0:
+            return row
+
+        row.target = int(row.target or 0) + increment
+        if row.status == "complete" and int(row.items_ingested or 0) < int(row.target or 0):
+            row.status = "running"
+        row.updated_at = datetime.utcnow()
+        self.db.commit()
+        return row
+
     def update_after_batch(
         self,
         *,

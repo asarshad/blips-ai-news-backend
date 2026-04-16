@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
 from app.models.content import ContentType
@@ -46,9 +47,10 @@ def test_process_ai_summaries_uses_article_hydrator_for_articles(monkeypatch):
         summary=None,
         ai_processed=False,
     )
-    repo.get_unprocessed_by_ai.return_value = [item]
+    repo.get_recent_promoted_articles_pending_ai.return_value = [item]
     repo.get_articles_with_short_summaries.return_value = []
     repo.get_articles_with_long_summaries.return_value = []
+    repo.get_videos_with_short_summaries.return_value = []
 
     llm_client = MagicMock()
     llm_client.is_configured.return_value = True
@@ -111,7 +113,7 @@ def test_process_ai_summaries_retries_short_article_summaries(monkeypatch):
         summary="Too short to satisfy the new target.",
         ai_processed=True,
     )
-    repo.get_unprocessed_by_ai.return_value = []
+    repo.get_recent_promoted_articles_pending_ai.return_value = []
     repo.get_articles_with_short_summaries.return_value = [item]
     repo.get_articles_with_long_summaries.return_value = []
 
@@ -175,7 +177,7 @@ def test_process_ai_summaries_retries_long_article_summaries(monkeypatch):
         summary=" ".join(f"word{i}" for i in range(71)),
         ai_processed=True,
     )
-    repo.get_unprocessed_by_ai.return_value = []
+    repo.get_recent_promoted_articles_pending_ai.return_value = []
     repo.get_articles_with_short_summaries.return_value = []
     repo.get_articles_with_long_summaries.return_value = [item]
 
@@ -243,9 +245,10 @@ def test_process_ai_summaries_counts_starter_answer_generation_toward_llm_cap(mo
         summary=None,
         ai_processed=False,
     )
-    repo.get_unprocessed_by_ai.return_value = [item]
+    repo.get_recent_promoted_articles_pending_ai.return_value = [item]
     repo.get_articles_with_short_summaries.return_value = []
     repo.get_articles_with_long_summaries.return_value = []
+    repo.get_videos_with_short_summaries.return_value = []
 
     llm_client = MagicMock()
     llm_client.is_configured.return_value = True
@@ -316,7 +319,7 @@ def test_process_ai_summaries_skips_empty_article_input_without_error(monkeypatc
         summary=None,
         ai_processed=False,
     )
-    repo.get_unprocessed_by_ai.return_value = [item]
+    repo.get_recent_promoted_articles_pending_ai.return_value = [item]
     repo.get_articles_with_short_summaries.return_value = []
     repo.get_articles_with_long_summaries.return_value = []
 
@@ -354,6 +357,59 @@ def test_process_ai_summaries_skips_empty_article_input_without_error(monkeypatc
     llm_client.summarize_article.assert_not_called()
 
 
+def test_process_ai_summaries_defers_recent_unskimmable_articles(monkeypatch):
+    db = MagicMock()
+    repo = MagicMock()
+    item = SimpleNamespace(
+        id=16,
+        type=ContentType.ARTICLE,
+        content_text=None,
+        description=None,
+        title="Recent article waiting on extraction",
+        canonical_url=None,
+        published_at=datetime.utcnow() - timedelta(hours=2),
+        image_url=None,
+        topics=[],
+        conversation_starters=None,
+        summary=None,
+        ai_processed=False,
+        updated_at=None,
+    )
+    repo.get_recent_promoted_articles_pending_ai.return_value = [item]
+    repo.get_articles_with_short_summaries.return_value = []
+    repo.get_articles_with_long_summaries.return_value = []
+
+    llm_client = MagicMock()
+    llm_client.is_configured.return_value = True
+
+    hydrator = MagicMock()
+    hydrator.run_article_extraction.return_value = None
+    hydrator.should_replace_article_image.return_value = False
+
+    stats = _FakeStats()
+
+    monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
+    monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
+    monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: stats)
+    monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tasks_ai_retry, "_run_article_image_verification", lambda *_a, **_k: {})
+    monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
+    monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
+    monkeypatch.setattr(
+        "app.article_hydration.ArticleHydrationService",
+        lambda llm_client=None: hydrator,
+    )
+    monkeypatch.setattr(tasks_ai_retry.time, "sleep", lambda *_args, **_kwargs: None)
+
+    tasks_ai_retry.process_ai_summaries()
+
+    assert stats.items_skipped == 1
+    assert item.ai_processed is False
+    assert str(item.summary).startswith("__blips_article_retry__:")
+    repo.mark_ai_processed.assert_not_called()
+    db.commit.assert_called()
+
+
 def test_process_ai_summaries_skips_when_fetch_news_is_active(monkeypatch):
     fetch_started_at = mark_job_started(FETCH_NEWS_JOB)
     try:
@@ -373,7 +429,7 @@ def test_process_ai_summaries_manual_runs_even_when_fetch_news_is_active(monkeyp
     try:
         db = MagicMock()
         repo = MagicMock()
-        repo.get_unprocessed_by_ai.return_value = []
+        repo.get_recent_promoted_articles_pending_ai.return_value = []
         repo.get_articles_with_short_summaries.return_value = []
         repo.get_articles_with_long_summaries.return_value = []
         repo.get_videos_with_short_summaries.return_value = []
@@ -395,7 +451,7 @@ def test_process_ai_summaries_manual_runs_even_when_fetch_news_is_active(monkeyp
 
         tasks_ai_retry.process_ai_summaries()
 
-        repo.get_unprocessed_by_ai.assert_called_once()
+        repo.get_recent_promoted_articles_pending_ai.assert_called_once()
     finally:
         mark_job_finished(FETCH_NEWS_JOB, fetch_started_at, success=False)
 
@@ -427,7 +483,7 @@ def test_process_ai_summaries_persists_extracted_article_fields_before_summary(m
         summary=None,
         ai_processed=False,
     )
-    repo.get_unprocessed_by_ai.return_value = [item]
+    repo.get_recent_promoted_articles_pending_ai.return_value = [item]
     repo.get_articles_with_short_summaries.return_value = []
     repo.get_articles_with_long_summaries.return_value = []
 
@@ -496,7 +552,7 @@ def test_process_ai_summaries_rejects_short_video_summary(monkeypatch):
         summary=None,
         ai_processed=False,
     )
-    repo.get_unprocessed_by_ai.return_value = [item]
+    repo.get_recent_promoted_articles_pending_ai.return_value = [item]
     repo.get_articles_with_short_summaries.return_value = []
     repo.get_articles_with_long_summaries.return_value = []
 
@@ -551,7 +607,7 @@ def test_process_ai_summaries_marks_non_tech_video_processed_without_summary(mon
         tech_relevance_reason=None,
         is_mixed_roundup=None,
     )
-    repo.get_unprocessed_by_ai.return_value = [item]
+    repo.get_recent_promoted_articles_pending_ai.return_value = [item]
     repo.get_articles_with_short_summaries.return_value = []
     repo.get_articles_with_long_summaries.return_value = []
     repo.get_videos_with_short_summaries.return_value = []
@@ -616,7 +672,7 @@ def test_process_ai_summaries_refreshes_caches_after_valid_video_summary(monkeyp
         tech_relevance_reason=None,
         is_mixed_roundup=None,
     )
-    repo.get_unprocessed_by_ai.return_value = [item]
+    repo.get_recent_promoted_articles_pending_ai.return_value = [item]
     repo.get_articles_with_short_summaries.return_value = []
     repo.get_articles_with_long_summaries.return_value = []
     repo.get_videos_with_short_summaries.return_value = []
@@ -682,7 +738,7 @@ def test_process_ai_summaries_skips_maintenance_for_immediate_runs(monkeypatch):
         summary=None,
         ai_processed=False,
     )
-    repo.get_unprocessed_by_ai.return_value = [item]
+    repo.get_recent_promoted_articles_pending_ai.return_value = [item]
     repo.get_articles_with_short_summaries.return_value = []
     repo.get_articles_with_long_summaries.return_value = []
     repo.get_videos_with_short_summaries.return_value = []

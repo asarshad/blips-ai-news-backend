@@ -18,13 +18,14 @@ import hashlib
 import json
 import uuid
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy.orm import Session
 
 from app.article_hydration import display_article_title
 from app.core.feature_flags import FeatureFlags
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentType
 from app.ranking.feed_score import rerank_feed
@@ -36,7 +37,11 @@ from app.repositories.user_repo import (
     UserProfileRepository,
 )
 from app.services.article_head_freshness import prioritize_recent_head
-from app.services.content_readiness import is_ready_for_surface, surface_name_for_item
+from app.services.content_readiness import (
+    is_ready_for_surface,
+    ready_content_filter,
+    surface_name_for_item,
+)
 from app.services.feed_freshness_strategies import CURRENT_STRATEGY, feed_freshness_strategies
 from app.services.feed_version import compute_feed_version
 from app.services.inventory_service import Surface
@@ -643,10 +648,11 @@ class PlaylistService:
             ContentType.VIDEO,
             ContentType.REEL,
         ) and FeatureFlags().is_enabled("video_hybrid_rerank")
+        snapshot_limit = self._tiered_snapshot_limit(content_type)
         raw_items, _has_more, meta = get_cached_tiered_feed(
             db,
             surface,
-            limit=MAX_PLAYLIST_SIZE,
+            limit=snapshot_limit,
             offset=0,
             hybrid_video_rerank=hybrid_video_rerank,
             device_id=device_id,
@@ -689,6 +695,30 @@ class PlaylistService:
                 getattr(meta, "strategy_name", CURRENT_STRATEGY)
             ).resume_snapshot_after_remote_window(surface=surface),
         )
+
+    def _tiered_snapshot_limit(self, content_type: ContentType) -> int:
+        if content_type != ContentType.ARTICLE:
+            return MAX_PLAYLIST_SIZE
+
+        db = getattr(self.content_repo, "db", None)
+        if db is None or not hasattr(db, "query"):
+            return MAX_PLAYLIST_SIZE
+
+        cutoff = datetime.utcnow() - timedelta(days=settings.ARTICLE_RECENT_POOL_DAYS)
+        try:
+            recent_ready_count = (
+                db.query(ContentItem)
+                .filter(
+                    ready_content_filter(Surface.ARTICLES.value),
+                    ContentItem.published_at >= cutoff,
+                )
+                .count()
+            )
+        except Exception as exc:
+            logger.warning("Unable to size article snapshot from recent pool: %s", exc)
+            return MAX_PLAYLIST_SIZE
+
+        return max(MAX_PLAYLIST_SIZE, int(recent_ready_count or 0))
 
     def _snapshot_from_items(
         self,

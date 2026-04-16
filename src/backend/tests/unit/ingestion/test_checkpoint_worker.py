@@ -617,6 +617,66 @@ def test_worker_failure_schedules_retry_with_backoff_and_rolls_back(monkeypatch)
     assert before + timedelta(seconds=5) <= progress.retry_at <= after + timedelta(seconds=60)
 
 
+def test_worker_failure_pauses_degraded_rss_source_and_reallocates_shortfall(monkeypatch):
+    entries = [_Entry("https://example.com/fail")]
+    progress = _Progress(
+        id=1,
+        day_utc=None,
+        source_type="rss",
+        feed_name="feed1",
+        target=10,
+        items_ingested=2,
+        items_attempted=0,
+        status="running",
+        retry_count=3,
+    )
+    session = _FakeSession(progress)
+
+    pkg = ModuleType("app.integrations")
+    pkg.__path__ = []
+    rss_mod = ModuleType("app.integrations.rss_client")
+    rss_mod.RSSClient = lambda: _FakeRSSClient(entries)  # type: ignore[attr-defined]
+    yt_mod = ModuleType("app.integrations.youtube_client")
+    yt_mod.YouTubeClient = lambda: None  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "app.integrations", pkg)
+    monkeypatch.setitem(sys.modules, "app.integrations.rss_client", rss_mod)
+    monkeypatch.setitem(sys.modules, "app.integrations.youtube_client", yt_mod)
+    monkeypatch.setattr("app.db.base.SessionLocal", lambda: session)
+    monkeypatch.setattr(checkpoint_worker, "IngestionBudgetRepository", _FakeBudgetRepo)
+    monkeypatch.setattr(checkpoint_worker, "claim_lease", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(checkpoint_worker, "release_lease", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        checkpoint_worker,
+        "_insert_content_items_postgres",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("insert boom")),
+    )
+
+    reallocated = []
+    monkeypatch.setattr(
+        checkpoint_worker,
+        "_reallocate_rss_shortfall",
+        lambda *_args, **_kwargs: reallocated.append("called") or {"feed_name": "feed2", "amount": 8},
+    )
+
+    result = checkpoint_worker.process_progress_row_batch(
+        row_id=1,
+        day_utc=datetime.utcnow().date(),
+        redis_client=object(),
+        owner_token="t",
+        ttl_ms=1000,
+        batch_size=1,
+        retry_base_seconds=5,
+        retry_max_seconds=60,
+    )
+
+    assert result["status"] == "failed"
+    assert progress.status == "failed"
+    assert "Paused for day after repeated RSS failures" in str(progress.last_error)
+    assert progress.retry_at is None
+    assert reallocated == ["called"]
+
+
 def test_worker_persists_youtube_metadata_fields(monkeypatch):
     progress = _Progress(
         id=1,

@@ -491,6 +491,45 @@ def test_generate_tiered_snapshot_skips_article_rerank_even_with_categories(monk
     assert [item["id"] for item in snapshot["items"]] == [1, 2]
 
 
+def test_generate_tiered_snapshot_sizes_article_pool_from_recent_ready_supply(monkeypatch):
+    service = PlaylistService(
+        content_repo=MagicMock(db=object()),
+        profile_repo=MagicMock(),
+        preference_repo=MagicMock(),
+        personalization_service=MagicMock(),
+        redis_client=None,
+    )
+
+    requested_limits = []
+
+    monkeypatch.setattr(
+        service,
+        "_tiered_snapshot_limit",
+        lambda content_type: 185 if content_type == ContentType.ARTICLE else 100,
+    )
+    monkeypatch.setattr(
+        "app.services.playlist_service.get_cached_tiered_feed",
+        lambda *_args, **kwargs: (
+            requested_limits.append(kwargs["limit"]) or [],
+            False,
+            SimpleNamespace(
+                generated_at=datetime(2026, 4, 16, 12, 0, 0),
+                source="db",
+                cache_key="cache-key",
+                cache_hit=False,
+                remaining_window_count=0,
+                strategy_name="current",
+                strategy_source="default",
+            ),
+        ),
+    )
+
+    snapshot = service._generate_tiered_snapshot("device-1", ContentType.ARTICLE)
+
+    assert requested_limits == [185]
+    assert snapshot["items"] == []
+
+
 def test_generate_tiered_snapshot_prioritizes_recent_video_head(monkeypatch):
     service = PlaylistService(
         content_repo=MagicMock(db=object()),

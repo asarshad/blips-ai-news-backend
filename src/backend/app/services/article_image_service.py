@@ -36,21 +36,24 @@ def repair_article_image_metadata(
     lookback_days: int = 14,
     limit: int = 200,
     include_generic: bool = True,
+    promoted_only: bool = False,
+    readiness_reasons: tuple[str, ...] | None = None,
 ) -> Dict[str, int]:
     """Backfill missing or suspicious article image/canonical metadata."""
     hydrator = ArticleHydrationService()
     hydrator.fetch_article_page_metadata = fetch_article_page_metadata
     cutoff = datetime.utcnow() - timedelta(days=lookback_days)
-    recent_items = (
-        db.query(ContentItem)
-        .filter(
-            ContentItem.type == ContentType.ARTICLE,
-            ContentItem.published_at >= cutoff,
-            ContentItem.source_url.isnot(None),
-        )
-        .order_by(ContentItem.published_at.desc())
-        .all()
+    query = db.query(ContentItem).filter(
+        ContentItem.type == ContentType.ARTICLE,
+        ContentItem.published_at >= cutoff,
+        ContentItem.source_url.isnot(None),
     )
+    if promoted_only:
+        query = query.filter(ContentItem.curation_status == ContentStatus.PROMOTED)
+    if readiness_reasons:
+        query = query.filter(ContentItem.readiness_reason.in_(tuple(readiness_reasons)))
+
+    recent_items = query.order_by(ContentItem.published_at.desc(), ContentItem.id.desc()).all()
 
     items = []
     for item in recent_items:

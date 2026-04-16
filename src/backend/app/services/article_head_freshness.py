@@ -1,12 +1,11 @@
-"""Helpers for keeping feed heads biased toward fresher inventory."""
+"""Helpers for keeping feed ordering biased toward fresher inventory."""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Sequence, TypeVar
 
 ARTICLE_FRESH_HEAD_SIZE = 10
-ARTICLE_RECENT_HEAD_CANDIDATE_LIMIT = 50
 
 T = TypeVar("T")
 
@@ -17,51 +16,44 @@ def prioritize_recent_head(
     head_size: int = ARTICLE_FRESH_HEAD_SIZE,
     now: datetime | None = None,
 ) -> list[T]:
-    """Build a recent feed head from today and yesterday first.
+    """Sort the feed by published day, then by score within each day.
 
-    The top feed slots should feel current and shared across devices:
-    - today bucket first
-    - then yesterday bucket
-    - then the existing feed order as fallback when recent inventory is thin
+    Day ordering is the primary freshness signal across the entire feed:
+    - newer UTC published days first
+    - within the same day, higher promotion/global score first
+    - undated items keep their existing relative order at the end
+
+    ``head_size`` is retained for backward compatibility with older callers,
+    but the ordering now applies to the full list instead of only a front slice.
     """
     if head_size <= 0 or len(items) <= 1:
         return list(items)
 
     indexed_items = list(enumerate(items))
-    effective_head_size = min(head_size, len(indexed_items))
-    reference = (now or _utcnow()).astimezone(timezone.utc).date()
-    yesterday = reference - timedelta(days=1)
+    dated_items: list[tuple[int, T, datetime]] = []
+    undated_items: list[tuple[int, T]] = []
 
-    recent_candidates = sorted(
-        (
-            pair
-            for pair in indexed_items
-            if _published_day_bucket(pair[1], today=reference, yesterday=yesterday) is not None
-        ),
-        key=lambda pair: (
-            _published_day_bucket(pair[1], today=reference, yesterday=yesterday),
-            -_numeric_sort_value(_promotion_score(pair[1])),
-            -_numeric_sort_value(_global_score(pair[1])),
-            -_datetime_sort_value(_published_at(pair[1])),
-            pair[0],
+    for index, item in indexed_items:
+        published_at = _coerce_datetime(_published_at(item))
+        if published_at is None:
+            undated_items.append((index, item))
+            continue
+        dated_items.append((index, item, published_at.astimezone(timezone.utc)))
+
+    ordered_dated_items = sorted(
+        dated_items,
+        key=lambda entry: (
+            -_date_sort_value(entry[2].date()),
+            -_numeric_sort_value(_promotion_score(entry[1])),
+            -_numeric_sort_value(_global_score(entry[1])),
+            -entry[2].timestamp(),
+            entry[0],
         ),
     )
-    head_selection = recent_candidates[:effective_head_size]
-    selected_indexes = {index for index, _ in head_selection}
-
-    if len(head_selection) < effective_head_size:
-        for pair in indexed_items:
-            index, _item = pair
-            if index in selected_indexes:
-                continue
-            head_selection.append(pair)
-            selected_indexes.add(index)
-            if len(head_selection) >= effective_head_size:
-                break
 
     return [
-        *(item for _, item in head_selection),
-        *(item for index, item in indexed_items if index not in selected_indexes),
+        *(item for _, item, _ in ordered_dated_items),
+        *(item for _, item in undated_items),
     ]
 
 
@@ -118,6 +110,10 @@ def _published_day_bucket(
     if published_day == yesterday:
         return 1
     return None
+
+
+def _date_sort_value(value: date) -> int:
+    return value.toordinal()
 
 
 def _numeric_sort_value(value: Any) -> float:

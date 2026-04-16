@@ -59,6 +59,16 @@ NEGATIVE_ITEM_SUPPRESSION_HOURS = 24
 NEGATIVE_CREATOR_SUPPRESSION_HOURS = 168
 
 
+def _article_day_first_order_clauses():
+    """Keep article candidate selection aligned with day-first serving."""
+    return (
+        desc(func.date(ContentItem.published_at)),
+        desc(ContentItem.promotion_score),
+        desc(ContentItem.global_score),
+        desc(ContentItem.published_at),
+    )
+
+
 @dataclass
 class FeedResponseMeta:
     """Metadata about a feed response for diagnostics."""
@@ -259,6 +269,7 @@ def get_tiered_feed(
     fresh_cutoff = now - timedelta(hours=cfg["fresh_hours"])
     backfill_cutoff = now - timedelta(hours=cfg["backfill_hours"])
     evergreen_cutoff = now - timedelta(days=cfg["evergreen_days"])
+    article_recent_pool_cutoff = now - timedelta(days=settings.ARTICLE_RECENT_POOL_DAYS)
 
     # Base filter
     base_filter = ready_content_filter(surface.value)
@@ -373,28 +384,70 @@ def get_tiered_feed(
     # =========================================================================
     if len(results) < target_count * fetch_multiplier:
         evergreen_min_score = evergreen_min_global_score(surface)
-        tier_c_items = (
-            eligible_inventory_query.filter(
-                evergreen_tier_filter,
-                ContentItem.global_score >= evergreen_min_score,
-            )
-            .order_by(
-                desc(ContentItem.promotion_score),
-                desc(ContentItem.global_score),
-                desc(ContentItem.published_at),
-            )
-            .limit(target_count * fetch_multiplier)
-            .all()
-        )
-
         tier_c_added = 0
-        for item in tier_c_items:
-            if item.id not in seen_ids:
-                seen_ids.add(item.id)
-                results.append(_annotate_item(item, FreshnessTier.C, "evergreen", now))
-                tier_c_added += 1
+        tier_c_candidates = 0
 
-        logger.debug(f"Tier C: {len(tier_c_items)} candidates, {tier_c_added} added")
+        if surface == Surface.ARTICLES:
+            recent_article_items = (
+                eligible_inventory_query.filter(
+                    ContentItem.published_at < fresh_cutoff,
+                    ContentItem.published_at >= article_recent_pool_cutoff,
+                )
+                .order_by(*_article_day_first_order_clauses())
+                .limit(target_count * fetch_multiplier)
+                .all()
+            )
+            tier_c_candidates += len(recent_article_items)
+            for item in recent_article_items:
+                if item.id not in seen_ids:
+                    seen_ids.add(item.id)
+                    results.append(_annotate_item(item, FreshnessTier.C, "recent_archive", now))
+                    tier_c_added += 1
+
+            if len(results) < target_count * fetch_multiplier:
+                older_evergreen_items = (
+                    eligible_inventory_query.filter(
+                        ContentItem.published_at < article_recent_pool_cutoff,
+                        ContentItem.published_at >= evergreen_cutoff,
+                        ContentItem.global_score >= evergreen_min_score,
+                    )
+                    .order_by(
+                        desc(ContentItem.promotion_score),
+                        desc(ContentItem.global_score),
+                        desc(ContentItem.published_at),
+                    )
+                    .limit(target_count * fetch_multiplier)
+                    .all()
+                )
+                tier_c_candidates += len(older_evergreen_items)
+                for item in older_evergreen_items:
+                    if item.id not in seen_ids:
+                        seen_ids.add(item.id)
+                        results.append(_annotate_item(item, FreshnessTier.C, "evergreen", now))
+                        tier_c_added += 1
+        else:
+            tier_c_items = (
+                eligible_inventory_query.filter(
+                    evergreen_tier_filter,
+                    ContentItem.global_score >= evergreen_min_score,
+                )
+                .order_by(
+                    desc(ContentItem.promotion_score),
+                    desc(ContentItem.global_score),
+                    desc(ContentItem.published_at),
+                )
+                .limit(target_count * fetch_multiplier)
+                .all()
+            )
+
+            tier_c_candidates = len(tier_c_items)
+            for item in tier_c_items:
+                if item.id not in seen_ids:
+                    seen_ids.add(item.id)
+                    results.append(_annotate_item(item, FreshnessTier.C, "evergreen", now))
+                    tier_c_added += 1
+
+        logger.debug(f"Tier C: {tier_c_candidates} candidates, {tier_c_added} added")
 
     # =========================================================================
     # Apply diversity mixing to the combined candidates

@@ -9,6 +9,7 @@ APScheduler job registration.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import time
 
 from sqlalchemy.orm import Session
@@ -30,6 +31,136 @@ from app.scheduler.runtime import (
 )
 
 logger = get_logger(__name__)
+
+_ARTICLE_RETRY_SENTINEL_PREFIX = "__blips_article_retry__"
+
+
+def _effective_item_limit(max_items: int | None) -> int:
+    if max_items is not None:
+        return max(1, int(max_items))
+    return max(MAX_ITEMS_PER_RUN, int(settings.ARTICLE_AI_PRIORITY_MAX_ITEMS_PER_RUN))
+
+
+def _effective_llm_call_cap() -> int:
+    return max(MAX_LLM_CALLS_PER_RUN, int(settings.ARTICLE_AI_PRIORITY_MAX_LLM_CALLS_PER_RUN))
+
+
+def _build_ai_retry_worklist(content_repo, *, item_limit: int):
+    """Prioritize recent promoted article backlog before other maintenance."""
+    if hasattr(content_repo, "get_recent_promoted_articles_pending_ai"):
+        recent_article_candidates = content_repo.get_recent_promoted_articles_pending_ai(
+            limit=max(item_limit * 3, item_limit),
+            lookback_days=settings.ARTICLE_MAINTENANCE_LOOKBACK_DAYS,
+        )
+    else:
+        recent_article_candidates = content_repo.get_unprocessed_by_ai(
+            limit=max(item_limit * 3, item_limit),
+            hours_back=settings.ARTICLE_MAINTENANCE_LOOKBACK_DAYS * 24,
+        )
+    items = _select_retry_eligible_articles(recent_article_candidates, limit=item_limit)
+
+    seen_ids = {int(item.id) for item in items if getattr(item, "id", None) is not None}
+    remaining_slots = max(0, item_limit - len(items))
+    if remaining_slots:
+        for batch in (
+            content_repo.get_articles_with_short_summaries(
+                limit=remaining_slots,
+                hours_back=settings.ARTICLE_MAINTENANCE_LOOKBACK_DAYS * 24,
+                max_words=settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS,
+            ),
+            content_repo.get_articles_with_long_summaries(
+                limit=remaining_slots,
+                hours_back=None,
+                min_words=settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS,
+            ),
+            content_repo.get_videos_with_short_summaries(
+                limit=remaining_slots,
+                hours_back=168,
+                min_words=settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS,
+            ),
+        ):
+            for item in list(batch or []):
+                item_id = getattr(item, "id", None)
+                if item_id is not None and int(item_id) in seen_ids:
+                    continue
+                items.append(item)
+                if item_id is not None:
+                    seen_ids.add(int(item_id))
+                if len(items) >= item_limit:
+                    return items
+            remaining_slots = max(0, item_limit - len(items))
+            if remaining_slots <= 0:
+                return items
+
+    return items
+
+
+def _select_retry_eligible_articles(items, *, limit: int):
+    now = datetime.utcnow()
+    eligible = []
+    for item in items:
+        if _article_retry_state(item, now=now)["eligible"]:
+            eligible.append(item)
+        if len(eligible) >= limit:
+            break
+    return eligible
+
+
+def _is_recent_article_for_maintenance(item, *, now: datetime | None = None) -> bool:
+    published_at = getattr(item, "published_at", None)
+    if published_at is None:
+        return False
+    now_utc = now or datetime.utcnow()
+    return published_at >= now_utc - timedelta(days=settings.ARTICLE_MAINTENANCE_LOOKBACK_DAYS)
+
+
+def _article_retry_state(item, *, now: datetime | None = None) -> dict[str, object]:
+    now_utc = now or datetime.utcnow()
+    summary = (getattr(item, "summary", None) or "").strip()
+    attempts = 0
+    first_failed_at = None
+    if summary.startswith(f"{_ARTICLE_RETRY_SENTINEL_PREFIX}:"):
+        parts = summary.split(":", 3)
+        if len(parts) >= 4:
+            try:
+                attempts = max(0, int(parts[2]))
+            except (TypeError, ValueError):
+                attempts = 0
+            try:
+                first_failed_at = datetime.fromisoformat(parts[3])
+            except ValueError:
+                first_failed_at = None
+
+    if first_failed_at is None:
+        return {"attempts": attempts, "first_failed_at": None, "eligible": True}
+
+    retry_window = timedelta(hours=int(settings.ARTICLE_UNSKIMMABLE_RETRY_WINDOW_HOURS))
+    within_window = first_failed_at + retry_window > now_utc
+    max_attempts = int(settings.ARTICLE_UNSKIMMABLE_RETRY_MAX_ATTEMPTS)
+    eligible = not within_window or attempts < max_attempts
+    return {
+        "attempts": attempts,
+        "first_failed_at": first_failed_at,
+        "eligible": eligible,
+    }
+
+
+def _record_article_retry_deferral(db: Session, item, *, now: datetime | None = None) -> int:
+    now_utc = now or datetime.utcnow()
+    state = _article_retry_state(item, now=now_utc)
+    retry_window = timedelta(hours=int(settings.ARTICLE_UNSKIMMABLE_RETRY_WINDOW_HOURS))
+    first_failed_at = state["first_failed_at"]
+    attempts = int(state["attempts"])
+    if first_failed_at is None or first_failed_at + retry_window <= now_utc:
+        first_failed_at = now_utc
+        attempts = 0
+    attempts += 1
+    item.summary = (
+        f"{_ARTICLE_RETRY_SENTINEL_PREFIX}:v1:{attempts}:{first_failed_at.isoformat()}"
+    )
+    item.updated_at = now_utc
+    db.commit()
+    return attempts
 
 
 def process_ai_summaries(
@@ -87,36 +218,9 @@ def process_ai_summaries(
             )
             return
 
-        item_limit = MAX_ITEMS_PER_RUN if max_items is None else max(1, int(max_items))
-
-        items = content_repo.get_unprocessed_by_ai(limit=item_limit, hours_back=168)
-        remaining_slots = max(0, item_limit - len(items))
-        if remaining_slots:
-            items.extend(
-                content_repo.get_articles_with_short_summaries(
-                    limit=remaining_slots,
-                    hours_back=168,
-                    max_words=settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS,
-                )
-            )
-        remaining_slots = max(0, item_limit - len(items))
-        if remaining_slots:
-            items.extend(
-                content_repo.get_articles_with_long_summaries(
-                    limit=remaining_slots,
-                    hours_back=None,
-                    min_words=settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS,
-                )
-            )
-        remaining_slots = max(0, item_limit - len(items))
-        if remaining_slots:
-            items.extend(
-                content_repo.get_videos_with_short_summaries(
-                    limit=remaining_slots,
-                    hours_back=168,
-                    min_words=settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS,
-                )
-            )
+        item_limit = _effective_item_limit(max_items)
+        llm_call_cap = _effective_llm_call_cap()
+        items = _build_ai_retry_worklist(content_repo, item_limit=item_limit)
 
         if not items:
             logger.info("[ai_retry] No items need processing")
@@ -125,8 +229,8 @@ def process_ai_summaries(
         logger.info(f"[ai_retry] Found {len(items)} items to process")
 
         for item in items:
-            if stats.llm_calls >= MAX_LLM_CALLS_PER_RUN:
-                logger.warning(f"[ai_retry] LLM cap reached ({MAX_LLM_CALLS_PER_RUN}), stopping")
+            if stats.llm_calls >= llm_call_cap:
+                logger.warning(f"[ai_retry] LLM cap reached ({llm_call_cap}), stopping")
                 stats.items_skipped = len(items) - stats.items_processed - stats.items_failed
                 break
 
@@ -155,18 +259,22 @@ def process_ai_summaries(
 
                     summary_input = bounded_article_summary_text(text)
                     if not summary_input:
-                        # No scrapeable content found even after a refresh attempt.
-                        # Permanently mark as processed with empty summary so the item
-                        # is removed from the retry queue and stays PENDING in readiness
-                        # (missing_article_summary) rather than re-entering every cycle.
-                        content_repo.mark_ai_processed(
-                            item.id, summary="", topics=item.topics or []
-                        )
+                        if _is_recent_article_for_maintenance(item):
+                            attempt = _record_article_retry_deferral(db, item)
+                            logger.info(
+                                "[ai_retry] Deferred unskimmable article retry attempt %s: %s",
+                                attempt,
+                                item.title[:80],
+                            )
+                        else:
+                            content_repo.mark_ai_processed(
+                                item.id, summary="", topics=item.topics or []
+                            )
+                            logger.info(
+                                "[ai_retry] Giving up on older unskimmable article (marked processed): %s",
+                                item.title[:80],
+                            )
                         stats.items_skipped += 1
-                        logger.info(
-                            "[ai_retry] Giving up on unskimmable article (marked processed): %s",
-                            item.title[:80],
-                        )
                         continue
 
                     article_hydrator.populate_article_summary(
@@ -209,7 +317,7 @@ def process_ai_summaries(
                     if starters and not getattr(item, "starter_answers", None):
                         from app.services.conversation_starters import get_starters_service
 
-                        if stats.llm_calls >= MAX_LLM_CALLS_PER_RUN:
+                        if stats.llm_calls >= llm_call_cap:
                             logger.warning(
                                 "[ai_retry] Starter-answer generation skipped for %s because the LLM cap was reached",
                                 item.id,
@@ -359,8 +467,10 @@ def _backfill_starters(db: Session, llm_client, stats) -> None:
     logger.info(f"[ai_retry] Backfilling starters for {len(items)} items")
     starters_service = get_starters_service(llm_client)
 
+    llm_call_cap = _effective_llm_call_cap()
+
     for item in items:
-        if stats.llm_calls >= MAX_LLM_CALLS_PER_RUN:
+        if stats.llm_calls >= llm_call_cap:
             break
         try:
             starters_service.generate_and_persist(item)
@@ -399,8 +509,10 @@ def _backfill_starter_answers(db: Session, llm_client, stats) -> None:
     logger.info(f"[ai_retry] Backfilling starter answers for {len(items)} items")
     starters_service = get_starters_service(llm_client)
 
+    llm_call_cap = _effective_llm_call_cap()
+
     for item in items:
-        if stats.llm_calls >= MAX_LLM_CALLS_PER_RUN:
+        if stats.llm_calls >= llm_call_cap:
             break
         try:
             if starters_service.generate_answers_and_persist(item):
@@ -418,7 +530,12 @@ def _run_article_image_verification(db: Session) -> dict[str, int]:
 
     return repair_article_image_metadata(
         db,
-        lookback_days=3,
-        limit=max(50, MAX_ITEMS_PER_RUN),
+        lookback_days=settings.ARTICLE_IMAGE_REPAIR_LOOKBACK_DAYS,
+        limit=max(settings.ARTICLE_IMAGE_REPAIR_LIMIT, MAX_ITEMS_PER_RUN),
         include_generic=True,
+        promoted_only=True,
+        readiness_reasons=(
+            "missing_article_image",
+            "awaiting_article_image_verification",
+        ),
     )

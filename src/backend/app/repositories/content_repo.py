@@ -135,6 +135,28 @@ class ContentItemRepository(BaseRepository[ContentItem]):
             .all()
         )
 
+    def get_recent_promoted_articles_pending_ai(
+        self,
+        *,
+        limit: int = 100,
+        lookback_days: int = 7,
+    ) -> List[ContentItem]:
+        """Return recent promoted articles that still need AI processing."""
+        cutoff = datetime.utcnow() - timedelta(days=max(1, int(lookback_days)))
+        return (
+            self.db.query(ContentItem)
+            .filter(
+                ContentItem.type == ContentType.ARTICLE,
+                ContentItem.ai_processed.is_(False),
+                ContentItem.is_suppressed.is_(False),
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.published_at >= cutoff,
+            )
+            .order_by(desc(ContentItem.published_at), desc(ContentItem.id))
+            .limit(max(limit, 1))
+            .all()
+        )
+
     def get_articles_with_short_summaries(
         self,
         *,

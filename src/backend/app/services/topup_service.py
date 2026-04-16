@@ -18,6 +18,9 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.models.content import ContentType
+from app.repositories.ingestion_budget_repo import IngestionBudgetRepository
+from app.repositories.ingestion_progress_repo import IngestionProgressRepository
 from app.services.freshness_metrics_service import (
     record_topup_completed,
     record_topup_triggered,
@@ -36,6 +39,27 @@ logger = get_logger(__name__)
 _topup_lock = threading.Lock()
 _topup_in_progress = False
 _last_topup_trigger: Optional[datetime] = None
+
+
+def _article_target_pending(db: Session) -> bool:
+    try:
+        from app.ingestion.time import get_ingestion_day
+
+        day = get_ingestion_day()
+        budget_repo = IngestionBudgetRepository(db)
+        progress_repo = IngestionProgressRepository(db)
+        remaining = budget_repo.remaining(day=day, content_type=ContentType.ARTICLE)
+        if remaining <= 0:
+            return False
+        eligible_rows = progress_repo.list_eligible(
+            day_utc=day,
+            source_types=["rss"],
+            limit=1,
+        )
+        return bool(eligible_rows)
+    except Exception as exc:
+        logger.warning("Unable to evaluate pending article target during top-up: %s", exc)
+        return False
 
 
 def _background_topup_enabled_for_process() -> bool:
@@ -194,7 +218,8 @@ def _run_topup(db_factory, priority_surfaces: list = None):
 
                 # Check if we're satisfied now
                 health = get_cached_inventory_health(db, force_refresh=True)
-                if not health.needs_topup:
+                article_target_pending = _article_target_pending(db)
+                if not health.needs_topup and not article_target_pending:
                     logger.info("Top-up complete: inventory thresholds met")
                     break
 
