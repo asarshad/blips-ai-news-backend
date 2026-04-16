@@ -69,6 +69,25 @@ def test_extract_article_image_url_uses_strict_extract_only_prompt():
     assert "Return only an image URL that is explicitly present in the provided document." in prompt
 
 
+def test_extract_article_image_url_allows_logo_fallback_prompt_when_requested():
+    from app.integrations.llm_client import LLMClient
+
+    client = LLMClient(provider="openai", api_key="sk-test-fake-key-12345678901234567890")
+    client.chat = Mock(return_value=SimpleNamespace(content="IMAGE_URL: /images/company-logo.png"))
+
+    image_url = client.extract_article_image_url(
+        article_url="https://example.com/story",
+        title="Story",
+        document='MEDIA: <img src="/images/company-logo.png" alt="Company logo" />',
+        allow_logo_fallback=True,
+    )
+
+    prompt = client.chat.call_args.kwargs["messages"][1].content
+    assert image_url == "/images/company-logo.png"
+    assert "high-resolution company or product logo only as a last resort" in prompt
+    assert "Prefer logos that are large, centered" in prompt
+
+
 def test_summarize_video_parses_structured_classifier_payload():
     from app.integrations.llm_client import LLMClient
 

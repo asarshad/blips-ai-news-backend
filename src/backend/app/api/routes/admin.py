@@ -4,6 +4,7 @@ These endpoints allow instant feature flag updates without redeploy.
 Should be protected in production (e.g., behind internal network or auth).
 """
 
+import importlib
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -86,6 +87,12 @@ class BrokenVideoSummaryRepairRequest(BaseModel):
     hours_back: Optional[int] = None
     limit: int = 250
     dry_run: bool = False
+
+
+class ScriptedMaintenanceRequest(BaseModel):
+    """Admin request body for the reusable scripted maintenance hook."""
+
+    payload: Dict[str, Any] = Field(default_factory=dict)
 
 
 @router.get("/ads/config", response_model=AdsConfigAdminResponse)
@@ -477,6 +484,31 @@ def trigger_broken_video_summary_repair(payload: BrokenVideoSummaryRepairRequest
         return {"status": "ok", "result": result.__dict__}
     except Exception as e:
         logger.error("Broken video summary repair failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/trigger-scripted-maintenance")
+def trigger_scripted_maintenance(payload: Optional[ScriptedMaintenanceRequest] = None):
+    """Run the current operator maintenance script.
+
+    This endpoint intentionally delegates to a single stable script module so
+    operators can replace that script's contents for new backfills/repairs
+    without needing a new API route every time.
+    """
+    try:
+        module = importlib.import_module("scripts.operator_backfill_job")
+        module = importlib.reload(module)
+        if not hasattr(module, "run"):
+            raise RuntimeError("scripts.operator_backfill_job is missing run(payload)")
+
+        result = module.run((payload.payload if payload else None) or {})
+        return {
+            "status": "ok",
+            "script": "scripts.operator_backfill_job",
+            "result": result,
+        }
+    except Exception as e:
+        logger.error("Scripted maintenance failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

@@ -843,10 +843,19 @@ Return JSON only. Do not wrap it in markdown.
         article_url: str,
         title: str,
         document: str,
+        allow_logo_fallback: bool = False,
     ) -> Optional[str]:
         """Extract the article's own hero image URL from provided page content."""
         if not self.is_configured():
             raise RuntimeError(f"{self.get_provider()} API key is not configured")
+
+        fallback_rules = ""
+        if allow_logo_fallback:
+            fallback_rules = """
+- If no trustworthy editorial hero image is present, you may return a high-resolution company or product logo only as a last resort.
+- Only use a logo when it appears to be the main visual for the article, not a tiny navigation/header/footer logo.
+- Prefer logos that are large, centered, or otherwise clearly emphasized in the article content.
+"""
 
         prompt = f"""
 Article URL: {article_url}
@@ -859,6 +868,8 @@ Rules:
 - Do not invent, guess, search the web, or rewrite a URL.
 - Prefer the article's hero, featured, or lead image.
 - Reject logos, icons, avatars, author photos, trackers, placeholders, thumbnails, and generic social/share images.
+- Treat company or product logos as a last resort only when no better editorial image exists.
+{fallback_rules}
 - If no trustworthy editorial image URL is present, return NONE.
 
 Format your response exactly like this:

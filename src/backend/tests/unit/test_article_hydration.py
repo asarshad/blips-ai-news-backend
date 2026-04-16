@@ -132,6 +132,36 @@ def test_prepare_rss_article_returns_none_for_direct_binary_asset_url():
     assert prepared is None
 
 
+def test_prepare_rss_article_returns_none_for_generic_menu_listing_url():
+    hydrator = ArticleHydrationService()
+
+    prepared = hydrator.prepare_rss_article(
+        source_url="https://www.mcdonalds.co.jp/en/menu/burger/",
+        title="Burgers | McDonald's",
+        description="Menu listing that should not be ingested as an article.",
+        image_url=None,
+        published_at=None,
+        include_text=False,
+    )
+
+    assert prepared is None
+
+
+def test_prepare_rss_article_allows_article_slug_under_generic_section_prefix():
+    hydrator = ArticleHydrationService()
+    prepared = hydrator.prepare_rss_article(
+        source_url="https://example.com/product/launches-new-enterprise-ai-platform",
+        title="Launches new enterprise AI platform",
+        description="Real article path under a generic section prefix.",
+        image_url=None,
+        published_at=None,
+        include_text=False,
+    )
+
+    assert prepared is not None
+    assert prepared.source_url == "https://example.com/product/launches-new-enterprise-ai-platform"
+
+
 def test_refresh_existing_article_metadata_prefers_page_metadata_over_rss_image(monkeypatch):
     hydrator = ArticleHydrationService()
     item = hydrator.build_article_stub(
@@ -430,6 +460,51 @@ def test_extract_article_image_with_llm_diagnostics_reports_validation_reason(mo
     assert result.image_url is None
     assert result.reason == "candidate_not_in_document"
     assert result.raw_candidate_url == "https://cdn.example.com/invented.jpg"
+
+
+def test_extract_article_image_with_llm_uses_logo_fallback_after_strict_attempt(monkeypatch):
+    from app.extraction.fetcher import FetchResult
+
+    llm_client = MagicMock()
+    llm_client.extract_article_image_url.side_effect = [
+        "/images/company-logo.png",
+        "/images/company-logo.png",
+    ]
+    hydrator = ArticleHydrationService(llm_client=llm_client)
+
+    def fake_fetch(url):
+        if url == "https://example.com/story":
+            return FetchResult(
+                url=url,
+                status_code=200,
+                html=(
+                    "<html><body><article>"
+                    '<img src="/images/company-logo.png" alt="Example company logo" />'
+                    "</article></body></html>"
+                ),
+                content_type="text/html",
+            )
+        if url == "https://example.com/images/company-logo.png":
+            return FetchResult(
+                url=url,
+                status_code=200,
+                html="",
+                content_type="image/png",
+            )
+        raise AssertionError(f"unexpected fetch: {url}")
+
+    monkeypatch.setattr("app.extraction.fetcher.fetch_url", fake_fetch)
+
+    result = hydrator.extract_article_image_with_llm_diagnostics(
+        article_url="https://example.com/story",
+        title="Story",
+    )
+
+    assert result.image_url == "https://example.com/images/company-logo.png"
+    assert result.reason == "generic_logo_fallback"
+    assert llm_client.extract_article_image_url.call_count == 2
+    assert llm_client.extract_article_image_url.call_args_list[0].kwargs["allow_logo_fallback"] is False
+    assert llm_client.extract_article_image_url.call_args_list[1].kwargs["allow_logo_fallback"] is True
 
 
 def test_refresh_existing_article_metadata_prefers_rss_image_over_weak_page_og(monkeypatch):

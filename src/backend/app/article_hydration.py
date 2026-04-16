@@ -89,6 +89,32 @@ _BLOCKED_DIRECT_ARTICLE_EXTENSIONS = {
     ".xml",
     ".zip",
 }
+_GENERIC_DIRECT_ARTICLE_PATH_SEGMENTS = {
+    "archive",
+    "archives",
+    "blogroll",
+    "browse",
+    "c",
+    "catalog",
+    "categories",
+    "category",
+    "collection",
+    "collections",
+    "menu",
+    "menus",
+    "pricing",
+    "product",
+    "products",
+    "search",
+    "section",
+    "sections",
+    "shop",
+    "store",
+    "tag",
+    "tags",
+    "topics",
+}
+_LOCALE_PATH_SEGMENT_RE = re.compile(r"^[a-z]{2}(?:-[a-z]{2})?$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -730,11 +756,13 @@ class ArticleHydrationService:
         *,
         article_url: Optional[str],
         title: Optional[str],
+        allow_logo_fallback: bool = False,
     ) -> Optional[str]:
         """Use the LLM as a last-resort parser for article-owned image URLs."""
         return self.extract_article_image_with_llm_diagnostics(
             article_url=article_url,
             title=title,
+            allow_logo_fallback=allow_logo_fallback,
         ).image_url
 
     def extract_article_image_with_llm_diagnostics(
@@ -742,6 +770,7 @@ class ArticleHydrationService:
         *,
         article_url: Optional[str],
         title: Optional[str],
+        allow_logo_fallback: bool = False,
     ) -> ArticleImageLLMExtractionResult:
         """Run LLM image recovery and preserve why a recovery did or did not happen."""
         if not settings.ARTICLE_IMAGE_LLM_FALLBACK_ENABLED:
@@ -831,6 +860,7 @@ class ArticleHydrationService:
                     title=(title or "").strip()
                     or display_article_title(None, fetch.url or normalized_article_url),
                     document=document,
+                    allow_logo_fallback=allow_logo_fallback,
                 )
             except Exception as exc:
                 logger.warning("LLM article image extraction failed for %s: %s", article_url, exc)
@@ -844,7 +874,18 @@ class ArticleHydrationService:
                 raw_candidate_url=candidate,
                 html=fetch.html,
                 article_url=fetch.url or normalized_article_url,
+                allow_generic_fallback=allow_logo_fallback,
             )
+            if (
+                not validated.image_url
+                and not allow_logo_fallback
+                and validated.reason in {"llm_returned_none", "candidate_rejected"}
+            ):
+                return self.extract_article_image_with_llm_diagnostics(
+                    article_url=fetch.url or normalized_article_url,
+                    title=title,
+                    allow_logo_fallback=True,
+                )
             if validated.image_url:
                 logger.info(
                     "Recovered article image via LLM fallback for %s -> %s",
@@ -929,11 +970,13 @@ class ArticleHydrationService:
         raw_candidate_url: Optional[str],
         html: str,
         article_url: str,
+        allow_generic_fallback: bool = False,
     ) -> Optional[str]:
         return ArticleHydrationService._validate_llm_extracted_image_url_with_diagnostics(
             raw_candidate_url=raw_candidate_url,
             html=html,
             article_url=article_url,
+            allow_generic_fallback=allow_generic_fallback,
         ).image_url
 
     @staticmethod
@@ -1038,6 +1081,7 @@ class ArticleHydrationService:
         raw_candidate_url: Optional[str],
         html: str,
         article_url: str,
+        allow_generic_fallback: bool = False,
     ) -> ArticleImageLLMExtractionResult:
         """Verify the LLM returned a real article-owned image URL from the page."""
         from app.extraction.fetcher import fetch_url
@@ -1074,7 +1118,11 @@ class ArticleHydrationService:
             if not validated:
                 saw_invalid_url = True
                 continue
-            if is_probably_generic_image_url(validated) or is_suspicious_image_url(validated):
+            is_generic_candidate = is_probably_generic_image_url(validated)
+            if is_suspicious_image_url(validated):
+                saw_rejected_candidate = True
+                continue
+            if is_generic_candidate and not allow_generic_fallback:
                 saw_rejected_candidate = True
                 continue
 
@@ -1090,7 +1138,7 @@ class ArticleHydrationService:
 
             return ArticleImageLLMExtractionResult(
                 image_url=validated,
-                reason="recovered",
+                reason="generic_logo_fallback" if is_generic_candidate else "recovered",
                 raw_candidate_url=candidate,
             )
 
@@ -1187,6 +1235,18 @@ class ArticleHydrationService:
         for ext in _BLOCKED_DIRECT_ARTICLE_EXTENSIONS:
             if path.endswith(ext):
                 return False
+
+        segments = [segment for segment in path.split("/") if segment]
+        while segments and _LOCALE_PATH_SEGMENT_RE.fullmatch(segments[0]):
+            segments.pop(0)
+        if not segments:
+            return False
+        if (
+            len(segments) <= 3
+            and any(segment in _GENERIC_DIRECT_ARTICLE_PATH_SEGMENTS for segment in segments)
+            and all("-" not in segment and len(segment) <= 16 for segment in segments)
+        ):
+            return False
 
         return True
 
