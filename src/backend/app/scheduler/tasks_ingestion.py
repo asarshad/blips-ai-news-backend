@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 
+from app.core.config import settings
 from app.core.dependencies import get_redis
 from app.core.feature_flags import feature_flags
 from app.core.logging import get_logger
@@ -16,16 +17,38 @@ logger = get_logger(__name__)
 
 
 def _resolve_immediate_ai_summary_max_items() -> int:
-    """Keep the post-ingestion freshness pass lightweight on constrained workers."""
-    raw = os.getenv("IMMEDIATE_AI_SUMMARY_MAX_ITEMS", "20")
+    """Resolve the post-ingestion AI batch size using the article-priority ceiling by default."""
+    raw = os.getenv(
+        "IMMEDIATE_AI_SUMMARY_MAX_ITEMS",
+        str(settings.ARTICLE_AI_PRIORITY_MAX_ITEMS_PER_RUN),
+    )
     try:
         return max(1, int(raw))
     except ValueError:
         logger.warning(
-            "Invalid IMMEDIATE_AI_SUMMARY_MAX_ITEMS=%r; defaulting to 20",
+            "Invalid IMMEDIATE_AI_SUMMARY_MAX_ITEMS=%r; defaulting to %s",
             raw,
+            settings.ARTICLE_AI_PRIORITY_MAX_ITEMS_PER_RUN,
         )
-        return 20
+        return int(settings.ARTICLE_AI_PRIORITY_MAX_ITEMS_PER_RUN)
+
+
+def run_immediate_ai_summaries(*, trigger: str = "fetch_news", include_maintenance: bool = False):
+    """Run the immediate AI summarization pass used after ingestion-like flows."""
+    from app.scheduler.tasks_ai_retry import process_ai_summaries
+
+    immediate_limit = _resolve_immediate_ai_summary_max_items()
+    logger.info(
+        "[%s] Running immediate AI summarization (max_items=%s, maintenance=%s)…",
+        trigger,
+        immediate_limit,
+        str(include_maintenance).lower(),
+    )
+    process_ai_summaries(
+        max_items=immediate_limit,
+        include_maintenance=include_maintenance,
+        trigger=trigger,
+    )
 
 
 def fetch_and_process_news():
@@ -66,18 +89,7 @@ def fetch_and_process_news():
         # Phase 2: immediately summarise newly-ingested items so they appear
         # in the feed right away instead of waiting for the next ai_retry tick.
         try:
-            from app.scheduler.tasks_ai_retry import process_ai_summaries
-
-            immediate_limit = _resolve_immediate_ai_summary_max_items()
-            logger.info(
-                "[fetch_news] Running immediate AI summarization (max_items=%s, maintenance=false)…",
-                immediate_limit,
-            )
-            process_ai_summaries(
-                max_items=immediate_limit,
-                include_maintenance=False,
-                trigger="fetch_news",
-            )
+            run_immediate_ai_summaries(trigger="fetch_news", include_maintenance=False)
             logger.info("[fetch_news] AI summarization complete")
         except Exception as e:
             # Non-fatal — the periodic ai_retry job will pick them up later.

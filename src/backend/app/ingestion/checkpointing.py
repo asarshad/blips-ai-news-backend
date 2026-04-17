@@ -180,9 +180,8 @@ def run_checkpointed_ingestion(
     if created:
         logger.info("Created %s ingestion_progress rows for %s", created, day.isoformat())
 
-    # Reopen completed YouTube rows so they can be polled again this cycle.
-    # RSS rows keep daily checkpoint behavior unchanged.
-    reopened = repo.reopen_youtube_rows(day_utc=day, defaults=defaults_tuples)
+    # Reopen continuous-ingestion rows so sources can be revisited within the same UTC day.
+    reopened = repo.reopen_continuous_rows(day_utc=day, defaults=defaults_tuples)
     if reopened:
         logger.info("Reopened %s YouTube progress rows for %s", reopened, day.isoformat())
 

@@ -42,7 +42,7 @@ def test_run_curation_ingestion_runs_video_discovery(monkeypatch):
     assert stats.errors == []
 
 
-def test_fetch_and_process_news_uses_lightweight_immediate_ai(monkeypatch):
+def test_fetch_and_process_news_respects_immediate_ai_override(monkeypatch):
     db = MagicMock()
     ai_calls = []
 
@@ -70,3 +70,34 @@ def test_fetch_and_process_news_uses_lightweight_immediate_ai(monkeypatch):
     tasks_ingestion.fetch_and_process_news()
 
     assert ai_calls == [{"max_items": 7, "include_maintenance": False, "trigger": "fetch_news"}]
+
+
+def test_fetch_and_process_news_defaults_immediate_ai_to_article_priority_limit(monkeypatch):
+    db = MagicMock()
+    ai_calls = []
+
+    monkeypatch.delenv("IMMEDIATE_AI_SUMMARY_MAX_ITEMS", raising=False)
+    monkeypatch.setattr(tasks_ingestion.feature_flags, "is_enabled", lambda name: True)
+    monkeypatch.setattr(tasks_ingestion, "SessionLocal", lambda: db)
+    monkeypatch.setattr(
+        tasks_ingestion,
+        "log_job_start",
+        lambda _name: JobStats(job_name="fetch_news"),
+    )
+    monkeypatch.setattr(
+        tasks_ingestion,
+        "_run_curation_ingestion_with_stats",
+        lambda _db, _stats: None,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "app.scheduler.tasks_ai_retry",
+        SimpleNamespace(
+            process_ai_summaries=lambda **kwargs: ai_calls.append(kwargs),
+        ),
+    )
+    monkeypatch.setattr(tasks_ingestion.settings, "ARTICLE_AI_PRIORITY_MAX_ITEMS_PER_RUN", 250)
+
+    tasks_ingestion.fetch_and_process_news()
+
+    assert ai_calls == [{"max_items": 250, "include_maintenance": False, "trigger": "fetch_news"}]

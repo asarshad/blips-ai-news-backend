@@ -139,6 +139,18 @@ def should_trigger_topup(health: InventoryHealth) -> bool:
     return health.needs_topup
 
 
+def _run_topup_followups() -> None:
+    """Advance freshly ingested content through clustering, promotion, and immediate AI."""
+    from app.scheduler.tasks_curation import run_clustering_job
+    from app.scheduler.tasks_ingestion import run_immediate_ai_summaries
+    from app.scheduler.tasks_promotion import run_promotion_job
+
+    logger.info("Running top-up follow-up pipeline")
+    run_clustering_job(trigger="topup")
+    run_promotion_job(trigger="topup")
+    run_immediate_ai_summaries(trigger="topup", include_maintenance=False)
+
+
 def trigger_topup_async(db_factory, priority_surfaces: list = None):
     """
     Trigger top-up in background thread (non-blocking).
@@ -231,6 +243,7 @@ def _run_topup(db_factory, priority_surfaces: list = None):
 
                     discovery_result = run_video_discovery_ingestion(db)
                     logger.info(f"Top-up discovery cycle {cycles + 1}: {discovery_result}")
+                _run_topup_followups()
                 cycles += 1
 
             # Invalidate caches after top-up
@@ -277,8 +290,9 @@ def check_and_trigger_topup(db: Session, db_factory) -> bool:
 
     try:
         health = get_cached_inventory_health(db)
+        article_target_pending = _article_target_pending(db)
 
-        if should_trigger_topup(health):
+        if should_trigger_topup(health) or article_target_pending:
             trigger_topup_async(db_factory, [s.value for s in health.topup_priority])
             return True
 
@@ -307,7 +321,7 @@ def startup_inventory_check(db_factory):
                 f"priority={[s.value for s in health.topup_priority]}"
             )
 
-            if health.needs_topup:
+            if health.needs_topup or _article_target_pending(db):
                 trigger_topup_async(db_factory, [s.value for s in health.topup_priority])
 
         finally:

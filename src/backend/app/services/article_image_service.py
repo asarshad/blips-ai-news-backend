@@ -19,15 +19,72 @@ from app.core.logging import get_logger
 from app.extraction.metadata import PageMetadata, is_probably_generic_image_url
 from app.extraction.normalize import is_suspicious_image_url
 from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.content_event import ContentEventOutbox
 from app.services.content_readiness import sync_content_readiness
 from app.services.playlist_service import refresh_cached_playlist_items
 
 logger = get_logger(__name__)
 
+ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE = "article.image_verification.requested"
+_ARTICLE_IMAGE_PENDING_REASONS = {
+    "awaiting_article_image_verification",
+    "missing_article_image",
+}
+
 
 def fetch_article_page_metadata(article_url: str) -> Optional[PageMetadata]:
     """Fetch and extract best-effort page metadata for an article URL."""
     return ArticleHydrationService.fetch_article_page_metadata(article_url)
+
+
+def should_queue_article_image_verification(item: Any) -> bool:
+    """Return True when an article should be pushed onto the async image-verification lane."""
+    if getattr(item, "id", None) is None:
+        return False
+    if getattr(item, "type", None) != ContentType.ARTICLE:
+        return False
+    if getattr(item, "curation_status", None) != ContentStatus.PROMOTED:
+        return False
+    readiness_reason = (getattr(item, "readiness_reason", None) or "").strip()
+    return readiness_reason in _ARTICLE_IMAGE_PENDING_REASONS
+
+
+def queue_article_image_verification_request(
+    db: Session,
+    item: Any,
+    *,
+    now: Optional[datetime] = None,
+) -> ContentEventOutbox | None:
+    """Enqueue a durable outbox event requesting article image verification."""
+    if not should_queue_article_image_verification(item):
+        return None
+
+    existing = (
+        db.query(ContentEventOutbox.id)
+        .filter(
+            ContentEventOutbox.content_item_id == int(item.id),
+            ContentEventOutbox.event_type == ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE,
+            ContentEventOutbox.status.in_(("pending", "processing")),
+        )
+        .first()
+    )
+    if existing is not None:
+        return None
+
+    event = ContentEventOutbox(
+        content_item_id=int(item.id),
+        event_type=ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE,
+        payload={
+            "content_id": int(item.id),
+            "source_url": (getattr(item, "canonical_url", None) or getattr(item, "source_url", None) or "").strip()
+            or None,
+            "readiness_reason": (getattr(item, "readiness_reason", None) or "").strip() or None,
+        },
+        status="pending",
+        available_at=now or datetime.utcnow(),
+    )
+    db.add(event)
+    return event
 
 
 def repair_article_image_metadata(
@@ -184,6 +241,50 @@ def repair_single_article_image(
         "previous_readiness_status": previous_readiness_status,
         "readiness_status": (getattr(item, "readiness_status", None) or "").strip() or None,
         "cache_refresh": cache_refresh,
+    }
+
+
+def process_article_image_verification_request(
+    db: Session,
+    *,
+    content_id: int,
+) -> Dict[str, Any]:
+    """Handle one durable article image-verification request inside the worker transaction."""
+    hydrator = ArticleHydrationService()
+    hydrator.fetch_article_page_metadata = fetch_article_page_metadata
+
+    item = db.get(ContentItem, int(content_id))
+    if item is None or item.type != ContentType.ARTICLE:
+        raise ValueError(f"Article {content_id} not found")
+
+    previous_image_url = (item.image_url or "").strip() or None
+    previous_verification_status = (
+        getattr(item, "article_image_status", None) or ""
+    ).strip() or None
+    previous_readiness_status = (getattr(item, "readiness_status", None) or "").strip() or None
+    previous_readiness_reason = (getattr(item, "readiness_reason", None) or "").strip() or None
+    source_url = (item.canonical_url or item.source_url or "").strip()
+
+    changed = hydrator.refresh_existing_article_metadata(
+        item,
+        source_url=source_url,
+        force_reconcile_image=True,
+    )
+    finalize_article_image_verification(item)
+    sync_content_readiness(db, item)
+
+    return {
+        "content_id": item.id,
+        "source_url": source_url or None,
+        "changed": bool(changed or (item.image_url or "").strip() != (previous_image_url or "")),
+        "previous_image_url": previous_image_url,
+        "image_url": (item.image_url or "").strip() or None,
+        "previous_article_image_status": previous_verification_status,
+        "article_image_status": (getattr(item, "article_image_status", None) or "").strip() or None,
+        "previous_readiness_status": previous_readiness_status,
+        "readiness_status": (getattr(item, "readiness_status", None) or "").strip() or None,
+        "previous_readiness_reason": previous_readiness_reason,
+        "readiness_reason": (getattr(item, "readiness_reason", None) or "").strip() or None,
     }
 
 

@@ -13,6 +13,7 @@ from app.services.content_readiness import (
     evaluate_content_readiness,
     sync_content_readiness,
 )
+from app.services.article_image_service import ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE
 
 
 def test_article_requires_ai_summary_to_be_ready():
@@ -134,6 +135,64 @@ def test_sync_content_readiness_enqueues_ready_event_once():
 
     sync_content_readiness(db, article, now=now)
     assert db.add.call_count == 1
+
+
+def test_sync_content_readiness_enqueues_article_image_verification_for_promoted_pending_article():
+    now = datetime(2026, 3, 23, 18, 30, 0)
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = None
+    article = SimpleNamespace(
+        id=13,
+        type=ContentType.ARTICLE,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        promotion_reason=None,
+        source_url="https://example.com/pending-image",
+        canonical_url="https://example.com/pending-image",
+        image_url="https://cdn.example.com/pending.jpg",
+        article_image_status="PENDING",
+        ai_processed=True,
+        summary="Promoted article waiting on image verification.",
+        readiness_status=ContentReadinessStatus.PENDING.value,
+        readiness_reason="awaiting_article_image_verification",
+        ready_at=None,
+        published_at=now,
+        created_at=now,
+    )
+
+    sync_content_readiness(db, article, now=now)
+
+    queued_event = db.add.call_args[0][0]
+    assert queued_event.event_type == ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE
+    assert queued_event.content_item_id == 13
+
+
+def test_sync_content_readiness_does_not_enqueue_article_image_verification_for_candidate_article():
+    now = datetime(2026, 3, 23, 18, 45, 0)
+    db = MagicMock()
+    db.query.return_value.filter.return_value.first.return_value = None
+    article = SimpleNamespace(
+        id=14,
+        type=ContentType.ARTICLE,
+        curation_status=ContentStatus.CANDIDATE,
+        is_suppressed=False,
+        promotion_reason=None,
+        source_url="https://example.com/candidate-pending-image",
+        canonical_url="https://example.com/candidate-pending-image",
+        image_url="https://cdn.example.com/pending.jpg",
+        article_image_status="PENDING",
+        ai_processed=True,
+        summary="Candidate article waiting on image verification.",
+        readiness_status=ContentReadinessStatus.PENDING.value,
+        readiness_reason="awaiting_article_image_verification",
+        ready_at=None,
+        published_at=now,
+        created_at=now,
+    )
+
+    sync_content_readiness(db, article, now=now)
+
+    db.add.assert_not_called()
 
 
 def test_sync_content_readiness_enqueues_unready_event_on_ready_regression():

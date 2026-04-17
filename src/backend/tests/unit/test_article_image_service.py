@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from app.article_hydration import ArticleImageLLMExtractionResult
 from app.extraction.metadata import PageMetadata
 from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.content_event import ContentEventOutbox
 from app.services import article_image_service
 
 
@@ -20,9 +21,14 @@ def _recent_dt(*, hours_ago: int = 0, minutes_ago: int = 0) -> datetime:
     return datetime.utcnow() - timedelta(hours=hours_ago, minutes=minutes_ago)
 
 
+def _create_test_tables(engine) -> None:
+    ContentItem.__table__.create(bind=engine)
+    ContentEventOutbox.__table__.create(bind=engine)
+
+
 def test_repair_article_image_metadata_backfills_recent_article_rows(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
-    ContentItem.__table__.create(bind=engine)
+    _create_test_tables(engine)
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
@@ -61,7 +67,7 @@ def test_repair_article_image_metadata_backfills_recent_article_rows(monkeypatch
 
 def test_repair_article_image_metadata_skips_when_no_metadata_found(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
-    ContentItem.__table__.create(bind=engine)
+    _create_test_tables(engine)
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
@@ -99,7 +105,7 @@ def test_repair_article_image_metadata_uses_llm_fallback_when_metadata_has_no_im
     monkeypatch,
 ):
     engine = create_engine("sqlite:///:memory:")
-    ContentItem.__table__.create(bind=engine)
+    _create_test_tables(engine)
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
@@ -143,7 +149,7 @@ def test_repair_article_image_metadata_uses_llm_fallback_when_metadata_has_no_im
 
 def test_repair_article_image_metadata_can_focus_on_promoted_missing_image_backlog(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
-    ContentItem.__table__.create(bind=engine)
+    _create_test_tables(engine)
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
@@ -209,7 +215,7 @@ def test_repair_article_image_metadata_can_focus_on_promoted_missing_image_backl
 
 def test_evaluate_llm_article_image_recovery_reports_success_rate(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
-    ContentItem.__table__.create(bind=engine)
+    _create_test_tables(engine)
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
@@ -267,7 +273,7 @@ def test_evaluate_llm_article_image_recovery_reports_success_rate(monkeypatch):
 
 def test_evaluate_llm_article_image_recovery_reports_failure_reasons(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
-    ContentItem.__table__.create(bind=engine)
+    _create_test_tables(engine)
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
@@ -312,7 +318,7 @@ def test_evaluate_llm_article_image_recovery_reports_failure_reasons(monkeypatch
 
 def test_repair_article_image_metadata_replaces_generic_images(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
-    ContentItem.__table__.create(bind=engine)
+    _create_test_tables(engine)
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
@@ -358,7 +364,7 @@ def test_repair_article_image_metadata_replaces_generic_images(monkeypatch):
 
 def test_repair_article_image_metadata_replaces_suspicious_images(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
-    ContentItem.__table__.create(bind=engine)
+    _create_test_tables(engine)
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
@@ -399,7 +405,7 @@ def test_repair_article_image_metadata_replaces_suspicious_images(monkeypatch):
 
 def test_repair_single_article_image_forces_reconcile(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
-    ContentItem.__table__.create(bind=engine)
+    _create_test_tables(engine)
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
@@ -466,3 +472,85 @@ def test_fetch_article_page_metadata_uses_final_fetched_url_for_relative_assets(
     assert metadata is not None
     assert metadata.canonical_url == "https://www.example.com/story/final"
     assert metadata.image_url == "https://www.example.com/images/hero.jpg"
+
+
+def test_queue_article_image_verification_request_enqueues_for_promoted_pending_article():
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/pending",
+        canonical_url="https://example.com/pending",
+        published_at=_recent_dt(hours_ago=1),
+        title="Pending image article",
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status="PENDING",
+        readiness_reason="awaiting_article_image_verification",
+        created_at=_recent_dt(hours_ago=1),
+        updated_at=_recent_dt(hours_ago=1),
+    )
+    db.add(item)
+    db.commit()
+
+    queued = article_image_service.queue_article_image_verification_request(db, item)
+    db.commit()
+
+    assert queued is not None
+    rows = db.query(ContentEventOutbox).all()
+    assert len(rows) == 1
+    assert rows[0].event_type == article_image_service.ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE
+    assert rows[0].content_item_id == item.id
+
+
+def test_process_article_image_verification_request_updates_article_and_readiness(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/story",
+        canonical_url="https://example.com/story",
+        published_at=_recent_dt(hours_ago=2),
+        title="Verify me",
+        curation_status=ContentStatus.PROMOTED,
+        article_image_status="PENDING",
+        ai_processed=True,
+        summary="A real summary is already present.",
+        readiness_status="PENDING",
+        readiness_reason="awaiting_article_image_verification",
+        created_at=_recent_dt(hours_ago=2),
+        updated_at=_recent_dt(hours_ago=2),
+    )
+    db.add(item)
+    db.commit()
+
+    monkeypatch.setattr(
+        article_image_service,
+        "fetch_article_page_metadata",
+        lambda article_url: PageMetadata(
+            canonical_url=article_url,
+            image_url="https://cdn.example.com/verified.jpg",
+            image_source="og",
+        ),
+    )
+
+    result = article_image_service.process_article_image_verification_request(
+        db,
+        content_id=item.id,
+    )
+    db.commit()
+    repaired = db.get(ContentItem, item.id)
+    outbox_rows = db.query(ContentEventOutbox).all()
+
+    assert result["changed"] is True
+    assert repaired.image_url == "https://cdn.example.com/verified.jpg"
+    assert repaired.article_image_status == "VERIFIED"
+    assert repaired.readiness_status == "READY"
+    assert any(row.event_type == "content.ready" for row in outbox_rows)

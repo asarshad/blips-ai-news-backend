@@ -23,8 +23,6 @@ from app.scheduler.job_stats import log_job_start
 from app.scheduler.runtime import (
     AI_RETRY_JOB,
     FETCH_NEWS_INLINE_AI_RETRY,
-    FETCH_NEWS_JOB,
-    is_job_active,
     log_memory_snapshot,
     mark_job_finished,
     mark_job_started,
@@ -180,11 +178,6 @@ def process_ai_summaries(
         logger.info("[ai_retry] SKIPPED - summarization feature is disabled")
         return
 
-    if trigger == "scheduled":
-        if is_job_active(FETCH_NEWS_JOB):
-            logger.info("[ai_retry] SKIPPED - fetch_news is still active")
-            return
-
     stats = log_job_start("ai_retry")
     job_key = FETCH_NEWS_INLINE_AI_RETRY if trigger == "fetch_news" else AI_RETRY_JOB
     run_started_at = None
@@ -236,7 +229,13 @@ def process_ai_summaries(
 
             try:
                 if item.type == ContentType.REEL:
-                    content_repo.mark_ai_processed(item.id, summary="", topics=item.topics or [])
+                    content_repo.mark_ai_processed(
+                        item.id,
+                        summary="",
+                        topics=item.topics or [],
+                        commit=False,
+                    )
+                    db.commit()
                     touched_content_ids.add(int(item.id))
                     stats.items_processed += 1
                     continue
@@ -268,8 +267,12 @@ def process_ai_summaries(
                             )
                         else:
                             content_repo.mark_ai_processed(
-                                item.id, summary="", topics=item.topics or []
+                                item.id,
+                                summary="",
+                                topics=item.topics or [],
+                                commit=False,
                             )
+                            db.commit()
                             logger.info(
                                 "[ai_retry] Giving up on older unskimmable article (marked processed): %s",
                                 item.title[:80],
@@ -310,7 +313,12 @@ def process_ai_summaries(
                     else is_video_summary_acceptable(summary)
                 )
                 if summary_is_valid:
-                    content_repo.mark_ai_processed(item.id, summary=summary, topics=topics)
+                    content_repo.mark_ai_processed(
+                        item.id,
+                        summary=summary,
+                        topics=topics,
+                        commit=False,
+                    )
                     touched_content_ids.add(int(item.id))
                     if starters and not item.conversation_starters:
                         item.conversation_starters = starters

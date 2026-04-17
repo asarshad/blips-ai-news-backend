@@ -163,18 +163,17 @@ class IngestionProgressRepository:
             self.db.commit()
         return created
 
-    def reopen_youtube_rows(
+    def reopen_continuous_rows(
         self,
         *,
         day_utc: date,
         defaults: Iterable[Tuple[str, str, int]],
     ) -> int:
-        """Reopen completed YouTube rows for the next ingestion cycle.
+        """Reopen completed continuous-ingestion rows for the next cycle.
 
-        For each YouTube row that has met its target or has exhausted its
+        For each row that has met its target or has exhausted its
         per-cycle attempt budget, bump the target additively and clear
         exhaustion state so the checkpoint loop picks it up again.
-        RSS rows are left unchanged.
 
         Uses ``skip_locked=True`` to avoid clobbering a row that another
         process (top-up or scheduler) is actively working on.
@@ -182,8 +181,6 @@ class IngestionProgressRepository:
         reopened = 0
         now = datetime.utcnow()
         for source_type, feed_name, per_cycle_target in defaults:
-            if source_type == "rss":
-                continue
             row = (
                 self.db.query(IngestionProgress)
                 .filter(
@@ -216,6 +213,20 @@ class IngestionProgressRepository:
         if reopened:
             self.db.commit()
         return reopened
+
+    def reopen_youtube_rows(
+        self,
+        *,
+        day_utc: date,
+        defaults: Iterable[Tuple[str, str, int]],
+    ) -> int:
+        """Backward-compatible YouTube-only reopen helper used by older tests/callers."""
+        youtube_defaults = [
+            (source_type, feed_name, target)
+            for source_type, feed_name, target in defaults
+            if source_type != "rss"
+        ]
+        return self.reopen_continuous_rows(day_utc=day_utc, defaults=youtube_defaults)
 
     def prime_youtube_rows(
         self,

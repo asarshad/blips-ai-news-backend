@@ -258,7 +258,14 @@ class ContentItemRepository(BaseRepository[ContentItem]):
 
         return long_items
 
-    def mark_ai_processed(self, item_id: int, summary: str, topics: List[str] = None) -> bool:
+    def mark_ai_processed(
+        self,
+        item_id: int,
+        summary: str,
+        topics: List[str] = None,
+        *,
+        commit: bool = True,
+    ) -> bool:
         """
         Mark a content item as AI processed and update its summary.
 
@@ -280,7 +287,8 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         if topics is not None:
             item.topics = topics
         sync_content_readiness(self.db, item)
-        self.db.commit()
+        if commit:
+            self.db.commit()
         return True
 
     def get_unclustered(self, hours_back: int = 48, limit: int = 500) -> List[ContentItem]:

@@ -4,16 +4,23 @@ from types import SimpleNamespace
 
 from app.services import content_event_dispatcher as dispatcher_module
 from app.services.content_event_dispatcher import ContentEventDispatcher
+from app.services.article_image_service import ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE
 
 
 def test_dispatch_ready_event_invalidates_cache_and_triggers_auto_push(monkeypatch):
     invalidated = []
     pushes = []
+    refreshed = []
 
     monkeypatch.setattr(
         dispatcher_module,
         "invalidate_tiered_feed_cache",
         lambda surface=None: invalidated.append(surface.value if surface else None),
+    )
+    monkeypatch.setattr(
+        dispatcher_module,
+        "refresh_cached_playlist_items",
+        lambda db, *, content_ids: refreshed.append((db, content_ids)) or {"cache_keys_updated": 1},
     )
 
     class _FakePushNotificationService:
@@ -40,6 +47,7 @@ def test_dispatch_ready_event_invalidates_cache_and_triggers_auto_push(monkeypat
     dispatcher._dispatch_ready_event(event, db)
 
     assert invalidated == ["articles", "videos"]
+    assert refreshed == [(db, [42])]
     assert pushes == [(db, [42], "event:content.ready")]
 
 
@@ -77,3 +85,38 @@ def test_dispatch_unready_event_invalidates_cache_without_push(monkeypatch):
 
     assert invalidated == ["articles", "videos"]
     assert pushes == []
+
+
+def test_dispatch_article_image_verification_event_repairs_article(monkeypatch):
+    repaired = []
+    refreshed = []
+
+    monkeypatch.setattr(
+        dispatcher_module,
+        "process_article_image_verification_request",
+        lambda db, *, content_id: repaired.append((db, content_id))
+        or {
+            "content_id": content_id,
+            "changed": True,
+            "article_image_status": "VERIFIED",
+            "readiness_status": "READY",
+        },
+    )
+    monkeypatch.setattr(
+        dispatcher_module,
+        "refresh_cached_playlist_items",
+        lambda db, *, content_ids: refreshed.append((db, content_ids)) or {"cache_keys_updated": 1},
+    )
+
+    dispatcher = ContentEventDispatcher()
+    event = SimpleNamespace(
+        event_type=ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE,
+        content_item_id=42,
+        payload={"content_id": 42},
+    )
+    db = object()
+
+    dispatcher._dispatch_article_image_verification_event(event, db)
+
+    assert repaired == [(db, 42)]
+    assert refreshed == [(db, [42])]

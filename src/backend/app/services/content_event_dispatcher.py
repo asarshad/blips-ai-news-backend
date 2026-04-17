@@ -10,6 +10,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.models.content_event import ContentEventOutbox
+from app.services.article_image_service import (
+    ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE,
+    process_article_image_verification_request,
+)
+from app.services.playlist_service import refresh_cached_playlist_items
 from app.services.content_readiness import CONTENT_READY_EVENT_TYPE, CONTENT_UNREADY_EVENT_TYPE
 from app.services.inventory_service import Surface
 from app.services.push_service import PushNotificationService
@@ -127,6 +132,8 @@ class ContentEventDispatcher:
             self._dispatch_ready_event(event, db)
         elif event.event_type == CONTENT_UNREADY_EVENT_TYPE:
             self._dispatch_unready_event(event)
+        elif event.event_type == ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE:
+            self._dispatch_article_image_verification_event(event, db)
 
     def _invalidate_surfaces(self, payload: dict) -> None:
         for surface_name in payload.get("surfaces", []):
@@ -140,6 +147,7 @@ class ContentEventDispatcher:
         payload = dict(event.payload or {})
         content_id = int(payload.get("content_id") or event.content_item_id)
         self._invalidate_surfaces(payload)
+        refresh_cached_playlist_items(db, content_ids=[content_id])
 
         PushNotificationService(db=db).send_auto_for_content_ids(
             [content_id],
@@ -148,6 +156,24 @@ class ContentEventDispatcher:
 
     def _dispatch_unready_event(self, event: ContentEventOutbox) -> None:
         self._invalidate_surfaces(dict(event.payload or {}))
+
+    def _dispatch_article_image_verification_event(
+        self,
+        event: ContentEventOutbox,
+        db: Session,
+    ) -> None:
+        payload = dict(event.payload or {})
+        content_id = int(payload.get("content_id") or event.content_item_id)
+        result = process_article_image_verification_request(db, content_id=content_id)
+        if result.get("changed"):
+            refresh_cached_playlist_items(db, content_ids=[content_id])
+        logger.info(
+            "[content_events] article image verification content_id=%s changed=%s status=%s readiness=%s",
+            content_id,
+            result.get("changed"),
+            result.get("article_image_status"),
+            result.get("readiness_status"),
+        )
 
 
 def _retry_delay(attempt_count: int | None) -> timedelta:

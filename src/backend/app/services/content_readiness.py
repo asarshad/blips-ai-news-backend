@@ -280,6 +280,11 @@ def sync_content_readiness(
         if emit_ready_event and previous_status == ContentReadinessStatus.READY and db is not None:
             queue_content_unready_event(db, item, decision, now=ts)
 
+    if db is not None and decision.effective_type == ContentType.ARTICLE:
+        from app.services.article_image_service import queue_article_image_verification_request
+
+        queue_article_image_verification_request(db, item, now=ts)
+
     return ContentReadinessSyncResult(
         previous_status=previous_status,
         current_status=decision.status,

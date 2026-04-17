@@ -94,6 +94,7 @@ def test_process_ai_summaries_uses_article_hydrator_for_articles(monkeypatch):
         42,
         summary=item.summary,
         topics=["ingestion", "release"],
+        commit=False,
     )
 
 
@@ -160,6 +161,7 @@ def test_process_ai_summaries_retries_short_article_summaries(monkeypatch):
         7,
         summary=item.summary,
         topics=["release", "platform"],
+        commit=False,
     )
 
 
@@ -227,6 +229,7 @@ def test_process_ai_summaries_retries_long_article_summaries(monkeypatch):
         99,
         summary=item.summary,
         topics=["openai", "hiring"],
+        commit=False,
     )
 
 
@@ -353,7 +356,7 @@ def test_process_ai_summaries_skips_empty_article_input_without_error(monkeypatc
     # Article is permanently marked processed with empty summary so it stops
     # re-entering the retry queue, but remains PENDING/missing_article_summary
     # in the feed (evaluate_content_readiness checks for non-empty summary).
-    repo.mark_ai_processed.assert_called_once_with(15, summary="", topics=[])
+    repo.mark_ai_processed.assert_called_once_with(15, summary="", topics=[], commit=False)
     llm_client.summarize_article.assert_not_called()
 
 
@@ -410,16 +413,28 @@ def test_process_ai_summaries_defers_recent_unskimmable_articles(monkeypatch):
     db.commit.assert_called()
 
 
-def test_process_ai_summaries_skips_when_fetch_news_is_active(monkeypatch):
+def test_process_ai_summaries_scheduled_runs_even_when_fetch_news_is_active(monkeypatch):
     fetch_started_at = mark_job_started(FETCH_NEWS_JOB)
     try:
+        db = MagicMock()
         repo_factory = MagicMock()
+        llm_client = MagicMock()
+        llm_client.is_configured.return_value = True
         monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
+        monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
+        monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: _FakeStats())
+        monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(tasks_ai_retry, "_run_article_image_verification", lambda *_a, **_k: {})
+        monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
         monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", repo_factory)
+        monkeypatch.setattr(
+            "app.scheduler.tasks_content_events.run_content_event_dispatch_job",
+            lambda: None,
+        )
 
         tasks_ai_retry.process_ai_summaries(trigger="scheduled")
 
-        repo_factory.assert_not_called()
+        repo_factory.assert_called_once()
     finally:
         mark_job_finished(FETCH_NEWS_JOB, fetch_started_at, success=False)
 
@@ -535,6 +550,7 @@ def test_process_ai_summaries_persists_extracted_article_fields_before_summary(m
         27,
         summary=item.summary,
         topics=["policy", "health"],
+        commit=False,
     )
 
 
@@ -722,6 +738,39 @@ def test_process_ai_summaries_refreshes_caches_after_valid_video_summary(monkeyp
     repo.mark_ai_processed.assert_called_once()
     assert invalidation_calls == ["invalidate"]
     assert refresh_calls == [[57]]
+
+
+def test_process_ai_summaries_runs_even_while_fetch_news_is_active(monkeypatch):
+    db = MagicMock()
+    repo = MagicMock()
+    repo.get_recent_promoted_articles_pending_ai.return_value = []
+    repo.get_articles_with_short_summaries.return_value = []
+    repo.get_articles_with_long_summaries.return_value = []
+    repo.get_videos_with_short_summaries.return_value = []
+
+    llm_client = MagicMock()
+    llm_client.is_configured.return_value = True
+
+    fetch_started_at = mark_job_started(FETCH_NEWS_JOB)
+    monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
+    monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
+    monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: _FakeStats())
+    monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tasks_ai_retry, "_run_article_image_verification", lambda *_a, **_k: {})
+    monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
+    monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
+    monkeypatch.setattr(
+        "app.scheduler.tasks_content_events.run_content_event_dispatch_job",
+        lambda: None,
+    )
+    monkeypatch.setattr(tasks_ai_retry.time, "sleep", lambda *_args, **_kwargs: None)
+
+    try:
+        tasks_ai_retry.process_ai_summaries(trigger="scheduled")
+    finally:
+        mark_job_finished(FETCH_NEWS_JOB, fetch_started_at, success=True)
+
+    assert db.close.called
 
 
 def test_process_ai_summaries_skips_maintenance_for_immediate_runs(monkeypatch):

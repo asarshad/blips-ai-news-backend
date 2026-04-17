@@ -125,6 +125,38 @@ class TestReopenYoutubeRows:
         assert reopened == 0
         db.query.assert_not_called()
 
+
+class TestReopenContinuousRows:
+    def test_reopens_complete_rss_row(self):
+        row = _make_progress(
+            source_type="rss",
+            target=10,
+            items_ingested=10,
+            items_attempted=25,
+            status="complete",
+            retry_count=1,
+            retry_at=datetime(2026, 6, 1, 12, 0),
+            last_error="some error",
+        )
+
+        db = MagicMock()
+        db.query.return_value = _FakeQuery([row])
+        repo = IngestionProgressRepository(db)
+
+        reopened = repo.reopen_continuous_rows(
+            day_utc=date(2026, 6, 1),
+            defaults=[("rss", "TechCrunch", 10)],
+        )
+
+        assert reopened == 1
+        assert row.target == 20
+        assert row.status == "running"
+        assert row.items_attempted == 0
+        assert row.retry_count == 0
+        assert row.retry_at is None
+        assert row.last_error is None
+        db.commit.assert_called_once()
+
     def test_skips_still_running_row(self):
         """A YouTube row that hasn't reached its target is left alone."""
         row = _make_progress(
@@ -323,7 +355,7 @@ def test_checkpointed_ingestion_uses_high_budget_for_youtube(monkeypatch):
         def ensure_rows(self, **_kw):
             return 0
 
-        def reopen_youtube_rows(self, **_kw):
+        def reopen_continuous_rows(self, **_kw):
             return 0
 
         def prime_youtube_rows(self, **_kw):
