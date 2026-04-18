@@ -1579,7 +1579,6 @@ class YouTubeClient:
                 video_id,
             )
             return False
-            return False
 
         logger.debug("_detect_short: vid=%s -> False (LONG_FORM channel)", video_id)
         return False

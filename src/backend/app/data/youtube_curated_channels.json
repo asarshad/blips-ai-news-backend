@@ -383,7 +383,8 @@
     "role": "news",
     "content_format": "long_form",
     "daily_cap": 1,
-    "quality_tier": "standard"
+    "quality_tier": "standard",
+    "enabled": false
   },
   {
     "channel_id": "UChjRM_qQAaOAiLNbOGbYcRA",

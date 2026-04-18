@@ -537,10 +537,12 @@ def _get_with_validated_redirects(
         total_elapsed_ms += (time.monotonic() - t0) * 1000
 
         if response.status_code not in _REDIRECT_STATUS:
+            response.read()  # buffer body so .content is accessible for inspection
             return response, total_elapsed_ms
 
         location = response.headers.get("Location")
         if not location:
+            response.read()
             return response, total_elapsed_ms
 
         next_url = urljoin(str(response.url), location)

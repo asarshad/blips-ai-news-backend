@@ -10,6 +10,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.models.content_event import ContentEventOutbox
+from app.services.content_ai_service import (
+    CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE,
+    process_content_ai_summary_request,
+)
 from app.services.article_image_service import (
     ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE,
     process_article_image_verification_request,
@@ -134,6 +138,8 @@ class ContentEventDispatcher:
             self._dispatch_unready_event(event)
         elif event.event_type == ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE:
             self._dispatch_article_image_verification_event(event, db)
+        elif event.event_type == CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE:
+            self._dispatch_content_ai_summary_event(event, db)
 
     def _invalidate_surfaces(self, payload: dict) -> None:
         for surface_name in payload.get("surfaces", []):
@@ -172,6 +178,23 @@ class ContentEventDispatcher:
             content_id,
             result.get("changed"),
             result.get("article_image_status"),
+            result.get("readiness_status"),
+        )
+
+    def _dispatch_content_ai_summary_event(
+        self,
+        event: ContentEventOutbox,
+        db: Session,
+    ) -> None:
+        payload = dict(event.payload or {})
+        content_id = int(payload.get("content_id") or event.content_item_id)
+        result = process_content_ai_summary_request(db, content_id=content_id)
+        logger.info(
+            "[content_events] content ai summary content_id=%s changed=%s skipped=%s ai_processed=%s readiness=%s",
+            content_id,
+            result.get("changed"),
+            result.get("skipped"),
+            result.get("ai_processed"),
             result.get("readiness_status"),
         )
 

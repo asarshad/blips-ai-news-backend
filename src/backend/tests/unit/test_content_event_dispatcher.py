@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from app.services import content_event_dispatcher as dispatcher_module
+from app.services.content_ai_service import CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE
 from app.services.content_event_dispatcher import ContentEventDispatcher
 from app.services.article_image_service import ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE
 
@@ -120,3 +121,32 @@ def test_dispatch_article_image_verification_event_repairs_article(monkeypatch):
 
     assert repaired == [(db, 42)]
     assert refreshed == [(db, [42])]
+
+
+def test_dispatch_content_ai_summary_event_processes_one_content_item(monkeypatch):
+    processed = []
+
+    monkeypatch.setattr(
+        dispatcher_module,
+        "process_content_ai_summary_request",
+        lambda db, *, content_id: processed.append((db, content_id))
+        or {
+            "content_id": content_id,
+            "changed": True,
+            "skipped": False,
+            "ai_processed": True,
+            "readiness_status": "READY",
+        },
+    )
+
+    dispatcher = ContentEventDispatcher()
+    event = SimpleNamespace(
+        event_type=CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE,
+        content_item_id=77,
+        payload={"content_id": 77},
+    )
+    db = object()
+
+    dispatcher._dispatch_content_ai_summary_event(event, db)
+
+    assert processed == [(db, 77)]

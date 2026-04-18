@@ -56,6 +56,10 @@ FEATURE_DEFAULTS = {
     "promotion": True,
     # Video/reel hybrid reranking for serve-time diversity and repetition control
     "video_hybrid_rerank": True,
+    # Queue AI summarization requests through the durable content outbox
+    "event_driven_ai": False,
+    # Queue promotion evaluation requests through the durable content outbox
+    "event_driven_promotion": False,
 }
 
 # Production defaults - more conservative
@@ -70,6 +74,8 @@ PROD_DEFAULTS = {
     "signals": True,  # Coverage Guarantee - ON in prod
     "promotion": True,  # Quality Gate - ON in prod
     "video_hybrid_rerank": True,  # ON after validation
+    "event_driven_ai": False,  # Roll out intentionally; keep scheduled ai_retry as fallback
+    "event_driven_promotion": False,  # Roll out intentionally; keep scheduled promotion as fallback
 }
 
 # Redis key prefix for feature flags
