@@ -31,9 +31,11 @@ class ContentEventDispatcher:
         *,
         session_factory: sessionmaker | None = None,
         lock_timeout: timedelta = timedelta(minutes=10),
+        event_types: tuple[str, ...] | None = None,
     ) -> None:
         self._session_factory = session_factory or SessionLocal
         self._lock_timeout = lock_timeout
+        self._event_types = tuple(event_types) if event_types else None
 
     def process_pending(self, *, limit: int = 50) -> int:
         """Process a bounded batch of pending outbox events."""
@@ -63,6 +65,11 @@ class ContentEventDispatcher:
                             ContentEventOutbox.locked_at < stale_before,
                         ),
                     )
+                )
+                .filter(
+                    ContentEventOutbox.event_type.in_(self._event_types)
+                    if self._event_types
+                    else True
                 )
                 .order_by(ContentEventOutbox.created_at.asc())
                 .with_for_update(skip_locked=True)

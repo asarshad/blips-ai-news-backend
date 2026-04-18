@@ -95,6 +95,7 @@ class PromotionConfig:
 
 _DEFAULT_CONFIG = PromotionConfig(
     min_score=settings.PROMOTION_MIN_SCORE_ARTICLES,
+    window_hours=settings.ARTICLE_RECENT_POOL_DAYS * 24,
 )
 _VIDEO_CONFIG = PromotionConfig(
     w_source=0.18,

@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 
+from app.core.config import settings
 from app.models.content import ContentItem, ContentReadinessStatus, ContentStatus, ContentType
 from app.services.promotion_service import (
     _DEFAULT_CONFIG,
@@ -25,6 +26,7 @@ def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
 
 
 def test_video_and_reel_configs_use_longer_half_lives():
+    assert _DEFAULT_CONFIG.window_hours == settings.ARTICLE_RECENT_POOL_DAYS * 24
     assert _VIDEO_CONFIG.window_hours == 168
     assert _REEL_CONFIG.window_hours == 168
     assert _DEFAULT_CONFIG.min_score == 0.25
