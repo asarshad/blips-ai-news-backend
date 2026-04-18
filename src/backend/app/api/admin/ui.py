@@ -51,7 +51,7 @@ from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.push import PushSendLog
 from app.repositories.editorial_repo import EditorialRepository
 from app.schemas.push import PushMode, PushRuntimeConfigPatch
-from app.services.content_readiness import describe_readiness_reason
+from app.services.content_readiness import describe_readiness_reason, readiness_reason_codes
 from app.services.push_config_service import PushConfigService
 from app.services.push_service import (
     PushNotificationError,
@@ -2874,6 +2874,7 @@ def ui_content_list(
     has_image: Optional[str] = Query(None),
     curation_status: Optional[str] = Query(None),
     readiness_status: Optional[str] = Query(None),
+    readiness_reason: Optional[str] = Query(None),
     sort_by: str = Query("published_at"),
     page: int = Query(1, ge=1),
     flash: Optional[str] = Query(None),
@@ -2917,6 +2918,7 @@ def ui_content_list(
         has_image=image_filter,
         curation_status=curation_status or None,
         readiness_status=readiness_status or None,
+        readiness_reason=readiness_reason or None,
         sort_by=sort_by,
         page=page,
         page_size=50,
@@ -2935,6 +2937,7 @@ def ui_content_list(
             "has_image": has_image or "",
             "curation_status": curation_status or "",
             "readiness_status": readiness_status or "",
+            "readiness_reason": readiness_reason or "",
             "sort_by": sort_by,
         }
     )
@@ -3109,7 +3112,7 @@ def ui_content_list(
 
     filter_form = f"""
     <div class="glass-panel rounded-[1.5rem] p-4 mb-4">
-      <form method="get" action="/api/v1/admin/ui/content" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-10 gap-3 items-end">
+      <form method="get" action="/api/v1/admin/ui/content" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-11 gap-3 items-end">
         <input type="hidden" name="key" value="{admin_key}">
         <div>
           <label class="block text-xs text-gray-500 mb-1">Day</label>
@@ -3140,6 +3143,10 @@ def ui_content_list(
           {_sel("readiness_status", readiness_status or "", [("", "All"), ("READY", "Ready"), ("PENDING", "Pending")])}
         </div>
         <div>
+          <label class="block text-xs text-gray-500 mb-1">Readiness reason</label>
+          {_sel("readiness_reason", readiness_reason or "", [("", "All")] + [(code, describe_readiness_reason(code)) for code in readiness_reason_codes()])}
+        </div>
+        <div>
           <label class="block text-xs text-gray-500 mb-1">Suppressed</label>
           {_sel("suppressed", suppressed or "", [("", "All"), ("false", "No"), ("true", "Yes")])}
         </div>
@@ -3167,6 +3174,7 @@ def ui_content_list(
                 "has_image": has_image or "",
                 "curation_status": curation_status or "",
                 "readiness_status": readiness_status or "",
+                "readiness_reason": readiness_reason or "",
                 "sort_by": sort_by,
             }
         )

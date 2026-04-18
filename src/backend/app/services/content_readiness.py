@@ -40,6 +40,11 @@ _READINESS_REASON_DESCRIPTIONS = {
 }
 
 
+def readiness_reason_codes() -> tuple[str, ...]:
+    """Return the known readiness reason codes for operator-facing filters."""
+    return tuple(_READINESS_REASON_DESCRIPTIONS.keys())
+
+
 @dataclass(frozen=True)
 class ContentReadinessDecision:
     """Computed readiness state for a content item."""
