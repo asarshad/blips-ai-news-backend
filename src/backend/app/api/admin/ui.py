@@ -2873,6 +2873,7 @@ def ui_content_list(
     manual_added: Optional[str] = Query(None),
     has_image: Optional[str] = Query(None),
     curation_status: Optional[str] = Query(None),
+    readiness_status: Optional[str] = Query(None),
     sort_by: str = Query("published_at"),
     page: int = Query(1, ge=1),
     flash: Optional[str] = Query(None),
@@ -2915,6 +2916,7 @@ def ui_content_list(
         manual_added=manual,
         has_image=image_filter,
         curation_status=curation_status or None,
+        readiness_status=readiness_status or None,
         sort_by=sort_by,
         page=page,
         page_size=50,
@@ -2932,6 +2934,7 @@ def ui_content_list(
             "manual_added": manual_added or "",
             "has_image": has_image or "",
             "curation_status": curation_status or "",
+            "readiness_status": readiness_status or "",
             "sort_by": sort_by,
         }
     )
@@ -3106,7 +3109,7 @@ def ui_content_list(
 
     filter_form = f"""
     <div class="glass-panel rounded-[1.5rem] p-4 mb-4">
-      <form method="get" action="/api/v1/admin/ui/content" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-3 items-end">
+      <form method="get" action="/api/v1/admin/ui/content" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-10 gap-3 items-end">
         <input type="hidden" name="key" value="{admin_key}">
         <div>
           <label class="block text-xs text-gray-500 mb-1">Day</label>
@@ -3131,6 +3134,10 @@ def ui_content_list(
         <div>
           <label class="block text-xs text-gray-500 mb-1">Image</label>
           {_sel("has_image", has_image or "", [("", "All"), ("true", "Present"), ("false", "Missing")])}
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Readiness</label>
+          {_sel("readiness_status", readiness_status or "", [("", "All"), ("READY", "Ready"), ("PENDING", "Pending")])}
         </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Suppressed</label>
@@ -3159,6 +3166,7 @@ def ui_content_list(
                 "manual_added": manual_added or "",
                 "has_image": has_image or "",
                 "curation_status": curation_status or "",
+                "readiness_status": readiness_status or "",
                 "sort_by": sort_by,
             }
         )

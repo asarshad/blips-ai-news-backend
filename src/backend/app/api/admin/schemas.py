@@ -41,6 +41,7 @@ class ContentFilter(BaseModel):
     suppressed: Optional[bool] = None
     manual_added: Optional[bool] = None
     has_image: Optional[bool] = None
+    readiness_status: Optional[str] = Field(None, pattern="^(READY|PENDING)$")
     sort_by: str = Field("published_at", pattern="^(published_at|created_at|editorial_boost)$")
     page: int = Field(1, ge=1)
     page_size: int = Field(50, ge=1, le=200)

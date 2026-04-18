@@ -196,6 +196,7 @@ def test_content_list_maps_missing_image_filter(monkeypatch):
         manual_added=None,
         has_image="false",
         curation_status="PROMOTED",
+        readiness_status="PENDING",
         sort_by="published_at",
         page=2,
         flash=None,
@@ -208,11 +209,14 @@ def test_content_list_maps_missing_image_filter(monkeypatch):
     assert _FakeContentRepo.last_list_args["search_text"] == "openai"
     assert _FakeContentRepo.last_list_args["has_image"] is False
     assert _FakeContentRepo.last_list_args["curation_status"] == "PROMOTED"
+    assert _FakeContentRepo.last_list_args["readiness_status"] == "PENDING"
 
     html = response.body.decode("utf-8")
     assert 'name="q"' in html
     assert "title, URL, summary" in html
     assert 'name="has_image"' in html
+    assert 'name="readiness_status"' in html
+    assert "Pending" in html
     assert "Missing" in html
 
 

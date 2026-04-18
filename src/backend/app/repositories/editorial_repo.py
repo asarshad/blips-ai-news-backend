@@ -55,6 +55,7 @@ class EditorialRepository:
         manual_added: Optional[bool] = None,
         has_image: Optional[bool] = None,
         curation_status: Optional[str] = None,
+        readiness_status: Optional[str] = None,
         sort_by: str = "published_at",
         page: int = 1,
         page_size: int = 50,
@@ -114,6 +115,11 @@ class EditorialRepository:
             cs = curation_status.upper()
             if cs in ContentStatus.__members__:
                 query = query.filter(ContentItem.curation_status == ContentStatus[cs])
+
+        if readiness_status is not None:
+            rs = readiness_status.upper()
+            if rs in {"READY", "PENDING"}:
+                query = query.filter(ContentItem.readiness_status == rs)
 
         total = query.count()
 

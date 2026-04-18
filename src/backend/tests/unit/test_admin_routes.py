@@ -314,6 +314,7 @@ def test_list_content_passes_has_image_filter(monkeypatch):
         suppressed=False,
         manual_added=None,
         has_image=False,
+        readiness_status="PENDING",
         sort_by="published_at",
         page=1,
         page_size=50,
@@ -325,6 +326,7 @@ def test_list_content_passes_has_image_filter(monkeypatch):
     assert _FakeEditorialRepo.last_list_args["source"] == "example.com"
     assert _FakeEditorialRepo.last_list_args["suppressed"] is False
     assert _FakeEditorialRepo.last_list_args["has_image"] is False
+    assert _FakeEditorialRepo.last_list_args["readiness_status"] == "PENDING"
     assert response.total == 0
 
 
