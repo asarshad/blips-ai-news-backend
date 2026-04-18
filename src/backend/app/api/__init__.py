@@ -12,6 +12,7 @@ from app.api.routes import (
     inventory,
     metrics,
     notifications,
+    placeholder,
     preferences,
     session,
     session_auth,
@@ -24,6 +25,7 @@ from app.core.config import settings
 
 api_router = APIRouter()
 
+api_router.include_router(placeholder.router, tags=["placeholder"])
 api_router.include_router(articles.router, prefix="/articles", tags=["articles"])
 api_router.include_router(session_auth.router, prefix="/auth/session", tags=["session-auth"])
 api_router.include_router(config.router, tags=["config"])

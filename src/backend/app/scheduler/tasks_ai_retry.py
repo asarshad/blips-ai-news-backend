@@ -23,6 +23,8 @@ from app.scheduler.job_stats import log_job_start
 from app.scheduler.runtime import (
     AI_RETRY_JOB,
     FETCH_NEWS_INLINE_AI_RETRY,
+    FETCH_NEWS_JOB,
+    is_job_active,
     log_memory_snapshot,
     mark_job_finished,
     mark_job_started,
@@ -176,6 +178,13 @@ def process_ai_summaries(
 
     if not feature_flags.is_enabled("summarization"):
         logger.info("[ai_retry] SKIPPED - summarization feature is disabled")
+        return
+
+    # Scheduled ticks must defer while ingestion is running on the same
+    # worker process. The inline ai_retry invoked from fetch_news is
+    # deliberately exempt — it is the authoritative post-ingest pass.
+    if trigger == "scheduled" and is_job_active(FETCH_NEWS_JOB):
+        logger.info("[ai_retry] SKIPPED - fetch_news cycle is currently active")
         return
 
     stats = log_job_start("ai_retry")
@@ -371,8 +380,10 @@ def process_ai_summaries(
         if include_maintenance:
             _backfill_starters(db, llm_client, stats)
             _backfill_starter_answers(db, llm_client, stats)
-            image_repair = _run_article_image_verification(db)
-            logger.info("[ai_retry] Article image verification: %s", image_repair)
+            # Article image verification now runs on its own dedicated
+            # scheduler (see tasks_article_image.py) so ai_retry no longer
+            # piggybacks it here — that coupling previously bottlenecked
+            # image recovery on the 15-min LLM cadence.
         else:
             logger.info("[ai_retry] Maintenance skipped for this run")
         from app.scheduler.tasks_content_events import run_content_event_dispatch_job
@@ -532,18 +543,3 @@ def _backfill_starter_answers(db: Session, llm_client, stats) -> None:
             logger.warning(f"[ai_retry] Starter-answer backfill failed for {item.id}: {e}")
 
 
-def _run_article_image_verification(db: Session) -> dict[str, int]:
-    """Run the lightweight article image verification pass for recent promoted rows."""
-    from app.services.article_image_service import repair_article_image_metadata
-
-    return repair_article_image_metadata(
-        db,
-        lookback_days=settings.ARTICLE_IMAGE_REPAIR_LOOKBACK_DAYS,
-        limit=max(settings.ARTICLE_IMAGE_REPAIR_LIMIT, MAX_ITEMS_PER_RUN),
-        include_generic=True,
-        promoted_only=True,
-        readiness_reasons=(
-            "missing_article_image",
-            "awaiting_article_image_verification",
-        ),
-    )

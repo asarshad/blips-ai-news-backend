@@ -23,7 +23,7 @@ projects:
       - name: production
         databases:
           - name: blips-db
-            plan: basic-256mb
+            plan: basic-1gb
             databaseName: blips
             user: blips
             region: oregon
@@ -33,7 +33,7 @@ projects:
           - type: web
             name: blips-api
             runtime: python
-            plan: starter
+            plan: standard
             autoDeployTrigger: commit
             region: oregon
             rootDir: src/backend
@@ -88,6 +88,8 @@ projects:
                 value: "false"
               - key: INGESTION_ENABLED
                 value: "false"          # Prod: worker owns ingestion
+              - key: API_PUBLIC_BASE_URL
+                sync: false             # Absolute origin for placeholder image URLs
               - key: EXTERNAL_SCHEDULER_EXPECTED
                 value: "true"
               - key: FEATURE_CHAT_ENABLED
@@ -116,7 +118,7 @@ projects:
           - type: worker
             name: blips-worker
             runtime: python
-            plan: starter
+            plan: standard
             autoDeployTrigger: commit
             region: oregon
             rootDir: src/backend
@@ -154,6 +156,8 @@ projects:
                 value: "true"           # Worker owns all scheduled jobs
               - key: INGESTION_ENABLED
                 value: "true"
+              - key: API_PUBLIC_BASE_URL
+                sync: false             # Same value as set on the API service
               - key: FEATURE_INGESTION_ENABLED
                 value: "true"
               - key: FEATURE_CHAT_ENABLED
@@ -175,9 +179,15 @@ projects:
               - key: PUSH_CONFIG_TTL_SECONDS
                 value: "300"
               - key: MAX_ITEMS_PER_RUN
-                value: "50"
+                value: "100"
+              - key: MAX_LLM_CALLS_PER_RUN
+                value: "120"
+              - key: LLM_RATE_LIMIT_DELAY
+                value: "0.25"
               - key: IMMEDIATE_AI_SUMMARY_MAX_ITEMS
-                value: "20"
+                value: "50"
+              - key: ARTICLE_IMAGE_VERIFICATION_INTERVAL_MINUTES
+                value: "5"
               - key: SIGNAL_INGESTION_COMMIT_EVERY
                 value: "10"
               - key: INGEST_UNTIL_TARGETS

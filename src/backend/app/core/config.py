@@ -212,6 +212,18 @@ class Settings(BaseSettings):
     ARTICLE_UNSKIMMABLE_RETRY_WINDOW_HOURS: int = 24
     ARTICLE_IMAGE_REPAIR_LOOKBACK_DAYS: int = 7
     ARTICLE_IMAGE_REPAIR_LIMIT: int = 300
+    # Dedicated image-verification scheduler cadence (minutes). Decoupled
+    # from ai_retry so image backlog drains without waiting for LLM work.
+    ARTICLE_IMAGE_VERIFICATION_INTERVAL_MINUTES: int = 5
+    # Source-branded SVG placeholder used when real image recovery is exhausted.
+    ARTICLE_IMAGE_PLACEHOLDER_ENABLED: bool = True
+    # Minimum age of the prior verification attempt before we accept the
+    # placeholder fallback — gives the regular recovery paths time to find a
+    # real image before we give up.
+    ARTICLE_IMAGE_PLACEHOLDER_MIN_AGE_MINUTES: int = 30
+    # Absolute base URL used when building placeholder image URLs stored in
+    # content_items.image_url. Leave empty to emit relative URLs (tests/dev).
+    API_PUBLIC_BASE_URL: str = ""
     ARTICLE_RSS_DEGRADED_RETRY_COUNT_THRESHOLD: int = 3
     VIDEO_SUMMARY_MIN_OUTPUT_WORDS: int = 50  # softer minimum for generated video summaries
     VIDEO_SUMMARY_MAX_OUTPUT_WORDS: int = 70  # hard cap for generated video summaries

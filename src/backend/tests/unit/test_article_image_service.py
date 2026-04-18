@@ -554,3 +554,118 @@ def test_process_article_image_verification_request_updates_article_and_readines
     assert repaired.article_image_status == "VERIFIED"
     assert repaired.readiness_status == "READY"
     assert any(row.event_type == "content.ready" for row in outbox_rows)
+
+
+def test_repair_article_image_metadata_falls_back_to_source_placeholder_after_prior_attempt(
+    monkeypatch,
+):
+    """When real-image recovery is exhausted and a prior verification attempt
+    is old enough, a source-branded placeholder is written so the article can
+    leave ``missing_article_image`` and reach READY."""
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    prior_attempt_at = datetime.utcnow() - timedelta(minutes=45)
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="InfoQ",
+        source_url="https://example.com/infoq-story",
+        canonical_url="https://example.com/infoq-story",
+        published_at=_recent_dt(hours_ago=2),
+        title="InfoQ article waiting on placeholder",
+        curation_status=ContentStatus.PROMOTED,
+        readiness_reason="missing_article_image",
+        article_image_status="MISSING",
+        article_image_checked_at=prior_attempt_at,
+        topics=["technology"],
+        created_at=_recent_dt(hours_ago=2),
+        updated_at=_recent_dt(hours_ago=2),
+    )
+    db.add(item)
+    db.commit()
+
+    # Real-image recovery all returns nothing.
+    monkeypatch.setattr(
+        article_image_service,
+        "fetch_article_page_metadata",
+        lambda article_url: None,
+    )
+    monkeypatch.setattr(
+        "app.article_hydration.ArticleHydrationService.extract_article_image_with_llm",
+        lambda self, **_kwargs: None,
+    )
+
+    result = article_image_service.repair_article_image_metadata(
+        db,
+        lookback_days=7,
+        limit=50,
+        promoted_only=True,
+        readiness_reasons=("missing_article_image", "awaiting_article_image_verification"),
+    )
+    repaired = db.get(ContentItem, item.id)
+
+    assert result["placeholder_applied"] == 1
+    assert repaired.image_url is not None
+    assert "/placeholder/source" in repaired.image_url
+    assert "source=InfoQ" in repaired.image_url
+    assert "category=technology" in repaired.image_url
+    # With a placeholder URL in place, the verification outcome is VERIFIED
+    # (placeholder URLs are accepted by finalize_article_image_verification).
+    assert repaired.article_image_status == "VERIFIED"
+
+
+def test_repair_article_image_metadata_defers_placeholder_when_no_prior_attempt(
+    monkeypatch,
+):
+    """Fresh articles with no verification history should NOT immediately get
+    a placeholder — the recovery loop needs at least one prior real attempt."""
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="InfoQ",
+        source_url="https://example.com/new-story",
+        canonical_url="https://example.com/new-story",
+        published_at=_recent_dt(hours_ago=1),
+        title="Brand new InfoQ article",
+        curation_status=ContentStatus.PROMOTED,
+        readiness_reason="missing_article_image",
+        article_image_status="PENDING",
+        article_image_checked_at=None,
+        topics=["technology"],
+        created_at=_recent_dt(minutes_ago=30),
+        updated_at=_recent_dt(minutes_ago=30),
+    )
+    db.add(item)
+    db.commit()
+
+    monkeypatch.setattr(
+        article_image_service,
+        "fetch_article_page_metadata",
+        lambda article_url: None,
+    )
+    monkeypatch.setattr(
+        "app.article_hydration.ArticleHydrationService.extract_article_image_with_llm",
+        lambda self, **_kwargs: None,
+    )
+
+    result = article_image_service.repair_article_image_metadata(
+        db,
+        lookback_days=7,
+        limit=50,
+        promoted_only=True,
+        readiness_reasons=("missing_article_image", "awaiting_article_image_verification"),
+    )
+    repaired = db.get(ContentItem, item.id)
+
+    # First pass records the attempt but does not commit a placeholder.
+    assert result["placeholder_applied"] == 0
+    assert repaired.image_url is None
+    # After the first attempt, checked_at is populated so the next run
+    # (once enough time has passed) can apply the placeholder.
+    assert repaired.article_image_checked_at is not None

@@ -219,10 +219,17 @@ def finalize_article_image_verification(item: Any, *, now: Optional[datetime] = 
     """Persist the outcome of article image verification."""
     if getattr(item, "type", None) != ContentType.ARTICLE:
         return
+    current_image_url = getattr(item, "image_url", None)
+    # Locally import to avoid a circular dependency between hydration and the
+    # placeholder service (which itself imports settings from core.config).
+    from app.services.article_image_placeholder import is_placeholder_image_url
+
+    is_verified = bool(
+        ArticleHydrationService.normalize_article_image(current_image_url)
+        or is_placeholder_image_url(current_image_url)
+    )
     item.article_image_status = (
-        ARTICLE_IMAGE_STATUS_VERIFIED
-        if ArticleHydrationService.normalize_article_image(getattr(item, "image_url", None))
-        else ARTICLE_IMAGE_STATUS_MISSING
+        ARTICLE_IMAGE_STATUS_VERIFIED if is_verified else ARTICLE_IMAGE_STATUS_MISSING
     )
     item.article_image_checked_at = now or datetime.utcnow()
 
@@ -722,11 +729,18 @@ class ArticleHydrationService:
         """Return True when an article should be revisited for metadata repair."""
         from app.extraction.metadata import is_probably_generic_image_url
         from app.extraction.normalize import is_suspicious_image_url
+        from app.services.article_image_placeholder import is_placeholder_image_url
 
-        has_missing_image = not (item.image_url or "").strip()
+        image_url = item.image_url
+        # Source-branded placeholders are intentional fallbacks — don't treat
+        # them as "generic" and keep re-queueing them for recovery.
+        if is_placeholder_image_url(image_url):
+            return not (item.canonical_url or "").strip()
+
+        has_missing_image = not (image_url or "").strip()
         has_missing_canonical = not (item.canonical_url or "").strip()
-        has_generic_image = include_generic and is_probably_generic_image_url(item.image_url)
-        has_suspicious_image = is_suspicious_image_url(item.image_url)
+        has_generic_image = include_generic and is_probably_generic_image_url(image_url)
+        has_suspicious_image = is_suspicious_image_url(image_url)
         return (
             has_missing_image or has_missing_canonical or has_generic_image or has_suspicious_image
         )

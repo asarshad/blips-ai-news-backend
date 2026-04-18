@@ -6,6 +6,7 @@ Implementation is split into smaller modules to keep files manageable.
 """
 
 from app.scheduler.tasks_ai_retry import retry_ai_processing
+from app.scheduler.tasks_article_image import run_article_image_verification_job
 from app.scheduler.tasks_backfill import run_backfill_job
 from app.scheduler.tasks_cleanup import run_data_cleanup_job
 from app.scheduler.tasks_content_events import run_content_event_dispatch_job
@@ -25,6 +26,7 @@ __all__ = [
     "fetch_and_process_news",
     "get_ingestion_metrics",
     "retry_ai_processing",
+    "run_article_image_verification_job",
     "run_backfill_job",
     "run_clustering_job",
     "run_content_event_dispatch_job",

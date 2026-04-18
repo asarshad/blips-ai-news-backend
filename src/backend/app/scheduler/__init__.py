@@ -20,6 +20,7 @@ from app.scheduler.tasks import (
     check_inventory_health,
     fetch_and_process_news,
     retry_ai_processing,
+    run_article_image_verification_job,
     run_backfill_job,
     run_clustering_job,
     run_content_event_dispatch_job,
@@ -213,6 +214,22 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             next_run_time=_initial_ai_retry_next_run(fetch_minutes),
         )
 
+        # Dedicated lightweight image-verification job. Runs independently
+        # of ai_retry so blocked images (the dominant readiness blocker)
+        # drain on a short cadence without waiting for LLM work.
+        image_verification_minutes = max(
+            1, int(settings.ARTICLE_IMAGE_VERIFICATION_INTERVAL_MINUTES)
+        )
+        scheduler.add_job(
+            run_article_image_verification_job,
+            IntervalTrigger(minutes=image_verification_minutes),
+            id="article_image_verification_job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=120,
+        )
+
         scheduler.add_job(
             run_content_event_dispatch_job,
             IntervalTrigger(minutes=1),
@@ -297,7 +314,8 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
         logger.info(f"Started background scheduler - fetching news every {fetch_human}")
         logger.info(
             "Curation jobs: scoring (hourly), clustering (15min), decay (daily), "
-            f"AI retry (15min), content-events (1min), cleanup (daily), backfill ({backfill_hours}h), health (30min), inventory (30min), "
+            f"AI retry (15min), image verification ({image_verification_minutes}min), "
+            f"content-events (1min), cleanup (daily), backfill ({backfill_hours}h), health (30min), inventory (30min), "
             f"signals ({signal_minutes}min), promotion (30min)"
         )
 
