@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from app.services import content_event_dispatcher as dispatcher_module
 from app.services.content_ai_service import CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE
+from app.services.content_promotion_service import CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE
 from app.services.content_event_dispatcher import ContentEventDispatcher
 from app.services.article_image_service import ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE
 
@@ -150,3 +151,32 @@ def test_dispatch_content_ai_summary_event_processes_one_content_item(monkeypatc
     dispatcher._dispatch_content_ai_summary_event(event, db)
 
     assert processed == [(db, 77)]
+
+
+def test_dispatch_content_promotion_event_processes_one_content_item(monkeypatch):
+    processed = []
+
+    monkeypatch.setattr(
+        dispatcher_module,
+        "process_content_promotion_request",
+        lambda db, *, content_id: processed.append((db, content_id))
+        or {
+            "content_id": content_id,
+            "changed": True,
+            "skipped": False,
+            "promoted": True,
+            "promotion_score": 0.91,
+        },
+    )
+
+    dispatcher = ContentEventDispatcher()
+    event = SimpleNamespace(
+        event_type=CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE,
+        content_item_id=88,
+        payload={"content_id": 88},
+    )
+    db = object()
+
+    dispatcher._dispatch_content_promotion_event(event, db)
+
+    assert processed == [(db, 88)]

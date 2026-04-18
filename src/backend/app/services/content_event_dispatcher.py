@@ -14,6 +14,10 @@ from app.services.content_ai_service import (
     CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE,
     process_content_ai_summary_request,
 )
+from app.services.content_promotion_service import (
+    CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE,
+    process_content_promotion_request,
+)
 from app.services.article_image_service import (
     ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE,
     process_article_image_verification_request,
@@ -35,9 +39,11 @@ class ContentEventDispatcher:
         *,
         session_factory: sessionmaker | None = None,
         lock_timeout: timedelta = timedelta(minutes=10),
+        event_types: tuple[str, ...] | None = None,
     ) -> None:
         self._session_factory = session_factory or SessionLocal
         self._lock_timeout = lock_timeout
+        self._event_types = tuple(event_types or ())
 
     def process_pending(self, *, limit: int = 50) -> int:
         """Process a bounded batch of pending outbox events."""
@@ -53,22 +59,23 @@ class ContentEventDispatcher:
         stale_before = now - self._lock_timeout
 
         with self._session_factory() as db:
-            rows = (
-                db.query(ContentEventOutbox)
-                .filter(
-                    or_(
-                        and_(
-                            ContentEventOutbox.status == "pending",
-                            ContentEventOutbox.available_at <= now,
-                        ),
-                        and_(
-                            ContentEventOutbox.status == "processing",
-                            ContentEventOutbox.locked_at.is_not(None),
-                            ContentEventOutbox.locked_at < stale_before,
-                        ),
-                    )
+            query = db.query(ContentEventOutbox).filter(
+                or_(
+                    and_(
+                        ContentEventOutbox.status == "pending",
+                        ContentEventOutbox.available_at <= now,
+                    ),
+                    and_(
+                        ContentEventOutbox.status == "processing",
+                        ContentEventOutbox.locked_at.is_not(None),
+                        ContentEventOutbox.locked_at < stale_before,
+                    ),
                 )
-                .order_by(ContentEventOutbox.created_at.asc())
+            )
+            if self._event_types:
+                query = query.filter(ContentEventOutbox.event_type.in_(self._event_types))
+            rows = (
+                query.order_by(ContentEventOutbox.created_at.asc())
                 .with_for_update(skip_locked=True)
                 .limit(limit)
                 .all()
@@ -140,6 +147,8 @@ class ContentEventDispatcher:
             self._dispatch_article_image_verification_event(event, db)
         elif event.event_type == CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE:
             self._dispatch_content_ai_summary_event(event, db)
+        elif event.event_type == CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE:
+            self._dispatch_content_promotion_event(event, db)
 
     def _invalidate_surfaces(self, payload: dict) -> None:
         for surface_name in payload.get("surfaces", []):
@@ -196,6 +205,23 @@ class ContentEventDispatcher:
             result.get("skipped"),
             result.get("ai_processed"),
             result.get("readiness_status"),
+        )
+
+    def _dispatch_content_promotion_event(
+        self,
+        event: ContentEventOutbox,
+        db: Session,
+    ) -> None:
+        payload = dict(event.payload or {})
+        content_id = int(payload.get("content_id") or event.content_item_id)
+        result = process_content_promotion_request(db, content_id=content_id)
+        logger.info(
+            "[content_events] content promotion content_id=%s changed=%s skipped=%s promoted=%s score=%s",
+            content_id,
+            result.get("changed"),
+            result.get("skipped"),
+            result.get("promoted"),
+            result.get("promotion_score"),
         )
 
 

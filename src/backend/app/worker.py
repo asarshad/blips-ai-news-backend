@@ -76,6 +76,11 @@ WORKER_LOCK_REFRESH_SECONDS = max(
 )
 LOCK_REACQUIRE_ATTEMPTS = 3
 LOCK_REACQUIRE_DELAY_SECONDS = 5.0
+DEFAULT_CONTENT_EVENT_WORKER_SPECS = (
+    "content.promotion_eval.requested;"
+    "content.ai_summary.requested;"
+    "article.image_verification.requested,content.ready,content.unready"
+)
 
 
 def _request_worker_stop() -> None:
@@ -322,11 +327,63 @@ def _maintain_worker_lock(
     return 0
 
 
+def _content_event_threads_enabled() -> bool:
+    return os.getenv("CONTENT_EVENT_THREADS_ENABLED", "false").lower() in (
+        "true",
+        "1",
+        "yes",
+        "on",
+    )
+
+
+def _resolve_content_event_worker_specs() -> tuple[tuple[str, ...], ...]:
+    raw = os.getenv("CONTENT_EVENT_WORKER_SPECS", DEFAULT_CONTENT_EVENT_WORKER_SPECS)
+    groups = [chunk.strip() for chunk in raw.split(";") if chunk.strip()]
+    parsed: list[tuple[str, ...]] = []
+    for group in groups:
+        event_types = tuple(part.strip() for part in group.split(",") if part.strip())
+        if event_types:
+            parsed.append(event_types)
+    return tuple(parsed)
+
+
+def _start_content_event_worker_threads(stop_event: threading.Event) -> list[threading.Thread]:
+    if not _content_event_threads_enabled():
+        return []
+
+    from app.content_event_worker import run_content_event_worker
+
+    batch_size = int(os.getenv("CONTENT_EVENT_BATCH_SIZE", "50"))
+    poll_seconds = float(os.getenv("CONTENT_EVENT_POLL_SECONDS", "1.0"))
+    threads: list[threading.Thread] = []
+    for idx, event_types in enumerate(_resolve_content_event_worker_specs(), start=1):
+        thread = threading.Thread(
+            target=run_content_event_worker,
+            kwargs={
+                "event_types": event_types,
+                "batch_size": batch_size,
+                "poll_seconds": poll_seconds,
+                "stop_event": stop_event,
+            },
+            daemon=True,
+            name=f"content-event-worker-{idx}",
+        )
+        thread.start()
+        logger.info(
+            "Started content event worker thread %s for event_types=%s",
+            thread.name,
+            ",".join(event_types),
+        )
+        threads.append(thread)
+    return threads
+
+
 def run_worker():
     """Main worker entry point."""
     global _scheduler
     lock_acquired = False
     exit_code = 0
+    content_event_threads: list[threading.Thread] = []
 
     # Register signal handlers as early as possible so SIGTERM during lock
     # acquisition is handled gracefully rather than causing an immediate exit.
@@ -443,6 +500,7 @@ def run_worker():
             sys.stdout.flush()
             return 1
 
+        content_event_threads = _start_content_event_worker_threads(_stop_event)
         # Keep the worker running and refresh lock.
         logger.info("Worker running. Press Ctrl+C to stop.")
         sys.stdout.flush()
@@ -458,6 +516,8 @@ def run_worker():
         _request_worker_stop()
         if _scheduler:
             _scheduler.shutdown(wait=False)
+        for thread in content_event_threads:
+            thread.join(timeout=5)
         if lock_acquired:
             if release_worker_lock():
                 logger.info("Worker lock released")

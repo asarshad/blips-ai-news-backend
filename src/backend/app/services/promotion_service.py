@@ -1072,13 +1072,22 @@ class PromotionService:
 
     # ── Main run ──────────────────────────────────────────────────────────
 
-    def run_promotion_job(self) -> PromotionResult:
+    def run_promotion_job(
+        self,
+        *,
+        content_types: tuple[ContentType, ...] | None = None,
+    ) -> PromotionResult:
         """Score all CANDIDATE items and promote the best ones.
 
         Runs independently per content type (ARTICLE, VIDEO, REEL) so that
         each surface has its own top-N allocation.
         """
         result = PromotionResult()
+        requested_types = content_types or (
+            ContentType.ARTICLE,
+            ContentType.VIDEO,
+            ContentType.REEL,
+        )
 
         try:
             max_window_hours = max(
@@ -1089,7 +1098,7 @@ class PromotionService:
             cluster_sizes = self._get_cluster_sizes(hours_back=max_window_hours * 2)
             story_topic_counts, story_entity_counts = self._get_recent_story_context()
 
-            for content_type in (ContentType.ARTICLE, ContentType.VIDEO, ContentType.REEL):
+            for content_type in requested_types:
                 try:
                     promoted, evaluated, rescored, promoted_ids = self._promote_type(
                         content_type,

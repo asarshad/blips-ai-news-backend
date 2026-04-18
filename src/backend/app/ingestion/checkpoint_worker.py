@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.article_hydration import ArticleHydrationService
 from app.core.config import settings
 from app.core.curation import review_queue_target_status
+from app.core.feature_flags import feature_flags
 from app.core.logging import get_logger
 from app.ingestion.canonical import canonical_key_for_article, canonical_key_for_youtube
 from app.ingestion.checkpoint_locks import pg_advisory_unlock, try_pg_advisory_lock
@@ -251,12 +252,17 @@ def _normalize_insert_result(
     return inserted_ids, len(inserted_ids)
 
 
-def _queue_ready_events_for_inserted_ids(db: Session, *, inserted_ids: List[int]) -> None:
+def _queue_followup_events_for_inserted_ids(db: Session, *, inserted_ids: List[int]) -> None:
     if not inserted_ids:
         return
+
+    from app.services.content_promotion_service import queue_content_promotion_request
+
     items = db.query(ContentItem).filter(ContentItem.id.in_(inserted_ids)).all()
     for item in items:
         queue_content_ready_event(db, item)
+        if feature_flags.is_enabled("event_driven_promotion"):
+            queue_content_promotion_request(db, item)
 
 
 def process_progress_row_batch(
@@ -447,7 +453,7 @@ def process_progress_row_batch(
                     attempted += len(chunk_values)
                     insert_result = _insert_content_items_postgres(db, values=chunk_values)
                     inserted_ids, ins = _normalize_insert_result(insert_result)
-                    _queue_ready_events_for_inserted_ids(db, inserted_ids=inserted_ids)
+                    _queue_followup_events_for_inserted_ids(db, inserted_ids=inserted_ids)
                     inserted += int(ins)
                     remaining_slots -= int(ins)
                     idx += len(chunk)
@@ -735,7 +741,7 @@ def process_progress_row_batch(
                     attempted += len(chunk)
                     insert_result = _insert_content_items_postgres(db, values=chunk)
                     inserted_ids, ins = _normalize_insert_result(insert_result)
-                    _queue_ready_events_for_inserted_ids(db, inserted_ids=inserted_ids)
+                    _queue_followup_events_for_inserted_ids(db, inserted_ids=inserted_ids)
                     inserted += int(ins)
                     remaining_slots -= int(ins)
                     idx += len(chunk)

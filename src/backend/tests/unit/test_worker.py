@@ -94,6 +94,65 @@ def test_run_worker_refreshes_lock_during_startup_fetch(monkeypatch):
     assert ("worker-startup-lock-refresher", None) in joined_threads
 
 
+def test_resolve_content_event_worker_specs_uses_default_groups(monkeypatch):
+    monkeypatch.delenv("CONTENT_EVENT_WORKER_SPECS", raising=False)
+
+    assert worker._resolve_content_event_worker_specs() == (
+        ("content.promotion_eval.requested",),
+        ("content.ai_summary.requested",),
+        (
+            "article.image_verification.requested",
+            "content.ready",
+            "content.unready",
+        ),
+    )
+
+
+def test_resolve_content_event_worker_specs_parses_semicolon_groups(monkeypatch):
+    monkeypatch.setenv(
+        "CONTENT_EVENT_WORKER_SPECS",
+        "content.ready,content.unready; content.ai_summary.requested ",
+    )
+
+    assert worker._resolve_content_event_worker_specs() == (
+        ("content.ready", "content.unready"),
+        ("content.ai_summary.requested",),
+    )
+
+
+def test_run_worker_starts_content_event_threads_when_enabled(monkeypatch):
+    _patch_signal_handlers(monkeypatch)
+    worker._stop_event.clear()
+    monkeypatch.setenv("SCHEDULER_ENABLED", "true")
+    monkeypatch.setenv("CONTENT_EVENT_THREADS_ENABLED", "true")
+    monkeypatch.setattr(worker, "_acquire_lock_with_retry", lambda: True)
+
+    class DummyScheduler:
+        def shutdown(self, wait=False):  # noqa: ARG002
+            return None
+
+    monkeypatch.setattr(worker, "init_scheduler", lambda: DummyScheduler())
+    monkeypatch.setattr(worker, "fetch_and_process_news", lambda: None)
+
+    started_specs: list[object] = []
+    monkeypatch.setattr(
+        worker,
+        "_start_content_event_worker_threads",
+        lambda stop_event: started_specs.append(stop_event) or [],
+    )
+    monkeypatch.setattr(
+        worker,
+        "_maintain_worker_lock",
+        lambda *args, **kwargs: worker._stop_event.set() or 0,
+    )
+    monkeypatch.setattr(worker, "release_worker_lock", lambda: True)
+
+    exit_code = worker.run_worker()
+
+    assert exit_code == 0
+    assert started_specs == [worker._stop_event]
+
+
 def test_maintain_worker_lock_exits_nonzero_when_reacquire_fails(monkeypatch):
     worker._stop_event.clear()
     stop_event = worker.threading.Event()
