@@ -20,7 +20,6 @@ from app.scheduler.tasks import (
     check_inventory_health,
     fetch_and_process_news,
     retry_ai_processing,
-    run_article_image_event_dispatch_job,
     run_backfill_job,
     run_clustering_job,
     run_content_event_dispatch_job,
@@ -224,16 +223,6 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             misfire_grace_time=60,
         )
 
-        scheduler.add_job(
-            run_article_image_event_dispatch_job,
-            IntervalTrigger(minutes=1),
-            id="article_image_event_dispatch_job",
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=60,
-        )
-
         # Add data cleanup job (daily at 4 AM UTC)
         scheduler.add_job(
             run_data_cleanup_job,
@@ -308,7 +297,7 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
         logger.info(f"Started background scheduler - fetching news every {fetch_human}")
         logger.info(
             "Curation jobs: scoring (hourly), clustering (15min), decay (daily), "
-            f"AI retry (15min), content-events (1min), article-image-events (1min), cleanup (daily), backfill ({backfill_hours}h), health (30min), inventory (30min), "
+            f"AI retry (15min), content-events (1min), cleanup (daily), backfill ({backfill_hours}h), health (30min), inventory (30min), "
             f"signals ({signal_minutes}min), promotion (30min)"
         )
 
@@ -326,7 +315,6 @@ __all__ = [
     "fetch_and_process_news",
     "run_scoring_job",
     "run_clustering_job",
-    "run_article_image_event_dispatch_job",
     "run_content_event_dispatch_job",
     "run_data_cleanup_job",
     "run_preference_decay_job",
