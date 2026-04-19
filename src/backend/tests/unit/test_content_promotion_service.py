@@ -165,7 +165,7 @@ def test_process_content_promotion_request_runs_targeted_promotion(monkeypatch):
     assert refreshed.curation_status == ContentStatus.PROMOTED
 
 
-def test_checkpoint_followup_events_queue_promotion_for_candidates(monkeypatch):
+def test_checkpoint_followup_events_always_queue_promotion_for_candidates():
     engine = create_engine("sqlite:///:memory:")
     _create_test_tables(engine)
     SessionLocal = sessionmaker(bind=engine)
@@ -187,16 +187,84 @@ def test_checkpoint_followup_events_queue_promotion_for_candidates(monkeypatch):
     db.add(item)
     db.commit()
 
-    monkeypatch.setattr(
-        "app.ingestion.checkpoint_worker.feature_flags.is_enabled",
-        lambda feature: feature == "event_driven_promotion",
-    )
-
     _queue_followup_events_for_inserted_ids(db, inserted_ids=[item.id])
     db.commit()
 
     rows = db.query(ContentEventOutbox).all()
+    event_types = {row.event_type for row in rows}
 
-    assert len(rows) == 1
-    assert rows[0].event_type == content_promotion_service.CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE
-    assert rows[0].content_item_id == item.id
+    assert content_promotion_service.CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE in event_types
+
+
+def test_classify_promotion_block_blocks_non_tech_article_at_confidence_threshold():
+    from app.services.promotion_service import classify_promotion_block
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Reuters",
+        source_url="https://reuters.com/world/us-election",
+        published_at=_recent_dt(hours_ago=1),
+        title="US election results 2026",
+        tech_relevance="no",
+        tech_relevance_confidence=0.91,
+        tech_relevance_reason="General politics with no meaningful tech angle.",
+        curation_status=ContentStatus.PROMOTED,
+    )
+
+    reason = classify_promotion_block(
+        item,
+        ContentType.ARTICLE,
+        story_topic_counts={},
+        story_entity_counts={},
+    )
+
+    assert reason == "llm_non_tech_article"
+
+
+def test_classify_promotion_block_does_not_block_article_with_null_tech_relevance():
+    from app.services.promotion_service import classify_promotion_block
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="TechCrunch",
+        source_url="https://techcrunch.com/story",
+        published_at=_recent_dt(hours_ago=1),
+        title="Apple unveils new chip",
+        tech_relevance=None,
+        tech_relevance_confidence=None,
+        curation_status=ContentStatus.PROMOTED,
+    )
+
+    reason = classify_promotion_block(
+        item,
+        ContentType.ARTICLE,
+        story_topic_counts={},
+        story_entity_counts={},
+    )
+
+    assert reason is None
+
+
+def test_classify_promotion_block_does_not_block_article_below_confidence_floor():
+    from app.services.promotion_service import classify_promotion_block
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Reuters",
+        source_url="https://reuters.com/world/story",
+        published_at=_recent_dt(hours_ago=1),
+        title="Some borderline story",
+        tech_relevance="no",
+        tech_relevance_confidence=0.45,
+        tech_relevance_reason="Weak non-tech signal.",
+        curation_status=ContentStatus.PROMOTED,
+    )
+
+    reason = classify_promotion_block(
+        item,
+        ContentType.ARTICLE,
+        story_topic_counts={},
+        story_entity_counts={},
+    )
+
+    assert reason is None

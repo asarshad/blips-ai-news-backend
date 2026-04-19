@@ -286,6 +286,9 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         summary: str,
         topics: List[str] = None,
         *,
+        tech_relevance: Optional[str] = None,
+        tech_relevance_confidence: Optional[float] = None,
+        tech_relevance_reason: Optional[str] = None,
         commit: bool = True,
     ) -> bool:
         """
@@ -295,6 +298,9 @@ class ContentItemRepository(BaseRepository[ContentItem]):
             item_id: ID of the content item
             summary: AI-generated summary
             topics: Optional updated topics list
+            tech_relevance: "yes" | "no" from Blips tech relevance classifier
+            tech_relevance_confidence: classifier confidence score
+            tech_relevance_reason: classifier reason string
 
         Returns:
             True if update succeeded
@@ -308,6 +314,12 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         item.updated_at = datetime.utcnow()
         if topics is not None:
             item.topics = topics
+        if tech_relevance is not None:
+            item.tech_relevance = tech_relevance
+        if tech_relevance_confidence is not None:
+            item.tech_relevance_confidence = tech_relevance_confidence
+        if tech_relevance_reason is not None:
+            item.tech_relevance_reason = tech_relevance_reason
         sync_content_readiness(self.db, item)
         if commit:
             self.db.commit()

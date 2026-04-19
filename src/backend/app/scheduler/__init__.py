@@ -230,15 +230,19 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             misfire_grace_time=120,
         )
 
-        scheduler.add_job(
-            run_content_event_dispatch_job,
-            IntervalTrigger(minutes=1),
-            id="content_event_dispatch_job",
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-            misfire_grace_time=60,
+        _threads_enabled = os.getenv("CONTENT_EVENT_THREADS_ENABLED", "false").lower() in (
+            "true", "1", "yes", "on"
         )
+        if not _threads_enabled:
+            scheduler.add_job(
+                run_content_event_dispatch_job,
+                IntervalTrigger(minutes=1),
+                id="content_event_dispatch_job",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=60,
+            )
 
         # Add data cleanup job (daily at 4 AM UTC)
         scheduler.add_job(

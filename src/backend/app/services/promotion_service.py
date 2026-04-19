@@ -466,7 +466,7 @@ def _llm_broad_news_block_reason(item: ContentItem, *, suffix: str) -> str | Non
 
     if (
         tech_relevance == "none"
-        and confidence >= min(max(0.0, float(settings.VIDEO_TECH_NONE_BLOCK_CONFIDENCE)), 0.50)
+        and confidence >= max(min(1.0, float(settings.VIDEO_TECH_NONE_BLOCK_CONFIDENCE)), 0.50)
     ):
         return f"llm_non_tech_broad_news_{suffix}"
 
@@ -680,7 +680,7 @@ def classify_promotion_block(
         confidence = _safe_float(getattr(item, "tech_relevance_confidence", None), default=-1.0)
         if (
             tech_relevance == "no"
-            and confidence >= min(max(0.0, float(settings.ARTICLE_TECH_NONE_BLOCK_CONFIDENCE)), 0.50)
+            and confidence >= max(min(1.0, float(settings.ARTICLE_TECH_NONE_BLOCK_CONFIDENCE)), 0.50)
         ):
             return "llm_non_tech_article"
 
@@ -1207,6 +1207,7 @@ class PromotionService:
             "weak_editorial_reel",
             "low_story_discovery_reel",
             "low_signal_official_reel",
+            "llm_non_tech_article",
         }
         for item in promoted_items:
             item.promotion_score = score_candidate(

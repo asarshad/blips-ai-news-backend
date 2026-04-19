@@ -86,10 +86,6 @@ def test_sync_content_readiness_queues_ai_summary_when_flag_enabled(monkeypatch)
     db.add(item)
     db.commit()
 
-    monkeypatch.setattr(
-        "app.services.content_readiness.feature_flags.is_enabled",
-        lambda feature: feature == "event_driven_ai",
-    )
 
     result = sync_content_readiness(db, item)
     db.commit()
@@ -124,10 +120,6 @@ def test_sync_content_readiness_queues_video_ai_summary_when_flag_enabled(monkey
     db.add(item)
     db.commit()
 
-    monkeypatch.setattr(
-        "app.services.content_readiness.feature_flags.is_enabled",
-        lambda feature: feature == "event_driven_ai",
-    )
 
     result = sync_content_readiness(db, item)
     db.commit()
@@ -161,10 +153,6 @@ def test_sync_content_readiness_does_not_queue_reel_ai_summary_when_flag_enabled
     db.add(item)
     db.commit()
 
-    monkeypatch.setattr(
-        "app.services.content_readiness.feature_flags.is_enabled",
-        lambda feature: feature == "event_driven_ai",
-    )
 
     result = sync_content_readiness(db, item)
     db.commit()
@@ -286,3 +274,82 @@ def test_process_content_ai_summary_request_marks_article_ready(monkeypatch):
     assert any(row.event_type == "content.ready" for row in outbox_rows)
     assert invalidated == [(None, None)]
     assert refreshed == [[item.id]]
+
+
+def test_process_article_summary_persists_tech_relevance_via_mark_ai_processed(monkeypatch):
+    """Tech relevance fields must be passed explicitly to mark_ai_processed."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Reuters",
+        source_url="https://reuters.com/tech/story",
+        canonical_url="https://reuters.com/tech/story",
+        published_at=_recent_dt(hours_ago=1),
+        title="Apple's new chip changes everything",
+        description="A long description about the new chip. " * 20,
+        content_text="A long article body about the new chip. " * 20,
+        image_url="https://cdn.example.com/hero.jpg",
+        article_image_status="VERIFIED",
+        curation_status=ContentStatus.PROMOTED,
+        created_at=_recent_dt(minutes_ago=10),
+        updated_at=_recent_dt(minutes_ago=10),
+    )
+    db.add(item)
+    db.commit()
+
+    # Stub the article hydrator so it writes a valid summary without hitting LLM
+    fake_hydrator = MagicMock()
+    fake_hydrator.needs_retry_refresh = MagicMock(return_value=False)
+
+    def _populate_summary(item, **_kwargs):
+        item.summary = "Apple unveiled a new chip that significantly improves performance."
+        item.topics = ["technology", "semiconductors"]
+        item.conversation_starters = []
+
+    fake_hydrator.populate_article_summary.side_effect = _populate_summary
+    fake_hydrator.refresh_article_annotations = MagicMock()
+
+    # Stub the LLM client with a tech-relevant classification response
+    fake_llm = MagicMock()
+    fake_llm.classify_blips_tech_relevance.return_value = SimpleNamespace(
+        is_blips_tech_relevant="yes",
+        confidence=0.97,
+        reason="Directly about a major tech company product launch.",
+    )
+
+    mark_calls = []
+    original_mark = content_ai_service.ContentItemRepository
+
+    class PatchedRepo(original_mark):
+        def mark_ai_processed(self, item_id, summary, topics=None, *, commit=True, **kwargs):
+            mark_calls.append({"item_id": item_id, "summary": summary, **kwargs})
+            return super().mark_ai_processed(
+                item_id, summary, topics=topics, commit=commit, **kwargs
+            )
+
+    monkeypatch.setattr(content_ai_service, "ContentItemRepository", PatchedRepo)
+    monkeypatch.setattr(content_ai_service, "ArticleHydrationService", lambda: fake_hydrator)
+
+    result = content_ai_service.process_content_ai_summary_request(
+        db,
+        content_id=item.id,
+        llm_client=fake_llm,
+    )
+
+    assert result["changed"] is True
+    assert len(mark_calls) == 1
+    assert mark_calls[0]["tech_relevance"] == "yes"
+    assert mark_calls[0]["tech_relevance_confidence"] == 0.97
+    assert mark_calls[0]["tech_relevance_reason"] == "Directly about a major tech company product launch."
+
+    db.commit()
+    refreshed = db.get(ContentItem, item.id)
+    assert refreshed.tech_relevance == "yes"
+    assert refreshed.tech_relevance_confidence == 0.97

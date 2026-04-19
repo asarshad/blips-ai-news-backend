@@ -254,6 +254,9 @@ def _process_article_summary(
         logger.warning("[content_ai] invalid article summary content_id=%s", item.id)
         return False
 
+    tech_relevance = None
+    tech_relevance_confidence = None
+    tech_relevance_reason = None
     if settings.ARTICLE_TECH_CLASSIFIER_ENABLED:
         try:
             tech = llm_client.classify_blips_tech_relevance(
@@ -262,9 +265,9 @@ def _process_article_summary(
                 source=item.source or "",
                 url=item.source_url or None,
             )
-            item.tech_relevance = tech.is_blips_tech_relevant
-            item.tech_relevance_confidence = tech.confidence
-            item.tech_relevance_reason = tech.reason
+            tech_relevance = tech.is_blips_tech_relevant
+            tech_relevance_confidence = tech.confidence
+            tech_relevance_reason = tech.reason
             logger.info(
                 "[content_ai] article tech relevance content_id=%s relevant=%s confidence=%.2f",
                 item.id,
@@ -282,6 +285,9 @@ def _process_article_summary(
         item.id,
         summary=summary,
         topics=topics,
+        tech_relevance=tech_relevance,
+        tech_relevance_confidence=tech_relevance_confidence,
+        tech_relevance_reason=tech_relevance_reason,
         commit=False,
     )
 

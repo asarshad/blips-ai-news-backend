@@ -118,12 +118,9 @@ def normalize_blips_tech_relevance(value: Optional[str]) -> Optional[str]:
     return None
 
 
-def normalize_blips_tech_reason(value: Optional[str]) -> Optional[str]:
+def normalize_blips_tech_reason(value: Optional[str]) -> str:
     """Store compact, user-readable Blips tech relevance reasons."""
-    cleaned = " ".join((value or "").split()).strip()
-    if not cleaned:
-        return None
-    return cleaned[:255]
+    return " ".join((value or "").split()).strip()[:255]
 
 
 def looks_like_video_classifier_payload(text: Optional[str]) -> bool:
@@ -969,7 +966,7 @@ Return JSON only. Do not wrap it in markdown.
             confidence = normalize_video_classifier_confidence(payload.get("confidence"))
             reason = normalize_blips_tech_reason(payload.get("reason"))
 
-            if relevance is None or confidence is None or reason is None:
+            if relevance is None or confidence is None:
                 raise ValueError("Invalid Blips tech relevance classifier payload")
 
             return BlipsTechRelevanceResult(
