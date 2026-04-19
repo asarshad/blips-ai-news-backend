@@ -54,6 +54,7 @@ from app.services.content_readiness import (
     sync_content_readiness,
 )
 from app.services.conversation_starters import get_starters_service
+from app.services.video_relevance_service import classify_video_blips_relevance
 from app.services.video_discovery_provenance import build_discovered_via
 from app.video_surface_rules import classify_video_like_item
 
@@ -171,22 +172,38 @@ def build_video_content_item_from_entry(
                     if transcript:
                         summary = transcript[:5000]
 
-                video_result = llm_client.summarize_video(entry.title, summary)
-                ai_summary = normalize_video_summary_output(video_result.summary)
-                inline_starters = video_result.conversation_starters
-                tech_relevance = video_result.tech_relevance
-                tech_relevance_confidence = video_result.tech_relevance_confidence
-                tech_relevance_reason = video_result.tech_relevance_reason
-                is_mixed_roundup = video_result.is_mixed_roundup
-
-                classification_only = tech_relevance == "none" or bool(is_mixed_roundup)
-                if classification_only:
+                relevance = classify_video_blips_relevance(
+                    llm_client,
+                    title=entry.title or "",
+                    summary=summary or "",
+                    source=source or "",
+                    url=normalized_video_url or entry.video_url,
+                )
+                if relevance is not None and not relevance.is_relevant:
                     summary = None
                     inline_starters = None
+                    tech_relevance = "none"
+                    tech_relevance_confidence = relevance.confidence
+                    tech_relevance_reason = relevance.reason
+                    is_mixed_roundup = False
                     ai_processed = True
-                elif is_video_summary_acceptable(ai_summary):
-                    summary = ai_summary
-                    ai_processed = True
+                else:
+                    video_result = llm_client.summarize_video(entry.title, summary)
+                    ai_summary = normalize_video_summary_output(video_result.summary)
+                    inline_starters = video_result.conversation_starters
+                    tech_relevance = video_result.tech_relevance
+                    tech_relevance_confidence = video_result.tech_relevance_confidence
+                    tech_relevance_reason = video_result.tech_relevance_reason
+                    is_mixed_roundup = video_result.is_mixed_roundup
+
+                    classification_only = tech_relevance == "none" or bool(is_mixed_roundup)
+                    if classification_only:
+                        summary = None
+                        inline_starters = None
+                        ai_processed = True
+                    elif is_video_summary_acceptable(ai_summary):
+                        summary = ai_summary
+                        ai_processed = True
         except Exception as exc:
             logger.warning("Failed to summarize video %s: %s", entry.title, exc)
 

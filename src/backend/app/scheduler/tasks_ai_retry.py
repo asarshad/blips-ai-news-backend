@@ -256,6 +256,7 @@ def process_ai_summaries(
         from app.services.content_readiness import sync_content_readiness
         from app.services.playlist_service import refresh_cached_playlist_items
         from app.services.tiered_feed_service import invalidate_tiered_feed_cache
+        from app.services.video_relevance_service import classify_video_blips_relevance
         from app.models.content import ContentType
         from app.repositories.content_repo import ContentItemRepository
 
@@ -348,16 +349,36 @@ def process_ai_summaries(
                     topics = item.topics
                     starters = item.conversation_starters
                 else:
-                    result = llm_client.summarize_video(item.title, text)
-                    summary = normalize_video_summary_output(result.summary)
-                    topics = item.topics
-                    starters = result.conversation_starters
-                    item.tech_relevance = result.tech_relevance
-                    item.tech_relevance_confidence = result.tech_relevance_confidence
-                    item.tech_relevance_reason = result.tech_relevance_reason
-                    item.is_mixed_roundup = result.is_mixed_roundup
+                    relevance = classify_video_blips_relevance(
+                        llm_client,
+                        title=item.title or "",
+                        summary=text or "",
+                        source=item.source or "",
+                        url=item.source_url or None,
+                    )
+                    if settings.VIDEO_TECH_CLASSIFIER_ENABLED:
+                        stats.llm_calls += 1
+                    if relevance is not None and not relevance.is_relevant:
+                        summary = None
+                        topics = item.topics
+                        starters = None
+                        item.tech_relevance = "none"
+                        item.tech_relevance_confidence = relevance.confidence
+                        item.tech_relevance_reason = relevance.reason
+                        item.is_mixed_roundup = False
+                    else:
+                        result = llm_client.summarize_video(item.title, text)
+                        summary = normalize_video_summary_output(result.summary)
+                        topics = item.topics
+                        starters = result.conversation_starters
+                        item.tech_relevance = result.tech_relevance
+                        item.tech_relevance_confidence = result.tech_relevance_confidence
+                        item.tech_relevance_reason = result.tech_relevance_reason
+                        item.is_mixed_roundup = result.is_mixed_roundup
+                        stats.llm_calls += 1
 
-                stats.llm_calls += 1
+                if item.type == ContentType.ARTICLE:
+                    stats.llm_calls += 1
 
                 classification_only = (
                     item.type == ContentType.VIDEO
@@ -591,4 +612,3 @@ def _backfill_starter_answers(db: Session, llm_client, stats) -> None:
         except Exception as e:
             db.rollback()
             logger.warning(f"[ai_retry] Starter-answer backfill failed for {item.id}: {e}")
-

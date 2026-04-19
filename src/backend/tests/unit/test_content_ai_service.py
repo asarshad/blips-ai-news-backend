@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import JSONB
@@ -276,6 +277,59 @@ def test_process_content_ai_summary_request_marks_article_ready(monkeypatch):
     assert refreshed == [[item.id]]
 
 
+def test_process_content_ai_summary_request_skips_non_tech_video_before_summary(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.VIDEO,
+        source="Reuters",
+        source_url="https://example.com/watch?v=999",
+        video_url="https://example.com/watch?v=999",
+        published_at=_recent_dt(hours_ago=1),
+        title="Downtown protest after local political dispute",
+        description="General world news coverage with no meaningful tech angle.",
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status="PENDING",
+        readiness_reason="awaiting_video_ai_processing",
+        created_at=_recent_dt(minutes_ago=50),
+        updated_at=_recent_dt(minutes_ago=50),
+    )
+    db.add(item)
+    db.commit()
+
+    fake_llm = SimpleNamespace(
+        is_configured=lambda: True,
+        get_provider=lambda: "fake",
+        classify_blips_tech_relevance=lambda **kwargs: SimpleNamespace(
+            is_blips_tech_relevant="no",
+            confidence=0.97,
+            reason="General political protest with no meaningful tech connection.",
+        ),
+        summarize_video=lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("summarize_video should not run for non-tech video")
+        ),
+    )
+
+    result = content_ai_service.process_content_ai_summary_request(
+        db,
+        content_id=item.id,
+        llm_client=fake_llm,
+    )
+    db.commit()
+
+    refreshed_item = db.get(ContentItem, item.id)
+    assert result["changed"] is True
+    assert refreshed_item.ai_processed is True
+    assert refreshed_item.summary is None
+    assert refreshed_item.tech_relevance == "none"
+    assert refreshed_item.tech_relevance_confidence == 0.97
+    assert refreshed_item.readiness_status == "PENDING"
+    assert refreshed_item.readiness_reason == "missing_video_summary"
+
+
 def test_process_article_summary_persists_tech_relevance_via_mark_ai_processed(monkeypatch):
     """Tech relevance fields must be passed explicitly to mark_ai_processed."""
     from types import SimpleNamespace
@@ -335,7 +389,11 @@ def test_process_article_summary_persists_tech_relevance_via_mark_ai_processed(m
             )
 
     monkeypatch.setattr(content_ai_service, "ContentItemRepository", PatchedRepo)
-    monkeypatch.setattr(content_ai_service, "ArticleHydrationService", lambda: fake_hydrator)
+    monkeypatch.setattr(
+        content_ai_service,
+        "ArticleHydrationService",
+        lambda *args, **kwargs: fake_hydrator,
+    )
 
     result = content_ai_service.process_content_ai_summary_request(
         db,

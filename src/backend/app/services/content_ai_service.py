@@ -21,6 +21,7 @@ from app.repositories.content_repo import ContentItemRepository
 from app.services.content_readiness import sync_content_readiness
 from app.services.playlist_service import refresh_cached_playlist_items
 from app.services.tiered_feed_service import invalidate_tiered_feed_cache
+from app.services.video_relevance_service import classify_video_blips_relevance
 
 logger = get_logger(__name__)
 
@@ -314,6 +315,23 @@ def _process_video_summary(
     llm_client: LLMClient,
 ) -> bool:
     text = item.content_text or item.description or item.title
+    relevance = classify_video_blips_relevance(
+        llm_client,
+        title=item.title or "",
+        summary=text or "",
+        source=item.source or "",
+        url=item.source_url or None,
+    )
+    if relevance is not None and not relevance.is_relevant:
+        item.tech_relevance = "none"
+        item.tech_relevance_confidence = relevance.confidence
+        item.tech_relevance_reason = relevance.reason
+        item.is_mixed_roundup = False
+        item.ai_processed = True
+        item.summary = None
+        sync_content_readiness(db, item)
+        return True
+
     result = llm_client.summarize_video(item.title, text)
     summary = normalize_video_summary_output(result.summary)
     topics = item.topics

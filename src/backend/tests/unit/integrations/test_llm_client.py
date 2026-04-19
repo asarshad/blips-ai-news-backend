@@ -187,6 +187,20 @@ def test_classify_blips_tech_relevance_rejects_malformed_json_payload():
         )
 
 
+def test_fake_llm_blips_relevance_uses_actual_input_not_prompt_examples():
+    from app.integrations.llm_client import LLMClient
+
+    client = LLMClient(provider="fake")
+
+    result = client.classify_blips_tech_relevance(
+        title="Thousands gather in downtown protest after local political dispute",
+        summary="Demonstrators marched through the city following a government decision.",
+        source="Local News",
+    )
+
+    assert result.is_blips_tech_relevant == "no"
+
+
 def test_openai_chat_passes_previous_response_id_to_responses_api():
     from app.integrations.llm_client import ChatMessage, OpenAILLMClient
 

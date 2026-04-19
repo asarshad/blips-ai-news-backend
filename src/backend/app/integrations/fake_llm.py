@@ -222,7 +222,18 @@ TAGS: technology, innovation, ai, software, testing"""
 
     def _generate_blips_tech_relevance_response(self, user_message: str) -> str:
         """Generate deterministic Blips news relevance classification JSON."""
-        combined = user_message.lower()
+        def _extract(label: str) -> str:
+            match = re.search(rf"^{label}:\s*(.+)$", user_message, re.IGNORECASE | re.MULTILINE)
+            return match.group(1).strip() if match else ""
+
+        combined = " ".join(
+            [
+                _extract("Title"),
+                _extract("Summary"),
+                _extract("Source"),
+                _extract("URL"),
+            ]
+        ).lower()
         if any(
             keyword in combined
             for keyword in (
