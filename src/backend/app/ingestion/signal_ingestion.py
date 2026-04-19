@@ -34,7 +34,6 @@ from sqlalchemy.orm import Session
 from app.article_hydration import ArticleHydrationService
 from app.config.source_tiering import get_domain_policy, is_allowed_domain
 from app.core.curation import review_queue_target_status
-from app.core.feature_flags import feature_flags
 from app.ingestion.canonical import canonical_key_for_article, extract_youtube_video_id
 from app.ingestion.signals import SignalItem
 from app.ingestion.signals.discovery_feeds import fetch_discovery_leads
@@ -391,8 +390,7 @@ def run_signal_ingestion(
                     article_hydrator.hydrate_article_candidate(stub)
                 sync_content_readiness(db, stub, emit_ready_event=False)
                 queue_content_ready_event(db, stub)
-                if feature_flags.is_enabled("event_driven_promotion"):
-                    queue_content_promotion_request(db, stub)
+                queue_content_promotion_request(db, stub)
 
                 signal_repo.mark_ingested(signal_row, stub.id)
                 stubs_this_run += 1

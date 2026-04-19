@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 
 from app.models.content import ContentItem, ContentReadinessStatus, ContentStatus, ContentType
 from app.models.content_event import ContentEventOutbox
-from app.core.feature_flags import feature_flags
 from app.video_surface_rules import (
     effective_content_type,
     surface_content_filter,
@@ -290,7 +289,7 @@ def sync_content_readiness(
         from app.services.article_image_service import queue_article_image_verification_request
 
         queue_article_image_verification_request(db, item, now=ts)
-    if db is not None and feature_flags.is_enabled("event_driven_ai"):
+    if db is not None:
         from app.services.content_ai_service import queue_content_ai_summary_request
 
         queue_content_ai_summary_request(db, item, now=ts)

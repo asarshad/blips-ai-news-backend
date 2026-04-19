@@ -354,14 +354,22 @@ def _start_content_event_worker_threads(stop_event: threading.Event) -> list[thr
     from app.content_event_worker import run_content_event_worker
 
     batch_size = int(os.getenv("CONTENT_EVENT_BATCH_SIZE", "50"))
+    # Separate cap for the AI summary thread: 5/s ≈ 300/min, safely under
+    # gpt-5-nano's 500 RPM / 200 K TPM limits.
+    ai_batch_size = int(os.getenv("CONTENT_EVENT_AI_BATCH_SIZE", "5"))
     poll_seconds = float(os.getenv("CONTENT_EVENT_POLL_SECONDS", "1.0"))
     threads: list[threading.Thread] = []
     for idx, event_types in enumerate(_resolve_content_event_worker_specs(), start=1):
+        effective_batch = (
+            ai_batch_size
+            if "content.ai_summary.requested" in event_types
+            else batch_size
+        )
         thread = threading.Thread(
             target=run_content_event_worker,
             kwargs={
                 "event_types": event_types,
-                "batch_size": batch_size,
+                "batch_size": effective_batch,
                 "poll_seconds": poll_seconds,
                 "stop_event": stop_event,
             },

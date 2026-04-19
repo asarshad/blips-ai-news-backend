@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import os
-
-from app.core.config import settings
-from app.core.dependencies import get_redis
 from app.core.feature_flags import feature_flags
+from app.core.dependencies import get_redis
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.scheduler.job_stats import JobStats, log_job_start
@@ -16,56 +13,12 @@ from app.services.video_content_policy import youtube_discovery_enabled
 logger = get_logger(__name__)
 
 
-def _resolve_immediate_ai_summary_max_items() -> int:
-    """Resolve the post-ingestion AI batch size using the article-priority ceiling by default."""
-    raw = os.getenv(
-        "IMMEDIATE_AI_SUMMARY_MAX_ITEMS",
-        str(settings.ARTICLE_AI_PRIORITY_MAX_ITEMS_PER_RUN),
-    )
-    try:
-        return max(1, int(raw))
-    except ValueError:
-        logger.warning(
-            "Invalid IMMEDIATE_AI_SUMMARY_MAX_ITEMS=%r; defaulting to %s",
-            raw,
-            settings.ARTICLE_AI_PRIORITY_MAX_ITEMS_PER_RUN,
-        )
-        return int(settings.ARTICLE_AI_PRIORITY_MAX_ITEMS_PER_RUN)
-
-
-def run_immediate_ai_summaries(*, trigger: str = "fetch_news", include_maintenance: bool = False):
-    """Run the immediate AI summarization pass used after ingestion-like flows."""
-    from app.scheduler.tasks_ai_retry import process_ai_summaries
-
-    immediate_limit = _resolve_immediate_ai_summary_max_items()
-    logger.info(
-        "[%s] Running immediate AI summarization (max_items=%s, maintenance=%s)…",
-        trigger,
-        immediate_limit,
-        str(include_maintenance).lower(),
-    )
-    process_ai_summaries(
-        max_items=immediate_limit,
-        include_maintenance=include_maintenance,
-        trigger=trigger,
-    )
-
-
-def _event_driven_promotion_enabled() -> bool:
-    return feature_flags.is_enabled("event_driven_promotion")
-
-
-def _event_driven_ai_enabled() -> bool:
-    return feature_flags.is_enabled("event_driven_ai")
-
-
 def fetch_and_process_news():
-    """Fetch new content then immediately run AI summarization.
+    """Fetch new content and queue it for event-driven processing.
 
-    Two phases:
-    1. Checkpointed ingestion — bulk-inserts articles/videos (ai_processed=False).
-    2. AI processing — summarises every unprocessed item so the feed is
-       populated without waiting for the 15-min retry scheduler.
+    Runs checkpointed ingestion which inserts articles/videos (ai_processed=False)
+    and queues outbox events for promotion and AI summarization. The content event
+    worker threads drain those events in near-real-time.
     """
 
     if not feature_flags.is_enabled("ingestion"):
@@ -93,21 +46,6 @@ def fetch_and_process_news():
             if db is not None:
                 db.close()
             log_memory_snapshot(logger, "fetch_news:after_curation")
-
-        if _event_driven_ai_enabled():
-            logger.info(
-                "[fetch_news] Event-driven AI enabled; skipping inline AI summarization"
-            )
-        else:
-            # Phase 2: immediately summarise newly-ingested items so they appear
-            # in the feed right away instead of waiting for the next ai_retry tick.
-            try:
-                run_immediate_ai_summaries(trigger="fetch_news", include_maintenance=False)
-                logger.info("[fetch_news] AI summarization complete")
-            except Exception as e:
-                # Non-fatal — the periodic ai_retry job will pick them up later.
-                logger.warning(f"[fetch_news] Immediate AI summarization failed (non-fatal): {e}")
-                fetch_success = False
     finally:
         log_memory_snapshot(logger, "fetch_news:finished")
         if run_started_at is not None:
@@ -120,7 +58,6 @@ def _run_curation_ingestion_with_stats(db, stats: JobStats):
     try:
         from app.ingestion.checkpointing import run_checkpointed_ingestion
         from app.scheduler.tasks_curation import run_clustering_job
-        from app.scheduler.tasks_promotion import run_promotion_job
 
         redis_client = None
         try:
@@ -146,12 +83,6 @@ def _run_curation_ingestion_with_stats(db, stats: JobStats):
 
         logger.info("[fetch_news] Running clustering before promotion")
         run_clustering_job(trigger="fetch_news")
-        if _event_driven_promotion_enabled():
-            logger.info(
-                "[fetch_news] Event-driven promotion enabled; queued promotion requests will drain asynchronously"
-            )
-        else:
-            logger.info("[fetch_news] Running promotion immediately after ingestion")
-            run_promotion_job(trigger="fetch_news")
+        logger.info("[fetch_news] Promotion requests queued via outbox; draining asynchronously")
     except Exception as e:
         stats.errors.append(f"Curation ingestion: {str(e)}")

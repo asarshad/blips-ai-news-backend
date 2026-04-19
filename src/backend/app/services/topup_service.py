@@ -17,7 +17,6 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.feature_flags import feature_flags
 from app.core.logging import get_logger
 from app.models.content import ContentType
 from app.repositories.ingestion_budget_repo import IngestionBudgetRepository
@@ -141,22 +140,12 @@ def should_trigger_topup(health: InventoryHealth) -> bool:
 
 
 def _run_topup_followups() -> None:
-    """Advance freshly ingested content through clustering, promotion, and immediate AI."""
+    """Advance freshly ingested content through clustering; promotion and AI drain via outbox."""
     from app.scheduler.tasks_curation import run_clustering_job
-    from app.scheduler.tasks_ingestion import run_immediate_ai_summaries
-    from app.scheduler.tasks_promotion import run_promotion_job
 
     logger.info("Running top-up follow-up pipeline")
     run_clustering_job(trigger="topup")
-    if feature_flags.is_enabled("event_driven_promotion"):
-        logger.info("Top-up using event-driven promotion; skipping inline promotion")
-    else:
-        run_promotion_job(trigger="topup")
-
-    if feature_flags.is_enabled("event_driven_ai"):
-        logger.info("Top-up using event-driven AI; skipping inline AI summarization")
-    else:
-        run_immediate_ai_summaries(trigger="topup", include_maintenance=False)
+    logger.info("Top-up clustering complete; promotion and AI requests queued via outbox")
 
 
 def trigger_topup_async(db_factory, priority_surfaces: list = None):

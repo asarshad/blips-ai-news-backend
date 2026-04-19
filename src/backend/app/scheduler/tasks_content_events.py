@@ -13,7 +13,7 @@ def run_content_event_dispatch_job() -> None:
     """Dispatch pending content lifecycle events."""
     stats = log_job_start("content_events")
     try:
-        processed = ContentEventDispatcher().process_pending(limit=100)
+        processed = ContentEventDispatcher().process_pending(limit=500)
         stats.items_processed = processed
         logger.info("[content_events] processed=%d", processed)
     except Exception as exc:

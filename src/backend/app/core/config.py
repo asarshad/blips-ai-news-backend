@@ -220,7 +220,7 @@ class Settings(BaseSettings):
     # Minimum age of the prior verification attempt before we accept the
     # placeholder fallback — gives the regular recovery paths time to find a
     # real image before we give up.
-    ARTICLE_IMAGE_PLACEHOLDER_MIN_AGE_MINUTES: int = 30
+    ARTICLE_IMAGE_PLACEHOLDER_MIN_AGE_MINUTES: int = 5
     # Absolute base URL used when building placeholder image URLs stored in
     # content_items.image_url. Leave empty to emit relative URLs (tests/dev).
     API_PUBLIC_BASE_URL: str = ""
