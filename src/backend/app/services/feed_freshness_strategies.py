@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional, Protocol, Set, Tuple
 
 import redis
 from redis.exceptions import RedisError
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 
 from app.core.logging import get_logger
 from app.models.content import EventType
@@ -95,9 +95,10 @@ class CurrentFeedFreshnessStrategy:
 
         if surface in (Surface.VIDEOS, Surface.REELS):
             return (
-                desc(ContentItem.published_at),
+                desc(func.date(ContentItem.published_at)),
                 desc(ContentItem.promotion_score),
                 desc(ContentItem.global_score),
+                desc(ContentItem.published_at),
             )
         return (
             desc(ContentItem.global_score),

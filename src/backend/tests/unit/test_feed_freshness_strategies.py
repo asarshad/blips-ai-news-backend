@@ -67,3 +67,16 @@ def test_recent_head_strategy_uses_short_article_continuation_window():
     assert EventType.VIEW_10S not in signals.exposed_event_types
     assert strategy.resume_continuity_window_minutes(surface=Surface.ARTICLES) == 10
     assert strategy.resume_snapshot_after_remote_window(surface=Surface.ARTICLES) is False
+
+
+def test_current_strategy_orders_video_tier_a_by_day_then_score(monkeypatch):
+    monkeypatch.setenv("VIDEOS_FRESHNESS_STRATEGY", CURRENT_STRATEGY)
+
+    strategy = FeedFreshnessStrategies(redis_client=None).resolve(Surface.VIDEOS)
+    clauses = strategy.tier_a_order_clauses(surface=Surface.VIDEOS, offset=0)
+    rendered = [str(clause).lower() for clause in clauses]
+
+    assert "date(" in rendered[0]
+    assert "promotion_score" in rendered[1]
+    assert "global_score" in rendered[2]
+    assert "published_at" in rendered[3]

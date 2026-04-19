@@ -160,3 +160,68 @@ def test_rerank_reels_penalizes_repeated_creators_more_than_videos(monkeypatch):
 
     assert [item.source for item in videos[:4]].count("Dominant Source") >= 3
     assert [item.source for item in reels[:4]].count("Dominant Source") <= 2
+
+
+def test_rerank_preserves_newer_day_ahead_of_older_day(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.video_hybrid_rerank.get_channel_by_name",
+        lambda _name: None,
+    )
+
+    now = datetime.now(timezone.utc)
+    newer_day = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    older_day = newer_day - timedelta(days=1)
+
+    newer_high = SimpleNamespace(
+        id=1,
+        source="Fresh Source",
+        channel_id="fresh-source",
+        title="Fresh higher score",
+        topics=[{"name": "Technology"}],
+        entities=[{"name": "OpenAI"}],
+        published_at=newer_day + timedelta(hours=6),
+        promotion_score=0.54,
+        global_score=0.50,
+        quality_score=0.7,
+        views_per_hour=180.0,
+        description="Fresh coverage",
+        summary="Fresh coverage",
+    )
+    newer_low = SimpleNamespace(
+        id=2,
+        source="Same Day Source",
+        channel_id="same-day-source",
+        title="Fresh lower score",
+        topics=[{"name": "Technology"}],
+        entities=[{"name": "OpenAI"}],
+        published_at=newer_day + timedelta(hours=3),
+        promotion_score=0.28,
+        global_score=0.24,
+        quality_score=0.7,
+        views_per_hour=180.0,
+        description="Fresh coverage",
+        summary="Fresh coverage",
+    )
+    older_best = SimpleNamespace(
+        id=3,
+        source="Older Source",
+        channel_id="older-source",
+        title="Older but stronger score",
+        topics=[{"name": "Technology"}],
+        entities=[{"name": "OpenAI"}],
+        published_at=older_day + timedelta(hours=20),
+        promotion_score=0.95,
+        global_score=0.91,
+        quality_score=0.7,
+        views_per_hour=180.0,
+        description="Older coverage",
+        summary="Older coverage",
+    )
+
+    reranked = rerank_video_candidates(
+        [older_best, newer_low, newer_high],
+        target_count=3,
+        surface="videos",
+    )
+
+    assert [item.id for item in reranked[:3]] == [1, 2, 3]

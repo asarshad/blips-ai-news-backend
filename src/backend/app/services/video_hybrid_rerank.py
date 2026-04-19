@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from math import ceil
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -129,6 +129,15 @@ def _is_recent(item: ContentItem) -> bool:
     return hours_old is not None and hours_old <= _RECENT_HOURS
 
 
+def _published_day(item: ContentItem) -> date:
+    published_at = getattr(item, "published_at", None)
+    if published_at is None:
+        return datetime.min.date()
+    if published_at.tzinfo is None:
+        published_at = published_at.replace(tzinfo=timezone.utc)
+    return published_at.astimezone(timezone.utc).date()
+
+
 def _curated_weight(item: ContentItem) -> Tuple[float, bool]:
     config = get_channel_by_name(getattr(item, "source", "") or "")
     if config is None:
@@ -210,6 +219,7 @@ def rerank_video_candidates(
     ]
     scored.sort(
         key=lambda pair: (
+            _published_day(pair[0]),
             pair[1],
             getattr(pair[0], "promotion_score", 0.0) or 0.0,
             getattr(pair[0], "global_score", 0.0) or 0.0,
@@ -232,63 +242,68 @@ def rerank_video_candidates(
     per_creator: Counter[str] = Counter()
     recent_selected = 0
 
-    while len(selected) < shaped_target:
-        need_recent = len(selected) < recent_floor and recent_selected < recent_floor
-        chosen: Optional[ContentItem] = None
-        chosen_score = float("-inf")
+    ordered_days = list(dict.fromkeys(_published_day(item) for item, _score in scored))
 
-        for item, score in scored:
-            if item.id in used_ids:
-                continue
-            source = getattr(item, "source", "") or "unknown"
-            creator = _creator_key(item)
-            if per_source[source] >= config.max_per_source:
-                continue
-            if per_creator[creator] >= config.max_per_creator:
-                continue
-            if need_recent and not _is_recent(item):
-                continue
-            recent_window = (
-                selected[-config.repetition_window :] if config.repetition_window else []
-            )
-            source_hits = sum(
-                1 for prev in recent_window if (getattr(prev, "source", "") or "unknown") == source
-            )
-            creator_hits = sum(1 for prev in recent_window if _creator_key(prev) == creator)
-            adjusted = score
-            adjusted -= min(max(per_source[source] - 1, 0), 4) * config.source_repeat_penalty
-            adjusted -= source_hits * config.source_repeat_penalty
-            adjusted -= creator_hits * config.creator_repeat_penalty
-            if recent_window and _creator_key(recent_window[-1]) == creator:
-                adjusted -= config.creator_repeat_penalty
-            if adjusted > chosen_score:
-                chosen = item
-                chosen_score = adjusted
-
-        if chosen is None and need_recent:
-            # Not enough recent candidates; relax the recent floor only.
-            recent_floor = len(selected)
-            continue
-
-        if chosen is None:
-            # Relax source cap to avoid starving the feed.
-            for item, _score in scored:
-                if item.id in used_ids:
-                    continue
-                chosen = item
+    for bucket_day in ordered_days:
+        while len(selected) < shaped_target:
+            bucket_remaining = [
+                (item, score)
+                for item, score in scored
+                if item.id not in used_ids and _published_day(item) == bucket_day
+            ]
+            if not bucket_remaining:
                 break
 
-        if chosen is None:
-            break
+            need_recent = len(selected) < recent_floor and recent_selected < recent_floor
+            chosen: Optional[ContentItem] = None
+            chosen_score = float("-inf")
 
-        selected.append(chosen)
-        used_ids.add(chosen.id)
-        source = getattr(chosen, "source", "") or "unknown"
-        creator = _creator_key(chosen)
-        per_source[source] += 1
-        per_creator[creator] += 1
-        if _is_recent(chosen):
-            recent_selected += 1
+            for item, score in bucket_remaining:
+                source = getattr(item, "source", "") or "unknown"
+                creator = _creator_key(item)
+                if per_source[source] >= config.max_per_source:
+                    continue
+                if per_creator[creator] >= config.max_per_creator:
+                    continue
+                if need_recent and not _is_recent(item):
+                    continue
+                recent_window = (
+                    selected[-config.repetition_window :] if config.repetition_window else []
+                )
+                source_hits = sum(
+                    1
+                    for prev in recent_window
+                    if (getattr(prev, "source", "") or "unknown") == source
+                )
+                creator_hits = sum(1 for prev in recent_window if _creator_key(prev) == creator)
+                adjusted = score
+                adjusted -= min(max(per_source[source] - 1, 0), 4) * config.source_repeat_penalty
+                adjusted -= source_hits * config.source_repeat_penalty
+                adjusted -= creator_hits * config.creator_repeat_penalty
+                if recent_window and _creator_key(recent_window[-1]) == creator:
+                    adjusted -= config.creator_repeat_penalty
+                if adjusted > chosen_score:
+                    chosen = item
+                    chosen_score = adjusted
+
+            if chosen is None and need_recent:
+                # Not enough recent candidates; relax the recent floor only.
+                recent_floor = len(selected)
+                continue
+
+            if chosen is None:
+                # Relax source cap to avoid starving the feed, while still
+                # preserving the day-first bucket order.
+                chosen = bucket_remaining[0][0]
+
+            selected.append(chosen)
+            used_ids.add(chosen.id)
+            source = getattr(chosen, "source", "") or "unknown"
+            creator = _creator_key(chosen)
+            per_source[source] += 1
+            per_creator[creator] += 1
+            if _is_recent(chosen):
+                recent_selected += 1
 
     remainder = [item for item, _score in scored if item.id not in used_ids]
     return selected + remainder
