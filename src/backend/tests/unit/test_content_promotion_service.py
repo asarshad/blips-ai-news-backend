@@ -59,6 +59,35 @@ def test_queue_content_promotion_request_dedupes_pending_rows():
     assert rows[0].event_type == content_promotion_service.CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE
 
 
+def test_queue_content_promotion_request_applies_initial_delay(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/delayed-candidate",
+        canonical_url="https://example.com/delayed-candidate",
+        published_at=_recent_dt(hours_ago=1),
+        title="Delayed candidate",
+        curation_status=ContentStatus.CANDIDATE,
+        created_at=_recent_dt(minutes_ago=50),
+        updated_at=_recent_dt(minutes_ago=50),
+    )
+    db.add(item)
+    db.commit()
+
+    queued_at = _recent_dt(minutes_ago=5)
+    monkeypatch.setenv("CONTENT_PROMOTION_QUEUE_DELAY_SECONDS", "90")
+
+    event = content_promotion_service.queue_content_promotion_request(db, item, now=queued_at)
+
+    assert event is not None
+    assert event.available_at == queued_at + timedelta(seconds=90)
+
+
 def test_process_content_promotion_request_skips_non_candidate_item():
     engine = create_engine("sqlite:///:memory:")
     _create_test_tables(engine)

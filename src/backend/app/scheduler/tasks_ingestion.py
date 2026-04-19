@@ -51,6 +51,14 @@ def run_immediate_ai_summaries(*, trigger: str = "fetch_news", include_maintenan
     )
 
 
+def _event_driven_promotion_enabled() -> bool:
+    return feature_flags.is_enabled("event_driven_promotion")
+
+
+def _event_driven_ai_enabled() -> bool:
+    return feature_flags.is_enabled("event_driven_ai")
+
+
 def fetch_and_process_news():
     """Fetch new content then immediately run AI summarization.
 
@@ -86,15 +94,20 @@ def fetch_and_process_news():
                 db.close()
             log_memory_snapshot(logger, "fetch_news:after_curation")
 
-        # Phase 2: immediately summarise newly-ingested items so they appear
-        # in the feed right away instead of waiting for the next ai_retry tick.
-        try:
-            run_immediate_ai_summaries(trigger="fetch_news", include_maintenance=False)
-            logger.info("[fetch_news] AI summarization complete")
-        except Exception as e:
-            # Non-fatal — the periodic ai_retry job will pick them up later.
-            logger.warning(f"[fetch_news] Immediate AI summarization failed (non-fatal): {e}")
-            fetch_success = False
+        if _event_driven_ai_enabled():
+            logger.info(
+                "[fetch_news] Event-driven AI enabled; skipping inline AI summarization"
+            )
+        else:
+            # Phase 2: immediately summarise newly-ingested items so they appear
+            # in the feed right away instead of waiting for the next ai_retry tick.
+            try:
+                run_immediate_ai_summaries(trigger="fetch_news", include_maintenance=False)
+                logger.info("[fetch_news] AI summarization complete")
+            except Exception as e:
+                # Non-fatal — the periodic ai_retry job will pick them up later.
+                logger.warning(f"[fetch_news] Immediate AI summarization failed (non-fatal): {e}")
+                fetch_success = False
     finally:
         log_memory_snapshot(logger, "fetch_news:finished")
         if run_started_at is not None:
@@ -133,7 +146,12 @@ def _run_curation_ingestion_with_stats(db, stats: JobStats):
 
         logger.info("[fetch_news] Running clustering before promotion")
         run_clustering_job(trigger="fetch_news")
-        logger.info("[fetch_news] Running promotion immediately after ingestion")
-        run_promotion_job(trigger="fetch_news")
+        if _event_driven_promotion_enabled():
+            logger.info(
+                "[fetch_news] Event-driven promotion enabled; queued promotion requests will drain asynchronously"
+            )
+        else:
+            logger.info("[fetch_news] Running promotion immediately after ingestion")
+            run_promotion_job(trigger="fetch_news")
     except Exception as e:
         stats.errors.append(f"Curation ingestion: {str(e)}")

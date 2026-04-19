@@ -120,3 +120,42 @@ def test_check_and_trigger_topup_uses_article_target_pending_even_when_health_is
 
     assert result is True
     assert triggered == [(db_factory, [])]
+
+
+def test_run_topup_followups_skips_inline_followups_when_event_driven_enabled(monkeypatch):
+    clustering_calls = []
+    promotion_calls = []
+    ai_calls = []
+
+    monkeypatch.setitem(
+        sys.modules,
+        "app.scheduler.tasks_curation",
+        SimpleNamespace(
+            run_clustering_job=lambda *, trigger="scheduled": clustering_calls.append(trigger),
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "app.scheduler.tasks_promotion",
+        SimpleNamespace(
+            run_promotion_job=lambda *, trigger="scheduled": promotion_calls.append(trigger),
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "app.scheduler.tasks_ingestion",
+        SimpleNamespace(
+            run_immediate_ai_summaries=lambda **kwargs: ai_calls.append(kwargs),
+        ),
+    )
+    monkeypatch.setattr(
+        topup_service.feature_flags,
+        "is_enabled",
+        lambda name: name in {"event_driven_promotion", "event_driven_ai"},
+    )
+
+    topup_service._run_topup_followups()
+
+    assert clustering_calls == ["topup"]
+    assert promotion_calls == []
+    assert ai_calls == []

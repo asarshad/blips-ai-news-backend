@@ -17,6 +17,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.feature_flags import feature_flags
 from app.core.logging import get_logger
 from app.models.content import ContentType
 from app.repositories.ingestion_budget_repo import IngestionBudgetRepository
@@ -147,8 +148,15 @@ def _run_topup_followups() -> None:
 
     logger.info("Running top-up follow-up pipeline")
     run_clustering_job(trigger="topup")
-    run_promotion_job(trigger="topup")
-    run_immediate_ai_summaries(trigger="topup", include_maintenance=False)
+    if feature_flags.is_enabled("event_driven_promotion"):
+        logger.info("Top-up using event-driven promotion; skipping inline promotion")
+    else:
+        run_promotion_job(trigger="topup")
+
+    if feature_flags.is_enabled("event_driven_ai"):
+        logger.info("Top-up using event-driven AI; skipping inline AI summarization")
+    else:
+        run_immediate_ai_summaries(trigger="topup", include_maintenance=False)
 
 
 def trigger_topup_async(db_factory, priority_surfaces: list = None):

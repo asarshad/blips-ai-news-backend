@@ -163,19 +163,23 @@ projects:
               - key: FEATURE_CHAT_ENABLED
                 value: "true"
               - key: FEATURE_EVENT_DRIVEN_AI_ENABLED
-                value: "false"          # Enable after deploy/validation
+                value: "true"           # Queue-first AI on the worker; scheduled ai_retry remains fallback
               - key: FEATURE_EVENT_DRIVEN_PROMOTION_ENABLED
-                value: "false"          # Enable after AI lane is healthy
+                value: "true"           # Queue-first promotion; scheduled promotion remains fallback
               - key: AUTO_APPROVE_REVIEW_CONTENT
                 sync: false
               - key: CONTENT_EVENT_THREADS_ENABLED
                 value: "true"           # One Render worker, multiple in-process queue lanes
               - key: CONTENT_EVENT_WORKER_SPECS
-                value: "content.promotion_eval.requested;content.ai_summary.requested"
+                value: "content.promotion_eval.requested;content.ai_summary.requested;article.image_verification.requested,content.ready,content.unready"
               - key: CONTENT_EVENT_BATCH_SIZE
                 value: "50"
               - key: CONTENT_EVENT_POLL_SECONDS
                 value: "1.0"
+              - key: CONTENT_PROMOTION_QUEUE_DELAY_SECONDS
+                value: "60"
+              - key: CONTENT_PROMOTION_FETCH_DEFERRAL_SECONDS
+                value: "60"
               - key: INGESTION_MAX_WORKERS
                 value: "2"
               - key: INGESTION_BATCH_SIZE

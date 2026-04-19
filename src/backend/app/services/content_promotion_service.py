@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
@@ -15,6 +16,19 @@ from app.services.promotion_service import PromotionService
 logger = get_logger(__name__)
 
 CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE = "content.promotion_eval.requested"
+
+
+def _promotion_queue_delay_seconds() -> int:
+    """Resolve the initial promotion-queue delay used after fresh inserts."""
+    raw = os.getenv("CONTENT_PROMOTION_QUEUE_DELAY_SECONDS", "60")
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        logger.warning(
+            "Invalid CONTENT_PROMOTION_QUEUE_DELAY_SECONDS=%r; defaulting to 60",
+            raw,
+        )
+        return 60
 
 
 def should_queue_content_promotion(item: Any) -> bool:
@@ -56,6 +70,7 @@ def queue_content_promotion_request(
     if existing is not None:
         return None
 
+    queued_at = now or datetime.utcnow()
     event = ContentEventOutbox(
         content_item_id=int(item.id),
         event_type=CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE,
@@ -73,7 +88,7 @@ def queue_content_promotion_request(
             ),
         },
         status="pending",
-        available_at=now or datetime.utcnow(),
+        available_at=queued_at + timedelta(seconds=_promotion_queue_delay_seconds()),
     )
     db.add(event)
     return event

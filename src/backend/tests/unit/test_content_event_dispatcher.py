@@ -1,12 +1,31 @@
 from __future__ import annotations
 
+from datetime import datetime
 from types import SimpleNamespace
 
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import sessionmaker
+
+from app.models.content import ContentItem, ContentType
+from app.models.content_event import ContentEventOutbox
 from app.services import content_event_dispatcher as dispatcher_module
 from app.services.content_ai_service import CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE
 from app.services.content_promotion_service import CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE
 from app.services.content_event_dispatcher import ContentEventDispatcher
 from app.services.article_image_service import ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE
+
+
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
+    return "TEXT"
+
+
+def _create_test_tables(engine) -> None:
+    ContentItem.__table__.create(bind=engine)
+    ContentEventOutbox.__table__.create(bind=engine)
 
 
 def test_dispatch_ready_event_invalidates_cache_and_triggers_auto_push(monkeypatch):
@@ -180,3 +199,68 @@ def test_dispatch_content_promotion_event_processes_one_content_item(monkeypatch
     dispatcher._dispatch_content_promotion_event(event, db)
 
     assert processed == [(db, 88)]
+
+
+def test_dispatch_content_promotion_event_defers_while_fetch_news_is_active(monkeypatch):
+    monkeypatch.setattr(dispatcher_module, "_is_fetch_news_active", lambda: True)
+
+    dispatcher = ContentEventDispatcher()
+    event = SimpleNamespace(
+        event_type=CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE,
+        content_item_id=88,
+        payload={"content_id": 88},
+    )
+
+    with pytest.raises(dispatcher_module._DeferredDispatch) as exc_info:
+        dispatcher._dispatch_content_promotion_event(event, object())
+
+    assert exc_info.value.reason == "fetch_news_active"
+
+
+def test_process_claimed_requeues_deferred_promotion_without_counting_failure(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/deferred-promotion",
+        canonical_url="https://example.com/deferred-promotion",
+        published_at=datetime.utcnow(),
+        title="Deferred promotion",
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(item)
+    db.flush()
+    event = ContentEventOutbox(
+        content_item_id=item.id,
+        event_type=CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE,
+        payload={"content_id": item.id},
+        status="processing",
+        attempt_count=1,
+        available_at=datetime.utcnow(),
+        locked_at=datetime.utcnow(),
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(event)
+    db.commit()
+
+    monkeypatch.setattr(dispatcher_module, "_is_fetch_news_active", lambda: True)
+    monkeypatch.setenv("CONTENT_PROMOTION_FETCH_DEFERRAL_SECONDS", "45")
+
+    dispatcher = ContentEventDispatcher(session_factory=SessionLocal)
+
+    assert dispatcher._process_claimed(event.id) is False
+
+    refreshed = SessionLocal().get(ContentEventOutbox, event.id)
+
+    assert refreshed is not None
+    assert refreshed.status == "pending"
+    assert refreshed.locked_at is None
+    assert refreshed.last_error is None
+    assert refreshed.attempt_count == 0
+    assert refreshed.available_at > datetime.utcnow()
