@@ -218,9 +218,66 @@ def test_content_list_maps_missing_image_filter(monkeypatch):
     assert "title, URL, summary" in html
     assert 'name="has_image"' in html
     assert 'name="readiness_status"' in html
-    assert 'name="readiness_reason"' in html
+    assert 'name="readiness_reason"' not in html
     assert "Pending" in html
     assert "Missing" in html
+
+
+def test_content_list_shows_readiness_reason_in_status_column(monkeypatch):
+    class _RepoWithItem:
+        def __init__(self, db):
+            self.db = db
+
+        def list_content(self, **_kwargs):
+            item = type(
+                "Item",
+                (),
+                {
+                    "id": 42,
+                    "title": "Example article",
+                    "canonical_url": "https://example.com/article",
+                    "source_url": "https://example.com/article",
+                    "curation_status": admin_ui.ContentStatus.PROMOTED,
+                    "is_suppressed": False,
+                    "manual_added": False,
+                    "editorial_boost": 0,
+                    "readiness_status": "PENDING",
+                    "readiness_reason": "missing_article_image",
+                    "image_url": None,
+                    "published_at": None,
+                    "promotion_score": 0.42,
+                    "discovered_via": "rss_ingestion",
+                    "signal_hits": 0,
+                    "type": admin_ui.ContentType.ARTICLE,
+                    "source": "Example",
+                },
+            )()
+            return [item], 1
+
+    monkeypatch.setattr(admin_ui, "EditorialRepository", _RepoWithItem)
+    monkeypatch.setattr(admin_ui, "_push_log_summaries", lambda _db, _ids: {})
+
+    response = admin_ui.ui_content_list(
+        day=None,
+        type="ARTICLE",
+        q=None,
+        source=None,
+        suppressed=None,
+        manual_added=None,
+        has_image=None,
+        curation_status=None,
+        readiness_status=None,
+        readiness_reason=None,
+        sort_by="published_at",
+        page=1,
+        flash=None,
+        db=object(),
+        admin_key="secret",
+    )
+
+    html = response.body.decode("utf-8")
+    assert "missing_article_image" in html
+    assert "does not yet have a usable verified image" in html
 
 
 def test_promotion_policy_badges_include_override_codes():

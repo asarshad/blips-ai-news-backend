@@ -51,7 +51,7 @@ from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.push import PushSendLog
 from app.repositories.editorial_repo import EditorialRepository
 from app.schemas.push import PushMode, PushRuntimeConfigPatch
-from app.services.content_readiness import describe_readiness_reason, readiness_reason_codes
+from app.services.content_readiness import describe_readiness_reason
 from app.services.push_config_service import PushConfigService
 from app.services.push_service import (
     PushNotificationError,
@@ -3036,6 +3036,19 @@ def ui_content_list(
             badges += _badge("no image", "gray") + " "
 
         pub = i.published_at.strftime("%m-%d %H:%M") if i.published_at else "—"
+        readiness_reason_code = (getattr(i, "readiness_reason", None) or "").strip()
+        readiness_reason_detail = (
+            describe_readiness_reason(readiness_reason_code) if readiness_reason_code else ""
+        )
+        readiness_status = (getattr(i, "readiness_status", "") or "PENDING").strip().upper()
+        status_detail_html = ""
+        if readiness_status != "READY" and readiness_reason_code:
+            status_detail_html = (
+                f'<div class="mt-1 space-y-0.5">'
+                f'<div class="text-[11px] font-mono text-slate-500">{_esc(readiness_reason_code)}</div>'
+                f'<div class="text-[11px] text-slate-500">{_esc(readiness_reason_detail)}</div>'
+                f"</div>"
+            )
         score = f"{i.promotion_score:.3f}" if getattr(i, "promotion_score", None) else "—"
         disc = _esc(getattr(i, "discovered_via", None) or "—")
         hits = str(getattr(i, "signal_hits", 0) or 0)
@@ -3083,7 +3096,7 @@ def ui_content_list(
           <td class="px-3 py-2 text-xs text-gray-600">{i.type.value if i.type else ""}</td>
           <td class="px-3 py-2 text-xs text-gray-600 truncate max-w-[90px]">{_esc(i.source or "")}</td>
           <td class="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{pub}</td>
-          <td class="px-3 py-2">{badges}</td>
+          <td class="px-3 py-2">{badges}{status_detail_html}</td>
           <td class="px-3 py-2 text-xs text-gray-500">
             <div class="max-w-[180px]">
               {push_summary_html}
@@ -3112,7 +3125,7 @@ def ui_content_list(
 
     filter_form = f"""
     <div class="glass-panel rounded-[1.5rem] p-4 mb-4">
-      <form method="get" action="/api/v1/admin/ui/content" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-11 gap-3 items-end">
+      <form method="get" action="/api/v1/admin/ui/content" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-10 gap-3 items-end">
         <input type="hidden" name="key" value="{admin_key}">
         <div>
           <label class="block text-xs text-gray-500 mb-1">Day</label>
@@ -3141,10 +3154,6 @@ def ui_content_list(
         <div>
           <label class="block text-xs text-gray-500 mb-1">Readiness</label>
           {_sel("readiness_status", readiness_status or "", [("", "All"), ("READY", "Ready"), ("PENDING", "Pending")])}
-        </div>
-        <div>
-          <label class="block text-xs text-gray-500 mb-1">Readiness reason</label>
-          {_sel("readiness_reason", readiness_reason or "", [("", "All")] + [(code, describe_readiness_reason(code)) for code in readiness_reason_codes()])}
         </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Suppressed</label>
