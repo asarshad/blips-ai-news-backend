@@ -48,6 +48,8 @@ class EditorialRepository:
         self,
         *,
         day: Optional[date] = None,
+        day_start: Optional[datetime] = None,
+        day_end: Optional[datetime] = None,
         content_type: Optional[str] = None,
         search_text: Optional[str] = None,
         source: Optional[str] = None,
@@ -64,16 +66,29 @@ class EditorialRepository:
         """Return a filtered, paginated list of content items + total count."""
         query = self.db.query(ContentItem)
 
-        if day is not None:
-            start = datetime.combine(day, datetime.min.time())
-            end = start + timedelta(days=1)
+        if day_start is not None or day_end is not None or day is not None:
+            start = day_start
+            end = day_end
+            if start is None or end is None:
+                if day is None:
+                    raise ValueError("day is required when day_start/day_end are omitted")
+                start = datetime.combine(day, datetime.min.time())
+                end = start + timedelta(days=1)
+            ingestion_days: list[date] = []
+            current_day = start.date()
+            last_day = (end - timedelta(microseconds=1)).date()
+            while current_day <= last_day:
+                ingestion_days.append(current_day)
+                current_day += timedelta(days=1)
             query = query.filter(
                 or_(
-                    ContentItem.ingestion_day == day,
                     and_(
-                        ContentItem.ingestion_day.is_(None),
                         ContentItem.published_at >= start,
                         ContentItem.published_at < end,
+                    ),
+                    and_(
+                        ContentItem.published_at.is_(None),
+                        ContentItem.ingestion_day.in_(ingestion_days),
                     ),
                 ),
             )
@@ -150,6 +165,8 @@ class EditorialRepository:
         min_signal_hits: int = 0,
         start_day: Optional[date] = None,
         end_day: Optional[date] = None,
+        start_at: Optional[datetime] = None,
+        end_at: Optional[datetime] = None,
         curation_status: Optional[str] = "CANDIDATE",
         include_suppressed: bool = False,
         sort_by: str = "priority",
@@ -183,16 +200,26 @@ class EditorialRepository:
         if min_signal_hits > 0:
             query = query.filter(ContentItem.signal_hits >= int(min_signal_hits))
 
-        if start_day is not None or end_day is not None:
+        if start_day is not None or end_day is not None or start_at is not None or end_at is not None:
             first_seen_expr = func.coalesce(
                 ContentItem.candidate_first_seen_at,
                 ContentItem.published_at,
             )
-            if start_day is not None:
+            if start_at is not None:
+                start_dt = start_at
+            elif start_day is not None:
                 start_dt = datetime.combine(start_day, datetime.min.time())
+            else:
+                start_dt = None
+            if start_dt is not None:
                 query = query.filter(first_seen_expr >= start_dt)
-            if end_day is not None:
+            if end_at is not None:
+                end_dt = end_at
+            elif end_day is not None:
                 end_dt = datetime.combine(end_day + timedelta(days=1), datetime.min.time())
+            else:
+                end_dt = None
+            if end_dt is not None:
                 query = query.filter(first_seen_expr < end_dt)
 
         total = query.count()

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from app.api.admin import ui as admin_ui
 
 
@@ -223,6 +225,33 @@ def test_content_list_maps_missing_image_filter(monkeypatch):
     assert "Missing" in html
 
 
+def test_content_list_maps_vancouver_day_bounds(monkeypatch):
+    _FakeContentRepo.last_list_args = None
+    monkeypatch.setattr(admin_ui, "EditorialRepository", _FakeContentRepo)
+
+    admin_ui.ui_content_list(
+        day="2026-04-18",
+        type="ARTICLE",
+        q=None,
+        source=None,
+        suppressed=None,
+        manual_added=None,
+        has_image=None,
+        curation_status=None,
+        readiness_status=None,
+        readiness_reason=None,
+        sort_by="published_at",
+        page=1,
+        flash=None,
+        db=object(),
+        admin_key="secret",
+    )
+
+    assert _FakeContentRepo.last_list_args["day"] == admin_ui.date(2026, 4, 18)
+    assert _FakeContentRepo.last_list_args["day_start"] == datetime(2026, 4, 18, 7, 0)
+    assert _FakeContentRepo.last_list_args["day_end"] == datetime(2026, 4, 19, 7, 0)
+
+
 def test_content_list_shows_readiness_reason_in_status_column(monkeypatch):
     class _RepoWithItem:
         def __init__(self, db):
@@ -278,6 +307,33 @@ def test_content_list_shows_readiness_reason_in_status_column(monkeypatch):
     html = response.body.decode("utf-8")
     assert "missing_article_image" in html
     assert "does not yet have a usable verified image" in html
+
+
+def test_review_queue_maps_vancouver_day_bounds(monkeypatch):
+    _FakeRepo.last_list_args = None
+    monkeypatch.setattr(admin_ui, "EditorialRepository", _FakeRepo)
+
+    admin_ui.ui_review_queue(
+        review_status="CANDIDATE",
+        include_suppressed=False,
+        type=None,
+        source=None,
+        discovered_via=None,
+        min_signal_hits=0,
+        start_day="2026-04-18",
+        end_day="2026-04-18",
+        sort_by="priority",
+        selected_id=None,
+        page=1,
+        flash=None,
+        db=object(),
+        admin_key="secret",
+    )
+
+    assert _FakeRepo.last_list_args["start_day"] == admin_ui.date(2026, 4, 18)
+    assert _FakeRepo.last_list_args["end_day"] == admin_ui.date(2026, 4, 18)
+    assert _FakeRepo.last_list_args["start_at"] == datetime(2026, 4, 18, 7, 0)
+    assert _FakeRepo.last_list_args["end_at"] == datetime(2026, 4, 19, 7, 0)
 
 
 def test_promotion_policy_badges_include_override_codes():

@@ -29,9 +29,10 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Cookie, Depends, Form, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -70,6 +71,8 @@ _ADMIN_UI_COOKIE_NAME = "blips_admin_session"
 _ADMIN_UI_COOKIE_TTL_SECONDS = 8 * 60 * 60
 _ADMIN_UI_PREFIX = "/api/v1/admin/ui"
 _ADMIN_UI_BULK_ACTION_LIMIT = 10
+_ADMIN_UI_TIMEZONE = ZoneInfo("America/Vancouver")
+_UTC = timezone.utc
 
 
 def _require_admin_ui_auth(
@@ -105,6 +108,45 @@ def _set_admin_ui_cookie(response: RedirectResponse) -> None:
         samesite="strict",
         path=_ADMIN_UI_PREFIX,
     )
+
+
+def _admin_now() -> datetime:
+    return datetime.now(_ADMIN_UI_TIMEZONE)
+
+
+def _admin_today() -> date:
+    return _admin_now().date()
+
+
+def _admin_day_bounds(day_value: date) -> tuple[datetime, datetime]:
+    local_start = datetime.combine(day_value, datetime.min.time(), tzinfo=_ADMIN_UI_TIMEZONE)
+    local_end = local_start + timedelta(days=1)
+    start_utc = local_start.astimezone(_UTC).replace(tzinfo=None)
+    end_utc = local_end.astimezone(_UTC).replace(tzinfo=None)
+    return start_utc, end_utc
+
+
+def _to_admin_tz(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=_UTC)
+    return value.astimezone(_ADMIN_UI_TIMEZONE)
+
+
+def _fmt_admin_dt(
+    value: Optional[datetime],
+    *,
+    fmt: str = "%Y-%m-%d %H:%M",
+    include_zone: bool = False,
+) -> str:
+    local_value = _to_admin_tz(value)
+    if local_value is None:
+        return "—"
+    rendered = local_value.strftime(fmt)
+    if include_zone:
+        rendered = f"{rendered} {local_value.tzname()}"
+    return rendered
 
 
 def admin_ui_auth_redirect_response(
@@ -634,7 +676,7 @@ def _push_summary_markup(summary: dict[str, Any] | None, *, eligible: bool) -> s
     else:
         last_tone = "blue"
 
-    timestamp = last.created_at.strftime("%m-%d %H:%M") if last.created_at else "—"
+    timestamp = _fmt_admin_dt(last.created_at, fmt="%m-%d %H:%M")
     badges = " ".join(
         [
             _badge(f"{summary['total']} sent", "blue"),
@@ -788,13 +830,12 @@ def ui_dashboard(
 
     # ── Date selection ────────────────────────────────────────────────────
     try:
-        selected_date = date.fromisoformat(day) if day else date.today()
+        selected_date = date.fromisoformat(day) if day else _admin_today()
     except ValueError:
-        selected_date = date.today()
+        selected_date = _admin_today()
 
     day_str = selected_date.isoformat()
-    day_start = datetime.combine(selected_date, datetime.min.time())
-    day_end = day_start + timedelta(days=1)
+    day_start, day_end = _admin_day_bounds(selected_date)
     now = datetime.utcnow()
     window_start = now - timedelta(days=7)
     video_supply = compute_video_supply_metrics(db)
@@ -814,7 +855,7 @@ def ui_dashboard(
         return f"{round(float(value), 1)}h"
 
     def _fmt_dt(value: Optional[datetime]) -> str:
-        return value.strftime("%Y-%m-%d %H:%M UTC") if value else "—"
+        return _fmt_admin_dt(value, include_zone=True)
 
     def _health_color(state: str) -> str:
         return {
@@ -1444,7 +1485,7 @@ def ui_dashboard(
     # Date nav
     prev_day = (selected_date - timedelta(days=1)).isoformat()
     next_day = (selected_date + timedelta(days=1)).isoformat()
-    is_today = selected_date == date.today()
+    is_today = selected_date == _admin_today()
 
     body = f"""
     <section class="mb-8 flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
@@ -2162,6 +2203,8 @@ def ui_review_queue(
 
     start_day_value = parsed_start_day.isoformat() if parsed_start_day else ""
     end_day_value = parsed_end_day.isoformat() if parsed_end_day else ""
+    start_at = parsed_start_day and _admin_day_bounds(parsed_start_day)[0]
+    end_at = parsed_end_day and _admin_day_bounds(parsed_end_day)[1]
 
     items, total = repo.list_candidate_queue(
         content_type=type or None,
@@ -2170,6 +2213,8 @@ def ui_review_queue(
         min_signal_hits=min_signal_hits,
         start_day=parsed_start_day,
         end_day=parsed_end_day,
+        start_at=start_at,
+        end_at=end_at,
         curation_status=status_filter,
         include_suppressed=include_suppressed,
         sort_by=sort_by,
@@ -2191,6 +2236,8 @@ def ui_review_queue(
             min_signal_hits=min_signal_hits,
             start_day=parsed_start_day,
             end_day=parsed_end_day,
+            start_at=start_at,
+            end_at=end_at,
             curation_status=status_filter,
             include_suppressed=include_suppressed,
             sort_by=sort_by,
@@ -2319,9 +2366,9 @@ def ui_review_queue(
     mobile_cards_html = ""
     for item in items:
         score = f"{item.promotion_score:.3f}" if item.promotion_score else "—"
-        published = item.published_at.strftime("%m-%d %H:%M") if item.published_at else "—"
+        published = _fmt_admin_dt(item.published_at, fmt="%m-%d %H:%M")
         first_seen = getattr(item, "candidate_first_seen_at", None)
-        first_seen_str = first_seen.strftime("%m-%d %H:%M") if first_seen else "—"
+        first_seen_str = _fmt_admin_dt(first_seen, fmt="%m-%d %H:%M")
         discovered_label = _esc(getattr(item, "discovered_via", None) or "—")
         signal_hits = str(getattr(item, "signal_hits", 0) or 0)
         source_label = _esc(item.source or "—")
@@ -2446,18 +2493,12 @@ def ui_review_queue(
         selected_score = (
             f"{selected_item.promotion_score:.4f}" if selected_item.promotion_score else "—"
         )
-        selected_pub = (
-            selected_item.published_at.strftime("%Y-%m-%d %H:%M")
-            if selected_item.published_at
-            else "—"
-        )
+        selected_pub = _fmt_admin_dt(selected_item.published_at)
         selected_first_seen = getattr(selected_item, "candidate_first_seen_at", None)
-        selected_first_seen_str = (
-            selected_first_seen.strftime("%Y-%m-%d %H:%M") if selected_first_seen else "—"
-        )
+        selected_first_seen_str = _fmt_admin_dt(selected_first_seen)
         selected_actions_rows = ""
         for action in selected_actions:
-            ts = action.created_at.strftime("%m-%d %H:%M") if action.created_at else "—"
+            ts = _fmt_admin_dt(action.created_at, fmt="%m-%d %H:%M")
             selected_actions_rows += f"""
             <tr class="border-b border-gray-100">
               <td class="px-2 py-1.5 text-xs text-gray-500 whitespace-nowrap">{ts}</td>
@@ -2889,6 +2930,9 @@ def ui_content_list(
             parsed_day = date.fromisoformat(day)
         except ValueError:
             pass
+    day_start = day_end = None
+    if parsed_day is not None:
+        day_start, day_end = _admin_day_bounds(parsed_day)
 
     supp = None
     if suppressed == "true":
@@ -2910,6 +2954,8 @@ def ui_content_list(
 
     items, total = repo.list_content(
         day=parsed_day,
+        day_start=day_start,
+        day_end=day_end,
         content_type=type,
         search_text=q,
         source=source,
@@ -3035,7 +3081,7 @@ def ui_content_list(
         if not (getattr(i, "image_url", None) or "").strip():
             badges += _badge("no image", "gray") + " "
 
-        pub = i.published_at.strftime("%m-%d %H:%M") if i.published_at else "—"
+        pub = _fmt_admin_dt(i.published_at, fmt="%m-%d %H:%M")
         readiness_reason_code = (getattr(i, "readiness_reason", None) or "").strip()
         readiness_reason_detail = (
             describe_readiness_reason(readiness_reason_code) if readiness_reason_code else ""
@@ -3288,8 +3334,8 @@ def ui_content_detail(
     if (item.editorial_boost or 0) > 0:
         badges += _badge(f"boost {item.editorial_boost}", "purple") + " "
 
-    pub = item.published_at.strftime("%Y-%m-%d %H:%M") if item.published_at else "—"
-    created = item.created_at.strftime("%Y-%m-%d %H:%M") if item.created_at else "—"
+    pub = _fmt_admin_dt(item.published_at)
+    created = _fmt_admin_dt(item.created_at)
 
     def _row(label: str, val: str) -> str:
         return f"""<tr class="border-b border-gray-100">
@@ -3373,7 +3419,7 @@ def ui_content_detail(
 
     push_log_rows = ""
     for log in push_logs:
-        ts = log.created_at.strftime("%Y-%m-%d %H:%M") if log.created_at else "—"
+        ts = _fmt_admin_dt(log.created_at)
         delivered = f"{log.success_count}/{log.audience_count}"
         failures = str(log.failure_count or 0)
         invalid = str(log.invalid_token_count or 0)
@@ -3388,7 +3434,7 @@ def ui_content_detail(
 
     actions_rows = ""
     for a in actions:
-        ts = a.created_at.strftime("%Y-%m-%d %H:%M") if a.created_at else "—"
+        ts = _fmt_admin_dt(a.created_at)
         actions_rows += f"""<tr class="border-b border-gray-100 hover:bg-gray-50">
           <td class="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{ts}</td>
           <td class="px-3 py-2">{_badge(a.action_type, "blue")}</td>
@@ -3414,7 +3460,7 @@ def ui_content_detail(
           {_row("Curation status", curation_badge)}
           {_row("Readiness", _readiness_badge(item))}
           {_row("Readiness reason", _esc(describe_readiness_reason(getattr(item, "readiness_reason", None))))}
-          {_row("Ready at", item.ready_at.strftime("%Y-%m-%d %H:%M") if getattr(item, "ready_at", None) else "—")}
+          {_row("Ready at", _fmt_admin_dt(getattr(item, "ready_at", None)))}
           {_row("Promotion score", f"{item.promotion_score:.4f}" if getattr(item, "promotion_score", None) else "—")}
           {_row("Promotion reason", _promotion_reason_markup(item))}
           {_row("Discovered via", _esc(getattr(item, "discovered_via", None) or "—"))}
