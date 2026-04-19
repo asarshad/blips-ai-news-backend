@@ -103,6 +103,79 @@ def test_sync_content_readiness_queues_ai_summary_when_flag_enabled(monkeypatch)
     assert outbox_rows[0].content_item_id == item.id
 
 
+def test_sync_content_readiness_queues_video_ai_summary_when_flag_enabled(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.VIDEO,
+        source="Example Channel",
+        source_url="https://example.com/watch?v=123",
+        video_url="https://example.com/watch?v=123",
+        published_at=_recent_dt(hours_ago=2),
+        title="Promoted video awaiting summary",
+        description=("Video details about queues and retries. " * 20).strip(),
+        curation_status=ContentStatus.PROMOTED,
+        created_at=_recent_dt(hours_ago=1, minutes_ago=55),
+        updated_at=_recent_dt(hours_ago=1, minutes_ago=55),
+    )
+    db.add(item)
+    db.commit()
+
+    monkeypatch.setattr(
+        "app.services.content_readiness.feature_flags.is_enabled",
+        lambda feature: feature == "event_driven_ai",
+    )
+
+    result = sync_content_readiness(db, item)
+    db.commit()
+
+    outbox_rows = db.query(ContentEventOutbox).all()
+
+    assert result.current_status.value == "PENDING"
+    assert result.reason == "awaiting_video_ai_processing"
+    assert len(outbox_rows) == 1
+    assert outbox_rows[0].event_type == content_ai_service.CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE
+    assert outbox_rows[0].content_item_id == item.id
+
+
+def test_sync_content_readiness_does_not_queue_reel_ai_summary_when_flag_enabled(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.REEL,
+        source="Example Channel",
+        source_url="https://www.youtube.com/shorts/abc123",
+        video_url="https://www.youtube.com/shorts/abc123",
+        published_at=_recent_dt(hours_ago=2),
+        title="Promoted reel",
+        curation_status=ContentStatus.PROMOTED,
+        created_at=_recent_dt(hours_ago=1, minutes_ago=55),
+        updated_at=_recent_dt(hours_ago=1, minutes_ago=55),
+    )
+    db.add(item)
+    db.commit()
+
+    monkeypatch.setattr(
+        "app.services.content_readiness.feature_flags.is_enabled",
+        lambda feature: feature == "event_driven_ai",
+    )
+
+    result = sync_content_readiness(db, item)
+    db.commit()
+
+    outbox_rows = db.query(ContentEventOutbox).all()
+
+    assert result.current_status.value == "READY"
+    assert result.reason == "reel_ready"
+    assert [row.event_type for row in outbox_rows] == ["content.ready"]
+
+
 def test_process_content_ai_summary_request_skips_already_processed_item():
     engine = create_engine("sqlite:///:memory:")
     _create_test_tables(engine)

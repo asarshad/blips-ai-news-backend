@@ -45,41 +45,91 @@ def _effective_llm_call_cap() -> int:
     return max(MAX_LLM_CALLS_PER_RUN, int(settings.ARTICLE_AI_PRIORITY_MAX_LLM_CALLS_PER_RUN))
 
 
+def _normalize_retry_batch(batch) -> list:
+    if isinstance(batch, list):
+        return batch
+    if isinstance(batch, tuple):
+        return list(batch)
+    return []
+
+
 def _build_ai_retry_worklist(content_repo, *, item_limit: int):
-    """Prioritize recent promoted article backlog before other maintenance."""
+    """Prioritize recent promoted article/video backlog before other maintenance."""
     if hasattr(content_repo, "get_recent_promoted_articles_pending_ai"):
-        recent_article_candidates = content_repo.get_recent_promoted_articles_pending_ai(
-            limit=max(item_limit * 3, item_limit),
-            lookback_days=settings.ARTICLE_MAINTENANCE_LOOKBACK_DAYS,
+        recent_article_candidates = _normalize_retry_batch(
+            content_repo.get_recent_promoted_articles_pending_ai(
+                limit=max(item_limit * 3, item_limit),
+                lookback_days=settings.ARTICLE_MAINTENANCE_LOOKBACK_DAYS,
+            )
         )
     else:
-        recent_article_candidates = content_repo.get_unprocessed_by_ai(
-            limit=max(item_limit * 3, item_limit),
-            hours_back=settings.ARTICLE_MAINTENANCE_LOOKBACK_DAYS * 24,
+        recent_article_candidates = _normalize_retry_batch(
+            content_repo.get_unprocessed_by_ai(
+                limit=max(item_limit * 3, item_limit),
+                hours_back=settings.ARTICLE_MAINTENANCE_LOOKBACK_DAYS * 24,
+            )
         )
     items = _select_retry_eligible_articles(recent_article_candidates, limit=item_limit)
 
     seen_ids = {int(item.id) for item in items if getattr(item, "id", None) is not None}
     remaining_slots = max(0, item_limit - len(items))
+
+    if remaining_slots:
+        if hasattr(content_repo, "get_recent_promoted_videos_pending_ai"):
+            recent_video_candidates = _normalize_retry_batch(
+                content_repo.get_recent_promoted_videos_pending_ai(
+                    limit=max(remaining_slots * 3, remaining_slots),
+                    lookback_hours=168,
+                )
+            )
+        else:
+            recent_video_candidates = [
+                item
+                for item in _normalize_retry_batch(
+                    content_repo.get_unprocessed_by_ai(
+                        limit=max(remaining_slots * 3, remaining_slots),
+                        hours_back=168,
+                    )
+                )
+                if getattr(item, "type", None) == ContentType.VIDEO
+            ]
+
+        for item in recent_video_candidates:
+            item_id = getattr(item, "id", None)
+            if item_id is not None and int(item_id) in seen_ids:
+                continue
+            items.append(item)
+            if item_id is not None:
+                seen_ids.add(int(item_id))
+            if len(items) >= item_limit:
+                return items
+
+    remaining_slots = max(0, item_limit - len(items))
     if remaining_slots:
         for batch in (
-            content_repo.get_articles_with_short_summaries(
-                limit=remaining_slots,
-                hours_back=settings.ARTICLE_MAINTENANCE_LOOKBACK_DAYS * 24,
-                max_words=settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS,
+            _normalize_retry_batch(
+                content_repo.get_articles_with_short_summaries(
+                    limit=remaining_slots,
+                    hours_back=settings.ARTICLE_MAINTENANCE_LOOKBACK_DAYS * 24,
+                    max_words=settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS,
+                )
             ),
-            content_repo.get_articles_with_long_summaries(
-                limit=remaining_slots,
-                hours_back=None,
-                min_words=settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS,
+            _normalize_retry_batch(
+                content_repo.get_articles_with_long_summaries(
+                    limit=remaining_slots,
+                    hours_back=None,
+                    min_words=settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS,
+                )
             ),
-            content_repo.get_videos_with_short_summaries(
-                limit=remaining_slots,
-                hours_back=168,
-                min_words=settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS,
+            _normalize_retry_batch(
+                content_repo.get_videos_with_short_summaries(
+                    limit=remaining_slots,
+                    hours_back=168,
+                    min_words=settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS,
+                )
             ),
         ):
-            for item in list(batch or []):
+            for item in batch:
                 item_id = getattr(item, "id", None)
                 if item_id is not None and int(item_id) in seen_ids:
                     continue
@@ -541,5 +591,4 @@ def _backfill_starter_answers(db: Session, llm_client, stats) -> None:
         except Exception as e:
             db.rollback()
             logger.warning(f"[ai_retry] Starter-answer backfill failed for {item.id}: {e}")
-
 

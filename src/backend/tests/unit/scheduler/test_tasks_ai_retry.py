@@ -433,6 +433,7 @@ def test_process_ai_summaries_manual_runs_even_when_fetch_news_is_active(monkeyp
         db = MagicMock()
         repo = MagicMock()
         repo.get_recent_promoted_articles_pending_ai.return_value = []
+        repo.get_recent_promoted_videos_pending_ai.return_value = []
         repo.get_articles_with_short_summaries.return_value = []
         repo.get_articles_with_long_summaries.return_value = []
         repo.get_videos_with_short_summaries.return_value = []
@@ -454,6 +455,7 @@ def test_process_ai_summaries_manual_runs_even_when_fetch_news_is_active(monkeyp
         tasks_ai_retry.process_ai_summaries()
 
         repo.get_recent_promoted_articles_pending_ai.assert_called_once()
+        repo.get_recent_promoted_videos_pending_ai.assert_called_once()
     finally:
         mark_job_finished(FETCH_NEWS_JOB, fetch_started_at, success=False)
 
@@ -721,6 +723,78 @@ def test_process_ai_summaries_refreshes_caches_after_valid_video_summary(monkeyp
     repo.mark_ai_processed.assert_called_once()
     assert invalidation_calls == ["invalidate"]
     assert refresh_calls == [[57]]
+
+
+def test_process_ai_summaries_processes_recent_promoted_videos_pending_ai(monkeypatch):
+    db = MagicMock()
+    repo = MagicMock()
+    item = SimpleNamespace(
+        id=58,
+        type=ContentType.VIDEO,
+        content_text="A detailed breakdown of new GPU launches, benchmarks, and driver changes.",
+        description=None,
+        title="Fresh GPU launch coverage",
+        topics=["video"],
+        conversation_starters=None,
+        summary=None,
+        ai_processed=False,
+        tech_relevance=None,
+        tech_relevance_confidence=None,
+        tech_relevance_reason=None,
+        is_mixed_roundup=None,
+    )
+    repo.get_recent_promoted_articles_pending_ai.return_value = []
+    repo.get_recent_promoted_videos_pending_ai.return_value = [item]
+    repo.get_articles_with_short_summaries.return_value = []
+    repo.get_articles_with_long_summaries.return_value = []
+    repo.get_videos_with_short_summaries.return_value = []
+
+    llm_client = MagicMock()
+    llm_client.is_configured.return_value = True
+    llm_client.summarize_video.return_value = SimpleNamespace(
+        summary=(
+            "NVIDIA and AMD both introduced new GPU updates, with the video focusing on benchmark "
+            "movement, performance tradeoffs, launch timing, driver maturity, cooling behavior, "
+            "frame-generation support, and what buyers should weigh before upgrading this cycle. "
+            "It also explains how early reviews compare against vendor claims and where the "
+            "software stack still needs work before mainstream adoption."
+        ),
+        conversation_starters={"starters": ["Which launch detail matters most here?"]},
+        tech_relevance="primary",
+        tech_relevance_confidence=0.95,
+        tech_relevance_reason="The story is entirely about GPU hardware and software updates.",
+        is_mixed_roundup=False,
+    )
+
+    monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
+    monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
+    monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: _FakeStats())
+    monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "app.services.tiered_feed_service.invalidate_tiered_feed_cache",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "app.services.playlist_service.refresh_cached_playlist_items",
+        lambda *_a, **_k: {},
+    )
+    monkeypatch.setattr(
+        "app.scheduler.tasks_content_events.run_content_event_dispatch_job",
+        lambda: None,
+    )
+    monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
+    monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
+    monkeypatch.setattr(tasks_ai_retry.time, "sleep", lambda *_args, **_kwargs: None)
+
+    tasks_ai_retry.process_ai_summaries()
+
+    repo.get_recent_promoted_videos_pending_ai.assert_called_once()
+    repo.mark_ai_processed.assert_called_once_with(
+        58,
+        summary=llm_client.summarize_video.return_value.summary,
+        topics=["video"],
+        commit=False,
+    )
 
 
 def test_process_ai_summaries_skips_maintenance_for_immediate_runs(monkeypatch):

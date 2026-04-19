@@ -157,6 +157,28 @@ class ContentItemRepository(BaseRepository[ContentItem]):
             .all()
         )
 
+    def get_recent_promoted_videos_pending_ai(
+        self,
+        *,
+        limit: int = 100,
+        lookback_hours: int = 168,
+    ) -> List[ContentItem]:
+        """Return recent promoted videos that still need AI processing."""
+        cutoff = datetime.utcnow() - timedelta(hours=max(1, int(lookback_hours)))
+        return (
+            self.db.query(ContentItem)
+            .filter(
+                ContentItem.type == ContentType.VIDEO,
+                ContentItem.ai_processed.is_(False),
+                ContentItem.is_suppressed.is_(False),
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.published_at >= cutoff,
+            )
+            .order_by(desc(ContentItem.published_at), desc(ContentItem.id))
+            .limit(max(limit, 1))
+            .all()
+        )
+
     def get_articles_with_short_summaries(
         self,
         *,
