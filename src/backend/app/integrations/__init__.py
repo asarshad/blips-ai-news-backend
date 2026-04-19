@@ -11,6 +11,7 @@ __all__ = [
     "ChatMessage",
     "ChatResponse",
     "SummaryResult",
+    "BlipsTechRelevanceResult",
     "RSSClient",
     "YouTubeClient",
 ]
@@ -18,8 +19,16 @@ __all__ = [
 
 def __getattr__(name):
     """Lazily resolve integration exports to avoid package cycles."""
-    if name in {"ChatMessage", "ChatResponse", "LLMClient", "SummaryResult", "get_llm_client"}:
+    if name in {
+        "ChatMessage",
+        "ChatResponse",
+        "LLMClient",
+        "SummaryResult",
+        "BlipsTechRelevanceResult",
+        "get_llm_client",
+    }:
         from app.integrations.llm_client import (
+            BlipsTechRelevanceResult,
             ChatMessage,
             ChatResponse,
             LLMClient,
@@ -32,6 +41,7 @@ def __getattr__(name):
             "ChatResponse": ChatResponse,
             "LLMClient": LLMClient,
             "SummaryResult": SummaryResult,
+            "BlipsTechRelevanceResult": BlipsTechRelevanceResult,
             "get_llm_client": get_llm_client,
         }[name]
     if name == "OpenAIClient":

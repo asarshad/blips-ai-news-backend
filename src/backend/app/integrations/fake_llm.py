@@ -109,6 +109,9 @@ class FakeLLMClient(BaseLLMClient):
         if "image_url:" in combined and "editorial image url" in combined:
             return self._generate_image_extraction_response(user_message)
 
+        if '"is_blips_tech_relevant"' in combined:
+            return self._generate_blips_tech_relevance_response(user_message)
+
         # Detect summarization request
         if "summary" in combined or "summarize" in combined:
             return self._generate_summary_response(user_message)
@@ -215,6 +218,43 @@ TAGS: technology, innovation, ai, software, testing"""
             )
             for prompt in prompts
         }
+        return json.dumps(payload)
+
+    def _generate_blips_tech_relevance_response(self, user_message: str) -> str:
+        """Generate deterministic Blips news relevance classification JSON."""
+        combined = user_message.lower()
+        if any(
+            keyword in combined
+            for keyword in (
+                "apple",
+                "google",
+                "microsoft",
+                "meta",
+                "amazon",
+                "openai",
+                "nvidia",
+                "chip",
+                "semiconductor",
+                "ai ",
+                "cloud",
+                "app store",
+                "antitrust",
+                "privacy",
+                "tiktok",
+                "social media",
+            )
+        ):
+            payload = {
+                "is_blips_tech_relevant": "yes",
+                "confidence": 0.92,
+                "reason": "Directly affects a major tech company, platform, or core technology market.",
+            }
+        else:
+            payload = {
+                "is_blips_tech_relevant": "no",
+                "confidence": 0.9,
+                "reason": "General news item with no meaningful tech company, product, or policy angle.",
+            }
         return json.dumps(payload)
 
     def _generate_chat_response(self, user_message: str) -> str:

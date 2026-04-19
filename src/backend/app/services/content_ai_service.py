@@ -254,6 +254,30 @@ def _process_article_summary(
         logger.warning("[content_ai] invalid article summary content_id=%s", item.id)
         return False
 
+    if settings.ARTICLE_TECH_CLASSIFIER_ENABLED:
+        try:
+            tech = llm_client.classify_blips_tech_relevance(
+                title=item.title or "",
+                summary=summary,
+                source=item.source or "",
+                url=item.source_url or None,
+            )
+            item.tech_relevance = tech.is_blips_tech_relevant
+            item.tech_relevance_confidence = tech.confidence
+            item.tech_relevance_reason = tech.reason
+            logger.info(
+                "[content_ai] article tech relevance content_id=%s relevant=%s confidence=%.2f",
+                item.id,
+                tech.is_blips_tech_relevant,
+                tech.confidence,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[content_ai] article tech relevance classification failed content_id=%s: %s",
+                item.id,
+                exc,
+            )
+
     content_repo.mark_ai_processed(
         item.id,
         summary=summary,

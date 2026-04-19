@@ -47,6 +47,7 @@ _IMAGE_URL_RESPONSE_RE = re.compile(
 )
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 _VIDEO_TECH_RELEVANCE_VALUES = {"none", "incidental", "meaningful", "primary"}
+_BLIPS_TECH_RELEVANCE_VALUES = {"yes", "no"}
 _VIDEO_CLASSIFIER_PAYLOAD_MARKERS = (
     '"tech_relevance"',
     '"confidence"',
@@ -103,6 +104,22 @@ def normalize_video_classifier_confidence(value: object) -> Optional[float]:
 
 def normalize_video_classifier_reason(value: Optional[str]) -> Optional[str]:
     """Store compact, user-readable classifier reasons."""
+    cleaned = " ".join((value or "").split()).strip()
+    if not cleaned:
+        return None
+    return cleaned[:255]
+
+
+def normalize_blips_tech_relevance(value: Optional[str]) -> Optional[str]:
+    """Normalize the binary Blips news relevance label."""
+    normalized = str(value or "").strip().lower()
+    if normalized in _BLIPS_TECH_RELEVANCE_VALUES:
+        return normalized
+    return None
+
+
+def normalize_blips_tech_reason(value: Optional[str]) -> Optional[str]:
+    """Store compact, user-readable Blips tech relevance reasons."""
     cleaned = " ".join((value or "").split()).strip()
     if not cleaned:
         return None
@@ -205,6 +222,15 @@ class SummaryResult:
     tech_relevance_confidence: Optional[float] = None
     tech_relevance_reason: Optional[str] = None
     is_mixed_roundup: Optional[bool] = None
+
+
+@dataclass
+class BlipsTechRelevanceResult:
+    """Result from Blips tech-news relevance classification."""
+
+    is_blips_tech_relevant: str
+    confidence: float
+    reason: str
 
 
 class BaseLLMClient(ABC):
@@ -835,6 +861,124 @@ Return JSON only. Do not wrap it in markdown.
 
         except (RuntimeError, ValueError) as e:
             logger.error(f"Video summarization error: {str(e)}")
+            raise
+
+    def classify_blips_tech_relevance(
+        self,
+        *,
+        title: str,
+        summary: str,
+        source: str,
+        url: Optional[str] = None,
+    ) -> BlipsTechRelevanceResult:
+        """Classify whether a news item is relevant to a Blips tech-news audience."""
+        if not self.is_configured():
+            raise RuntimeError(f"{self.get_provider()} API key is not configured")
+
+        url_line = f"URL: {url}\n" if (url or "").strip() else ""
+        prompt = f"""
+You are classifying whether a news item is relevant for the audience of Blips, a tech-news product.
+
+Your job is NOT to decide whether the story is "pure tech."
+Your job is to decide whether the story is relevant to a tech-news audience.
+
+Classification target:
+- is_blips_tech_relevant: yes | no
+
+Decision standard:
+Be permissive, not strict.
+
+Include stories that are directly about technology OR meaningfully relevant to a tech-news audience, including:
+- major tech companies
+- AI companies, models, chips, cloud, software, hardware
+- social platforms, app stores, devices, internet infrastructure
+- cybersecurity, privacy, developer ecosystems, open source
+- regulation, litigation, antitrust, policy, bans, export controls, labor actions, or legislation affecting tech companies, platforms, AI, semiconductors, privacy, or internet services
+- geopolitics or business news when it materially affects semiconductors, supply chains, cloud providers, platforms, telecom, or major tech firms
+- earnings, M&A, leadership changes, strategy shifts, or market moves involving major technology companies
+
+Exclude stories when the connection to tech is weak, incidental, or nonexistent, including:
+- general world news with no meaningful tech angle
+- politics, crime, war, protests, sports, entertainment, or celebrity news with no direct impact on tech companies, platforms, products, infrastructure, or regulation
+- business news unrelated to technology or tech-adjacent industries
+
+Important rule:
+If a reasonable tech-news reader would likely care because the story affects tech companies, platforms, AI, chips, software, hardware, privacy, or internet regulation, classify it as yes.
+
+Be especially careful not to reject:
+- lawsuits against major tech companies
+- antitrust or regulatory actions involving platforms, AI, chips, app stores, or privacy
+- government policy affecting semiconductors, export controls, cloud, telecom, or social media
+- geopolitics that materially affects the tech supply chain
+- business or financial stories centered on major tech companies
+
+Only classify as no when the tech relevance is clearly weak or absent.
+
+Input:
+Title: {title}
+Summary: {summary}
+Source: {source}
+{url_line}
+Output:
+Return JSON only in this exact format:
+{{
+  "is_blips_tech_relevant": "yes" | "no",
+  "confidence": 0.0-1.0,
+  "reason": "short explanation"
+}}
+
+Reason requirements:
+- Keep it brief and concrete
+- Mention the tech angle if yes
+- Mention why the tech connection is weak/absent if no
+
+Return JSON only. Do not wrap it in markdown.
+"""
+
+        try:
+            response = self.chat(
+                messages=[
+                    ChatMessage(
+                        role="system",
+                        content=(
+                            "You classify whether a news item is relevant to a tech-news audience. "
+                            "Be permissive and return JSON only."
+                        ),
+                    ),
+                    ChatMessage(role="user", content=prompt),
+                ],
+                max_tokens=180,
+                temperature=0.1,
+            )
+
+            text = response.content.strip()
+            if not text:
+                raise ValueError("Empty response returned from LLM")
+
+            try:
+                payload = json.loads(_strip_json_fence(text))
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "Malformed JSON returned from LLM for Blips tech relevance classification"
+                ) from exc
+
+            if not isinstance(payload, dict):
+                raise ValueError("Blips tech relevance classifier returned a non-object payload")
+
+            relevance = normalize_blips_tech_relevance(payload.get("is_blips_tech_relevant"))
+            confidence = normalize_video_classifier_confidence(payload.get("confidence"))
+            reason = normalize_blips_tech_reason(payload.get("reason"))
+
+            if relevance is None or confidence is None or reason is None:
+                raise ValueError("Invalid Blips tech relevance classifier payload")
+
+            return BlipsTechRelevanceResult(
+                is_blips_tech_relevant=relevance,
+                confidence=confidence,
+                reason=reason,
+            )
+        except (RuntimeError, ValueError) as e:
+            logger.error(f"Blips tech relevance classification error: {str(e)}")
             raise
 
     def extract_article_image_url(

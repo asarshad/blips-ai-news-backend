@@ -675,6 +675,15 @@ def classify_promotion_block(
         if story_importance < 0.20 and tech_score < 0.38:
             return "weak_tech_signal_video"
 
+    if content_type == ContentType.ARTICLE and settings.ARTICLE_TECH_CLASSIFIER_ENABLED:
+        tech_relevance = _safe_text(getattr(item, "tech_relevance", None))
+        confidence = _safe_float(getattr(item, "tech_relevance_confidence", None), default=-1.0)
+        if (
+            tech_relevance == "no"
+            and confidence >= min(max(0.0, float(settings.ARTICLE_TECH_NONE_BLOCK_CONFIDENCE)), 0.50)
+        ):
+            return "llm_non_tech_article"
+
     return None
 
 

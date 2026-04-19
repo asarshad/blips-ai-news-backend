@@ -138,6 +138,55 @@ def test_summarize_video_rejects_malformed_json_classifier_payload():
         client.summarize_video("Apple's 2026 Macs have LEAKED!", "New Mac rumors and performance claims")
 
 
+def test_classify_blips_tech_relevance_parses_structured_payload():
+    from app.integrations.llm_client import LLMClient
+
+    client = LLMClient(provider="openai", api_key="sk-test-fake-key-12345678901234567890")
+    client.chat = Mock(
+        return_value=SimpleNamespace(
+            content="""{
+  "is_blips_tech_relevant": "yes",
+  "confidence": 0.94,
+  "reason": "Antitrust action directly affects a major tech platform and app ecosystem."
+}"""
+        )
+    )
+
+    result = client.classify_blips_tech_relevance(
+        title="Apple faces new antitrust lawsuit over App Store rules",
+        summary="Regulators and developers say Apple’s store policies harm competition.",
+        source="Reuters",
+        url="https://example.com/apple-antitrust",
+    )
+
+    assert result.is_blips_tech_relevant == "yes"
+    assert result.confidence == 0.94
+    assert result.reason == "Antitrust action directly affects a major tech platform and app ecosystem."
+
+
+def test_classify_blips_tech_relevance_rejects_malformed_json_payload():
+    import pytest
+
+    from app.integrations.llm_client import LLMClient
+
+    client = LLMClient(provider="openai", api_key="sk-test-fake-key-12345678901234567890")
+    client.chat = Mock(
+        return_value=SimpleNamespace(
+            content='{"is_blips_tech_relevant":"yes","confidence":0.88,"reason":"Directly affects a major tech company"'
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Malformed JSON returned from LLM for Blips tech relevance classification",
+    ):
+        client.classify_blips_tech_relevance(
+            title="US expands chip export restrictions to China",
+            summary="New rules may affect semiconductor firms and global supply chains.",
+            source="AP",
+        )
+
+
 def test_openai_chat_passes_previous_response_id_to_responses_api():
     from app.integrations.llm_client import ChatMessage, OpenAILLMClient
 
