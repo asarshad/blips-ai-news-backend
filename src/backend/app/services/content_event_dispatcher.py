@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import sys
 from datetime import datetime, timedelta
 
 from sqlalchemy import and_, or_
@@ -31,42 +29,6 @@ from app.services.push_service import PushNotificationService
 from app.services.tiered_feed_service import invalidate_tiered_feed_cache
 
 logger = get_logger(__name__)
-
-
-class _DeferredDispatch(Exception):
-    """Signal that an outbox event should be retried later without counting as a failure."""
-
-    def __init__(self, *, reason: str, delay_seconds: int) -> None:
-        super().__init__(reason)
-        self.reason = reason
-        self.delay_seconds = max(1, int(delay_seconds))
-
-
-def _promotion_fetch_deferral_seconds() -> int:
-    raw = os.getenv("CONTENT_PROMOTION_FETCH_DEFERRAL_SECONDS", "60")
-    try:
-        return max(1, int(raw))
-    except ValueError:
-        logger.warning(
-            "Invalid CONTENT_PROMOTION_FETCH_DEFERRAL_SECONDS=%r; defaulting to 60",
-            raw,
-        )
-        return 60
-
-
-def _is_fetch_news_active() -> bool:
-    """Check scheduler runtime state without importing the scheduler package."""
-    runtime_module = sys.modules.get("app.scheduler.runtime")
-    if runtime_module is None:
-        return False
-    fetch_news_job = getattr(runtime_module, "FETCH_NEWS_JOB", "fetch_news")
-    is_job_active = getattr(runtime_module, "is_job_active", None)
-    if not callable(is_job_active):
-        return False
-    try:
-        return bool(is_job_active(fetch_news_job))
-    except Exception:
-        return False
 
 
 class ContentEventDispatcher:
@@ -133,8 +95,6 @@ class ContentEventDispatcher:
 
     def _process_claimed(self, event_id: int) -> bool:
         error_message = "dispatch failed"
-        deferred: _DeferredDispatch | None = None
-        deferred_event_type = "unknown"
         with self._session_factory() as db:
             event = (
                 db.query(ContentEventOutbox)
@@ -146,7 +106,6 @@ class ContentEventDispatcher:
             )
             if event is None:
                 return False
-            deferred_event_type = getattr(event, "event_type", "unknown")
 
             try:
                 self._dispatch(event, db)
@@ -157,9 +116,6 @@ class ContentEventDispatcher:
                 event.updated_at = datetime.utcnow()
                 db.commit()
                 return True
-            except _DeferredDispatch as exc:
-                deferred = exc
-                db.rollback()
             except Exception as exc:
                 error_message = str(exc)
                 logger.warning(
@@ -169,27 +125,6 @@ class ContentEventDispatcher:
                     exc,
                 )
                 db.rollback()
-
-        if deferred is not None:
-            with self._session_factory() as db:
-                event = db.query(ContentEventOutbox).filter(ContentEventOutbox.id == event_id).first()
-                if event is None:
-                    return False
-                event.status = "pending"
-                event.locked_at = None
-                event.available_at = datetime.utcnow() + timedelta(seconds=deferred.delay_seconds)
-                event.last_error = None
-                event.attempt_count = max(0, int(event.attempt_count or 0) - 1)
-                event.updated_at = datetime.utcnow()
-                db.commit()
-            logger.info(
-                "Deferred content event %s (%s): %s; retrying in %ss",
-                event_id,
-                deferred_event_type,
-                deferred.reason,
-                deferred.delay_seconds,
-            )
-            return False
 
         with self._session_factory() as db:
             event = db.query(ContentEventOutbox).filter(ContentEventOutbox.id == event_id).first()
@@ -277,11 +212,6 @@ class ContentEventDispatcher:
         event: ContentEventOutbox,
         db: Session,
     ) -> None:
-        if _is_fetch_news_active():
-            raise _DeferredDispatch(
-                reason="fetch_news_active",
-                delay_seconds=_promotion_fetch_deferral_seconds(),
-            )
         payload = dict(event.payload or {})
         content_id = int(payload.get("content_id") or event.content_item_id)
         result = process_content_promotion_request(db, content_id=content_id)

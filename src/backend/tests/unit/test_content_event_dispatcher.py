@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime
 from types import SimpleNamespace
 
-import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
@@ -199,25 +198,7 @@ def test_dispatch_content_promotion_event_processes_one_content_item(monkeypatch
     dispatcher._dispatch_content_promotion_event(event, db)
 
     assert processed == [(db, 88)]
-
-
-def test_dispatch_content_promotion_event_defers_while_fetch_news_is_active(monkeypatch):
-    monkeypatch.setattr(dispatcher_module, "_is_fetch_news_active", lambda: True)
-
-    dispatcher = ContentEventDispatcher()
-    event = SimpleNamespace(
-        event_type=CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE,
-        content_item_id=88,
-        payload={"content_id": 88},
-    )
-
-    with pytest.raises(dispatcher_module._DeferredDispatch) as exc_info:
-        dispatcher._dispatch_content_promotion_event(event, object())
-
-    assert exc_info.value.reason == "fetch_news_active"
-
-
-def test_process_claimed_requeues_deferred_promotion_without_counting_failure(monkeypatch):
+def test_process_claimed_marks_promotion_processed(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     _create_test_tables(engine)
     SessionLocal = sessionmaker(bind=engine)
@@ -229,7 +210,7 @@ def test_process_claimed_requeues_deferred_promotion_without_counting_failure(mo
         source_url="https://example.com/deferred-promotion",
         canonical_url="https://example.com/deferred-promotion",
         published_at=datetime.utcnow(),
-        title="Deferred promotion",
+        title="Queued promotion",
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
@@ -249,18 +230,28 @@ def test_process_claimed_requeues_deferred_promotion_without_counting_failure(mo
     db.add(event)
     db.commit()
 
-    monkeypatch.setattr(dispatcher_module, "_is_fetch_news_active", lambda: True)
-    monkeypatch.setenv("CONTENT_PROMOTION_FETCH_DEFERRAL_SECONDS", "45")
+    processed = []
+    monkeypatch.setattr(
+        dispatcher_module,
+        "process_content_promotion_request",
+        lambda db, *, content_id: processed.append((db, content_id))
+        or {
+            "content_id": content_id,
+            "changed": True,
+            "skipped": False,
+            "promoted": True,
+            "promotion_score": 0.91,
+        },
+    )
 
     dispatcher = ContentEventDispatcher(session_factory=SessionLocal)
 
-    assert dispatcher._process_claimed(event.id) is False
+    assert dispatcher._process_claimed(event.id) is True
 
     refreshed = SessionLocal().get(ContentEventOutbox, event.id)
 
     assert refreshed is not None
-    assert refreshed.status == "pending"
+    assert refreshed.status == "processed"
+    assert processed and processed[0][1] == item.id
     assert refreshed.locked_at is None
-    assert refreshed.last_error is None
-    assert refreshed.attempt_count == 0
-    assert refreshed.available_at > datetime.utcnow()
+    assert refreshed.processed_at is not None

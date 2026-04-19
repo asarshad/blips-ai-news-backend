@@ -66,3 +66,41 @@ def test_operator_backfill_job_accepts_broader_payload(monkeypatch):
     assert captured["kwargs"]["limit"] == 50
     assert captured["kwargs"]["promoted_only"] is False
     assert captured["kwargs"]["readiness_reasons"] is None
+
+
+def test_operator_backfill_job_can_enqueue_pending_content_events(monkeypatch):
+    captured = {}
+
+    class _FakeSession:
+        def close(self):
+            captured["closed"] = True
+
+    monkeypatch.setattr(operator_backfill_job, "SessionLocal", lambda: _FakeSession())
+
+    def _fake_enqueue(db, **kwargs):
+        captured["db"] = db
+        captured["kwargs"] = kwargs
+        return {"job": "content_event_backfill", "queued": {"promotion": 3}}
+
+    monkeypatch.setattr(
+        operator_backfill_job,
+        "enqueue_pending_content_events",
+        _fake_enqueue,
+    )
+
+    result = operator_backfill_job.run(
+        {
+            "job": "content_event_backfill",
+            "lookback_days": 14,
+            "limit": 200,
+            "pending_only": False,
+        }
+    )
+
+    assert result == {"job": "content_event_backfill", "queued": {"promotion": 3}}
+    assert captured["kwargs"] == {
+        "lookback_days": 14,
+        "limit": 200,
+        "pending_only": False,
+    }
+    assert captured["closed"] is True
