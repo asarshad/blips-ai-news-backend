@@ -309,6 +309,63 @@ def test_content_list_shows_readiness_reason_in_status_column(monkeypatch):
     assert "does not yet have a usable verified image" in html
 
 
+def test_content_list_keeps_all_readiness_filter_selected(monkeypatch):
+    class _RepoWithPendingRow:
+        def __init__(self, db):
+            self.db = db
+
+        def list_content(self, **_kwargs):
+            item = type(
+                "Item",
+                (),
+                {
+                    "id": 7,
+                    "title": "Pending example",
+                    "canonical_url": "https://example.com/article",
+                    "source_url": "https://example.com/article",
+                    "curation_status": admin_ui.ContentStatus.PROMOTED,
+                    "is_suppressed": False,
+                    "manual_added": False,
+                    "editorial_boost": 0,
+                    "readiness_status": "PENDING",
+                    "readiness_reason": "missing_article_summary",
+                    "image_url": "https://example.com/image.jpg",
+                    "published_at": None,
+                    "promotion_score": 0.42,
+                    "discovered_via": "rss_ingestion",
+                    "signal_hits": 0,
+                    "type": admin_ui.ContentType.ARTICLE,
+                    "source": "Example",
+                },
+            )()
+            return [item], 1
+
+    monkeypatch.setattr(admin_ui, "EditorialRepository", _RepoWithPendingRow)
+    monkeypatch.setattr(admin_ui, "_push_log_summaries", lambda _db, _ids: {})
+
+    response = admin_ui.ui_content_list(
+        day=None,
+        type="ARTICLE",
+        q=None,
+        source=None,
+        suppressed=None,
+        manual_added=None,
+        has_image=None,
+        curation_status=None,
+        readiness_status=None,
+        readiness_reason=None,
+        sort_by="published_at",
+        page=1,
+        flash=None,
+        db=object(),
+        admin_key="secret",
+    )
+
+    html = response.body.decode("utf-8")
+    assert '<option value="" selected>All</option>' in html
+    assert '<option value="PENDING" selected>' not in html
+
+
 def test_review_queue_maps_vancouver_day_bounds(monkeypatch):
     _FakeRepo.last_list_args = None
     monkeypatch.setattr(admin_ui, "EditorialRepository", _FakeRepo)

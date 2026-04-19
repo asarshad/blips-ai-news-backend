@@ -3086,9 +3086,9 @@ def ui_content_list(
         readiness_reason_detail = (
             describe_readiness_reason(readiness_reason_code) if readiness_reason_code else ""
         )
-        readiness_status = (getattr(i, "readiness_status", "") or "PENDING").strip().upper()
+        item_readiness_status = (getattr(i, "readiness_status", "") or "PENDING").strip().upper()
         status_detail_html = ""
-        if readiness_status != "READY" and readiness_reason_code:
+        if item_readiness_status != "READY" and readiness_reason_code:
             status_detail_html = (
                 f'<div class="mt-1 space-y-0.5">'
                 f'<div class="text-[11px] font-mono text-slate-500">{_esc(readiness_reason_code)}</div>'
