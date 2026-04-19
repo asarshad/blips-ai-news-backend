@@ -734,7 +734,12 @@ class ArticleHydrationService:
         image_url = item.image_url
         # Source-branded placeholders are intentional fallbacks — don't treat
         # them as "generic" and keep re-queueing them for recovery.
+        # Exception: relative placeholder URLs (no scheme/host) need to be
+        # upgraded to absolute ones once API_PUBLIC_BASE_URL is configured.
         if is_placeholder_image_url(image_url):
+            is_relative = bool(image_url) and not (image_url or "").startswith("http")
+            if is_relative:
+                return True
             return not (item.canonical_url or "").strip()
 
         has_missing_image = not (image_url or "").strip()

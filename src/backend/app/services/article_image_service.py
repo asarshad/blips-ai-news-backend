@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.article_hydration import (
@@ -113,7 +113,14 @@ def repair_article_image_metadata(
     if promoted_only:
         query = query.filter(ContentItem.curation_status == ContentStatus.PROMOTED)
     if readiness_reasons:
-        query = query.filter(ContentItem.readiness_reason.in_(tuple(readiness_reasons)))
+        # Also pick up READY articles that have a relative placeholder URL (no scheme/host)
+        # so they get upgraded to absolute URLs once API_PUBLIC_BASE_URL is configured.
+        query = query.filter(
+            or_(
+                ContentItem.readiness_reason.in_(tuple(readiness_reasons)),
+                ContentItem.image_url.like("/api/v1/placeholder/%"),
+            )
+        )
 
     recent_items = query.order_by(ContentItem.published_at.desc(), ContentItem.id.desc()).all()
 
