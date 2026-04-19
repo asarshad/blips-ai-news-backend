@@ -114,7 +114,7 @@ def test_process_content_promotion_request_skips_non_candidate_item():
     assert result["reason"] == "not_candidate_or_suppressed"
 
 
-def test_process_content_promotion_request_runs_type_scoped_promotion(monkeypatch):
+def test_process_content_promotion_request_runs_targeted_promotion(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     _create_test_tables(engine)
     SessionLocal = sessionmaker(bind=engine)
@@ -136,21 +136,22 @@ def test_process_content_promotion_request_runs_type_scoped_promotion(monkeypatc
 
     calls = []
 
-    class _FakePromotionResult:
-        promoted_ids = [item.id]
-        errors = []
-
     class _FakePromotionService:
         def __init__(self, _db):
             self._db = _db
 
-        def run_promotion_job(self, *, content_types=None):
-            calls.append(content_types)
+        def evaluate_candidate_item(self, target):
+            calls.append(target.id)
             target = self._db.get(ContentItem, item.id)
             target.curation_status = ContentStatus.PROMOTED
             target.promotion_score = 0.84
             target.readiness_status = "PENDING"
-            return _FakePromotionResult()
+            return {
+                "promoted": True,
+                "candidate_rank": 1,
+                "candidate_count": 1,
+                "reason": "promoted",
+            }
 
     monkeypatch.setattr(content_promotion_service, "PromotionService", _FakePromotionService)
 
@@ -158,7 +159,7 @@ def test_process_content_promotion_request_runs_type_scoped_promotion(monkeypatc
 
     refreshed = db.get(ContentItem, item.id)
 
-    assert calls == [(ContentType.VIDEO,)]
+    assert calls == [item.id]
     assert result["changed"] is True
     assert result["promoted"] is True
     assert refreshed.curation_status == ContentStatus.PROMOTED

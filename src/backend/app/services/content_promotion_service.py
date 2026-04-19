@@ -142,7 +142,7 @@ def process_content_promotion_request(
     previous_status = item.curation_status
     previous_score = getattr(item, "promotion_score", None)
 
-    result = PromotionService(db).run_promotion_job(content_types=(item.type,))
+    result = PromotionService(db).evaluate_candidate_item(item)
     db.flush()
     db.refresh(item)
 
@@ -164,6 +164,7 @@ def process_content_promotion_request(
         "promotion_score": getattr(item, "promotion_score", None),
         "promotion_reason": getattr(item, "promotion_reason", None),
         "readiness_status": (getattr(item, "readiness_status", None) or "").strip() or None,
-        "result_promoted_ids": list(result.promoted_ids),
-        "result_errors": list(result.errors),
+        "candidate_rank": result.get("candidate_rank"),
+        "candidate_count": result.get("candidate_count"),
+        "decision_reason": result.get("reason"),
     }

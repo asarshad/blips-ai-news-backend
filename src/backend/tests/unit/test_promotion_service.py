@@ -14,6 +14,7 @@ from app.services.promotion_service import (
     _DEFAULT_CONFIG,
     _REEL_CONFIG,
     _VIDEO_CONFIG,
+    PromotionConfig,
     PromotionService,
     compute_story_keyword_signal,
 )
@@ -269,3 +270,170 @@ def test_recent_promotion_context_counts_only_visible_ready_items(monkeypatch):
     topic_counts, entity_counts = service._get_recent_story_context()
     assert topic_counts == {"ai": 1}
     assert entity_counts == {"openai": 1}
+
+
+def test_evaluate_candidate_item_promotes_only_the_target(monkeypatch):
+    db = MagicMock()
+    service = PromotionService(db, config=PromotionConfig(top_n_per_type=1, min_score=0.0))
+    target = SimpleNamespace(
+        id=2,
+        type=ContentType.ARTICLE,
+        curation_status=ContentStatus.CANDIDATE,
+        published_at=datetime.utcnow(),
+        channel_id=None,
+        source="Target Source",
+        promotion_score=None,
+        promotion_reason=None,
+    )
+    higher = SimpleNamespace(
+        id=1,
+        type=ContentType.ARTICLE,
+        curation_status=ContentStatus.CANDIDATE,
+        published_at=datetime.utcnow(),
+        channel_id=None,
+        source="Higher Source",
+        promotion_score=None,
+        promotion_reason=None,
+    )
+
+    monkeypatch.setattr(service, "_get_cluster_sizes", lambda **_kwargs: {})
+    monkeypatch.setattr(service, "_get_recent_story_context", lambda: ({}, {}))
+    monkeypatch.setattr(service, "_get_candidates", lambda _content_type: [higher, target])
+    monkeypatch.setattr(service, "_get_recent_promoted_topic_counts", lambda _content_type: {})
+    monkeypatch.setattr(service, "_get_recent_promoted_channel_counts", lambda _content_type: {})
+    monkeypatch.setattr(service, "_get_source_profiles", lambda _items: {})
+    monkeypatch.setattr(service, "_promotion_reason", lambda *_args, **_kwargs: "base")
+    monkeypatch.setattr(
+        "app.services.promotion_service._channel_config_for_item",
+        lambda _item: None,
+    )
+    monkeypatch.setattr(
+        "app.services.promotion_service.classify_promotion_block",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.services.promotion_service.score_candidate",
+        lambda item, *_args, **_kwargs: 0.9 if item.id == target.id else 0.8,
+    )
+    monkeypatch.setattr(
+        "app.services.promotion_service.sync_content_readiness",
+        lambda _db, item: setattr(item, "readiness_status", "PENDING"),
+    )
+
+    result = service.evaluate_candidate_item(target)
+
+    assert result["promoted"] is True
+    assert result["candidate_rank"] == 1
+    assert target.curation_status == ContentStatus.PROMOTED
+    assert higher.curation_status == ContentStatus.CANDIDATE
+
+
+def test_evaluate_candidate_item_respects_higher_ranked_peer(monkeypatch):
+    db = MagicMock()
+    service = PromotionService(db, config=PromotionConfig(top_n_per_type=1, min_score=0.0))
+    target = SimpleNamespace(
+        id=2,
+        type=ContentType.ARTICLE,
+        curation_status=ContentStatus.CANDIDATE,
+        published_at=datetime.utcnow(),
+        channel_id=None,
+        source="Target Source",
+        promotion_score=None,
+        promotion_reason=None,
+    )
+    higher = SimpleNamespace(
+        id=1,
+        type=ContentType.ARTICLE,
+        curation_status=ContentStatus.CANDIDATE,
+        published_at=datetime.utcnow(),
+        channel_id=None,
+        source="Higher Source",
+        promotion_score=None,
+        promotion_reason=None,
+    )
+
+    monkeypatch.setattr(service, "_get_cluster_sizes", lambda **_kwargs: {})
+    monkeypatch.setattr(service, "_get_recent_story_context", lambda: ({}, {}))
+    monkeypatch.setattr(service, "_get_candidates", lambda _content_type: [higher, target])
+    monkeypatch.setattr(service, "_get_recent_promoted_topic_counts", lambda _content_type: {})
+    monkeypatch.setattr(service, "_get_recent_promoted_channel_counts", lambda _content_type: {})
+    monkeypatch.setattr(service, "_get_source_profiles", lambda _items: {})
+    monkeypatch.setattr(service, "_promotion_reason", lambda *_args, **_kwargs: "base")
+    monkeypatch.setattr(
+        "app.services.promotion_service._channel_config_for_item",
+        lambda _item: None,
+    )
+    monkeypatch.setattr(
+        "app.services.promotion_service.classify_promotion_block",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.services.promotion_service.score_candidate",
+        lambda item, *_args, **_kwargs: 0.8 if item.id == target.id else 0.9,
+    )
+    monkeypatch.setattr(
+        "app.services.promotion_service.sync_content_readiness",
+        lambda _db, item: setattr(item, "readiness_status", "PENDING"),
+    )
+
+    result = service.evaluate_candidate_item(target)
+
+    assert result["promoted"] is False
+    assert result["candidate_rank"] == 2
+    assert result["reason"] == "top_n_exhausted"
+    assert target.curation_status == ContentStatus.CANDIDATE
+    assert higher.curation_status == ContentStatus.CANDIDATE
+
+
+def test_evaluate_candidate_item_respects_reel_channel_cap(monkeypatch):
+    db = MagicMock()
+    service = PromotionService(db, config=PromotionConfig(top_n_per_type=5, min_score=0.0))
+    target = SimpleNamespace(
+        id=2,
+        type=ContentType.REEL,
+        curation_status=ContentStatus.CANDIDATE,
+        published_at=datetime.utcnow(),
+        channel_id="channel-cap",
+        source="GitHub",
+        acquisition_lane="curated",
+        promotion_score=None,
+        promotion_reason=None,
+    )
+
+    monkeypatch.setattr(service, "_get_cluster_sizes", lambda **_kwargs: {})
+    monkeypatch.setattr(service, "_get_recent_story_context", lambda: ({}, {}))
+    monkeypatch.setattr(service, "_get_candidates", lambda _content_type: [target])
+    monkeypatch.setattr(service, "_get_recent_promoted_topic_counts", lambda _content_type: {})
+    monkeypatch.setattr(
+        service,
+        "_get_recent_promoted_channel_counts",
+        lambda _content_type: {"channel-cap": 1},
+    )
+    monkeypatch.setattr(service, "_get_source_profiles", lambda _items: {})
+    monkeypatch.setattr(service, "_promotion_reason", lambda *_args, **_kwargs: "base")
+    monkeypatch.setattr(
+        "app.services.promotion_service._channel_config_for_item",
+        lambda _item: SimpleNamespace(
+            effective_daily_reel_cap=1,
+            enabled=True,
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.promotion_service.classify_promotion_block",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.services.promotion_service.score_candidate",
+        lambda *_args, **_kwargs: 0.9,
+    )
+    monkeypatch.setattr(
+        "app.services.promotion_service.sync_content_readiness",
+        lambda _db, item: setattr(item, "readiness_status", "PENDING"),
+    )
+
+    result = service.evaluate_candidate_item(target)
+
+    assert result["promoted"] is False
+    assert result["reason"] == "daily_reel_cap"
+    assert target.curation_status == ContentStatus.CANDIDATE
+    assert target.promotion_reason == "base|blocked=daily_reel_cap"

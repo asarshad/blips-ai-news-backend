@@ -769,6 +769,15 @@ class PromotionResult:
     errors: List[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class _ScoredCandidate:
+    score: float
+    item: ContentItem
+    block_reason: str | None
+    channel_config: ChannelConfig | None
+    source_profile: VideoSourceProfile | None
+
+
 # ── Main service ──────────────────────────────────────────────────────────────
 
 
@@ -987,6 +996,166 @@ class PromotionService:
         actor = getattr(item, "last_modified_by", None)
         return isinstance(actor, str) and bool(actor.strip())
 
+    def _score_candidate_batch(
+        self,
+        content_type: ContentType,
+        candidates: List[ContentItem],
+        *,
+        config: PromotionConfig,
+        cluster_sizes: Dict[str, int],
+        promoted_topic_counts: Optional[Dict[str, int]] = None,
+        promoted_channel_counts: Optional[Dict[str, int]] = None,
+        story_topic_counts: Optional[Dict[str, int]] = None,
+        story_entity_counts: Optional[Dict[str, int]] = None,
+    ) -> List[_ScoredCandidate]:
+        source_profiles = self._get_source_profiles(candidates)
+        scored: List[_ScoredCandidate] = []
+        for item in candidates:
+            source_profile = source_profiles.get(getattr(item, "channel_id", None) or "")
+            channel_config = _channel_config_for_item(item)
+            score = score_candidate(
+                item,
+                cluster_sizes,
+                config,
+                promoted_topic_counts=promoted_topic_counts,
+                promoted_channel_counts=promoted_channel_counts,
+                story_topic_counts=story_topic_counts,
+                story_entity_counts=story_entity_counts,
+            )
+            block_reason = classify_promotion_block(
+                item,
+                content_type,
+                story_topic_counts=story_topic_counts or {},
+                story_entity_counts=story_entity_counts or {},
+                channel_config=channel_config,
+                source_profile=source_profile,
+            )
+            item.promotion_score = score
+            item.promotion_reason = self._promotion_reason(
+                item,
+                config,
+                story_topic_counts=story_topic_counts,
+                story_entity_counts=story_entity_counts,
+            )
+            if block_reason:
+                item.promotion_reason = f"{item.promotion_reason}|blocked={block_reason}"
+            scored.append(
+                _ScoredCandidate(
+                    score=score,
+                    item=item,
+                    block_reason=block_reason,
+                    channel_config=channel_config,
+                    source_profile=source_profile,
+                )
+            )
+
+        scored.sort(key=lambda candidate: candidate.score, reverse=True)
+        return scored
+
+    def evaluate_candidate_item(self, item: ContentItem) -> Dict[str, object]:
+        """Evaluate promotion for one candidate while preserving cohort ranking semantics."""
+        content_type = item.type
+        config = self._config_for_type(content_type)
+        cluster_sizes = self._get_cluster_sizes(hours_back=config.window_hours * 2)
+        story_topic_counts, story_entity_counts = self._get_recent_story_context()
+        candidates = self._get_candidates(content_type)
+        candidate_count = len(candidates)
+
+        target = next((candidate for candidate in candidates if candidate.id == item.id), None)
+        if target is None:
+            return {
+                "promoted": False,
+                "candidate_count": candidate_count,
+                "candidate_rank": None,
+                "reason": "candidate_not_in_window",
+                "promotion_score": getattr(item, "promotion_score", None),
+            }
+
+        promoted_topic_counts = self._get_recent_promoted_topic_counts(content_type)
+        promoted_channel_counts = self._get_recent_promoted_channel_counts(content_type)
+        scored = self._score_candidate_batch(
+            content_type,
+            candidates,
+            config=config,
+            cluster_sizes=cluster_sizes,
+            promoted_topic_counts=promoted_topic_counts,
+            promoted_channel_counts=promoted_channel_counts,
+            story_topic_counts=story_topic_counts,
+            story_entity_counts=story_entity_counts,
+        )
+
+        min_score = self._min_promotion_score(content_type, config)
+        working_channel_counts = dict(promoted_channel_counts)
+        promoted_ahead = 0
+        target_rank: int | None = None
+        target_outcome_reason: str | None = None
+        target_promoted = False
+
+        for rank, scored_candidate in enumerate(scored, start=1):
+            candidate = scored_candidate.item
+            target_rank = rank if candidate.id == item.id else target_rank
+
+            if promoted_ahead >= config.top_n_per_type:
+                if candidate.id == item.id:
+                    target_outcome_reason = "top_n_exhausted"
+                break
+
+            if scored_candidate.score < min_score:
+                if candidate.id == item.id:
+                    target_outcome_reason = "below_min_score"
+                break
+
+            if scored_candidate.block_reason:
+                if candidate.id == item.id:
+                    target_outcome_reason = scored_candidate.block_reason
+                continue
+
+            channel_key = self._channel_key_for_item(candidate)
+            cap = self._surface_channel_cap(
+                content_type,
+                item=candidate,
+                channel_config=scored_candidate.channel_config,
+                source_profile=scored_candidate.source_profile,
+            )
+            if cap is not None:
+                if cap <= 0:
+                    if candidate.id == item.id:
+                        candidate.promotion_reason = (
+                            f"{candidate.promotion_reason}|blocked=reel_cap_zero"
+                        )
+                        target_outcome_reason = "reel_cap_zero"
+                    continue
+                if working_channel_counts.get(channel_key, 0) >= cap:
+                    if candidate.id == item.id:
+                        candidate.promotion_reason = (
+                            f"{candidate.promotion_reason}|blocked=daily_reel_cap"
+                        )
+                        target_outcome_reason = "daily_reel_cap"
+                    continue
+
+            if candidate.id == item.id:
+                candidate.curation_status = ContentStatus.PROMOTED
+                sync_content_readiness(self.db, candidate)
+                target_promoted = True
+                target_outcome_reason = "promoted"
+                promoted_ahead += 1
+                working_channel_counts[channel_key] = working_channel_counts.get(channel_key, 0) + 1
+                break
+
+            promoted_ahead += 1
+            working_channel_counts[channel_key] = working_channel_counts.get(channel_key, 0) + 1
+
+        if not target_promoted:
+            sync_content_readiness(self.db, target)
+
+        return {
+            "promoted": target_promoted,
+            "candidate_count": candidate_count,
+            "candidate_rank": target_rank,
+            "reason": target_outcome_reason or "not_promoted",
+            "promotion_score": getattr(target, "promotion_score", None),
+        }
+
     # ── Re-score existing PROMOTED items ──────────────────────────────────
 
     def _rescore_promoted(
@@ -1156,68 +1325,35 @@ class PromotionService:
         config = self._config_for_type(content_type)
         promoted_topic_counts = self._get_recent_promoted_topic_counts(content_type)
         promoted_channel_counts = self._get_recent_promoted_channel_counts(content_type)
-        source_profiles = self._get_source_profiles(candidates)
-
-        # Score every candidate
-        scored: List[
-            Tuple[
-                float,
-                ContentItem,
-                str | None,
-                ChannelConfig | None,
-                VideoSourceProfile | None,
-            ]
-        ] = []
-        for item in candidates:
-            source_profile = source_profiles.get(getattr(item, "channel_id", None) or "")
-            channel_config = _channel_config_for_item(item)
-            s = score_candidate(
-                item,
-                cluster_sizes,
-                config,
-                promoted_topic_counts=promoted_topic_counts,
-                promoted_channel_counts=promoted_channel_counts,
-                story_topic_counts=story_topic_counts,
-                story_entity_counts=story_entity_counts,
-            )
-            block_reason = classify_promotion_block(
-                item,
-                content_type,
-                story_topic_counts=story_topic_counts or {},
-                story_entity_counts=story_entity_counts or {},
-                channel_config=channel_config,
-                source_profile=source_profile,
-            )
-            item.promotion_score = s
-            item.promotion_reason = self._promotion_reason(
-                item,
-                config,
-                story_topic_counts=story_topic_counts,
-                story_entity_counts=story_entity_counts,
-            )
-            if block_reason:
-                item.promotion_reason = f"{item.promotion_reason}|blocked={block_reason}"
-            scored.append((s, item, block_reason, channel_config, source_profile))
-
-        # Sort descending by promotion score
-        scored.sort(key=lambda t: t[0], reverse=True)
+        scored = self._score_candidate_batch(
+            content_type,
+            candidates,
+            config=config,
+            cluster_sizes=cluster_sizes,
+            promoted_topic_counts=promoted_topic_counts,
+            promoted_channel_counts=promoted_channel_counts,
+            story_topic_counts=story_topic_counts,
+            story_entity_counts=story_entity_counts,
+        )
 
         promoted = 0
         promoted_ids: List[int] = []
         min_score = self._min_promotion_score(content_type, config)
-        for s, item, block_reason, channel_config, source_profile in scored:
+        for scored_candidate in scored:
+            s = scored_candidate.score
+            item = scored_candidate.item
             if promoted >= config.top_n_per_type:
                 break
             if s < min_score:
                 break
-            if block_reason:
+            if scored_candidate.block_reason:
                 continue
             channel_key = self._channel_key_for_item(item)
             cap = self._surface_channel_cap(
                 content_type,
                 item=item,
-                channel_config=channel_config,
-                source_profile=source_profile,
+                channel_config=scored_candidate.channel_config,
+                source_profile=scored_candidate.source_profile,
             )
             if cap is not None:
                 if cap <= 0:
