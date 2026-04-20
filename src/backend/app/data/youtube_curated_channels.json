@@ -1381,5 +1381,190 @@
     "daily_reel_cap": 3,
     "quality_tier": "standard",
     "bootstrap_on_add": true
+  },
+  {
+    "channel_id": "UCbY9xX3_jW5c2fjlZVBI4cg",
+    "name": "TheAIGRID",
+    "role": "ai",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 4,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true,
+    "notes": "Daily AI research and news uploads, 370K subs."
+  },
+  {
+    "channel_id": "UCP7WmQ_U4GB3K51Od9QvM0w",
+    "name": "David Bombal",
+    "role": "engineer",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true,
+    "notes": "Networking, ethical hacking, Python. CCIE certified. 1.5M subs."
+  },
+  {
+    "channel_id": "UCEyCubIF0e8MYi1jkgVepKg",
+    "name": "David Bombal Shorts",
+    "role": "engineer",
+    "content_format": "shorts",
+    "daily_cap": 5,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true,
+    "notes": "Dedicated Shorts channel for David Bombal (networking/security)."
+  },
+  {
+    "channel_id": "UCO2WJZKQoDW4Te6NHx4KfTg",
+    "name": "Geeky Ranjit",
+    "role": "explainer",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true,
+    "notes": "Largest English-language tech channel in India. 3.3M subs."
+  },
+  {
+    "channel_id": "UCOnA4oZccE0dxZjI733EjSw",
+    "name": "GadgetsBoy",
+    "role": "explainer",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true,
+    "notes": "UK tech reviewer, works with Samsung, Qualcomm, Microsoft. 1M+ subs."
+  },
+  {
+    "channel_id": "UCwSozl89jl2zUDzQ4jGJD3g",
+    "name": "Skill Leap AI",
+    "role": "ai",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 4,
+    "quality_tier": "standard",
+    "bootstrap_on_add": true,
+    "notes": "AI tools, models, tutorials. Fast-paced uploads, 300K subs."
+  },
+  {
+    "channel_id": "UCR9j1jqqB5Rse69wjUnbYwA",
+    "name": "All About AI",
+    "role": "ai",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 4,
+    "quality_tier": "standard",
+    "bootstrap_on_add": true,
+    "notes": "ChatGPT, automation, generative AI. Daily uploads."
+  },
+  {
+    "channel_id": "UCOk-gHyjcWZNj3Br4oxwh0A",
+    "name": "Techno Tim",
+    "role": "engineer",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "standard",
+    "bootstrap_on_add": true,
+    "notes": "Homelab, self-hosting, infrastructure. 320K subs."
+  },
+  {
+    "channel_id": "UCbXgNpp0jedKWcQiULLbDTA",
+    "name": "Patrick Loeber",
+    "role": "engineer",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true,
+    "notes": "Python/ML from scratch. Dev Rel at Google DeepMind. 200K subs."
+  },
+  {
+    "channel_id": "UC4MZ7zUHb5eAxU75Dc_nqdQ",
+    "name": "Tiff in Tech",
+    "role": "news",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true,
+    "notes": "Interviews Zuckerberg, Jensen Huang, Nadella. Works with NVIDIA, Microsoft, Meta. 183K subs."
+  },
+  {
+    "channel_id": "UCJFMlSxcvlZg5yZUYJT0Pug",
+    "name": "Corbin Brown",
+    "role": "ai",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "standard",
+    "bootstrap_on_add": true,
+    "notes": "AI coding and automation. Software engineer. 156K subs."
+  },
+  {
+    "channel_id": "UC5Wz4fFacYuON6IKbhSa7Zw",
+    "name": "MattVidPro AI",
+    "role": "ai",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "standard",
+    "bootstrap_on_add": true,
+    "notes": "AI news, tool reviews, technical deep-dives. 200K subs."
+  },
+  {
+    "channel_id": "UCPNn_SusNZI47DerKB-xpbQ",
+    "name": "Beebom Shorts",
+    "role": "explainer",
+    "content_format": "shorts",
+    "daily_cap": 5,
+    "quality_tier": "standard",
+    "bootstrap_on_add": true,
+    "notes": "Dedicated Shorts channel from Beebom tech publication."
+  },
+  {
+    "channel_id": "UCvGwM5woTl13I-qThI4YMCg",
+    "name": "Josh tried coding",
+    "role": "engineer",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "standard",
+    "bootstrap_on_add": true,
+    "notes": "Next.js, TypeScript, React Native. 100K+ subs."
+  },
+  {
+    "channel_id": "UCHhYXsLBEVVnbvsq57n1MTQ",
+    "name": "The AI Advantage",
+    "role": "ai",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "standard",
+    "ingestion_stream": "expansion",
+    "notes": "AI workflows and business automation. 100K+ subs."
+  },
+  {
+    "channel_id": "UCMo28ATCDU0Kn9dpilAF79Q",
+    "name": "Simon Høiberg",
+    "role": "engineer",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 2,
+    "quality_tier": "supplemental",
+    "ingestion_stream": "expansion",
+    "notes": "SaaS building, no-code/AI dev. 50K subs."
+  },
+  {
+    "channel_id": "UCgdTVe88YVSrOZ9qKumhULQ",
+    "name": "Hardware Haven",
+    "role": "engineer",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 2,
+    "quality_tier": "supplemental",
+    "ingestion_stream": "expansion",
+    "notes": "Retro computing, homelab, networking. Growing channel."
   }
 ]
