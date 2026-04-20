@@ -11,6 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.models.content import ContentItem, ContentReadinessStatus, ContentStatus, ContentType
 from app.models.content_event import ContentEventOutbox
+from app.services.ai_retry_state import (
+    is_article_retry_summary,
+    is_video_summary_retry_summary,
+)
 from app.video_surface_rules import (
     effective_content_type,
     surface_content_filter,
@@ -29,10 +33,16 @@ _READINESS_REASON_DESCRIPTIONS = {
     ),
     "missing_article_image": "This article does not yet have a usable verified image.",
     "awaiting_ai_processing": "This article still needs AI summarization before delivery.",
+    "article_unskimmable_retry": (
+        "This article has too little extracted text right now; recent items are retried before being abandoned."
+    ),
     "missing_article_summary": "This article does not yet have a usable summary.",
     "missing_video_title": "This video is missing a title.",
     "missing_video_url": "This video is missing a playable URL.",
     "awaiting_video_ai_processing": "This video still needs AI summarization before delivery.",
+    "video_non_tech": "This video was classified as not relevant to the Blips tech-news audience.",
+    "video_summary_retry": "This video returned no usable AI summary and is still inside the bounded retry window.",
+    "video_summary_failed": "This video repeatedly returned no usable AI summary and will not be retried automatically.",
     "missing_video_summary": "This video does not yet have a usable summary.",
     "article_ready": "This article is ready for client delivery.",
     "video_ready": "This video is ready for client delivery.",
@@ -186,6 +196,13 @@ def evaluate_content_readiness(item: Any) -> ContentReadinessDecision:
             )
 
         if not bool(getattr(item, "ai_processed", False)):
+            if is_article_retry_summary(getattr(item, "summary", None)):
+                return ContentReadinessDecision(
+                    status=ContentReadinessStatus.PENDING,
+                    reason="article_unskimmable_retry",
+                    effective_type=effective_type,
+                    surfaces=surfaces,
+                )
             return ContentReadinessDecision(
                 status=ContentReadinessStatus.PENDING,
                 reason="awaiting_ai_processing",
@@ -229,6 +246,29 @@ def evaluate_content_readiness(item: Any) -> ContentReadinessDecision:
         )
 
     if effective_type == ContentType.VIDEO:
+        if is_video_summary_retry_summary(getattr(item, "summary", None)):
+            return ContentReadinessDecision(
+                status=ContentReadinessStatus.PENDING,
+                reason=(
+                    "video_summary_failed"
+                    if bool(getattr(item, "ai_processed", False))
+                    else "video_summary_retry"
+                ),
+                effective_type=effective_type,
+                surfaces=surfaces,
+            )
+
+        if (
+            bool(getattr(item, "ai_processed", False))
+            and _trimmed(getattr(item, "tech_relevance", None)).lower() == "none"
+        ):
+            return ContentReadinessDecision(
+                status=ContentReadinessStatus.PENDING,
+                reason="video_non_tech",
+                effective_type=effective_type,
+                surfaces=surfaces,
+            )
+
         if not bool(getattr(item, "ai_processed", False)):
             return ContentReadinessDecision(
                 status=ContentReadinessStatus.PENDING,

@@ -48,8 +48,18 @@ def classify_video_blips_relevance(
         )
         return None
 
+    raw_relevance = str(getattr(result, "is_blips_tech_relevant", "") or "").strip().lower()
+    if raw_relevance not in {"yes", "no"}:
+        logger.warning(
+            "[video_relevance] invalid classification result title=%r source=%r value=%r",
+            (title or "")[:120],
+            source or "",
+            getattr(result, "is_blips_tech_relevant", None),
+        )
+        return None
+
     return VideoRelevanceDecision(
-        is_relevant=result.is_blips_tech_relevant == "yes",
+        is_relevant=raw_relevance == "yes",
         confidence=float(result.confidence),
         reason=result.reason,
     )

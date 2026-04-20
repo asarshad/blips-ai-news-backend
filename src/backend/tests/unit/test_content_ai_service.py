@@ -87,7 +87,6 @@ def test_sync_content_readiness_queues_ai_summary_when_flag_enabled(monkeypatch)
     db.add(item)
     db.commit()
 
-
     result = sync_content_readiness(db, item)
     db.commit()
 
@@ -121,7 +120,6 @@ def test_sync_content_readiness_queues_video_ai_summary_when_flag_enabled(monkey
     db.add(item)
     db.commit()
 
-
     result = sync_content_readiness(db, item)
     db.commit()
 
@@ -153,7 +151,6 @@ def test_sync_content_readiness_does_not_queue_reel_ai_summary_when_flag_enabled
     )
     db.add(item)
     db.commit()
-
 
     result = sync_content_readiness(db, item)
     db.commit()
@@ -327,7 +324,118 @@ def test_process_content_ai_summary_request_skips_non_tech_video_before_summary(
     assert refreshed_item.tech_relevance == "none"
     assert refreshed_item.tech_relevance_confidence == 0.97
     assert refreshed_item.readiness_status == "PENDING"
-    assert refreshed_item.readiness_reason == "missing_video_summary"
+    assert refreshed_item.readiness_reason == "video_non_tech"
+
+
+def test_process_content_ai_summary_request_records_video_summary_retry(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.VIDEO,
+        source="Example Channel",
+        source_url="https://example.com/watch?v=retry",
+        video_url="https://example.com/watch?v=retry",
+        published_at=_recent_dt(hours_ago=1),
+        title="Tech video with empty LLM summary",
+        description="A detailed developer tooling video that should be relevant.",
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status="PENDING",
+        readiness_reason="awaiting_video_ai_processing",
+        created_at=_recent_dt(minutes_ago=50),
+        updated_at=_recent_dt(minutes_ago=50),
+    )
+    db.add(item)
+    db.commit()
+
+    fake_llm = SimpleNamespace(
+        is_configured=lambda: True,
+        get_provider=lambda: "fake",
+        classify_blips_tech_relevance=lambda **kwargs: SimpleNamespace(
+            is_blips_tech_relevant="yes",
+            confidence=0.96,
+            reason="Developer tooling video.",
+        ),
+        summarize_video=lambda *args, **kwargs: (_ for _ in ()).throw(
+            ValueError("Empty summary returned from LLM for tech-relevant video")
+        ),
+    )
+    monkeypatch.setattr(content_ai_service, "invalidate_tiered_feed_cache", lambda *a, **k: None)
+    monkeypatch.setattr(content_ai_service, "refresh_cached_playlist_items", lambda *a, **k: {})
+
+    result = content_ai_service.process_content_ai_summary_request(
+        db,
+        content_id=item.id,
+        llm_client=fake_llm,
+    )
+    db.commit()
+
+    refreshed_item = db.get(ContentItem, item.id)
+    assert result["changed"] is True
+    assert refreshed_item.ai_processed is False
+    assert refreshed_item.summary.startswith("__blips_video_summary_retry__:v1:1:")
+    assert refreshed_item.readiness_status == "PENDING"
+    assert refreshed_item.readiness_reason == "video_summary_retry"
+    assert refreshed_item.tech_relevance_reason.startswith("video_summary_failure:")
+
+
+def test_process_content_ai_summary_request_terminal_marks_repeated_video_summary_failure(
+    monkeypatch,
+):
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.VIDEO,
+        source="Example Channel",
+        source_url="https://example.com/watch?v=terminal",
+        video_url="https://example.com/watch?v=terminal",
+        published_at=_recent_dt(hours_ago=1),
+        title="Tech video with repeated empty LLM summaries",
+        description="A detailed developer tooling video that should be relevant.",
+        summary="__blips_video_summary_retry__:v1:2:2026-04-20T12:00:00",
+        ai_processed=False,
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status="PENDING",
+        readiness_reason="video_summary_retry",
+        created_at=_recent_dt(minutes_ago=50),
+        updated_at=_recent_dt(minutes_ago=50),
+    )
+    db.add(item)
+    db.commit()
+
+    fake_llm = SimpleNamespace(
+        is_configured=lambda: True,
+        get_provider=lambda: "fake",
+        classify_blips_tech_relevance=lambda **kwargs: SimpleNamespace(
+            is_blips_tech_relevant="yes",
+            confidence=0.96,
+            reason="Developer tooling video.",
+        ),
+        summarize_video=lambda *args, **kwargs: (_ for _ in ()).throw(
+            ValueError("Empty summary returned from LLM for tech-relevant video")
+        ),
+    )
+    monkeypatch.setattr(content_ai_service, "invalidate_tiered_feed_cache", lambda *a, **k: None)
+    monkeypatch.setattr(content_ai_service, "refresh_cached_playlist_items", lambda *a, **k: {})
+
+    result = content_ai_service.process_content_ai_summary_request(
+        db,
+        content_id=item.id,
+        llm_client=fake_llm,
+    )
+    db.commit()
+
+    refreshed_item = db.get(ContentItem, item.id)
+    assert result["changed"] is True
+    assert refreshed_item.ai_processed is True
+    assert refreshed_item.summary.startswith("__blips_video_summary_retry__:v1:3:")
+    assert refreshed_item.readiness_status == "PENDING"
+    assert refreshed_item.readiness_reason == "video_summary_failed"
 
 
 def test_process_article_summary_persists_tech_relevance_via_mark_ai_processed(monkeypatch):
@@ -405,7 +513,10 @@ def test_process_article_summary_persists_tech_relevance_via_mark_ai_processed(m
     assert len(mark_calls) == 1
     assert mark_calls[0]["tech_relevance"] == "yes"
     assert mark_calls[0]["tech_relevance_confidence"] == 0.97
-    assert mark_calls[0]["tech_relevance_reason"] == "Directly about a major tech company product launch."
+    assert (
+        mark_calls[0]["tech_relevance_reason"]
+        == "Directly about a major tech company product launch."
+    )
 
     db.commit()
     refreshed = db.get(ContentItem, item.id)

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from app.models.content import ContentReadinessStatus, ContentStatus, ContentType
+from app.services.article_image_service import ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE
 from app.services.content_readiness import (
     CONTENT_READY_EVENT_TYPE,
     CONTENT_UNREADY_EVENT_TYPE,
@@ -13,7 +14,6 @@ from app.services.content_readiness import (
     evaluate_content_readiness,
     sync_content_readiness,
 )
-from app.services.article_image_service import ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE
 
 
 def test_article_requires_ai_summary_to_be_ready():
@@ -38,6 +38,27 @@ def test_article_requires_ai_summary_to_be_ready():
     assert decision.surfaces == ("articles",)
 
 
+def test_article_unskimmable_retry_has_specific_reason():
+    article = SimpleNamespace(
+        id=12,
+        type=ContentType.ARTICLE,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        promotion_reason=None,
+        source_url="https://example.com/article",
+        canonical_url="https://example.com/article",
+        image_url="https://cdn.example.com/article.jpg",
+        article_image_status="VERIFIED",
+        ai_processed=False,
+        summary="__blips_article_retry__:v1:1:2026-04-20T12:00:00",
+    )
+
+    decision = evaluate_content_readiness(article)
+
+    assert decision.status == ContentReadinessStatus.PENDING
+    assert decision.reason == "article_unskimmable_retry"
+
+
 def test_video_requires_ai_summary_to_be_ready():
     video = SimpleNamespace(
         id=2,
@@ -57,6 +78,67 @@ def test_video_requires_ai_summary_to_be_ready():
     assert decision.status == ContentReadinessStatus.PENDING
     assert decision.reason == "awaiting_video_ai_processing"
     assert decision.surfaces == ("videos",)
+
+
+def test_video_summary_retry_has_specific_reason():
+    video = SimpleNamespace(
+        id=21,
+        type=ContentType.VIDEO,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        promotion_reason=None,
+        title="Fresh promoted video",
+        source_url="https://www.youtube.com/watch?v=test123",
+        video_url="https://www.youtube.com/watch?v=test123",
+        ai_processed=False,
+        summary="__blips_video_summary_retry__:v1:1:2026-04-20T12:00:00",
+    )
+
+    decision = evaluate_content_readiness(video)
+
+    assert decision.status == ContentReadinessStatus.PENDING
+    assert decision.reason == "video_summary_retry"
+
+
+def test_video_exhausted_summary_retry_has_terminal_reason():
+    video = SimpleNamespace(
+        id=22,
+        type=ContentType.VIDEO,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        promotion_reason=None,
+        title="Fresh promoted video",
+        source_url="https://www.youtube.com/watch?v=test123",
+        video_url="https://www.youtube.com/watch?v=test123",
+        ai_processed=True,
+        summary="__blips_video_summary_retry__:v1:3:2026-04-20T12:00:00",
+    )
+
+    decision = evaluate_content_readiness(video)
+
+    assert decision.status == ContentReadinessStatus.PENDING
+    assert decision.reason == "video_summary_failed"
+
+
+def test_non_tech_video_has_terminal_relevance_reason():
+    video = SimpleNamespace(
+        id=23,
+        type=ContentType.VIDEO,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        promotion_reason=None,
+        title="General protest video",
+        source_url="https://www.youtube.com/watch?v=test123",
+        video_url="https://www.youtube.com/watch?v=test123",
+        ai_processed=True,
+        summary=None,
+        tech_relevance="none",
+    )
+
+    decision = evaluate_content_readiness(video)
+
+    assert decision.status == ContentReadinessStatus.PENDING
+    assert decision.reason == "video_non_tech"
 
 
 def test_video_requires_non_empty_summary_after_ai_processing():

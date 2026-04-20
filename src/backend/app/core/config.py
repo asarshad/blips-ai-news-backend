@@ -227,6 +227,8 @@ class Settings(BaseSettings):
     ARTICLE_RSS_DEGRADED_RETRY_COUNT_THRESHOLD: int = 3
     VIDEO_SUMMARY_MIN_OUTPUT_WORDS: int = 50  # softer minimum for generated video summaries
     VIDEO_SUMMARY_MAX_OUTPUT_WORDS: int = 70  # hard cap for generated video summaries
+    VIDEO_SUMMARY_RETRY_MAX_ATTEMPTS: int = 3
+    VIDEO_SUMMARY_RETRY_WINDOW_HOURS: int = 24
     VIDEO_TECH_CLASSIFIER_ENABLED: bool = True
     VIDEO_TECH_NONE_BLOCK_CONFIDENCE: float = 0.85
     VIDEO_TECH_MIXED_ROUNDUP_BLOCK_CONFIDENCE: float = 0.80

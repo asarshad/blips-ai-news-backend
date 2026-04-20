@@ -18,7 +18,12 @@ from app.integrations.llm_client import (
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.content_event import ContentEventOutbox
 from app.repositories.content_repo import ContentItemRepository
-from app.services.content_readiness import sync_content_readiness
+from app.services.ai_retry_state import (
+    article_retry_state,
+    record_article_retry_deferral,
+    record_video_summary_failure,
+)
+from app.services.content_readiness import seed_content_readiness, sync_content_readiness
 from app.services.playlist_service import refresh_cached_playlist_items
 from app.services.tiered_feed_service import invalidate_tiered_feed_cache
 from app.services.video_relevance_service import classify_video_blips_relevance
@@ -26,7 +31,6 @@ from app.services.video_relevance_service import classify_video_blips_relevance
 logger = get_logger(__name__)
 
 CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE = "content.ai_summary.requested"
-_ARTICLE_RETRY_SENTINEL_PREFIX = "__blips_article_retry__"
 
 
 def should_queue_content_ai_summary(item: Any) -> bool:
@@ -215,13 +219,16 @@ def _process_article_summary(
         _refresh_article_retry_inputs(article_hydrator, item)
 
     text = item.content_text or item.description or item.title
+    previous_summary = item.summary
     item.ai_processed = False
     item.summary = None
 
     summary_input = bounded_article_summary_text(text)
     if not summary_input:
         if _is_recent_article_for_maintenance(item):
-            attempt = _record_article_retry_deferral(db, item)
+            item.summary = previous_summary
+            attempt = record_article_retry_deferral(item)
+            seed_content_readiness(item)
             logger.info(
                 "[content_ai] deferred unskimmable article content_id=%s attempt=%s",
                 item.id,
@@ -332,7 +339,14 @@ def _process_video_summary(
         sync_content_readiness(db, item)
         return True
 
-    result = llm_client.summarize_video(item.title, text)
+    try:
+        result = llm_client.summarize_video(item.title, text)
+    except ValueError as exc:
+        return _record_video_summary_failure(
+            item,
+            reason=str(exc) or "empty_summary_exception",
+        )
+
     summary = normalize_video_summary_output(result.summary)
     topics = item.topics
     starters = result.conversation_starters
@@ -341,9 +355,8 @@ def _process_video_summary(
     item.tech_relevance_reason = result.tech_relevance_reason
     item.is_mixed_roundup = result.is_mixed_roundup
 
-    classification_only = (
-        getattr(item, "tech_relevance", None) == "none"
-        or bool(getattr(item, "is_mixed_roundup", False))
+    classification_only = getattr(item, "tech_relevance", None) == "none" or bool(
+        getattr(item, "is_mixed_roundup", False)
     )
     summary_is_valid = is_video_summary_acceptable(summary)
 
@@ -375,8 +388,10 @@ def _process_video_summary(
         sync_content_readiness(db, item)
         return True
 
-    logger.warning("[content_ai] invalid video summary content_id=%s", item.id)
-    return False
+    return _record_video_summary_failure(
+        item,
+        reason="empty_or_short_summary",
+    )
 
 
 def _is_recent_article_for_maintenance(item: ContentItem, *, now: datetime | None = None) -> bool:
@@ -388,34 +403,7 @@ def _is_recent_article_for_maintenance(item: ContentItem, *, now: datetime | Non
 
 
 def _article_retry_state(item: ContentItem, *, now: datetime | None = None) -> dict[str, object]:
-    now_utc = now or datetime.utcnow()
-    summary = (getattr(item, "summary", None) or "").strip()
-    attempts = 0
-    first_failed_at = None
-    if summary.startswith(f"{_ARTICLE_RETRY_SENTINEL_PREFIX}:"):
-        parts = summary.split(":", 3)
-        if len(parts) >= 4:
-            try:
-                attempts = max(0, int(parts[2]))
-            except (TypeError, ValueError):
-                attempts = 0
-            try:
-                first_failed_at = datetime.fromisoformat(parts[3])
-            except ValueError:
-                first_failed_at = None
-
-    if first_failed_at is None:
-        return {"attempts": attempts, "first_failed_at": None, "eligible": True}
-
-    retry_window = timedelta(hours=int(settings.ARTICLE_UNSKIMMABLE_RETRY_WINDOW_HOURS))
-    within_window = first_failed_at + retry_window > now_utc
-    max_attempts = int(settings.ARTICLE_UNSKIMMABLE_RETRY_MAX_ATTEMPTS)
-    eligible = not within_window or attempts < max_attempts
-    return {
-        "attempts": attempts,
-        "first_failed_at": first_failed_at,
-        "eligible": eligible,
-    }
+    return article_retry_state(item, now=now)
 
 
 def _record_article_retry_deferral(
@@ -424,20 +412,27 @@ def _record_article_retry_deferral(
     *,
     now: datetime | None = None,
 ) -> int:
-    now_utc = now or datetime.utcnow()
-    state = _article_retry_state(item, now=now_utc)
-    retry_window = timedelta(hours=int(settings.ARTICLE_UNSKIMMABLE_RETRY_WINDOW_HOURS))
-    first_failed_at = state["first_failed_at"]
-    attempts = int(state["attempts"])
-    if first_failed_at is None or first_failed_at + retry_window <= now_utc:
-        first_failed_at = now_utc
-        attempts = 0
-    attempts += 1
-    item.summary = (
-        f"{_ARTICLE_RETRY_SENTINEL_PREFIX}:v1:{attempts}:{first_failed_at.isoformat()}"
+    attempt = record_article_retry_deferral(item, now=now)
+    seed_content_readiness(item, now=now)
+    return attempt
+
+
+def _record_video_summary_failure(
+    item: ContentItem,
+    *,
+    reason: str,
+    now: datetime | None = None,
+) -> bool:
+    state = record_video_summary_failure(item, reason=reason, now=now)
+    seed_content_readiness(item, now=now)
+    logger.warning(
+        "[content_ai] video summary failure content_id=%s attempt=%s terminal=%s reason=%s",
+        item.id,
+        state["attempts"],
+        state["terminal"],
+        reason,
     )
-    item.updated_at = now_utc
-    return attempts
+    return True
 
 
 def _refresh_article_retry_inputs(
