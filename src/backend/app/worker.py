@@ -12,7 +12,6 @@ import os
 import signal
 import sys
 import threading
-import time
 import traceback
 import uuid
 
@@ -471,6 +470,8 @@ def run_worker():
         logger.info("Scheduler initialized successfully")
         sys.stdout.flush()
 
+        content_event_threads = _start_content_event_worker_threads(_stop_event)
+
         # Run initial fetch (catch ALL errors so it never kills the worker)
         startup_lock_stop_event = threading.Event()
         startup_lock_failures: list[int] = []
@@ -508,7 +509,6 @@ def run_worker():
             sys.stdout.flush()
             return 1
 
-        content_event_threads = _start_content_event_worker_threads(_stop_event)
         # Keep the worker running and refresh lock.
         logger.info("Worker running. Press Ctrl+C to stop.")
         sys.stdout.flush()
