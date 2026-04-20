@@ -43,6 +43,11 @@ def should_queue_content_ai_summary(item: Any) -> bool:
         return False
     if bool(getattr(item, "is_suppressed", False)):
         return False
+    if (
+        getattr(item, "type", None) == ContentType.ARTICLE
+        and not article_retry_state(item)["eligible"]
+    ):
+        return False
     return not bool(getattr(item, "ai_processed", False))
 
 
@@ -144,6 +149,33 @@ def process_content_ai_summary_request(
             "content_type": item.type.value,
             "ai_processed": True,
         }
+
+    if item.type == ContentType.ARTICLE:
+        retry_state = article_retry_state(item)
+        if not retry_state["eligible"]:
+            seed_content_readiness(item)
+            logger.info(
+                "[content_ai] skipping article outside unskimmable retry window "
+                "content_id=%s attempts=%s",
+                item.id,
+                retry_state["attempts"],
+            )
+            return {
+                "content_id": int(item.id),
+                "changed": False,
+                "skipped": True,
+                "reason": "article_retry_window_exhausted",
+                "content_type": item.type.value,
+                "ai_processed": bool(item.ai_processed),
+                "readiness_status": (
+                    getattr(item, "readiness_status", None) or ""
+                ).strip()
+                or None,
+                "readiness_reason": (
+                    getattr(item, "readiness_reason", None) or ""
+                ).strip()
+                or None,
+            }
 
     resolved_llm_client = llm_client or LLMClient()
     if not resolved_llm_client.is_configured():

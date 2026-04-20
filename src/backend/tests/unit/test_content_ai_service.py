@@ -64,6 +64,38 @@ def test_queue_content_ai_summary_request_dedupes_pending_rows():
     assert rows[0].event_type == content_ai_service.CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE
 
 
+def test_queue_content_ai_summary_request_skips_exhausted_article_retry_window():
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/story",
+        canonical_url="https://example.com/story",
+        published_at=_recent_dt(hours_ago=1),
+        title="Queued article",
+        summary=f"__blips_article_retry__:v1:3:{_recent_dt(hours_ago=1).isoformat()}",
+        image_url="https://cdn.example.com/hero.jpg",
+        article_image_status="VERIFIED",
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status="PENDING",
+        readiness_reason="article_unskimmable_retry",
+        created_at=_recent_dt(minutes_ago=50),
+        updated_at=_recent_dt(minutes_ago=50),
+    )
+    db.add(item)
+    db.commit()
+
+    event = content_ai_service.queue_content_ai_summary_request(db, item)
+    db.commit()
+
+    assert event is None
+    assert db.query(ContentEventOutbox).count() == 0
+
+
 def test_sync_content_readiness_queues_ai_summary_when_flag_enabled(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     _create_test_tables(engine)
@@ -193,6 +225,44 @@ def test_process_content_ai_summary_request_skips_already_processed_item():
 
     assert result["skipped"] is True
     assert result["reason"] == "already_processed"
+
+
+def test_process_content_ai_summary_request_skips_exhausted_article_retry_window():
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/story",
+        canonical_url="https://example.com/story",
+        published_at=_recent_dt(hours_ago=2),
+        title="Retry exhausted article",
+        summary=f"__blips_article_retry__:v1:3:{_recent_dt(hours_ago=1).isoformat()}",
+        ai_processed=False,
+        image_url="https://cdn.example.com/hero.jpg",
+        article_image_status="VERIFIED",
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status="PENDING",
+        readiness_reason="article_unskimmable_retry",
+        created_at=_recent_dt(hours_ago=1, minutes_ago=55),
+        updated_at=_recent_dt(hours_ago=1, minutes_ago=55),
+    )
+    db.add(item)
+    db.commit()
+
+    result = content_ai_service.process_content_ai_summary_request(db, content_id=item.id)
+    db.commit()
+
+    refreshed_item = db.get(ContentItem, item.id)
+
+    assert result["skipped"] is True
+    assert result["reason"] == "article_retry_window_exhausted"
+    assert result["changed"] is False
+    assert refreshed_item.summary.startswith("__blips_article_retry__:v1:3:")
+    assert refreshed_item.readiness_reason == "article_unskimmable_retry"
 
 
 def test_process_content_ai_summary_request_marks_article_ready(monkeypatch):
