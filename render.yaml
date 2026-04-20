@@ -215,7 +215,17 @@ projects:
               - key: YOUTUBE_VIDEO_SEARCH_MIN_INTERVAL_MINUTES
                 value: "90"
               - key: YOUTUBE_REEL_SEARCH_MIN_INTERVAL_MINUTES
-                value: "60"
+                value: "30"
+              - key: YOUTUBE_DISCOVERY_REELS_LOOKBACK_DAYS
+                value: "14"
+              - key: YOUTUBE_DISCOVERY_MIN_CHANNEL_SUBSCRIBERS
+                value: "3000"
+              - key: YOUTUBE_DISCOVERY_MIN_VIDEO_VIEWS
+                value: "500"
+              - key: YOUTUBE_DISCOVERY_MIN_VIEWS_PER_HOUR
+                value: "20"
+              - key: YOUTUBE_DISCOVERY_MIN_ENGAGEMENT_RATE
+                value: "0.0015"
               - key: YOUTUBE_SEARCH_MIN_VIDEO_DEFICIT
                 value: "1"
               - key: YOUTUBE_SEARCH_MIN_REEL_DEFICIT

@@ -5,6 +5,7 @@
     "role": "explainer",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 4,
     "quality_tier": "premium"
   },
   {
@@ -21,6 +22,7 @@
     "role": "news",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 4,
     "quality_tier": "premium"
   },
   {
@@ -29,6 +31,7 @@
     "role": "explainer",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 4,
     "quality_tier": "premium"
   },
   {
@@ -61,6 +64,7 @@
     "role": "explainer",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 4,
     "quality_tier": "premium"
   },
   {
@@ -189,6 +193,7 @@
     "role": "explainer",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 4,
     "quality_tier": "premium"
   },
   {
@@ -197,6 +202,7 @@
     "role": "explainer",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 4,
     "quality_tier": "premium"
   },
   {
@@ -270,7 +276,7 @@
     "name": "MKBHD Clips",
     "role": "shorts",
     "content_format": "shorts",
-    "daily_cap": 2,
+    "daily_cap": 6,
     "quality_tier": "premium"
   },
   {
@@ -278,7 +284,7 @@
     "name": "Waveform Clips",
     "role": "shorts",
     "content_format": "shorts",
-    "daily_cap": 2,
+    "daily_cap": 6,
     "quality_tier": "premium"
   },
   {
@@ -286,7 +292,7 @@
     "name": "Technology Connections Shorts",
     "role": "shorts",
     "content_format": "shorts",
-    "daily_cap": 2,
+    "daily_cap": 6,
     "quality_tier": "premium"
   },
   {
@@ -426,6 +432,7 @@
     "role": "engineer",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 5,
     "quality_tier": "premium"
   },
   {
@@ -458,6 +465,7 @@
     "role": "engineer",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 4,
     "quality_tier": "standard"
   },
   {
@@ -522,6 +530,7 @@
     "role": "engineer",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 4,
     "quality_tier": "standard"
   },
   {
@@ -554,6 +563,7 @@
     "role": "engineer",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 4,
     "quality_tier": "premium"
   },
   {
@@ -684,6 +694,7 @@
     "role": "official",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 4,
     "quality_tier": "premium"
   },
   {
@@ -692,6 +703,7 @@
     "role": "official",
     "content_format": "mixed",
     "daily_cap": 2,
+    "daily_reel_cap": 4,
     "quality_tier": "premium"
   },
   {
@@ -700,7 +712,7 @@
     "role": "official",
     "content_format": "mixed",
     "daily_cap": 2,
-    "daily_reel_cap": 2,
+    "daily_reel_cap": 4,
     "quality_tier": "premium"
   },
   {
@@ -790,7 +802,7 @@
     "role": "official",
     "content_format": "mixed",
     "daily_cap": 2,
-    "daily_reel_cap": 2,
+    "daily_reel_cap": 4,
     "quality_tier": "standard"
   },
   {
@@ -855,7 +867,7 @@
     "role": "official",
     "content_format": "mixed",
     "daily_cap": 2,
-    "daily_reel_cap": 1,
+    "daily_reel_cap": 3,
     "quality_tier": "standard"
   },
   {
@@ -925,7 +937,7 @@
     "name": "MKBHD Shorts",
     "role": "shorts",
     "content_format": "shorts",
-    "daily_cap": 2,
+    "daily_cap": 6,
     "quality_tier": "premium",
     "bootstrap_on_add": true
   },
@@ -934,7 +946,7 @@
     "name": "Dwarkesh Clips",
     "role": "shorts",
     "content_format": "shorts",
-    "daily_cap": 2,
+    "daily_cap": 6,
     "quality_tier": "premium",
     "bootstrap_on_add": true
   },
@@ -1216,5 +1228,158 @@
     "quality_tier": "supplemental",
     "ingestion_stream": "expansion",
     "notes": "Expansion stream: activated only when video or reel inventory needs fill."
+  },
+  {
+    "channel_id": "UCYO_jab_esuFRV4b17AJtAw",
+    "name": "3Blue1Brown",
+    "role": "engineer",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 2,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
+  },
+  {
+    "channel_id": "UCSHZKyawb77ixDdsGog4iWA",
+    "name": "Lex Fridman",
+    "role": "ai",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
+  },
+  {
+    "channel_id": "UCZHmQk67mSJgfCCTn7xBfew",
+    "name": "Yannic Kilcher",
+    "role": "ai",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
+  },
+  {
+    "channel_id": "UChpleBmo18P08aKCIgti38g",
+    "name": "Matt Wolfe",
+    "role": "ai",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 4,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
+  },
+  {
+    "channel_id": "UCqcbQf6yw5KzRoDDcZ_wBSw",
+    "name": "Wes Roth",
+    "role": "ai",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "standard",
+    "bootstrap_on_add": true
+  },
+  {
+    "channel_id": "UCXUPKJO5MZQN11PqgIvyuvQ",
+    "name": "Andrej Karpathy",
+    "role": "ai",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
+  },
+  {
+    "channel_id": "UCK8XIGR5kRidIw2fWqwyHRA",
+    "name": "Reducible",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
+  },
+  {
+    "channel_id": "UCJZv4d5rbIKd4QHMPkcABCw",
+    "name": "Kevin Powell",
+    "role": "engineer",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
+  },
+  {
+    "channel_id": "UC6vRUjYqDuoUsYsku86Lrsw",
+    "name": "Jack Herrington",
+    "role": "engineer",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
+  },
+  {
+    "channel_id": "UCNzszbnvQeFzObW0ghk0Ckw",
+    "name": "Dave's Garage",
+    "role": "engineer",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
+  },
+  {
+    "channel_id": "UCRjSO-juFtngAeJGJRMdIZw",
+    "name": "Gary Explains",
+    "role": "explainer",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "standard",
+    "bootstrap_on_add": true
+  },
+  {
+    "channel_id": "UCZSlfzadjnw7G419c_OJ9eg",
+    "name": "Mrwhosetheboss Shorts",
+    "role": "shorts",
+    "content_format": "shorts",
+    "daily_cap": 5,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
+  },
+  {
+    "channel_id": "UC4SVo0Ue36XCfOyb5Lh1viQ",
+    "name": "Bro Code",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard",
+    "bootstrap_on_add": true
+  },
+  {
+    "channel_id": "UCcabW7890RKJzL968QWEykA",
+    "name": "CS50",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "premium",
+    "bootstrap_on_add": true
+  },
+  {
+    "channel_id": "UCwd5VFu4KoJNjkWJZMFJGHQ",
+    "name": "Jacob Sorber",
+    "role": "engineer",
+    "content_format": "long_form",
+    "daily_cap": 1,
+    "quality_tier": "standard",
+    "ingestion_stream": "expansion"
+  },
+  {
+    "channel_id": "UC_mYaQAE6-71rjSN6CeCA-g",
+    "name": "NeetCode",
+    "role": "engineer",
+    "content_format": "mixed",
+    "daily_cap": 1,
+    "daily_reel_cap": 3,
+    "quality_tier": "standard",
+    "bootstrap_on_add": true
   }
 ]

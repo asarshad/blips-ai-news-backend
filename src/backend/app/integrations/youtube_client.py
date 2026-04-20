@@ -1479,7 +1479,75 @@ class YouTubeClient:
             logger.error(f"Error parsing YouTube feed {config.feed_url}: {str(e)}")
             raise
 
+        if config.reels_enabled and config.content_format != ContentFormat.SHORTS:
+            seen_ids = {v.video_id for v in videos if v.video_id}
+            shorts_entries = self._fetch_shorts_feed(config, seen_ids)
+            videos.extend(shorts_entries)
+
         return videos
+
+    def _fetch_shorts_feed(
+        self, config: ChannelConfig, exclude_ids: set
+    ) -> List[VideoEntry]:
+        """Fetch from the channel's UUSH Shorts-only playlist feed.
+
+        All entries returned by this feed are definitively YouTube Shorts, so
+        we force is_short=True and skip duration / permalink heuristics.
+        New video IDs not already seen from the main feed are appended.
+        """
+        shorts_url = config.shorts_feed_url
+        try:
+            feed = self._parse_feed_with_retries(shorts_url)
+        except Exception as e:
+            logger.debug("UUSH feed unavailable for %s: %s", config.name, e)
+            return []
+
+        channel_name = feed.feed.get("title", config.name)
+        results: List[VideoEntry] = []
+        for entry in feed.entries:
+            try:
+                video_url = entry.get("link", "")
+                if not video_url:
+                    continue
+                video_id = self._extract_video_id(video_url)
+                if not video_id or video_id in exclude_ids:
+                    continue
+
+                title = entry.get("title", "Untitled")
+                normalized_url = f"https://www.youtube.com/shorts/{video_id}"
+                fit_score = self._compute_format_fit_score(
+                    duration_seconds=None,
+                    is_short=True,
+                    surface="reels",
+                    role=config.role,
+                )
+                results.append(
+                    VideoEntry(
+                        title=title,
+                        video_url=normalized_url,
+                        thumbnail_url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
+                        summary=self._get_summary(entry),
+                        source=channel_name,
+                        category=self._categorize_video(title, self._get_summary(entry)),
+                        video_id=video_id,
+                        channel_id=config.channel_id,
+                        channel_role=config.role,
+                        content_format=config.content_format,
+                        quality_tier=config.quality_tier,
+                        is_short=True,
+                        published_at=self._parse_entry_published_at(entry),
+                        acquisition_lane="curated",
+                        source_status="core" if config.enabled else "blocked",
+                        duration_seconds=None,
+                        format_fit_score=fit_score,
+                    )
+                )
+                exclude_ids.add(video_id)
+            except Exception as exc:
+                logger.debug("Error processing UUSH entry for %s: %s", config.name, exc)
+        if results:
+            logger.info("UUSH feed added %d new shorts for %s", len(results), config.name)
+        return results
 
     def _prime_duration_cache(self, video_ids: List[str]) -> None:
         """Batch-load video durations so mixed-format channels do not spend one API call per item."""

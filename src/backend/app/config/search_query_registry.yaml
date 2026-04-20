@@ -208,3 +208,80 @@ queries:
     reel_query: Apple Google Microsoft Meta shorts
     order: viewCount
     enabled: true
+  - id: hashtag-ai-shorts
+    category: AI & Machine Learning
+    concept: AI shorts via hashtag discovery
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: high
+    priority: 1
+    video_query:
+    reel_query: "#AIshorts artificial intelligence"
+    order: viewCount
+    enabled: true
+  - id: hashtag-tech-shorts
+    category: Consumer Tech
+    concept: Tech shorts via hashtag discovery
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: high
+    priority: 2
+    video_query:
+    reel_query: "#techshorts technology"
+    order: viewCount
+    enabled: true
+  - id: hashtag-coding-shorts
+    category: Software Development & Dev Tools
+    concept: Coding shorts via hashtag discovery
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: high
+    priority: 2
+    video_query:
+    reel_query: "#codingshorts programming developer"
+    order: relevance
+    enabled: true
+  - id: hashtag-ml-shorts
+    category: AI & Machine Learning
+    concept: Machine learning shorts via hashtag discovery
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: high
+    priority: 1
+    video_query:
+    reel_query: "#machinelearning #shorts AI model"
+    order: viewCount
+    enabled: true
+  - id: hashtag-devtools-shorts
+    category: Software Development & Dev Tools
+    concept: Developer tool shorts via hashtag discovery
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: medium
+    priority: 2
+    video_query:
+    reel_query: "#devshorts developer tools workflow"
+    order: relevance
+    enabled: true
+  - id: security-shorts
+    category: Cybersecurity
+    concept: Security and privacy shorts
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: medium
+    priority: 3
+    video_query:
+    reel_query: cybersecurity hacking privacy shorts
+    order: viewCount
+    enabled: true
+  - id: cloud-infra-shorts
+    category: Cloud & Infrastructure
+    concept: Cloud and infrastructure shorts
+    surfaces: [reels]
+    mode: always_on
+    youtube_fit: medium
+    priority: 3
+    video_query:
+    reel_query: Kubernetes Docker cloud platform shorts
+    order: relevance
+    enabled: true

@@ -77,6 +77,20 @@ class ChannelConfig:
         return f"https://www.youtube.com/feeds/videos.xml?channel_id={self.channel_id}"
 
     @property
+    def shorts_feed_url(self) -> str:
+        """YouTube Shorts-only RSS feed via the UUSH playlist prefix.
+
+        YouTube exposes a hidden playlist for each channel's Shorts that uses
+        the UUSH prefix instead of the standard UC prefix.  Entries from this
+        feed are definitively Shorts, so callers can skip duration / permalink
+        heuristics.
+        """
+        if not self.channel_id.startswith("UC"):
+            return self.feed_url
+        playlist_id = "UUSH" + self.channel_id[2:]
+        return f"https://www.youtube.com/feeds/videos.xml?playlist_id={playlist_id}"
+
+    @property
     def reels_enabled(self) -> bool:
         """Whether this channel should contribute to the reels surface."""
         if self.allow_reels is not None:
