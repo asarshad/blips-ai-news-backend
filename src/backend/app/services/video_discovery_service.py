@@ -268,6 +268,7 @@ class VideoDiscoveryService:
                 for entry in accepted:
                     unique.setdefault(entry.video_id, entry)
 
+        unique = self._exclude_already_ingested(unique)
         self.db.commit()
         return list(unique.values())
 
@@ -756,6 +757,37 @@ class VideoDiscoveryService:
         default = "0"
         return os.getenv(env_name, default).strip().lower() not in {"0", "false", "no", "off"}
 
+    def _exclude_already_ingested(
+        self, candidates: Dict[str, VideoEntry]
+    ) -> Dict[str, VideoEntry]:
+        """Drop candidates whose video_id already exists as a dedupe_key in content_items.
+
+        Trending results are especially prone to re-surfacing the same videos across
+        multiple discovery windows because the mostPopular chart is slow-moving.
+        A single DB look-up prevents duplicate ingestion without touching the ingestion
+        layer itself.
+        """
+        if not candidates:
+            return candidates
+
+        from app.models.content import ContentItem  # local import to avoid circular deps
+
+        video_ids = list(candidates.keys())
+        existing: set[str] = {
+            row[0]
+            for row in self.db.query(ContentItem.dedupe_key)
+            .filter(ContentItem.dedupe_key.in_(video_ids))
+            .all()
+            if row[0]
+        }
+        if existing:
+            logger.info(
+                "[video_discovery] Skipping %d already-ingested candidates: %s",
+                len(existing),
+                ", ".join(sorted(existing)[:5]),
+            )
+        return {vid: entry for vid, entry in candidates.items() if vid not in existing}
+
     def _filter_candidates(
         self, candidates: List[VideoEntry], surface: str
     ) -> tuple[List[VideoEntry], Counter]:
@@ -899,8 +931,18 @@ class VideoDiscoveryService:
             or self._channel_name_looks_tech(entry.source)
             or subscribers >= _DISCOVERY_HIGH_AUTHORITY_SUBSCRIBERS
         )
+        # YouTube already pre-filters trending to videoCategoryId=28 (Science & Technology),
+        # so trending candidates get a relaxed quality path rather than reapplying the full
+        # signal thresholds that were designed for open keyword search results.
+        is_trending = entry.acquisition_lane == "trending"
 
         if surface == "reels":
+            # Trending: trust YouTube's category-28 pre-filter. Accept Shorts with visible
+            # traction, but still require a minimal tech signal to guard against YouTube
+            # miscategorising entertainment content as Science & Technology.
+            if is_trending and (strong_video or strong_engagement):
+                return tech_signal >= 0.20 or story_signal >= 0.12
+            # Non-trending: require a trusted channel upfront.
             if not trusted_channel:
                 return False
             if tech_signal < 0.35 and story_signal < 0.18:
@@ -919,12 +961,11 @@ class VideoDiscoveryService:
 
         if strong_channel and trusted_channel and strong_video:
             return True
-        if (
-            entry.acquisition_lane == "trending"
-            and trusted_channel
-            and (strong_video or basic_traction)
-            and (story_signal >= 0.18 or tech_signal >= 0.30)
-        ):
+        # Trending videos: category-28 pre-filter already scoped to Science & Technology;
+        # require traction (not trusted_channel) and a light signal floor.
+        if is_trending and (strong_video or (basic_traction and strong_engagement)):
+            return tech_signal >= 0.15 or story_signal >= 0.10
+        if is_trending and trusted_channel and (strong_video or basic_traction):
             return True
         if story_led and trusted_channel and (basic_traction or strong_engagement):
             return True

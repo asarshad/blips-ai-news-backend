@@ -231,9 +231,9 @@ projects:
               - key: YOUTUBE_SEARCH_MIN_REEL_DEFICIT
                 value: "1"
               - key: YOUTUBE_VIDEO_TRENDING_ENABLED
-                value: "0"
+                value: "1"
               - key: YOUTUBE_REEL_TRENDING_ENABLED
-                value: "0"
+                value: "1"
               - key: YT_REEL_UPLOADS_API_ENABLED
                 value: "true"
               - key: YT_REEL_UPLOADS_MAX_PAGES
