@@ -355,6 +355,141 @@ FEED_REGISTRY: List[FeedConfig] = [
         base_quality_weight=0.75,
         notes="Startup funding, valuations, M&A",
     ),
+    FeedConfig(
+        url="https://strictlyvc.com/feed/",
+        name="StrictlyVC",
+        role=FeedRole.BUSINESS,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=1,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.78,
+        notes="Venture capital deals, startup funding rounds, investor moves",
+    ),
+    FeedConfig(
+        url="https://techcrunch.com/category/startups/feed/",
+        name="TechCrunch Startups",
+        role=FeedRole.BUSINESS,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.FAST,
+        base_quality_weight=0.85,
+        notes="Startup-specific lane from TechCrunch for funding and launch coverage",
+    ),
+    # =========================================================================
+    # FINTECH
+    # Payments, banking infrastructure, digital finance, compliance
+    # Target: 2-3 articles/day
+    # =========================================================================
+    FeedConfig(
+        url="https://www.finextra.com/rss/headlines.aspx",
+        name="Finextra",
+        role=FeedRole.BUSINESS,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=2,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.80,
+        notes="Fintech infrastructure, banking rails, regulation, and payments tech",
+    ),
+    FeedConfig(
+        url="https://www.bankingdive.com/feeds/news/",
+        name="Banking Dive",
+        role=FeedRole.BUSINESS,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=1,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.76,
+        notes="Banking operations, digital transformation, and policy-driven market updates",
+    ),
+    # =========================================================================
+    # ROBOTICS
+    # Robotics systems, automation engineering, industrial deployment
+    # Target: 2-3 articles/day
+    # =========================================================================
+    FeedConfig(
+        url="https://ramagazine.ieee.org/feed/",
+        name="IEEE Robotics and Automation Magazine",
+        role=FeedRole.ANALYSIS,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.90,
+        notes="Peer-reviewed robotics and automation engineering perspectives",
+    ),
+    FeedConfig(
+        url="https://www.therobotreport.com/feed/",
+        name="The Robot Report",
+        role=FeedRole.BREAKING,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=2,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.82,
+        notes="Industry robotics product updates, deployments, and vendor ecosystem coverage",
+    ),
+    # =========================================================================
+    # CLIMATE / GREEN TECH
+    # Electrification, clean energy technology, climate-adjacent innovation
+    # Target: 2-3 articles/day
+    # =========================================================================
+    FeedConfig(
+        url="https://cleantechnica.com/feed/",
+        name="CleanTechnica",
+        role=FeedRole.ANALYSIS,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=1,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.76,
+        notes="Clean energy, battery, and sustainability technology coverage",
+    ),
+    FeedConfig(
+        url="https://electrek.co/feed/",
+        name="Electrek",
+        role=FeedRole.BREAKING,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=1,
+        decay_profile=DecayProfile.FAST,
+        base_quality_weight=0.76,
+        notes="EV, charging, and energy transition product updates",
+    ),
+    # =========================================================================
+    # BIOTECH & HEALTH TECH
+    # Biotech R&D, clinical innovation, health systems technology
+    # Target: 2-3 articles/day
+    # =========================================================================
+    FeedConfig(
+        url="https://www.statnews.com/feed/",
+        name="STAT News",
+        role=FeedRole.ANALYSIS,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.86,
+        notes="Biotech and health tech reporting with strong editorial rigor",
+    ),
+    FeedConfig(
+        url="https://www.technologyreview.com/topic/biomedicine/feed/",
+        name="MIT Technology Review (Biomedicine)",
+        role=FeedRole.ANALYSIS,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.84,
+        notes="Biomedicine and health innovation analysis",
+    ),
+    # =========================================================================
+    # REGULATORY / POLICY
+    # Privacy, civil liberties, platform and technology policy
+    # Target: 1-2 articles/day
+    # =========================================================================
+    FeedConfig(
+        url="https://www.eff.org/rss/updates.xml",
+        name="EFF Deep Links",
+        role=FeedRole.SECURITY,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.85,
+        notes="Technology policy, surveillance, and digital rights analysis",
+    ),
     # NOTE: PitchBook has Cloudflare protection that blocks automated requests
     # FeedConfig(
     #     url="https://pitchbook.com/news/rss",
@@ -657,6 +792,16 @@ FEED_REGISTRY: List[FeedConfig] = [
         enabled=False,
         base_quality_weight=0.80,
         notes="Disabled March 28, 2026: URL redirects away from an RSS feed and parses as empty/broken",
+    ),
+    FeedConfig(
+        url="https://export.arxiv.org/rss/cs.AI",
+        name="arXiv cs.AI",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.90,
+        notes="AI research preprints to restore academic-research signal coverage",
     ),
     FeedConfig(
         url="https://hai.stanford.edu/news/feed",

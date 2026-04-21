@@ -54,8 +54,8 @@ from app.services.content_readiness import (
     sync_content_readiness,
 )
 from app.services.conversation_starters import get_starters_service
-from app.services.video_relevance_service import classify_video_blips_relevance
 from app.services.video_discovery_provenance import build_discovered_via
+from app.services.video_relevance_service import classify_video_blips_relevance
 from app.video_surface_rules import classify_video_like_item
 
 logger = get_logger(__name__)
@@ -220,9 +220,9 @@ def build_video_content_item_from_entry(
     resolved_source_status = (
         source_status if source_status is not None else getattr(entry, "source_status", None)
     )
-    channel_config = get_channel_by_id(getattr(entry, "channel_id", "") or "") or get_channel_by_name(
-        source
-    )
+    channel_config = get_channel_by_id(
+        getattr(entry, "channel_id", "") or ""
+    ) or get_channel_by_name(source)
     reel_cap = channel_config.effective_daily_reel_cap if channel_config is not None else None
     resolved_status = curation_status or review_queue_target_status(
         content_type=content_type,
@@ -276,7 +276,9 @@ def build_video_content_item_from_entry(
         try:
             get_starters_service(llm_client).generate_answers_and_persist(content_item)
         except Exception as exc:
-            logger.warning("Failed to precompute starter answers for video %s: %s", entry.title, exc)
+            logger.warning(
+                "Failed to precompute starter answers for video %s: %s", entry.title, exc
+            )
     base_quality = compute_source_weight(source)
     content_item.quality_score = base_quality * quality_modifier
     content_item.recency_score = 1.0
@@ -328,7 +330,10 @@ class IngestionPipeline:
             return False
 
         try:
-            finalize_article_image_verification(existing_item)
+            finalize_article_image_verification(
+                existing_item,
+                allow_placeholder_fallback=True,
+            )
             sync_content_readiness(self.db, existing_item)
             self.db.add(existing_item)
             self.db.commit()

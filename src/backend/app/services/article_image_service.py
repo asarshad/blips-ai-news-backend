@@ -21,9 +21,7 @@ from app.extraction.normalize import is_suspicious_image_url
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.content_event import ContentEventOutbox
 from app.services.article_image_placeholder import (
-    apply_source_placeholder,
     is_placeholder_image_url,
-    should_apply_placeholder,
 )
 from app.services.content_readiness import sync_content_readiness
 from app.services.playlist_service import refresh_cached_playlist_items
@@ -81,7 +79,9 @@ def queue_article_image_verification_request(
         event_type=ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE,
         payload={
             "content_id": int(item.id),
-            "source_url": (getattr(item, "canonical_url", None) or getattr(item, "source_url", None) or "").strip()
+            "source_url": (
+                getattr(item, "canonical_url", None) or getattr(item, "source_url", None) or ""
+            ).strip()
             or None,
             "readiness_reason": (getattr(item, "readiness_reason", None) or "").strip() or None,
         },
@@ -168,15 +168,11 @@ def repair_article_image_metadata(
             failures += 1
             continue
 
-        # When real-image recovery has now been tried at least once and still
-        # produced nothing, fall back to a source-branded placeholder so the
-        # article can go READY rather than sit in ``missing_article_image``
-        # forever.
-        if should_apply_placeholder(item) and apply_source_placeholder(item):
+        previous_image_url = (item.image_url or "").strip()
+        finalize_article_image_verification(item, allow_placeholder_fallback=True)
+        if is_placeholder_image_url(item.image_url) and item.image_url != previous_image_url:
             placeholder_applied += 1
             changed = True
-
-        finalize_article_image_verification(item)
         sync_content_readiness(db, item)
         verification_changed = (
             getattr(item, "article_image_status", None) or ""
@@ -246,9 +242,7 @@ def repair_single_article_image(
         source_url=source_url,
         force_reconcile_image=True,
     )
-    if should_apply_placeholder(item) and apply_source_placeholder(item):
-        changed = True
-    finalize_article_image_verification(item)
+    finalize_article_image_verification(item, allow_placeholder_fallback=True)
     sync_content_readiness(db, item)
     db.commit()
     db.refresh(item)
@@ -294,9 +288,7 @@ def process_article_image_verification_request(
         source_url=source_url,
         force_reconcile_image=True,
     )
-    if should_apply_placeholder(item) and apply_source_placeholder(item):
-        changed = True
-    finalize_article_image_verification(item)
+    finalize_article_image_verification(item, allow_placeholder_fallback=True)
     sync_content_readiness(db, item)
 
     return {

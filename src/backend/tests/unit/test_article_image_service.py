@@ -620,7 +620,8 @@ def test_repair_article_image_metadata_defers_placeholder_when_no_prior_attempt(
     monkeypatch,
 ):
     """Fresh articles with no verification history should NOT immediately get
-    a placeholder — the recovery loop needs at least one prior real attempt."""
+    a placeholder — the recovery loop needs at least one prior real attempt
+    (article_image_checked_at populated) before committing to a placeholder."""
     engine = create_engine("sqlite:///:memory:")
     _create_test_tables(engine)
     SessionLocal = sessionmaker(bind=engine)
@@ -636,7 +637,7 @@ def test_repair_article_image_metadata_defers_placeholder_when_no_prior_attempt(
         curation_status=ContentStatus.PROMOTED,
         readiness_reason="missing_article_image",
         article_image_status="PENDING",
-        article_image_checked_at=None,
+        article_image_checked_at=None,  # no prior attempt
         topics=["technology"],
         created_at=_recent_dt(minutes_ago=30),
         updated_at=_recent_dt(minutes_ago=30),
@@ -663,9 +664,59 @@ def test_repair_article_image_metadata_defers_placeholder_when_no_prior_attempt(
     )
     repaired = db.get(ContentItem, item.id)
 
-    # First pass records the attempt but does not commit a placeholder.
+    # First pass records the attempt but must NOT commit a placeholder yet.
+    # After checked_at is populated and the min-age threshold passes, the next
+    # run will apply the placeholder.
     assert result["placeholder_applied"] == 0
     assert repaired.image_url is None
-    # After the first attempt, checked_at is populated so the next run
-    # (once enough time has passed) can apply the placeholder.
-    assert repaired.article_image_checked_at is not None
+    assert repaired.article_image_checked_at is not None  # timestamp recorded for next pass
+
+
+def test_process_article_image_verification_request_applies_placeholder_when_recovery_fails(
+    monkeypatch,
+):
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="InfoQ",
+        source_url="https://example.com/infoq-story",
+        canonical_url="https://example.com/infoq-story",
+        published_at=_recent_dt(hours_ago=2),
+        title="Verify placeholder fallback",
+        curation_status=ContentStatus.PROMOTED,
+        article_image_status="PENDING",
+        ai_processed=True,
+        summary="A real summary is already present.",
+        readiness_status="PENDING",
+        readiness_reason="awaiting_article_image_verification",
+        topics=["technology"],
+        created_at=_recent_dt(hours_ago=2),
+        updated_at=_recent_dt(hours_ago=2),
+    )
+    db.add(item)
+    db.commit()
+
+    monkeypatch.setattr(
+        article_image_service,
+        "fetch_article_page_metadata",
+        lambda article_url: None,
+    )
+    monkeypatch.setattr(
+        "app.article_hydration.ArticleHydrationService.extract_article_image_with_llm",
+        lambda self, **_kwargs: None,
+    )
+
+    result = article_image_service.process_article_image_verification_request(
+        db,
+        content_id=item.id,
+    )
+
+    assert result["placeholder_applied"] is True
+    assert result["image_url"] is not None
+    assert "/placeholder/source" in result["image_url"]
+    assert result["article_image_status"] == "VERIFIED"
+    assert result["readiness_status"] == "READY"

@@ -27,8 +27,8 @@ from app.extraction.normalize import make_absolute_url
 from app.ingestion.canonical import canonical_key_for_article
 from app.ingestion.extractors import extract_entities, extract_source, extract_topics
 from app.models.content import ContentItem, ContentType
-from app.services.conversation_starters import get_starters_service
 from app.services.content_readiness import seed_content_readiness
+from app.services.conversation_starters import get_starters_service
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -215,19 +215,34 @@ def seed_article_image_verification(item: Any) -> None:
     item.article_image_checked_at = None
 
 
-def finalize_article_image_verification(item: Any, *, now: Optional[datetime] = None) -> None:
+def finalize_article_image_verification(
+    item: Any,
+    *,
+    now: Optional[datetime] = None,
+    allow_placeholder_fallback: bool = False,
+) -> None:
     """Persist the outcome of article image verification."""
     if getattr(item, "type", None) != ContentType.ARTICLE:
         return
     current_image_url = getattr(item, "image_url", None)
     # Locally import to avoid a circular dependency between hydration and the
     # placeholder service (which itself imports settings from core.config).
-    from app.services.article_image_placeholder import is_placeholder_image_url
-
-    is_verified = bool(
-        ArticleHydrationService.normalize_article_image(current_image_url)
-        or is_placeholder_image_url(current_image_url)
+    from app.services.article_image_placeholder import (
+        apply_source_placeholder,
+        is_placeholder_image_url,
+        should_apply_placeholder,
     )
+
+    normalized_image_url = ArticleHydrationService.normalize_article_image(current_image_url)
+    if not normalized_image_url and allow_placeholder_fallback:
+        # Placeholder is the last resort: only apply once real-image recovery has
+        # been attempted at least once and enough time has passed (age gate).
+        # should_apply_placeholder enforces the feature flag, checked_at guard,
+        # and ARTICLE_IMAGE_PLACEHOLDER_MIN_AGE_MINUTES threshold.
+        if should_apply_placeholder(item) and apply_source_placeholder(item):
+            current_image_url = getattr(item, "image_url", None)
+
+    is_verified = bool(normalized_image_url or is_placeholder_image_url(current_image_url))
     item.article_image_status = (
         ARTICLE_IMAGE_STATUS_VERIFIED if is_verified else ARTICLE_IMAGE_STATUS_MISSING
     )

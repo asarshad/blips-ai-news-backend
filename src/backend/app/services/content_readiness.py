@@ -112,6 +112,20 @@ def ready_content_filter(surface_name: str):
         ContentItem.readiness_status == ContentReadinessStatus.READY.value,
     ]
 
+    if surface_name == "articles":
+        # Defense in depth: keep stale persisted READY rows with blank images or
+        # missing article verification out of delivery until readiness is
+        # synchronized again.
+        filters.extend(
+            [
+                ContentItem.article_image_status == "VERIFIED",
+                _sql_non_empty(func.coalesce(ContentItem.source_url, ContentItem.canonical_url)),
+                _sql_non_empty(ContentItem.image_url),
+                ContentItem.ai_processed.is_(True),
+                _sql_non_empty(ContentItem.summary),
+            ]
+        )
+
     if surface_name == "videos":
         # Keep stale persisted READY rows out of delivery until they have a
         # validated AI summary under the current policy.

@@ -506,7 +506,10 @@ class EditorialService:
                 )
 
         if item.type == ContentType.ARTICLE:
-            finalize_article_image_verification(item)
+            finalize_article_image_verification(
+                item,
+                allow_placeholder_fallback=True,
+            )
 
     def _ensure_ready_for_manual_promotion(self, item: ContentItem) -> None:
         """Prevent manual approval flows from promoting content that still cannot ship."""

@@ -4,6 +4,12 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from sqlalchemy import create_engine
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import sessionmaker
+
+from app.db.base import Base
 from app.models.content import ContentReadinessStatus, ContentStatus, ContentType
 from app.services.article_image_service import ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE
 from app.services.content_readiness import (
@@ -12,8 +18,14 @@ from app.services.content_readiness import (
     build_content_ready_event_payload,
     build_content_unready_event_payload,
     evaluate_content_readiness,
+    ready_content_filter,
     sync_content_readiness,
 )
+
+
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
+    return "TEXT"
 
 
 def test_article_requires_ai_summary_to_be_ready():
@@ -181,6 +193,52 @@ def test_article_waits_for_image_verification_before_becoming_ready():
 
     assert decision.status == ContentReadinessStatus.PENDING
     assert decision.reason == "awaiting_article_image_verification"
+
+
+def test_ready_content_filter_excludes_ready_articles_with_blank_image_url():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    from app.models.content import ContentItem
+
+    stale_ready = ContentItem(
+        id=101,
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/stale-ready",
+        canonical_url="https://example.com/stale-ready",
+        title="Stale ready article",
+        summary="A valid looking summary that should still be blocked.",
+        image_url="   ",
+        article_image_status="VERIFIED",
+        ai_processed=True,
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status=ContentReadinessStatus.READY.value,
+        published_at=datetime(2026, 4, 20, 12, 0, 0),
+    )
+    healthy_ready = ContentItem(
+        id=102,
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/healthy-ready",
+        canonical_url="https://example.com/healthy-ready",
+        title="Healthy ready article",
+        summary="A valid summary for an article with a verified image.",
+        image_url="https://cdn.example.com/healthy.jpg",
+        article_image_status="VERIFIED",
+        ai_processed=True,
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status=ContentReadinessStatus.READY.value,
+        published_at=datetime(2026, 4, 20, 12, 5, 0),
+    )
+    db.add_all([stale_ready, healthy_ready])
+    db.commit()
+
+    rows = db.query(ContentItem).filter(ready_content_filter("articles")).all()
+
+    assert [row.id for row in rows] == [102]
 
 
 def test_sync_content_readiness_enqueues_ready_event_once():
