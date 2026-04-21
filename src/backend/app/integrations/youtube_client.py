@@ -1479,9 +1479,13 @@ class YouTubeClient:
             logger.error(f"Error parsing YouTube feed {config.feed_url}: {str(e)}")
             raise
 
-        if config.reels_enabled and config.content_format != ContentFormat.SHORTS:
+        # UUSH supplementary feed: only useful for MIXED channels where the main feed
+        # contains both long-form and Shorts. SHORTS channels already have their main
+        # feed as the Shorts-only feed; LONG_FORM channels rarely post Shorts and their
+        # main feed already captures them, so we skip the extra request.
+        if config.content_format == ContentFormat.MIXED:
             seen_ids = {v.video_id for v in videos if v.video_id}
-            shorts_entries = self._fetch_shorts_feed(config, seen_ids)
+            shorts_entries = self._fetch_shorts_feed(config, set(seen_ids))
             videos.extend(shorts_entries)
 
         return videos
@@ -1544,7 +1548,7 @@ class YouTubeClient:
                 )
                 exclude_ids.add(video_id)
             except Exception as exc:
-                logger.debug("Error processing UUSH entry for %s: %s", config.name, exc)
+                logger.warning("Error processing UUSH entry for %s: %s", config.name, exc)
         if results:
             logger.info("UUSH feed added %d new shorts for %s", len(results), config.name)
         return results

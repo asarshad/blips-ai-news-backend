@@ -772,21 +772,23 @@ class VideoDiscoveryService:
 
         from app.models.content import ContentItem  # local import to avoid circular deps
 
-        video_ids = list(candidates.keys())
-        existing: set[str] = {
+        # dedupe_key is stored as "yt:<video_id>" in the DB
+        prefixed_ids = [f"yt:{vid}" for vid in candidates.keys()]
+        existing_prefixed: set[str] = {
             row[0]
             for row in self.db.query(ContentItem.dedupe_key)
-            .filter(ContentItem.dedupe_key.in_(video_ids))
+            .filter(ContentItem.dedupe_key.in_(prefixed_ids))
             .all()
             if row[0]
         }
-        if existing:
+        existing_bare = {key.removeprefix("yt:") for key in existing_prefixed}
+        if existing_bare:
             logger.info(
                 "[video_discovery] Skipping %d already-ingested candidates: %s",
-                len(existing),
-                ", ".join(sorted(existing)[:5]),
+                len(existing_bare),
+                ", ".join(sorted(existing_bare)[:5]),
             )
-        return {vid: entry for vid, entry in candidates.items() if vid not in existing}
+        return {vid: entry for vid, entry in candidates.items() if vid not in existing_bare}
 
     def _filter_candidates(
         self, candidates: List[VideoEntry], surface: str

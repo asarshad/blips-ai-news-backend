@@ -86,6 +86,13 @@ class ChannelConfig:
         heuristics.
         """
         if not self.channel_id.startswith("UC"):
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "Channel %s has non-UC channel_id %r — cannot build UUSH feed URL, "
+                "falling back to main feed (no Shorts-only results expected).",
+                self.name,
+                self.channel_id,
+            )
             return self.feed_url
         playlist_id = "UUSH" + self.channel_id[2:]
         return f"https://www.youtube.com/feeds/videos.xml?playlist_id={playlist_id}"
