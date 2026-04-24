@@ -55,7 +55,7 @@ class OpenAIClient:
 
         Args:
             api_key: OpenAI API key. Defaults to settings.OPENAI_API_KEY
-            model: Legacy model selector. OpenAI is pinned to gpt-5-nano
+            model: Legacy model selector. OpenAI is pinned to the backend default model.
 
         Raises:
             ValueError: If API key is missing or empty

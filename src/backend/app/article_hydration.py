@@ -514,6 +514,7 @@ class ArticleHydrationService:
         item: ContentItem,
         *,
         precompute_starter_answers: bool = True,
+        allow_summary_rescue: bool = False,
     ) -> bool:
         """Generate article summary fields when the item still needs AI enrichment."""
         if item.type != ContentType.ARTICLE:
@@ -529,7 +530,11 @@ class ArticleHydrationService:
         if not summary_input:
             return False
 
-        summary_result = self.summarize_article(item, summary_input)
+        summary_result = self.summarize_article(
+            item,
+            summary_input,
+            allow_rescue=allow_summary_rescue,
+        )
         summary = normalize_article_summary_output(getattr(summary_result, "summary", None))
         if not summary or len(summary) <= 50:
             return False
@@ -1284,7 +1289,13 @@ class ArticleHydrationService:
 
         return True
 
-    def summarize_article(self, item: ContentItem, article_text: str):
+    def summarize_article(
+        self,
+        item: ContentItem,
+        article_text: str,
+        *,
+        allow_rescue: bool = False,
+    ):
         """Return a best-effort summary result, or None when the LLM is unavailable."""
         llm_client = self._get_llm_client()
         if llm_client is None:
@@ -1292,6 +1303,7 @@ class ArticleHydrationService:
         return llm_client.summarize_article(
             display_article_title(item.title, item.canonical_url or item.source_url),
             article_text,
+            allow_rescue=allow_rescue,
         )
 
     def _get_llm_client(self):

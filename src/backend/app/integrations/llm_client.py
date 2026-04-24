@@ -34,11 +34,18 @@ LLM_REQUEST_TIMEOUT = (
 # Daily cost ceiling (USD) — tracked in Redis
 LLM_DAILY_COST_CEILING = float(getattr(settings, "LLM_DAILY_COST_CEILING", 5.0))
 
-# Approximate cost per 1K tokens (input+output blended) for budgeting
-_TOKEN_COST_PER_1K = {
-    "openai": 0.00020,  # gpt-5-nano approximate blended rate
-    "mistral": 0.00025,  # mistral-small blended
-    "fake": 0.0,
+# Token prices are USD per 1M tokens. Keep this small table near the call
+# sites so the Redis cost ceiling tracks actual model choice, not just volume.
+_OPENAI_TOKEN_PRICES_PER_1M = {
+    "gpt-5-nano": (0.05, 0.40),
+    "gpt-5-mini": (0.25, 2.00),
+    "gpt-5.4-nano": (0.20, 1.25),
+    "gpt-5.4-mini": (0.75, 4.50),
+    "gpt-5.4": (2.50, 15.00),
+}
+_PROVIDER_FALLBACK_PRICES_PER_1M = {
+    "mistral": (0.25, 0.25),
+    "fake": (0.0, 0.0),
 }
 
 _IMAGE_URL_RESPONSE_RE = re.compile(
@@ -116,6 +123,35 @@ def normalize_blips_tech_relevance(value: Optional[str]) -> Optional[str]:
     if normalized in _BLIPS_TECH_RELEVANCE_VALUES:
         return normalized
     return None
+
+
+def _openai_prices_for_model(model: Optional[str]) -> tuple[float, float]:
+    """Return OpenAI input/output prices for a model or snapshot alias."""
+    model_name = (model or "").strip()
+    if model_name in _OPENAI_TOKEN_PRICES_PER_1M:
+        return _OPENAI_TOKEN_PRICES_PER_1M[model_name]
+
+    for prefix, prices in sorted(
+        _OPENAI_TOKEN_PRICES_PER_1M.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    ):
+        if model_name.startswith(f"{prefix}-"):
+            return prices
+
+    return (0.30, 0.30)
+
+
+def _summary_word_count(text: Optional[str]) -> int:
+    return len(" ".join((text or "").split()).split())
+
+
+def _is_article_summary_acceptable(summary_text: Optional[str]) -> bool:
+    cleaned = " ".join((summary_text or "").split()).strip()
+    if not cleaned:
+        return False
+    min_words = max(1, int(settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS))
+    return _summary_word_count(cleaned) >= min_words
 
 
 def normalize_blips_tech_reason(value: Optional[str]) -> str:
@@ -206,6 +242,8 @@ class ChatResponse:
     model: str
     provider: str
     response_id: Optional[str] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
 
 
 @dataclass
@@ -246,6 +284,7 @@ class BaseLLMClient(ABC):
         temperature: float = 0.7,
         previous_response_id: Optional[str] = None,
         store: bool = False,
+        model: Optional[str] = None,
     ) -> ChatResponse:
         """Send a chat completion request."""
         pass
@@ -277,16 +316,8 @@ class OpenAILLMClient(BaseLLMClient):
         )
 
         self.api_key = api_key or settings.OPENAI_API_KEY
-        requested_model = model or settings.OPENAI_MODEL
-        self.model = PINNED_OPENAI_MODEL
+        self.model = model or settings.OPENAI_MODEL or PINNED_OPENAI_MODEL
         self._client = None
-
-        if requested_model != self.model:
-            logger.warning(
-                "Ignoring OpenAI model override '%s'; using pinned model '%s'",
-                requested_model,
-                self.model,
-            )
 
         if not self._is_valid_key(self.api_key):
             logger.warning("OpenAI API key is missing or invalid. AI features will be unavailable.")
@@ -323,6 +354,7 @@ class OpenAILLMClient(BaseLLMClient):
         temperature: float = 0.7,
         previous_response_id: Optional[str] = None,
         store: bool = False,
+        model: Optional[str] = None,
     ) -> ChatResponse:
         if not self.is_configured():
             raise RuntimeError(
@@ -339,8 +371,9 @@ class OpenAILLMClient(BaseLLMClient):
                 if msg.role != "system"
             ]
 
+            request_model = model or self.model
             request_kwargs = {
-                "model": self.model,
+                "model": request_model,
                 "input": input_messages,
                 "max_output_tokens": max_tokens,
                 "reasoning": {"effort": self._REASONING_EFFORT},
@@ -352,21 +385,24 @@ class OpenAILLMClient(BaseLLMClient):
                 request_kwargs["previous_response_id"] = previous_response_id
             if temperature != 0.7:
                 logger.debug(
-                    "Ignoring OpenAI temperature override for pinned GPT-5 model '%s'",
-                    self.model,
+                    "Ignoring OpenAI temperature override for GPT-5 model '%s'",
+                    request_model,
                 )
 
             response = self._client.responses.create(**request_kwargs)
             content = (response.output_text or "").strip()
             if not content:
                 raise ValueError("Empty text output returned from OpenAI Responses API")
+            usage = getattr(response, "usage", None)
 
             return ChatResponse(
                 content=content,
-                tokens_used=response.usage.total_tokens if response.usage else 0,
-                model=getattr(response, "model", self.model),
+                tokens_used=getattr(usage, "total_tokens", 0) if usage else 0,
+                model=getattr(response, "model", request_model),
                 provider="openai",
                 response_id=getattr(response, "id", None),
+                input_tokens=getattr(usage, "input_tokens", None) if usage else None,
+                output_tokens=getattr(usage, "output_tokens", None) if usage else None,
             )
         except tuple(self._RETRYABLE):
             raise  # let tenacity retry
@@ -426,6 +462,7 @@ class MistralLLMClient(BaseLLMClient):
         temperature: float = 0.7,
         previous_response_id: Optional[str] = None,
         store: bool = False,
+        model: Optional[str] = None,
     ) -> ChatResponse:
         if not self.is_configured():
             raise RuntimeError(
@@ -436,17 +473,20 @@ class MistralLLMClient(BaseLLMClient):
             api_messages = [{"role": msg.role, "content": msg.content} for msg in messages]
 
             response = self.client.chat.complete(
-                model=self.model,
+                model=model or self.model,
                 messages=api_messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
+            usage = getattr(response, "usage", None)
 
             return ChatResponse(
                 content=response.choices[0].message.content,
-                tokens_used=response.usage.total_tokens if response.usage else 0,
-                model=self.model,
+                tokens_used=getattr(usage, "total_tokens", 0) if usage else 0,
+                model=model or self.model,
                 provider="mistral",
+                input_tokens=getattr(usage, "prompt_tokens", None) if usage else None,
+                output_tokens=getattr(usage, "completion_tokens", None) if usage else None,
             )
         except (ConnectionError, TimeoutError):
             raise  # let tenacity retry
@@ -511,6 +551,7 @@ class LLMClient:
         temperature: float = 0.7,
         previous_response_id: Optional[str] = None,
         store: bool = False,
+        model: Optional[str] = None,
     ) -> ChatResponse:
         """
         Send a chat completion request to the configured provider.
@@ -535,10 +576,11 @@ class LLMClient:
             temperature,
             previous_response_id=previous_response_id,
             store=store,
+            model=model,
         )
 
-        # --- Track token spend ---
-        self._record_tokens(response.tokens_used, response.provider)
+        # --- Track token spend and estimated dollar spend ---
+        self._record_usage(response)
 
         return response
 
@@ -547,9 +589,19 @@ class LLMClient:
     # ------------------------------------------------------------------
 
     def _cost_redis_key(self) -> str:
-        """Redis key for today's token counter."""
+        """Redis key for today's estimated dollar counter."""
+        today = date.today().isoformat()
+        return f"llm:cost_usd:{today}"
+
+    def _tokens_redis_key(self) -> str:
+        """Redis key for today's raw token counter, retained for diagnostics."""
         today = date.today().isoformat()
         return f"llm:tokens:{today}"
+
+    def _rescue_calls_redis_key(self) -> str:
+        """Redis key for today's full-model summary rescue calls."""
+        today = date.today().isoformat()
+        return f"llm:summary_rescue_calls:{today}"
 
     def _enforce_cost_ceiling(self) -> None:
         """Raise RuntimeError if daily estimated spend exceeds ceiling."""
@@ -561,10 +613,7 @@ class LLMClient:
             r = get_redis()
             raw = r.get(self._cost_redis_key())
             if raw is not None:
-                total_tokens = int(raw)
-                provider = self._client.get_provider_name()
-                cost_per_1k = _TOKEN_COST_PER_1K.get(provider, 0.0003)
-                estimated_cost = (total_tokens / 1000.0) * cost_per_1k
+                estimated_cost = float(raw)
                 if estimated_cost >= LLM_DAILY_COST_CEILING:
                     logger.warning(
                         f"LLM daily cost ceiling reached: ${estimated_cost:.4f} >= ${LLM_DAILY_COST_CEILING}"
@@ -578,22 +627,179 @@ class LLMClient:
             # If Redis is down, allow the request rather than blocking AI entirely
             logger.warning(f"Cost ceiling check failed (allowing request): {e}")
 
-    def _record_tokens(self, tokens: int, provider: str) -> None:
-        """Increment today's token counter in Redis."""
-        if tokens <= 0:
+    def _estimate_response_cost_usd(self, response: ChatResponse) -> float:
+        """Estimate request cost from usage details and the response model."""
+        if response.tokens_used <= 0:
+            return 0.0
+
+        input_tokens = response.input_tokens
+        output_tokens = response.output_tokens
+        if input_tokens is None or output_tokens is None:
+            output_tokens = int(response.tokens_used * 0.20)
+            input_tokens = max(0, response.tokens_used - output_tokens)
+
+        if response.provider == "openai":
+            input_price, output_price = _openai_prices_for_model(response.model)
+        else:
+            input_price, output_price = _PROVIDER_FALLBACK_PRICES_PER_1M.get(
+                response.provider,
+                (0.30, 0.30),
+            )
+
+        return (input_tokens / 1_000_000.0) * input_price + (
+            output_tokens / 1_000_000.0
+        ) * output_price
+
+    def _record_usage(self, response: ChatResponse) -> None:
+        """Increment today's raw-token and estimated-dollar counters."""
+        if response.tokens_used <= 0:
             return
         try:
             from app.core.dependencies import get_redis
 
             r = get_redis()
-            key = self._cost_redis_key()
-            r.incrby(key, tokens)
-            r.expire(key, 90_000)  # 25 hours — auto-expire stale counters
+            token_key = self._tokens_redis_key()
+            cost_key = self._cost_redis_key()
+            r.incrby(token_key, response.tokens_used)
+            r.expire(token_key, 90_000)  # 25 hours — auto-expire stale counters
+            r.incrbyfloat(cost_key, self._estimate_response_cost_usd(response))
+            r.expire(cost_key, 90_000)
         except RedisError as e:
             logger.warning(f"Token tracking failed (non-fatal): {e}")
 
+    def _summary_models(
+        self,
+        *,
+        surface: str,
+        allow_rescue: bool,
+    ) -> list[tuple[Optional[str], str]]:
+        """Return the ordered summary model ladder for this provider."""
+        if self.get_provider() != "openai":
+            return [(None, "primary")]
+
+        if surface == "article":
+            models = [
+                (settings.ARTICLE_SUMMARY_PRIMARY_MODEL, "primary"),
+                (settings.ARTICLE_SUMMARY_FALLBACK_MODEL, "fallback"),
+            ]
+            rescue_model = settings.ARTICLE_SUMMARY_RESCUE_MODEL
+        else:
+            models = [
+                (settings.VIDEO_SUMMARY_PRIMARY_MODEL, "primary"),
+                (settings.VIDEO_SUMMARY_FALLBACK_MODEL, "fallback"),
+            ]
+            rescue_model = settings.VIDEO_SUMMARY_RESCUE_MODEL
+
+        if allow_rescue and rescue_model:
+            models.append((rescue_model, "rescue"))
+
+        deduped: list[tuple[Optional[str], str]] = []
+        seen = set()
+        for model, tier in models:
+            normalized = (model or "").strip() or None
+            key = normalized or "__default__"
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append((normalized, tier))
+        return deduped
+
+    def _try_consume_summary_rescue_budget(self) -> bool:
+        """Consume one full-model rescue call if today's budget allows it."""
+        limit = int(getattr(settings, "SUMMARY_RESCUE_DAILY_CALL_LIMIT", 50))
+        if limit <= 0:
+            return False
+        try:
+            from app.core.dependencies import get_redis
+
+            r = get_redis()
+            key = self._rescue_calls_redis_key()
+            current = int(r.incr(key))
+            r.expire(key, 90_000)
+            if current > limit:
+                try:
+                    r.decr(key)
+                except RedisError:
+                    pass
+                logger.warning(
+                    "Summary rescue daily call limit reached: %s >= %s",
+                    current - 1,
+                    limit,
+                )
+                return False
+            return True
+        except RedisError as exc:
+            logger.warning("Summary rescue budget check failed; allowing rescue: %s", exc)
+            return True
+
+    def _summary_chat(
+        self,
+        *,
+        surface: str,
+        tier: str,
+        model: Optional[str],
+        messages: List[ChatMessage],
+        max_tokens: int,
+        temperature: float,
+    ) -> ChatResponse:
+        """Run one summary attempt and log the chosen tier/model."""
+        if tier == "rescue" and not self._try_consume_summary_rescue_budget():
+            raise RuntimeError("Summary rescue daily call limit reached")
+        logger.info(
+            "Running %s summary attempt tier=%s model=%s provider=%s",
+            surface,
+            tier,
+            model or "default",
+            self.get_provider(),
+        )
+        return self.chat(
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            model=model,
+        )
+
+    def _parse_article_summary_response(self, text: str) -> SummaryResult:
+        """Parse the article summary/tags/starters contract."""
+        summary = ""
+        tags = []
+        starters = None
+
+        if "SUMMARY:" in text:
+            parts = text.split("TAGS:")
+            summary = parts[0].replace("SUMMARY:", "").strip()
+            if len(parts) > 1:
+                tag_section = parts[1]
+                if "STARTERS:" in tag_section:
+                    tag_part, starter_part = tag_section.split("STARTERS:", 1)
+                    tags = [t.strip().lower() for t in tag_part.split(",") if t.strip()]
+                    raw_starters = [s.strip() for s in starter_part.split("|") if s.strip()]
+                    raw_starters = [
+                        s[:117] + "..." if len(s) > 120 else s for s in raw_starters
+                    ]
+                    if raw_starters:
+                        starters = {
+                            "starters": raw_starters[:5],
+                            "fallback": [
+                                "What are the main points of this?",
+                                "Can you summarize this for me?",
+                                "What should I know about this topic?",
+                            ],
+                        }
+                else:
+                    tags = [t.strip().lower() for t in tag_section.split(",") if t.strip()]
+        else:
+            summary = text.strip()
+
+        return SummaryResult(summary=summary, tags=tags, conversation_starters=starters)
+
     def summarize_article(
-        self, title: str, content: str, max_content_length: int = 4000
+        self,
+        title: str,
+        content: str,
+        max_content_length: int = 4000,
+        *,
+        allow_rescue: bool = False,
     ) -> SummaryResult:
         """
         Generate a summary, tags, and conversation starters for an article.
@@ -636,54 +842,143 @@ TAGS: tag1, tag2, tag3
 STARTERS: question1 | question2 | question3
 """
 
-        try:
-            response = self.chat(
-                messages=[ChatMessage(role="user", content=prompt)], max_tokens=450, temperature=0.5
-            )
+        last_error: Exception | None = None
+        for model, tier in self._summary_models(surface="article", allow_rescue=allow_rescue):
+            try:
+                response = self._summary_chat(
+                    surface="article",
+                    tier=tier,
+                    model=model,
+                    messages=[ChatMessage(role="user", content=prompt)],
+                    max_tokens=450,
+                    temperature=0.5,
+                )
+                result = self._parse_article_summary_response(response.content)
+                if not _is_article_summary_acceptable(result.summary):
+                    raise ValueError(
+                        f"Article summary from {tier} model is empty or below "
+                        f"{settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS} words"
+                    )
+                return result
+            except (RuntimeError, ValueError) as e:
+                last_error = e
+                logger.warning(
+                    "Article summarization attempt failed tier=%s model=%s: %s",
+                    tier,
+                    model or "default",
+                    e,
+                )
 
-            # Parse response
-            text = response.content
-            summary = ""
-            tags = []
+        if last_error is not None:
+            logger.error(f"Article summarization error: {str(last_error)}")
+            raise last_error
+        raise ValueError("No article summary models configured")
+
+    def _parse_video_summary_response(self, text: str) -> SummaryResult:
+        """Parse and validate the video JSON summary contract."""
+        text = text.strip()
+        if not text:
+            raise ValueError("Empty response returned from LLM")
+
+        try:
+            payload = json.loads(_strip_json_fence(text))
+            if not isinstance(payload, dict):
+                raise ValueError("Video classifier returned a non-object payload")
+
+            tech_relevance = normalize_video_tech_relevance(payload.get("tech_relevance"))
+            confidence = normalize_video_classifier_confidence(payload.get("confidence"))
+            is_mixed_roundup = payload.get("is_mixed_roundup")
+            reason = normalize_video_classifier_reason(payload.get("reason"))
+
+            raw_summary = payload.get("summary")
+            normalized_summary = normalize_video_summary_output(raw_summary)
+
+            raw_starters = payload.get("starters")
             starters = None
+            if isinstance(raw_starters, list):
+                sanitized = []
+                for value in raw_starters:
+                    cleaned = " ".join(str(value or "").split()).strip()
+                    if not cleaned:
+                        continue
+                    sanitized.append(cleaned[:117] + "..." if len(cleaned) > 120 else cleaned)
+                if sanitized:
+                    starters = {
+                        "starters": sanitized[:3],
+                        "fallback": [
+                            "What are the main points of this?",
+                            "Can you summarize this for me?",
+                            "What should I know about this topic?",
+                        ],
+                    }
+
+            should_skip_summary = bool(is_mixed_roundup) or tech_relevance == "none"
+        except json.JSONDecodeError:
+            if looks_like_video_classifier_payload(text):
+                raise ValueError("Malformed JSON returned from LLM for video summary")
+
+            tech_relevance = None
+            confidence = None
+            is_mixed_roundup = None
+            reason = None
+            normalized_summary = ""
+            starters = None
+            should_skip_summary = False
 
             if "SUMMARY:" in text:
-                # Split into sections
-                parts = text.split("TAGS:")
-                summary = parts[0].replace("SUMMARY:", "").strip()
-                if len(parts) > 1:
-                    tag_section = parts[1]
-                    # Separate TAGS from STARTERS
-                    if "STARTERS:" in tag_section:
-                        tag_part, starter_part = tag_section.split("STARTERS:", 1)
-                        tags = [t.strip().lower() for t in tag_part.split(",") if t.strip()]
-                        raw_starters = [s.strip() for s in starter_part.split("|") if s.strip()]
-                        # Truncate each starter to 120 chars and take up to 5
-                        raw_starters = [
-                            s[:117] + "..." if len(s) > 120 else s for s in raw_starters
-                        ]
-                        if raw_starters:
-                            starters = {
-                                "starters": raw_starters[:5],
-                                "fallback": [
-                                    "What are the main points of this?",
-                                    "Can you summarize this for me?",
-                                    "What should I know about this topic?",
-                                ],
-                            }
-                    else:
-                        tags = [t.strip().lower() for t in tag_section.split(",") if t.strip()]
+                if "STARTERS:" in text:
+                    parts = text.split("STARTERS:", 1)
+                    normalized_summary = normalize_video_summary_output(
+                        parts[0].replace("SUMMARY:", "").strip()
+                    ) or ""
+                    raw_starters = [s.strip() for s in parts[1].split("|") if s.strip()]
+                    raw_starters = [
+                        s[:117] + "..." if len(s) > 120 else s for s in raw_starters
+                    ]
+                    if raw_starters:
+                        starters = {
+                            "starters": raw_starters[:3],
+                            "fallback": [
+                                "What are the main points of this?",
+                                "Can you summarize this for me?",
+                                "What should I know about this topic?",
+                            ],
+                        }
+                else:
+                    normalized_summary = normalize_video_summary_output(
+                        text.replace("SUMMARY:", "").strip()
+                    ) or ""
             else:
-                summary = text.strip()
+                normalized_summary = normalize_video_summary_output(text) or ""
 
-            return SummaryResult(summary=summary, tags=tags, conversation_starters=starters)
+        if looks_like_video_classifier_payload(normalized_summary):
+            raise ValueError("Structured classifier payload leaked into video summary")
 
-        except (RuntimeError, ValueError) as e:
-            logger.error(f"Article summarization error: {str(e)}")
-            raise
+        if not should_skip_summary and not normalized_summary:
+            raise ValueError("Empty summary returned from LLM for tech-relevant video")
+
+        if not should_skip_summary and not is_video_summary_acceptable(normalized_summary):
+            raise ValueError(
+                f"Video summary is below {settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS} words"
+            )
+
+        return SummaryResult(
+            summary=normalized_summary or "",
+            tags=[],
+            conversation_starters=starters,
+            tech_relevance=tech_relevance,
+            tech_relevance_confidence=confidence,
+            tech_relevance_reason=reason,
+            is_mixed_roundup=bool(is_mixed_roundup) if is_mixed_roundup is not None else None,
+        )
 
     def summarize_video(
-        self, title: str, description: str, max_length: int = 4000
+        self,
+        title: str,
+        description: str,
+        max_length: int = 4000,
+        *,
+        allow_rescue: bool = False,
     ) -> SummaryResult:
         """
         Generate a summary and conversation starters for a video.
@@ -747,118 +1042,42 @@ Before sending the response, verify that it is valid JSON:
 Return JSON only. Do not wrap it in markdown.
 """
 
-        try:
-            response = self.chat(
-                messages=[
-                    ChatMessage(
-                        role="system",
-                        content=(
-                            "You are a careful tech-news editor. "
-                            "Classify how relevant a video is to a tech-news feed and summarize it only when appropriate."
-                        ),
-                    ),
-                    ChatMessage(role="user", content=prompt),
-                ],
-                max_tokens=350,
-                temperature=0.5,
-            )
+        messages = [
+            ChatMessage(
+                role="system",
+                content=(
+                    "You are a careful tech-news editor. "
+                    "Classify how relevant a video is to a tech-news feed and summarize it only when appropriate."
+                ),
+            ),
+            ChatMessage(role="user", content=prompt),
+        ]
 
-            text = response.content.strip()
-            if not text:
-                raise ValueError("Empty response returned from LLM")
-
+        last_error: Exception | None = None
+        for model, tier in self._summary_models(surface="video", allow_rescue=allow_rescue):
             try:
-                payload = json.loads(_strip_json_fence(text))
-                if not isinstance(payload, dict):
-                    raise ValueError("Video classifier returned a non-object payload")
+                response = self._summary_chat(
+                    surface="video",
+                    tier=tier,
+                    model=model,
+                    messages=messages,
+                    max_tokens=350,
+                    temperature=0.5,
+                )
+                return self._parse_video_summary_response(response.content)
+            except (RuntimeError, ValueError) as e:
+                last_error = e
+                logger.warning(
+                    "Video summarization attempt failed tier=%s model=%s: %s",
+                    tier,
+                    model or "default",
+                    e,
+                )
 
-                tech_relevance = normalize_video_tech_relevance(payload.get("tech_relevance"))
-                confidence = normalize_video_classifier_confidence(payload.get("confidence"))
-                is_mixed_roundup = payload.get("is_mixed_roundup")
-                reason = normalize_video_classifier_reason(payload.get("reason"))
-
-                raw_summary = payload.get("summary")
-                normalized_summary = normalize_video_summary_output(raw_summary)
-
-                raw_starters = payload.get("starters")
-                starters = None
-                if isinstance(raw_starters, list):
-                    sanitized = []
-                    for value in raw_starters:
-                        cleaned = " ".join(str(value or "").split()).strip()
-                        if not cleaned:
-                            continue
-                        sanitized.append(
-                            cleaned[:117] + "..." if len(cleaned) > 120 else cleaned
-                        )
-                    if sanitized:
-                        starters = {
-                            "starters": sanitized[:3],
-                            "fallback": [
-                                "What are the main points of this?",
-                                "Can you summarize this for me?",
-                                "What should I know about this topic?",
-                            ],
-                        }
-
-                should_skip_summary = bool(is_mixed_roundup) or tech_relevance == "none"
-            except json.JSONDecodeError:
-                if looks_like_video_classifier_payload(text):
-                    raise ValueError("Malformed JSON returned from LLM for video summary")
-
-                tech_relevance = None
-                confidence = None
-                is_mixed_roundup = None
-                reason = None
-                normalized_summary = ""
-                starters = None
-                should_skip_summary = False
-
-                if "SUMMARY:" in text:
-                    if "STARTERS:" in text:
-                        parts = text.split("STARTERS:", 1)
-                        normalized_summary = normalize_video_summary_output(
-                            parts[0].replace("SUMMARY:", "").strip()
-                        ) or ""
-                        raw_starters = [s.strip() for s in parts[1].split("|") if s.strip()]
-                        raw_starters = [
-                            s[:117] + "..." if len(s) > 120 else s for s in raw_starters
-                        ]
-                        if raw_starters:
-                            starters = {
-                                "starters": raw_starters[:3],
-                                "fallback": [
-                                    "What are the main points of this?",
-                                    "Can you summarize this for me?",
-                                    "What should I know about this topic?",
-                                ],
-                            }
-                    else:
-                        normalized_summary = normalize_video_summary_output(
-                            text.replace("SUMMARY:", "").strip()
-                        ) or ""
-                else:
-                    normalized_summary = normalize_video_summary_output(text) or ""
-
-            if looks_like_video_classifier_payload(normalized_summary):
-                raise ValueError("Structured classifier payload leaked into video summary")
-
-            if not should_skip_summary and not normalized_summary:
-                raise ValueError("Empty summary returned from LLM for tech-relevant video")
-
-            return SummaryResult(
-                summary=normalized_summary or "",
-                tags=[],
-                conversation_starters=starters,
-                tech_relevance=tech_relevance,
-                tech_relevance_confidence=confidence,
-                tech_relevance_reason=reason,
-                is_mixed_roundup=bool(is_mixed_roundup) if is_mixed_roundup is not None else None,
-            )
-
-        except (RuntimeError, ValueError) as e:
-            logger.error(f"Video summarization error: {str(e)}")
-            raise
+        if last_error is not None:
+            logger.error(f"Video summarization error: {str(last_error)}")
+            raise last_error
+        raise ValueError("No video summary models configured")
 
     def classify_blips_tech_relevance(
         self,

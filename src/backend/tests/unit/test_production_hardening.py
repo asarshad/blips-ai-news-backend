@@ -207,11 +207,11 @@ class TestLLMRetryConfig:
         assert "TimeoutError" in type_names
 
 
-class TestOpenAIModelPinning:
-    """Verify OpenAI usage stays pinned to gpt-5-nano."""
+class TestOpenAIModelSelection:
+    """Verify OpenAI model selection supports per-call overrides."""
 
-    def test_llm_client_ignores_openai_model_setting(self):
-        """LLMClient should ignore OpenAI model overrides and pin to gpt-5-nano."""
+    def test_llm_client_honors_openai_model_setting(self):
+        """LLMClient should use the configured OpenAI default model."""
         with patch("app.integrations.llm_client.settings") as mock_settings:
             mock_settings.LLM_PROVIDER = "openai"
             mock_settings.OPENAI_API_KEY = "sk-test-fake-key-12345678901234567890"
@@ -220,17 +220,17 @@ class TestOpenAIModelPinning:
             from app.integrations.llm_client import LLMClient
 
             client = LLMClient(provider="openai", api_key=mock_settings.OPENAI_API_KEY)
-            assert client._client.model == "gpt-5-nano"
+            assert client._client.model == "gpt-4o-mini"
 
     def test_deprecated_openai_client_ignores_model_override(self):
-        """Legacy OpenAIClient should also stay pinned to gpt-5-nano."""
+        """Legacy OpenAIClient still uses the backend default model."""
         from app.integrations.openai_client import OpenAIClient
 
         client = OpenAIClient(
             api_key="sk-test-fake-key-12345678901234567890",
             model="gpt-4o-mini",
         )
-        assert client.model == "gpt-5-nano"
+        assert client.model == "gpt-5-mini"
 
     def test_llm_client_uses_gpt5_compatible_responses_parameters(self):
         """Pinned GPT-5 requests should use the Responses API contract."""
@@ -243,7 +243,7 @@ class TestOpenAIModelPinning:
         client._client.responses.create.return_value = SimpleNamespace(
             output_text="ok",
             usage=SimpleNamespace(total_tokens=42),
-            model="gpt-5-nano-2025-08-07",
+            model="gpt-5-mini-2025-08-07",
         )
 
         response = client.chat(
@@ -254,7 +254,7 @@ class TestOpenAIModelPinning:
 
         kwargs = client._client.responses.create.call_args.kwargs
         assert response.content == "ok"
-        assert kwargs["model"] == "gpt-5-nano"
+        assert kwargs["model"] == "gpt-5-mini"
         assert kwargs["input"] == [{"role": "user", "content": "hello"}]
         assert kwargs["max_output_tokens"] == 123
         assert kwargs["reasoning"] == {"effort": "minimal"}
@@ -273,7 +273,7 @@ class TestOpenAIModelPinning:
         client._client.responses.create.return_value = SimpleNamespace(
             output_text="ok",
             usage=SimpleNamespace(total_tokens=21),
-            model="gpt-5-nano-2025-08-07",
+            model="gpt-5-mini-2025-08-07",
         )
 
         client.chat(
@@ -299,10 +299,19 @@ class TestSummaryLengthPrompting:
         from app.core.config import settings
         from app.integrations.llm_client import LLMClient
 
+        summary = (
+            "This article summary is long enough to satisfy the configured production word "
+            "floor while keeping the prompt-focused test deterministic. It explains a "
+            "technology update, the companies involved, why developers and users should "
+            "care, and how the change affects reliability, security, infrastructure, "
+            "product strategy, cost, deployment planning, future platform adoption, "
+            "engineering workflows, customer trust, market competition, operational readiness, "
+            "data governance, release quality, and support planning."
+        )
         client = LLMClient(provider="openai", api_key="sk-test-fake-key-12345678901234567890")
         client.chat = Mock(
             return_value=SimpleNamespace(
-                content="SUMMARY: test\nTAGS: ai, chips\nSTARTERS: q1 | q2 | q3"
+                content=f"SUMMARY: {summary}\nTAGS: ai, chips\nSTARTERS: q1 | q2 | q3"
             )
         )
 
@@ -323,9 +332,22 @@ class TestSummaryLengthPrompting:
         from app.core.config import settings
         from app.integrations.llm_client import LLMClient
 
+        summary = (
+            "This video summary is long enough to satisfy the configured production word "
+            "floor while keeping the prompt-focused test deterministic. It explains a "
+            "technology update, the companies involved, why developers and users should "
+            "care, and how the change affects reliability, security, infrastructure, "
+            "product strategy, cost, deployment planning, and future platform adoption."
+        )
         client = LLMClient(provider="openai", api_key="sk-test-fake-key-12345678901234567890")
         client.chat = Mock(
-            return_value=SimpleNamespace(content="SUMMARY: test\nSTARTERS: q1 | q2 | q3")
+            return_value=SimpleNamespace(
+                content=(
+                    '{"tech_relevance":"primary","confidence":0.95,'
+                    f'"is_mixed_roundup":false,"reason":"Tech update","summary":"{summary}",'
+                    '"starters":["q1","q2","q3"]}'
+                )
+            )
         )
 
         client.summarize_video("Title", "Description")

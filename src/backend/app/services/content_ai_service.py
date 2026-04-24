@@ -283,6 +283,7 @@ def _process_article_summary(
     article_hydrator.populate_article_summary(
         item,
         precompute_starter_answers=False,
+        allow_summary_rescue=_allow_summary_rescue_for_item(item),
     )
     article_hydrator.refresh_article_annotations(item)
 
@@ -372,7 +373,11 @@ def _process_video_summary(
         return True
 
     try:
-        result = llm_client.summarize_video(item.title, text)
+        result = llm_client.summarize_video(
+            item.title,
+            text,
+            allow_rescue=_allow_summary_rescue_for_item(item),
+        )
     except ValueError as exc:
         return _record_video_summary_failure(
             item,
@@ -432,6 +437,25 @@ def _is_recent_article_for_maintenance(item: ContentItem, *, now: datetime | Non
         return False
     now_utc = now or datetime.utcnow()
     return published_at >= now_utc - timedelta(days=settings.ARTICLE_MAINTENANCE_LOOKBACK_DAYS)
+
+
+def _allow_summary_rescue_for_item(item: ContentItem, *, now: datetime | None = None) -> bool:
+    """Allow full-model rescue only for recent promoted, unsuppressed content."""
+    if getattr(item, "curation_status", None) != ContentStatus.PROMOTED:
+        return False
+    if bool(getattr(item, "is_suppressed", False)):
+        return False
+    published_at = getattr(item, "published_at", None)
+    if published_at is None:
+        return False
+
+    now_utc = now or datetime.utcnow()
+    lookback_days = (
+        settings.ARTICLE_MAINTENANCE_LOOKBACK_DAYS
+        if getattr(item, "type", None) == ContentType.ARTICLE
+        else 7
+    )
+    return published_at >= now_utc - timedelta(days=lookback_days)
 
 
 def _article_retry_state(item: ContentItem, *, now: datetime | None = None) -> dict[str, object]:

@@ -10,7 +10,8 @@ from typing import List
 
 from pydantic_settings import BaseSettings
 
-PINNED_OPENAI_MODEL = "gpt-5-nano"
+DEFAULT_OPENAI_MODEL = "gpt-5-mini"
+PINNED_OPENAI_MODEL = DEFAULT_OPENAI_MODEL
 
 
 class Settings(BaseSettings):
@@ -59,7 +60,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = PINNED_OPENAI_MODEL  # legacy setting; OpenAI path ignores overrides
+    OPENAI_MODEL: str = DEFAULT_OPENAI_MODEL
 
     # Mistral
     MISTRAL_API_KEY: str = ""
@@ -68,6 +69,7 @@ class Settings(BaseSettings):
     # LLM resilience / cost controls
     LLM_REQUEST_TIMEOUT: int = 30
     LLM_DAILY_COST_CEILING: float = 5.0
+    SUMMARY_RESCUE_DAILY_CALL_LIMIT: int = 50
 
     # News sources
     RSS_FEEDS: List[str] = [
@@ -202,6 +204,9 @@ class Settings(BaseSettings):
     ARTICLE_SUMMARY_MAX_WORDS: int = 1200  # clip very long article text before summarizing
     ARTICLE_SUMMARY_MIN_OUTPUT_WORDS: int = 60  # target minimum words for generated summaries
     ARTICLE_SUMMARY_MAX_OUTPUT_WORDS: int = 70  # hard cap for generated summaries
+    ARTICLE_SUMMARY_PRIMARY_MODEL: str = "gpt-5-mini"
+    ARTICLE_SUMMARY_FALLBACK_MODEL: str = "gpt-5.4-mini"
+    ARTICLE_SUMMARY_RESCUE_MODEL: str = "gpt-5.4"
     ARTICLE_IMAGE_LLM_FALLBACK_ENABLED: bool = True
     ARTICLE_IMAGE_LLM_MAX_INPUT_CHARS: int = 12000
     ARTICLE_RECENT_POOL_DAYS: int = 7
@@ -227,6 +232,9 @@ class Settings(BaseSettings):
     ARTICLE_RSS_DEGRADED_RETRY_COUNT_THRESHOLD: int = 3
     VIDEO_SUMMARY_MIN_OUTPUT_WORDS: int = 50  # softer minimum for generated video summaries
     VIDEO_SUMMARY_MAX_OUTPUT_WORDS: int = 70  # hard cap for generated video summaries
+    VIDEO_SUMMARY_PRIMARY_MODEL: str = "gpt-5-mini"
+    VIDEO_SUMMARY_FALLBACK_MODEL: str = "gpt-5.4-mini"
+    VIDEO_SUMMARY_RESCUE_MODEL: str = "gpt-5.4"
     VIDEO_SUMMARY_RETRY_MAX_ATTEMPTS: int = 3
     VIDEO_SUMMARY_RETRY_WINDOW_HOURS: int = 24
     VIDEO_TECH_CLASSIFIER_ENABLED: bool = True

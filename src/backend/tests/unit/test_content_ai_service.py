@@ -312,7 +312,13 @@ def test_process_content_ai_summary_request_marks_article_ready(monkeypatch):
             return "fake"
 
     class _FakeArticleHydrator:
-        def populate_article_summary(self, target, *, precompute_starter_answers=False):
+        def populate_article_summary(
+            self,
+            target,
+            *,
+            precompute_starter_answers=False,
+            **_kwargs,
+        ):
             target.summary = (
                 "This event-driven article summary is intentionally long enough to satisfy "
                 "the persisted summary threshold while keeping the test deterministic."
@@ -467,7 +473,7 @@ def test_process_content_ai_summary_request_terminal_marks_repeated_video_summar
         published_at=_recent_dt(hours_ago=1),
         title="Tech video with repeated empty LLM summaries",
         description="A detailed developer tooling video that should be relevant.",
-        summary="__blips_video_summary_retry__:v1:2:2026-04-20T12:00:00",
+        summary=f"__blips_video_summary_retry__:v1:2:{_recent_dt(minutes_ago=30).isoformat()}",
         ai_processed=False,
         curation_status=ContentStatus.PROMOTED,
         readiness_status="PENDING",

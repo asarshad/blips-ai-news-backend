@@ -354,7 +354,7 @@ def _start_content_event_worker_threads(stop_event: threading.Event) -> list[thr
 
     batch_size = int(os.getenv("CONTENT_EVENT_BATCH_SIZE", "50"))
     # Separate cap for the AI summary thread: 5/s ≈ 300/min, safely under
-    # gpt-5-nano's 500 RPM / 200 K TPM limits.
+    # Keep default worker concurrency below the small-model RPM / TPM limits.
     ai_batch_size = int(os.getenv("CONTENT_EVENT_AI_BATCH_SIZE", "5"))
     poll_seconds = float(os.getenv("CONTENT_EVENT_POLL_SECONDS", "1.0"))
     threads: list[threading.Thread] = []
