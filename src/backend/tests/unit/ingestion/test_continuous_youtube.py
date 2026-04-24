@@ -9,6 +9,7 @@ Covers:
 from __future__ import annotations
 
 from datetime import date, datetime
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from app.models.ingestion_progress import IngestionProgress
@@ -350,7 +351,11 @@ def test_checkpointed_ingestion_uses_high_budget_for_youtube(monkeypatch):
 
     class FakeProgressRepo:
         def __init__(self, _db):
-            pass
+            self.rows = [
+                SimpleNamespace(source_type="rss", feed_name="feed1", target=10),
+                SimpleNamespace(source_type="youtube_video", feed_name="ch1", target=5),
+                SimpleNamespace(source_type="youtube_reel", feed_name="ch2", target=3),
+            ]
 
         def ensure_rows(self, **_kw):
             return 0
@@ -358,14 +363,25 @@ def test_checkpointed_ingestion_uses_high_budget_for_youtube(monkeypatch):
         def reopen_continuous_rows(self, **_kw):
             return 0
 
+        def list_for_day(self, **_kw):
+            return self.rows
+
         def prime_youtube_rows(self, **_kw):
             return []
 
         def list_incomplete(self, **_kw):
             return []
 
+    class FakeContentRepo:
+        def __init__(self, _db):
+            pass
+
+        def get_article_supply_counts_on_ingestion_day(self, _day):
+            return {"promoted": 100, "ready": 100}
+
     monkeypatch.setattr(checkpointing, "IngestionBudgetRepository", FakeBudgetRepo)
     monkeypatch.setattr(checkpointing, "IngestionProgressRepository", FakeProgressRepo)
+    monkeypatch.setattr(checkpointing, "ContentItemRepository", FakeContentRepo)
     monkeypatch.setattr(checkpointing, "_prime_bootstrap_youtube_rows", lambda **_kw: [])
 
     # Provide minimal defaults: 1 rss, 1 video, 1 reel channel
@@ -391,3 +407,89 @@ def test_checkpointed_ingestion_uses_high_budget_for_youtube(monkeypatch):
     # Video/reel budgets are 10x
     assert budget_calls["VIDEO"] == 50
     assert budget_calls["REEL"] == 30
+
+
+def test_checkpointed_ingestion_expands_article_budget_when_ready_supply_is_below_target(
+    monkeypatch,
+):
+    """Article budget should follow reopened RSS row targets, not just base inserts."""
+    from app.ingestion import checkpointing
+    from app.ingestion.checkpoint_defaults import FeedDefault
+    from app.models.content import ContentType
+
+    monkeypatch.setenv("INGESTION_ENABLED", "true")
+    monkeypatch.setenv("INGESTION_CRON_DISABLED", "false")
+
+    fake_day = date(2026, 6, 1)
+    monkeypatch.setattr(checkpointing, "get_ingestion_day", lambda: fake_day)
+
+    budget_calls = {}
+
+    class _Row:
+        def __init__(self, source_type, feed_name, target):
+            self.source_type = source_type
+            self.feed_name = feed_name
+            self.target = target
+
+    class FakeBudgetRepo:
+        def __init__(self, _db):
+            pass
+
+        def ensure(self, *, day, content_type, target):
+            budget_calls[content_type.value] = target
+
+    class FakeProgressRepo:
+        def __init__(self, _db):
+            self.rows = [
+                _Row("rss", "feed1", 10),
+                _Row("youtube_video", "ch1", 5),
+                _Row("youtube_reel", "ch2", 3),
+            ]
+
+        def ensure_rows(self, **_kw):
+            return 0
+
+        def reopen_continuous_rows(self, *, defaults, **_kw):
+            reopened = 0
+            for source_type, feed_name, per_cycle_target in defaults:
+                for row in self.rows:
+                    if row.source_type == source_type and row.feed_name == feed_name:
+                        row.target += per_cycle_target
+                        reopened += 1
+            return reopened
+
+        def list_for_day(self, **_kw):
+            return self.rows
+
+        def prime_youtube_rows(self, **_kw):
+            return []
+
+        def list_incomplete(self, **_kw):
+            return []
+
+    class FakeContentRepo:
+        def __init__(self, _db):
+            pass
+
+        def get_article_supply_counts_on_ingestion_day(self, _day):
+            return {"promoted": 32, "ready": 18}
+
+    monkeypatch.setattr(checkpointing, "IngestionBudgetRepository", FakeBudgetRepo)
+    monkeypatch.setattr(checkpointing, "IngestionProgressRepository", FakeProgressRepo)
+    monkeypatch.setattr(checkpointing, "ContentItemRepository", FakeContentRepo)
+    monkeypatch.setattr(checkpointing, "_prime_bootstrap_youtube_rows", lambda **_kw: [])
+    monkeypatch.setattr(
+        checkpointing,
+        "_build_defaults",
+        lambda **_kw: [
+            FeedDefault("rss", "feed1", 10),
+            FeedDefault("youtube_video", "ch1", 5),
+            FeedDefault("youtube_reel", "ch2", 3),
+        ],
+    )
+
+    checkpointing.run_checkpointed_ingestion(db=MagicMock(), redis_client=None)
+
+    assert budget_calls[ContentType.ARTICLE.value] == 20
+    assert budget_calls[ContentType.VIDEO.value] == 50
+    assert budget_calls[ContentType.REEL.value] == 30

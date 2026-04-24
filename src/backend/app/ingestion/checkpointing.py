@@ -16,6 +16,7 @@ from typing import Dict, List
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.ingestion.checkpoint_defaults import FeedDefault
 from app.ingestion.checkpoint_defaults import build_defaults as _build_defaults
@@ -26,6 +27,7 @@ from app.ingestion.checkpoint_worker import (
 )
 from app.ingestion.time import get_ingestion_day
 from app.models.content import ContentType
+from app.repositories.content_repo import ContentItemRepository
 from app.repositories.ingestion_budget_repo import IngestionBudgetRepository
 from app.repositories.ingestion_progress_repo import IngestionProgressRepository
 from app.repositories.video_source_repo import VideoSourceProfileRepository
@@ -35,6 +37,10 @@ from app.services.tiered_feed_service import invalidate_tiered_feed_cache
 logger = get_logger(__name__)
 
 STOP_EVENT = threading.Event()
+
+
+def _sum_targets(rows, *, source_type: str) -> int:
+    return sum(int(row.target or 0) for row in rows if row.source_type == source_type)
 
 
 def _bootstrap_target(source_type: str, *, daily_cap: int, reel_cap: int) -> int:
@@ -180,21 +186,50 @@ def run_checkpointed_ingestion(
     if created:
         logger.info("Created %s ingestion_progress rows for %s", created, day.isoformat())
 
-    # Reopen continuous-ingestion rows so sources can be revisited within the same UTC day.
-    reopened = repo.reopen_continuous_rows(day_utc=day, defaults=defaults_tuples)
+    content_repo = ContentItemRepository(db)
+    article_supply = content_repo.get_article_supply_counts_on_ingestion_day(day)
+    article_target_pending = article_supply["ready"] < settings.DAILY_TARGET_ARTICLES
+
+    youtube_defaults = [d for d in defaults_tuples if d[0] != "rss"]
+    reopened = repo.reopen_continuous_rows(day_utc=day, defaults=youtube_defaults)
     if reopened:
         logger.info("Reopened %s YouTube progress rows for %s", reopened, day.isoformat())
+
+    if article_target_pending:
+        rss_defaults = [d for d in defaults_tuples if d[0] == "rss"]
+        reopened_rss = repo.reopen_continuous_rows(day_utc=day, defaults=rss_defaults)
+        if reopened_rss:
+            logger.info(
+                "Reopened %s RSS progress rows for %s while article ready supply remained below target (%s/%s ready, %s promoted)",
+                reopened_rss,
+                day.isoformat(),
+                article_supply["ready"],
+                settings.DAILY_TARGET_ARTICLES,
+                article_supply["promoted"],
+            )
 
     # Ensure strict per-type budgets from configured per-feed targets.
     # Videos/reels use a high multiplier so the budget never blocks continuous
     # ingestion (budget table kept for Phase A concurrency safety; daily cap
     # enforcement is removed).
-    article_target = sum(d.target for d in defaults if d.source_type == "rss")
+    progress_rows = repo.list_for_day(day_utc=day)
+    article_target = _sum_targets(progress_rows, source_type="rss")
+    if article_target <= 0:
+        article_target = sum(d.target for d in defaults if d.source_type == "rss")
     video_target = sum(d.target for d in defaults if d.source_type == "youtube_video")
     reel_target = sum(d.target for d in defaults if d.source_type == "youtube_reel")
     budget_repo.ensure(day=day, content_type=ContentType.ARTICLE, target=article_target)
     budget_repo.ensure(day=day, content_type=ContentType.VIDEO, target=video_target * 10)
     budget_repo.ensure(day=day, content_type=ContentType.REEL, target=reel_target * 10)
+
+    logger.info(
+        "Article ingestion target for %s: ready=%s promoted=%s desired_ready=%s rss_budget_target=%s",
+        day.isoformat(),
+        article_supply["ready"],
+        article_supply["promoted"],
+        settings.DAILY_TARGET_ARTICLES,
+        article_target,
+    )
 
     owner = _owner_token()
     ttl_ms = int(os.getenv("INGESTION_LEASE_TTL_MS", "60000"))

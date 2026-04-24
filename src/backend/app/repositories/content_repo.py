@@ -7,7 +7,7 @@ Provides data access methods for the unified content_items table.
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import desc, func, or_
+from sqlalchemy import and_, desc, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.content import ContentItem, ContentStatus, ContentType
@@ -63,6 +63,43 @@ class ContentItemRepository(BaseRepository[ContentItem]):
             .scalar()
             or 0
         )
+
+    def get_article_supply_counts_on_ingestion_day(self, day: date) -> Dict[str, int]:
+        """Return promoted/ready article counts for the logical ingestion day."""
+
+        from app.ingestion.time import get_ingestion_day_bounds
+
+        start, end = get_ingestion_day_bounds(day=day)
+        day_filter = or_(
+            ContentItem.ingestion_day == day,
+            and_(
+                ContentItem.ingestion_day.is_(None),
+                ContentItem.created_at >= start,
+                ContentItem.created_at < end,
+            ),
+        )
+
+        promoted = int(
+            self.db.query(func.count(ContentItem.id))
+            .filter(
+                day_filter,
+                ContentItem.type == ContentType.ARTICLE,
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.is_suppressed.is_(False),
+            )
+            .scalar()
+            or 0
+        )
+        ready = int(
+            self.db.query(func.count(ContentItem.id))
+            .filter(
+                day_filter,
+                ready_content_filter("articles"),
+            )
+            .scalar()
+            or 0
+        )
+        return {"promoted": promoted, "ready": ready}
 
     def get_by_type(
         self,

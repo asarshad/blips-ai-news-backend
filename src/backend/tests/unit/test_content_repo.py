@@ -108,3 +108,69 @@ def test_get_items_for_playlist_blocks_stale_ready_videos_without_ai_summary():
     results = repo.get_items_for_playlist(ContentType.VIDEO, hours_back=168, limit=10)
 
     assert [item.id for item in results] == [2]
+
+
+def test_get_article_supply_counts_on_ingestion_day_uses_ready_supply_not_raw_created_rows():
+    engine = create_engine("sqlite:///:memory:")
+    ContentItem.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+    repo = ContentItemRepository(db)
+    now = datetime.utcnow()
+
+    ready_article = ContentItem(
+        id=10,
+        type=ContentType.ARTICLE,
+        source="The Verge",
+        source_url="https://example.com/ready",
+        title="Ready article",
+        summary="A complete article summary with enough detail for delivery.",
+        image_url="https://example.com/image.jpg",
+        article_image_status="VERIFIED",
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status=ContentReadinessStatus.READY.value,
+        readiness_reason="article_ready",
+        ai_processed=True,
+        published_at=now - timedelta(hours=1),
+        created_at=now - timedelta(hours=1),
+        ingestion_day=now.date(),
+    )
+    pending_article = ContentItem(
+        id=11,
+        type=ContentType.ARTICLE,
+        source="Ars Technica",
+        source_url="https://example.com/pending",
+        title="Pending article",
+        summary="Still waiting on a verified image.",
+        image_url=None,
+        article_image_status="MISSING",
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status=ContentReadinessStatus.PENDING.value,
+        readiness_reason="missing_article_image",
+        ai_processed=True,
+        published_at=now - timedelta(hours=2),
+        created_at=now - timedelta(hours=2),
+        ingestion_day=now.date(),
+    )
+    older_ready_article = ContentItem(
+        id=12,
+        type=ContentType.ARTICLE,
+        source="Wired",
+        source_url="https://example.com/older",
+        title="Older ready article",
+        summary="Older article outside the current ingestion day window.",
+        image_url="https://example.com/older.jpg",
+        article_image_status="VERIFIED",
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status=ContentReadinessStatus.READY.value,
+        readiness_reason="article_ready",
+        ai_processed=True,
+        published_at=now - timedelta(days=1, hours=1),
+        created_at=now - timedelta(days=1, hours=1),
+    )
+    db.add_all([ready_article, pending_article, older_ready_article])
+    db.commit()
+
+    counts = repo.get_article_supply_counts_on_ingestion_day(now.date())
+
+    assert counts == {"promoted": 2, "ready": 1}
