@@ -149,6 +149,27 @@ class Settings(BaseSettings):
     DISCOVERY_SIGNAL_LIMIT: int = 25
     DISCOVERY_SIGNAL_PER_SOURCE_LIMIT: int = 5
 
+    # ── X (Twitter) signal source ────────────────────────────────────────────
+    # X is a signal-amplification layer only. Posts are never ingested as
+    # content. Only the URLs contained in tweets are extracted and fed into
+    # the existing signal pipeline. Disabled by default — requires a Bearer
+    # Token and explicit opt-in.
+    # Kill switch: set FEATURE_X_SIGNALS_ENABLED=false OR X_SIGNALS_MODE=off.
+    X_BEARER_TOKEN: str = ""
+    X_SIGNALS_MODE: str = "cohort"  # off | cohort | query | mixed
+    X_SIGNALS_MAX_ITEMS_PER_RUN: int = 50
+    X_SIGNALS_MIN_SCORE: int = 10
+    # Optional comma-separated domain allowlist; empty = all tech domains allowed
+    X_SIGNALS_ALLOWED_DOMAINS: str = ""
+    X_SIGNALS_RATE_LIMIT_ENABLED: bool = True
+    X_SIGNALS_DEBUG_LOGGING: bool = False
+    # Override default curated cohort (comma-separated usernames, no @)
+    X_SIGNALS_COHORT_ACCOUNTS: str = ""
+    # Override default topical query terms (comma-separated)
+    X_SIGNALS_QUERY_TERMS: str = ""
+    X_SIGNALS_MAX_TWEET_AGE_HOURS: int = 24
+    X_SIGNALS_REQUEST_TIMEOUT: int = 15
+
     # Personalization weights (topic/entity/source/format)
     PERSONALIZATION_TOPIC_WEIGHT: float = 0.35
     PERSONALIZATION_ENTITY_WEIGHT: float = 0.30

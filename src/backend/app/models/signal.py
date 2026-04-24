@@ -37,6 +37,7 @@ class SignalSource(enum.Enum):
     GITHUB_TRENDING = "github_trending"
     YT_TRENDING = "yt_trending"  # YouTube Science & Technology most-popular
     DISCOVERY_LEADS = "discovery_leads"  # Substack/Beehiiv discovery feeds
+    X_SIGNAL = "x_signal"  # X (Twitter) link signal — URL amplification only
 
 
 class EnqueueStatus(enum.Enum):

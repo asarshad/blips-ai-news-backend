@@ -39,6 +39,7 @@ from app.ingestion.signals import SignalItem
 from app.ingestion.signals.discovery_feeds import fetch_discovery_leads
 from app.ingestion.signals.github_trending import fetch_github_trending
 from app.ingestion.signals.hacker_news import fetch_hn_best, fetch_hn_top
+from app.ingestion.signals.x_signal_fetcher import fetch_x_signals
 from app.ingestion.signals.youtube_trending import fetch_yt_trending
 from app.ingestion.url_normalizer import normalize_url
 from app.models.candidate_audit import CandidateAuditEvent
@@ -64,6 +65,7 @@ _SIGNAL_SOURCE_LABELS: Dict[SignalSource, str] = {
     SignalSource.GITHUB_TRENDING: "signal_github",
     SignalSource.YT_TRENDING: "signal_yt_trending",
     SignalSource.DISCOVERY_LEADS: "signal_discovery",
+    SignalSource.X_SIGNAL: "signal_x",
 }
 
 # Max article/video stub candidates created per orchestrator run
@@ -243,6 +245,22 @@ def run_signal_ingestion(
     discovery_limit: int = 25,
     discovery_per_source_limit: int = 5,
     discovery_enabled: bool = True,
+    # X (Twitter) signal amplification parameters.
+    # x_signals_enabled=False by default — requires explicit opt-in via feature
+    # flag AND a configured bearer token. Set to True only when the caller has
+    # already verified both conditions.
+    x_signals_enabled: bool = False,
+    x_bearer_token: Optional[str] = None,
+    x_signals_mode: str = "cohort",
+    x_signals_limit: int = 50,
+    x_signals_min_score: int = 10,
+    x_signals_allowed_domains: Optional[set] = None,
+    x_signals_rate_limit_enabled: bool = True,
+    x_signals_max_tweet_age_hours: int = 24,
+    x_signals_request_timeout: int = 15,
+    x_signals_debug_logging: bool = False,
+    x_signals_cohort_accounts: Optional[list] = None,
+    x_signals_query_terms: Optional[list] = None,
     max_stubs: int = _MAX_STUBS_PER_RUN,
 ) -> SignalIngestionResult:
     """Fetch all signal sources and cross-check / enqueue new URLs.
@@ -256,6 +274,18 @@ def run_signal_ingestion(
         discovery_limit: Max links from discovery feed fetcher.
         discovery_per_source_limit: Max links per discovery feed source.
         discovery_enabled: Include discovery feed fetcher in this run.
+        x_signals_enabled: Include X signal fetcher in this run.
+        x_bearer_token:    Twitter API v2 Bearer Token.
+        x_signals_mode:    ``cohort`` | ``query`` | ``mixed`` | ``off``.
+        x_signals_limit:   Max SignalItems from X per run.
+        x_signals_min_score: Minimum X signal score threshold.
+        x_signals_allowed_domains: Optional domain allowlist for X signals.
+        x_signals_rate_limit_enabled: Sleep between X API calls.
+        x_signals_max_tweet_age_hours: Reject tweets older than N hours.
+        x_signals_request_timeout: HTTP timeout per X API call (seconds).
+        x_signals_debug_logging: Verbose per-URL rejection logging.
+        x_signals_cohort_accounts: Override default trusted account list.
+        x_signals_query_terms: Override default topical query terms.
         max_stubs:   Cap on new CANDIDATE stubs created per run.
 
     Returns:
@@ -284,6 +314,27 @@ def run_signal_ingestion(
                 {
                     "limit": discovery_limit,
                     "per_source_limit": discovery_per_source_limit,
+                },
+            )
+        )
+
+    if x_signals_enabled:
+        fetchers.append(
+            (
+                "X_SIGNAL",
+                fetch_x_signals,
+                {
+                    "bearer_token": x_bearer_token or "",
+                    "mode": x_signals_mode,
+                    "limit": x_signals_limit,
+                    "min_score": x_signals_min_score,
+                    "allowed_domains": x_signals_allowed_domains,
+                    "rate_limit_enabled": x_signals_rate_limit_enabled,
+                    "max_tweet_age_hours": x_signals_max_tweet_age_hours,
+                    "request_timeout": x_signals_request_timeout,
+                    "debug_logging": x_signals_debug_logging,
+                    "cohort_accounts": x_signals_cohort_accounts,
+                    "query_terms": x_signals_query_terms,
                 },
             )
         )

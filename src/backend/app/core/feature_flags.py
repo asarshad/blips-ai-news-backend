@@ -56,6 +56,10 @@ FEATURE_DEFAULTS = {
     "promotion": True,
     # Video/reel hybrid reranking for serve-time diversity and repetition control
     "video_hybrid_rerank": True,
+    # X (Twitter) signal amplification — OFF by default; requires Bearer Token
+    # and explicit opt-in. Kill switch: set to false to fully disable X signals
+    # without affecting any other signal source or feed behavior.
+    "x_signals": False,
 }
 
 # Production defaults - more conservative
@@ -70,6 +74,7 @@ PROD_DEFAULTS = {
     "signals": True,  # Coverage Guarantee - ON in prod
     "promotion": True,  # Quality Gate - ON in prod
     "video_hybrid_rerank": True,  # ON after validation
+    "x_signals": False,  # OFF until Bearer Token configured and explicitly enabled
 }
 
 # Redis key prefix for feature flags

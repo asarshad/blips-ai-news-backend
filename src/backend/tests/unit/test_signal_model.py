@@ -9,4 +9,5 @@ def test_signal_enums_use_lowercase_database_values():
         "github_trending",
         "yt_trending",
         "discovery_leads",
+        "x_signal",
     ]
