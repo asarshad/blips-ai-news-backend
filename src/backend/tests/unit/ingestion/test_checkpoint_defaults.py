@@ -200,6 +200,19 @@ def test_build_defaults_includes_expansion_video_stream_when_video_surface_needs
     assert targets[("youtube_video", "Expansion Video Feed")] == 1
 
 
+def test_should_fill_surface_uses_ready_counts(monkeypatch):
+    counts = []
+
+    def _fake_ready_count(_db, content_type, *, hours):
+        counts.append((content_type, hours))
+        return 0
+
+    monkeypatch.setattr(checkpoint_defaults, "_fresh_ready_count", _fake_ready_count)
+
+    assert checkpoint_defaults._should_fill_surface(object(), ContentType.VIDEO) is True
+    assert counts[0][0] == ContentType.VIDEO
+
+
 def test_build_defaults_allows_long_form_channels_to_feed_reels_when_enabled(monkeypatch):
     channels = [
         _Channel(
@@ -239,7 +252,7 @@ def test_build_defaults_respects_explicit_mixed_reel_cap(monkeypatch):
     assert targets[("youtube_reel", "Samsung")] == 1
 
 
-def test_fresh_promoted_count_applies_curated_only_policy(monkeypatch):
+def test_fresh_ready_count_applies_curated_only_policy(monkeypatch):
     db = _FakeDb([object(), object(), object()])
     seen = {}
 
@@ -249,13 +262,13 @@ def test_fresh_promoted_count_applies_curated_only_policy(monkeypatch):
 
     monkeypatch.setattr(checkpoint_defaults, "apply_content_policy", _apply_policy)
 
-    count = checkpoint_defaults._fresh_promoted_count(db, ContentType.VIDEO, hours=168)
+    count = checkpoint_defaults._fresh_ready_count(db, ContentType.VIDEO, hours=168)
 
     assert count == 3
     assert seen["content_type"] == ContentType.VIDEO
 
 
-def test_fresh_promoted_count_uses_surface_age_filters_for_video_fresh_window(monkeypatch):
+def test_fresh_ready_count_uses_surface_age_filters_for_video_fresh_window(monkeypatch):
     db = _FakeDb([object(), object()])
     seen = {"age_filters": 0}
 
@@ -266,7 +279,7 @@ def test_fresh_promoted_count_uses_surface_age_filters_for_video_fresh_window(mo
 
     monkeypatch.setattr(checkpoint_defaults, "build_surface_age_filters", _fake_age_filters)
 
-    count = checkpoint_defaults._fresh_promoted_count(
+    count = checkpoint_defaults._fresh_ready_count(
         db,
         ContentType.VIDEO,
         hours=checkpoint_defaults.settings.VIDEOS_FRESH_PUBLISHED_HOURS,
@@ -288,7 +301,7 @@ def test_should_fill_surface_when_recent_video_refresh_is_stale(monkeypatch):
 
     monkeypatch.setattr(
         checkpoint_defaults,
-        "_fresh_promoted_count",
+        "_fresh_ready_count",
         lambda _db, content_type, *, hours: counts[(content_type, hours)],
     )
 

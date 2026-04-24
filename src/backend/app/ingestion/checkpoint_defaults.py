@@ -15,10 +15,11 @@ from typing import Dict, List
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.content import ContentItem, ContentType
+from app.services.content_readiness import ready_content_filter
 from app.services.video_content_policy import apply_content_policy
 from app.video_age_policy import build_surface_age_filters, make_default_policy
-from app.video_surface_rules import surface_content_filter, visible_promotion_filter
+from app.video_surface_rules import surface_content_filter
 
 logger = get_logger(__name__)
 
@@ -63,7 +64,7 @@ def parse_target_overrides() -> Dict[str, int]:
     return result
 
 
-def _fresh_promoted_count(db, content_type: ContentType, *, hours: int) -> int:
+def _fresh_ready_count(db, content_type: ContentType, *, hours: int) -> int:
     cutoff = datetime.utcnow() - timedelta(hours=hours)
     if content_type == ContentType.VIDEO:
         content_filter = surface_content_filter("videos")
@@ -72,12 +73,14 @@ def _fresh_promoted_count(db, content_type: ContentType, *, hours: int) -> int:
     else:
         content_filter = ContentItem.type == content_type
 
-    filters = [
-        content_filter,
-        visible_promotion_filter(),
-        ContentItem.curation_status == ContentStatus.PROMOTED,
-        ContentItem.is_suppressed.is_(False),
-    ]
+    surface_name = (
+        "videos"
+        if content_type == ContentType.VIDEO
+        else "reels"
+        if content_type == ContentType.REEL
+        else "articles"
+    )
+    filters = [content_filter, ready_content_filter(surface_name)]
 
     if content_type in (ContentType.VIDEO, ContentType.REEL):
         surface_cfg = (
@@ -127,26 +130,26 @@ def _should_fill_surface(db, content_type: ContentType) -> bool:
         return True
 
     if content_type == ContentType.VIDEO:
-        fresh_count = _fresh_promoted_count(
+        fresh_count = _fresh_ready_count(
             db,
             ContentType.VIDEO,
             hours=settings.VIDEOS_FRESH_PUBLISHED_HOURS,
         )
         refresh_hours, refresh_min = _recent_refresh_requirement(ContentType.VIDEO)
-        recent_count = _fresh_promoted_count(
+        recent_count = _fresh_ready_count(
             db,
             ContentType.VIDEO,
             hours=refresh_hours,
         )
         return fresh_count < settings.MIN_FRESH_VIDEOS or recent_count < refresh_min
 
-    fresh_count = _fresh_promoted_count(
+    fresh_count = _fresh_ready_count(
         db,
         ContentType.REEL,
         hours=settings.REELS_FRESH_PUBLISHED_HOURS,
     )
     refresh_hours, refresh_min = _recent_refresh_requirement(ContentType.REEL)
-    recent_count = _fresh_promoted_count(
+    recent_count = _fresh_ready_count(
         db,
         ContentType.REEL,
         hours=refresh_hours,

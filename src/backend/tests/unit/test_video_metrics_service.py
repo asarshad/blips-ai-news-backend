@@ -7,13 +7,14 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 
-from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.content import ContentItem, ContentReadinessStatus, ContentStatus, ContentType
 from app.models.video_source import VideoDiscoveryRun
 from app.services import video_metrics_service as metrics_service
 from app.services.inventory_service import SourceDistribution, Surface, SurfaceHealth, TierCounts
 from app.services.video_metrics_service import (
     _comparison_window,
     _inventory_state,
+    _load_promoted_items,
     _surface_floor,
     _surface_window_hours,
     compute_video_lane_metrics,
@@ -159,6 +160,56 @@ def test_compute_video_supply_metrics_merges_recent_refresh_health(monkeypatch):
         "Recent refresh below minimum: 3 < 12 in last 24h"
     ]
     assert payload["surfaces"]["reels"]["inventory_state"] == "needs_refresh"
+
+
+def test_video_supply_items_use_ready_filter_not_promoted_only():
+    engine = create_engine("sqlite:///:memory:")
+    ContentItem.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+    now = datetime.utcnow()
+
+    ready_video = ContentItem(
+        type=ContentType.VIDEO,
+        source="Ready Channel",
+        source_url="https://youtube.com/watch?v=ready123",
+        video_url="https://youtube.com/watch?v=ready123",
+        title="Ready AI video",
+        summary="A useful summary for a ready video.",
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status=ContentReadinessStatus.READY.value,
+        readiness_reason="video_ready",
+        ai_processed=True,
+        published_at=now - timedelta(hours=1),
+        created_at=now - timedelta(hours=1),
+        is_suppressed=False,
+    )
+    pending_video = ContentItem(
+        type=ContentType.VIDEO,
+        source="Pending Channel",
+        source_url="https://youtube.com/watch?v=pending123",
+        video_url="https://youtube.com/watch?v=pending123",
+        title="Pending AI video",
+        summary="__blips_video_retry__:v1:3:2026-04-24T00:00:00",
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status=ContentReadinessStatus.PENDING.value,
+        readiness_reason="video_summary_failed",
+        ai_processed=True,
+        published_at=now - timedelta(minutes=30),
+        created_at=now - timedelta(minutes=30),
+        is_suppressed=False,
+    )
+    db.add_all([ready_video, pending_video])
+    db.commit()
+
+    items = _load_promoted_items(
+        db,
+        "videos",
+        start=now - timedelta(hours=24),
+        end=now + timedelta(seconds=1),
+    )
+
+    assert [item.title for item in items] == ["Ready AI video"]
 
 
 def test_compute_video_lane_metrics_supports_query_breakdown():

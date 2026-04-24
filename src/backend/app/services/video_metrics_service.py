@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.content import ContentItem, ContentStatus, ContentType, EventType, InteractionEvent
+from app.services.content_readiness import ready_content_filter
 from app.models.video_source import VideoDiscoveryRun, VideoSourceProfile
 from app.services.inventory_service import Surface, SurfaceHealth, compute_surface_health
 from app.services.video_baseline_service import load_baseline_snapshot, numeric_delta
@@ -105,9 +106,7 @@ def _load_promoted_items(
             content_type=_surface_type(surface),
         )
         .filter(
-            ContentItem.type == _surface_type(surface),
-            ContentItem.curation_status == ContentStatus.PROMOTED,
-            ContentItem.is_suppressed.is_(False),
+            ready_content_filter(surface),
             ContentItem.published_at >= start,
         )
         .order_by(

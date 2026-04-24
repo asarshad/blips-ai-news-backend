@@ -22,10 +22,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.content import ContentItem, ContentType
+from app.services.content_readiness import ready_content_filter
 from app.services.video_content_policy import apply_content_policy
 from app.video_age_policy import build_surface_age_filters, make_default_policy
-from app.video_surface_rules import surface_content_filter, visible_promotion_filter
 
 logger = get_logger(__name__)
 
@@ -219,13 +219,10 @@ def compute_surface_health(
     backfill_cutoff = now - timedelta(hours=cfg["backfill_hours"])
     evergreen_cutoff = now - timedelta(days=cfg["evergreen_days"])
 
-    # Base query filters – only PROMOTED items count toward inventory health;
-    # CANDIDATE stubs are invisible in feeds and must not inflate tier counts.
+    # Health must mirror what the app can actually deliver.
     base_filter = and_(
-        surface_content_filter(surface.value),
-        visible_promotion_filter(),
-        ContentItem.is_suppressed.is_(False),
-        ContentItem.curation_status == ContentStatus.PROMOTED,
+        ready_content_filter(surface.value),
+        ContentItem.published_at <= now,
     )
     scoped_query = apply_content_policy(db.query(ContentItem), content_type=content_type)
 
