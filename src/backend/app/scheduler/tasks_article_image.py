@@ -19,7 +19,7 @@ from app.scheduler.runtime import (
     is_job_active,
     log_memory_snapshot,
     mark_job_finished,
-    mark_job_started,
+    try_mark_job_started,
 )
 from app.services.article_image_service import repair_article_image_metadata
 
@@ -48,7 +48,16 @@ def run_article_image_verification_job() -> None:
     run_success = False
     db = None
     try:
-        run_started_at = mark_job_started(ARTICLE_IMAGE_VERIFICATION_JOB)
+        run_started_at = try_mark_job_started(
+            ARTICLE_IMAGE_VERIFICATION_JOB,
+            unless_active=(FETCH_NEWS_JOB,),
+        )
+        if run_started_at is None:
+            logger.info(
+                "[%s] fetch_news started concurrently; skipping image verification tick",
+                ARTICLE_IMAGE_VERIFICATION_JOB,
+            )
+            return
         log_memory_snapshot(logger, f"{ARTICLE_IMAGE_VERIFICATION_JOB}:start")
         db = SessionLocal()
         result = repair_article_image_metadata(

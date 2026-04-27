@@ -57,6 +57,23 @@ def mark_job_started(job_name: str) -> datetime:
     return started_at
 
 
+def try_mark_job_started(
+    job_name: str,
+    *,
+    unless_active: tuple[str, ...] = (),
+) -> datetime | None:
+    """Atomically start a job unless any mutually-exclusive job is active."""
+    started_at = _utcnow()
+    with _LOCK:
+        for blocked_job in unless_active:
+            if _state_for(blocked_job).active_count > 0:
+                return None
+        state = _state_for(job_name)
+        state.active_count += 1
+        state.last_started_at = started_at.isoformat()
+    return started_at
+
+
 def mark_job_finished(job_name: str, started_at: datetime, *, success: bool) -> None:
     finished_at = _utcnow()
     duration_seconds = max(0.0, (finished_at - started_at).total_seconds())

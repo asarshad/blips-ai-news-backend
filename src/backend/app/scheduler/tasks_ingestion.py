@@ -12,9 +12,9 @@ from app.scheduler.runtime import (
     current_rss_mb,
     log_memory_snapshot,
     mark_job_finished,
-    mark_job_started,
     memory_hard_limit_mb,
     memory_over_hard_limit,
+    try_mark_job_started,
 )
 from app.services.video_content_policy import youtube_discovery_enabled
 
@@ -45,7 +45,15 @@ def fetch_and_process_news():
     fetch_success = False
     db = None
     try:
-        run_started_at = mark_job_started(FETCH_NEWS_JOB)
+        run_started_at = try_mark_job_started(
+            FETCH_NEWS_JOB,
+            unless_active=("article_image_verification",),
+        )
+        if run_started_at is None:
+            logger.info(
+                "[fetch_news] SKIPPED - article image verification is currently active"
+            )
+            return
         log_memory_snapshot(logger, "fetch_news:start")
 
         db = SessionLocal()

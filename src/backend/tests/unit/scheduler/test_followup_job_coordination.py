@@ -11,6 +11,7 @@ from app.scheduler.runtime import (
     mark_job_finished,
     mark_job_started,
     reset_job_runtime_state,
+    try_mark_job_started,
 )
 
 
@@ -70,6 +71,21 @@ def test_scheduled_promotion_skips_after_recent_inline_run(monkeypatch):
     tasks_promotion.run_promotion_job()
 
     session_factory.assert_not_called()
+
+
+def test_try_mark_job_started_is_atomic_with_blockers():
+    fetch_started_at = mark_job_started(FETCH_NEWS_JOB)
+    try:
+        assert (
+            try_mark_job_started(
+                "article_image_verification",
+                unless_active=(FETCH_NEWS_JOB,),
+            )
+            is None
+        )
+        assert is_job_active("article_image_verification") is False
+    finally:
+        mark_job_finished(FETCH_NEWS_JOB, fetch_started_at, success=False)
 
 
 def test_scheduled_clustering_clears_runtime_state_when_session_setup_fails(monkeypatch):

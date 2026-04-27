@@ -132,7 +132,11 @@ class ContentEventDispatcher:
                 return False
             event.status = "pending"
             event.locked_at = None
-            event.available_at = datetime.utcnow() + _retry_delay(event.attempt_count)
+            event.available_at = datetime.utcnow() + _retry_delay(
+                event.attempt_count,
+                event_type=event.event_type,
+                error_message=error_message,
+            )
             event.last_error = error_message[:4000]
             event.updated_at = datetime.utcnow()
             db.commit()
@@ -225,6 +229,32 @@ class ContentEventDispatcher:
         )
 
 
-def _retry_delay(attempt_count: int | None) -> timedelta:
+def _retry_delay(
+    attempt_count: int | None,
+    *,
+    event_type: str | None = None,
+    error_message: str | None = None,
+) -> timedelta:
+    error = (error_message or "").lower()
+    if event_type == CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE:
+        if (
+            "daily call limit reached" in error
+            or "daily cost ceiling" in error
+        ):
+            return _until_next_utc_budget_window()
+        if "offset-naive and offset-aware" in error:
+            return timedelta(hours=1)
+
     attempt = max(1, int(attempt_count or 1))
     return timedelta(seconds=min(300, 15 * attempt))
+
+
+def _until_next_utc_budget_window() -> timedelta:
+    now = datetime.utcnow()
+    next_midnight = (now + timedelta(days=1)).replace(
+        hour=0,
+        minute=5,
+        second=0,
+        microsecond=0,
+    )
+    return max(timedelta(minutes=15), next_midnight - now)

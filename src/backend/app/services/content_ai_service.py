@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
@@ -435,8 +435,10 @@ def _is_recent_article_for_maintenance(item: ContentItem, *, now: datetime | Non
     published_at = getattr(item, "published_at", None)
     if published_at is None:
         return False
-    now_utc = now or datetime.utcnow()
-    return published_at >= now_utc - timedelta(days=settings.ARTICLE_MAINTENANCE_LOOKBACK_DAYS)
+    now_utc = _as_naive_utc(now or datetime.utcnow())
+    return _as_naive_utc(published_at) >= now_utc - timedelta(
+        days=settings.ARTICLE_MAINTENANCE_LOOKBACK_DAYS
+    )
 
 
 def _allow_summary_rescue_for_item(item: ContentItem, *, now: datetime | None = None) -> bool:
@@ -449,13 +451,20 @@ def _allow_summary_rescue_for_item(item: ContentItem, *, now: datetime | None = 
     if published_at is None:
         return False
 
-    now_utc = now or datetime.utcnow()
+    now_utc = _as_naive_utc(now or datetime.utcnow())
     lookback_days = (
         settings.ARTICLE_MAINTENANCE_LOOKBACK_DAYS
         if getattr(item, "type", None) == ContentType.ARTICLE
         else 7
     )
-    return published_at >= now_utc - timedelta(days=lookback_days)
+    return _as_naive_utc(published_at) >= now_utc - timedelta(days=lookback_days)
+
+
+def _as_naive_utc(value: datetime) -> datetime:
+    """Normalize mixed DB/API datetimes before comparing recency windows."""
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _article_retry_state(item: ContentItem, *, now: datetime | None = None) -> dict[str, object]:

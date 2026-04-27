@@ -198,6 +198,27 @@ def test_dispatch_content_promotion_event_processes_one_content_item(monkeypatch
     dispatcher._dispatch_content_promotion_event(event, db)
 
     assert processed == [(db, 88)]
+
+
+def test_ai_daily_limit_failures_back_off_until_next_budget_window():
+    delay = dispatcher_module._retry_delay(
+        3,
+        event_type=CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE,
+        error_message="Summary rescue daily call limit reached",
+    )
+
+    assert delay >= dispatcher_module.timedelta(minutes=15)
+    assert delay > dispatcher_module.timedelta(minutes=5)
+
+
+def test_ai_timezone_compare_failures_back_off_for_an_hour():
+    assert dispatcher_module._retry_delay(
+        1,
+        event_type=CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE,
+        error_message="can't compare offset-naive and offset-aware datetimes",
+    ) == dispatcher_module.timedelta(hours=1)
+
+
 def test_process_claimed_marks_promotion_processed(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     _create_test_tables(engine)
