@@ -23,6 +23,7 @@ setup_logging()
 logger = get_logger(__name__)
 
 STOP_EVENT = threading.Event()
+PROMOTION_EVENT_TYPE = "content.promotion_eval.requested"
 
 
 def _log_memory_snapshot(label: str) -> None:
@@ -50,12 +51,13 @@ def _pause_for_shared_worker_pressure(
 ) -> bool:
     """Back off when the single Render worker is busy or near its memory budget."""
     label = ",".join(event_types) or "*"
+    fetch_pause_exempt = event_types == (PROMOTION_EVENT_TYPE,)
     if os.getenv("CONTENT_EVENT_PAUSE_DURING_FETCH", "true").lower() in {
         "true",
         "1",
         "yes",
         "on",
-    } and is_job_active(FETCH_NEWS_JOB):
+    } and not fetch_pause_exempt and is_job_active(FETCH_NEWS_JOB):
         logger.info(
             "[content_event_worker] paused while fetch_news is active event_types=%s",
             label,
