@@ -493,3 +493,98 @@ def test_checkpointed_ingestion_expands_article_budget_when_ready_supply_is_belo
     assert budget_calls[ContentType.ARTICLE.value] == 20
     assert budget_calls[ContentType.VIDEO.value] == 50
     assert budget_calls[ContentType.REEL.value] == 30
+
+
+def test_checkpointed_ingestion_skips_low_yield_rss_sources_when_topping_up_articles(
+    monkeypatch,
+):
+    """Low ready-yield RSS sources should not receive more target in the same run."""
+    from app.ingestion import checkpointing
+    from app.ingestion.checkpoint_defaults import FeedDefault
+    from app.models.content import ContentType
+
+    monkeypatch.setenv("INGESTION_ENABLED", "true")
+    monkeypatch.setenv("INGESTION_CRON_DISABLED", "false")
+
+    fake_day = date(2026, 6, 1)
+    monkeypatch.setattr(checkpointing, "get_ingestion_day", lambda: fake_day)
+    monkeypatch.setattr(
+        checkpointing,
+        "_low_yield_rss_source_names",
+        lambda *_args, **_kwargs: {"bad-feed"},
+    )
+
+    budget_calls = {}
+    reopened_defaults = []
+
+    class _Row:
+        def __init__(self, row_id, source_type, feed_name, target):
+            self.id = row_id
+            self.source_type = source_type
+            self.feed_name = feed_name
+            self.target = target
+
+    class FakeBudgetRepo:
+        def __init__(self, _db):
+            pass
+
+        def ensure(self, *, day, content_type, target):
+            budget_calls[content_type.value] = target
+
+    class FakeProgressRepo:
+        def __init__(self, _db):
+            self.rows = [
+                _Row(1, "rss", "bad-feed", 10),
+                _Row(2, "rss", "good-feed", 10),
+                _Row(3, "youtube_video", "ch1", 5),
+                _Row(4, "youtube_reel", "ch2", 3),
+            ]
+
+        def ensure_rows(self, **_kw):
+            return 0
+
+        def reopen_continuous_rows(self, *, defaults, **_kw):
+            defaults = list(defaults)
+            reopened_defaults.extend(defaults)
+            for source_type, feed_name, per_cycle_target in defaults:
+                for row in self.rows:
+                    if row.source_type == source_type and row.feed_name == feed_name:
+                        row.target += per_cycle_target
+            return len(defaults)
+
+        def list_for_day(self, **_kw):
+            return self.rows
+
+        def prime_youtube_rows(self, **_kw):
+            return []
+
+        def list_incomplete(self, **_kw):
+            return []
+
+    class FakeContentRepo:
+        def __init__(self, _db):
+            pass
+
+        def get_article_supply_counts_on_ingestion_day(self, _day):
+            return {"promoted": 40, "ready": 10}
+
+    monkeypatch.setattr(checkpointing, "IngestionBudgetRepository", FakeBudgetRepo)
+    monkeypatch.setattr(checkpointing, "IngestionProgressRepository", FakeProgressRepo)
+    monkeypatch.setattr(checkpointing, "ContentItemRepository", FakeContentRepo)
+    monkeypatch.setattr(checkpointing, "_prime_bootstrap_youtube_rows", lambda **_kw: [])
+    monkeypatch.setattr(
+        checkpointing,
+        "_build_defaults",
+        lambda **_kw: [
+            FeedDefault("rss", "bad-feed", 10),
+            FeedDefault("rss", "good-feed", 10),
+            FeedDefault("youtube_video", "ch1", 5),
+            FeedDefault("youtube_reel", "ch2", 3),
+        ],
+    )
+
+    checkpointing.run_checkpointed_ingestion(db=MagicMock(), redis_client=None)
+
+    assert ("rss", "bad-feed", 10) not in reopened_defaults
+    assert ("rss", "good-feed", 10) in reopened_defaults
+    assert budget_calls[ContentType.ARTICLE.value] == 20

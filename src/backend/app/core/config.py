@@ -238,6 +238,11 @@ class Settings(BaseSettings):
     ARTICLE_UNSKIMMABLE_RETRY_WINDOW_HOURS: int = 24
     ARTICLE_IMAGE_REPAIR_LOOKBACK_DAYS: int = 7
     ARTICLE_IMAGE_REPAIR_LIMIT: int = 300
+    ARTICLE_RSS_READY_YIELD_GUARD_ENABLED: bool = True
+    ARTICLE_RSS_READY_YIELD_MIN_PROMOTED: int = 8
+    ARTICLE_RSS_READY_YIELD_MAX_READY_RATIO: float = 0.35
+    ARTICLE_RSS_READY_YIELD_MIN_UNSKIMMABLE_RATIO: float = 0.6
+    ARTICLE_RSS_READY_YIELD_MAX_PAUSE_FRACTION: float = 0.35
     # Dedicated image-verification scheduler cadence (minutes). Decoupled
     # from ai_retry so image backlog drains without waiting for LLM work.
     ARTICLE_IMAGE_VERIFICATION_INTERVAL_MINUTES: int = 5

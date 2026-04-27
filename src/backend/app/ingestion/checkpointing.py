@@ -9,11 +9,14 @@ Implementation details live in smaller modules:
 """
 
 import os
+import re
 import signal
 import threading
+from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Dict, List
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -25,8 +28,8 @@ from app.ingestion.checkpoint_loop import run_checkpoint_loop as _run_checkpoint
 from app.ingestion.checkpoint_worker import (
     process_progress_row_batch as _process_progress_row_batch,
 )
-from app.ingestion.time import get_ingestion_day
-from app.models.content import ContentType
+from app.ingestion.time import get_ingestion_day, get_ingestion_day_bounds
+from app.models.content import ContentItem, ContentReadinessStatus, ContentStatus, ContentType
 from app.repositories.content_repo import ContentItemRepository
 from app.repositories.ingestion_budget_repo import IngestionBudgetRepository
 from app.repositories.ingestion_progress_repo import IngestionProgressRepository
@@ -37,10 +40,134 @@ from app.services.tiered_feed_service import invalidate_tiered_feed_cache
 logger = get_logger(__name__)
 
 STOP_EVENT = threading.Event()
+_SOURCE_KEY_RE = re.compile(r"[^a-z0-9]+")
 
 
-def _sum_targets(rows, *, source_type: str) -> int:
-    return sum(int(row.target or 0) for row in rows if row.source_type == source_type)
+def _source_key(value: str | None) -> str:
+    return _SOURCE_KEY_RE.sub("", (value or "").lower())
+
+
+def _sum_targets(rows, *, source_type: str, excluded_feed_names: set[str] | None = None) -> int:
+    excluded = excluded_feed_names or set()
+    return sum(
+        int(row.target or 0)
+        for row in rows
+        if row.source_type == source_type and str(row.feed_name) not in excluded
+    )
+
+
+def _bounded_fraction(value: float, *, default: float) -> float:
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _low_yield_rss_source_names(
+    db: Session,
+    *,
+    day_utc,
+    feed_names: list[str],
+) -> set[str]:
+    """Return RSS feed names that are currently producing poor ready yield.
+
+    The guard is intentionally conservative: it only trips when a source has
+    enough promoted items to be statistically meaningful, poor ready yield, and
+    a high share of unskimmable promoted articles. It pauses work for the
+    current run only; later runs can resume once readiness catches up.
+    """
+    if not settings.ARTICLE_RSS_READY_YIELD_GUARD_ENABLED or not feed_names:
+        return set()
+
+    try:
+        feed_by_key = {_source_key(name): name for name in feed_names}
+        start, end = get_ingestion_day_bounds(day=day_utc)
+        day_filter = or_(
+            ContentItem.ingestion_day == day_utc,
+            and_(
+                ContentItem.ingestion_day.is_(None),
+                ContentItem.created_at >= start,
+                ContentItem.created_at < end,
+            ),
+        )
+        rows = (
+            db.query(
+                ContentItem.source,
+                ContentItem.readiness_status,
+                ContentItem.readiness_reason,
+            )
+            .filter(
+                day_filter,
+                ContentItem.type == ContentType.ARTICLE,
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.is_suppressed.is_(False),
+            )
+            .all()
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Article RSS yield guard skipped after metrics lookup failed: %s", exc)
+        return set()
+
+    stats: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"promoted": 0, "ready": 0, "unskimmable": 0}
+    )
+    for source, readiness_status, readiness_reason in rows:
+        key = _source_key(str(source or ""))
+        if key not in feed_by_key:
+            continue
+        bucket = stats[key]
+        bucket["promoted"] += 1
+        if str(readiness_status or "") == ContentReadinessStatus.READY.value:
+            bucket["ready"] += 1
+        if str(readiness_reason or "") == "article_unskimmable_retry":
+            bucket["unskimmable"] += 1
+
+    min_promoted = max(1, int(settings.ARTICLE_RSS_READY_YIELD_MIN_PROMOTED))
+    max_ready_ratio = _bounded_fraction(
+        settings.ARTICLE_RSS_READY_YIELD_MAX_READY_RATIO,
+        default=0.35,
+    )
+    min_unskimmable_ratio = _bounded_fraction(
+        settings.ARTICLE_RSS_READY_YIELD_MIN_UNSKIMMABLE_RATIO,
+        default=0.6,
+    )
+    candidates: list[tuple[float, str, dict[str, int]]] = []
+    for key, bucket in stats.items():
+        promoted = int(bucket["promoted"])
+        if promoted < min_promoted:
+            continue
+        ready_ratio = int(bucket["ready"]) / promoted
+        unskimmable_ratio = int(bucket["unskimmable"]) / promoted
+        if ready_ratio <= max_ready_ratio and unskimmable_ratio >= min_unskimmable_ratio:
+            severity = unskimmable_ratio - ready_ratio
+            candidates.append((severity, feed_by_key[key], bucket))
+
+    if not candidates:
+        return set()
+
+    max_pause_fraction = _bounded_fraction(
+        settings.ARTICLE_RSS_READY_YIELD_MAX_PAUSE_FRACTION,
+        default=0.35,
+    )
+    max_paused = max(1, int(len(feed_names) * max_pause_fraction))
+    selected = sorted(candidates, key=lambda item: item[0], reverse=True)[:max_paused]
+    paused = {feed_name for _severity, feed_name, _bucket in selected}
+    logger.warning(
+        "Article RSS ready-yield guard pausing %s/%s sources for %s: %s",
+        len(paused),
+        len(feed_names),
+        day_utc.isoformat(),
+        [
+            {
+                "source": feed_name,
+                "promoted": bucket["promoted"],
+                "ready": bucket["ready"],
+                "unskimmable": bucket["unskimmable"],
+            }
+            for _severity, feed_name, bucket in selected
+        ],
+    )
+    return paused
 
 
 def _bootstrap_target(source_type: str, *, daily_cap: int, reel_cap: int) -> int:
@@ -189,6 +316,12 @@ def run_checkpointed_ingestion(
     content_repo = ContentItemRepository(db)
     article_supply = content_repo.get_article_supply_counts_on_ingestion_day(day)
     article_target_pending = article_supply["ready"] < settings.DAILY_TARGET_ARTICLES
+    rss_feed_names = [feed_name for source_type, feed_name, _target in defaults_tuples if source_type == "rss"]
+    low_yield_rss_sources = (
+        _low_yield_rss_source_names(db, day_utc=day, feed_names=rss_feed_names)
+        if article_target_pending
+        else set()
+    )
 
     youtube_defaults = [d for d in defaults_tuples if d[0] != "rss"]
     reopened = repo.reopen_continuous_rows(day_utc=day, defaults=youtube_defaults)
@@ -196,7 +329,11 @@ def run_checkpointed_ingestion(
         logger.info("Reopened %s YouTube progress rows for %s", reopened, day.isoformat())
 
     if article_target_pending:
-        rss_defaults = [d for d in defaults_tuples if d[0] == "rss"]
+        rss_defaults = [
+            d
+            for d in defaults_tuples
+            if d[0] == "rss" and d[1] not in low_yield_rss_sources
+        ]
         reopened_rss = repo.reopen_continuous_rows(day_utc=day, defaults=rss_defaults)
         if reopened_rss:
             logger.info(
@@ -213,9 +350,17 @@ def run_checkpointed_ingestion(
     # ingestion (budget table kept for Phase A concurrency safety; daily cap
     # enforcement is removed).
     progress_rows = repo.list_for_day(day_utc=day)
-    article_target = _sum_targets(progress_rows, source_type="rss")
+    article_target = _sum_targets(
+        progress_rows,
+        source_type="rss",
+        excluded_feed_names=low_yield_rss_sources,
+    )
     if article_target <= 0:
-        article_target = sum(d.target for d in defaults if d.source_type == "rss")
+        article_target = sum(
+            d.target
+            for d in defaults
+            if d.source_type == "rss" and d.feed_name not in low_yield_rss_sources
+        )
     video_target = sum(d.target for d in defaults if d.source_type == "youtube_video")
     reel_target = sum(d.target for d in defaults if d.source_type == "youtube_reel")
     budget_repo.ensure(day=day, content_type=ContentType.ARTICLE, target=article_target)
@@ -230,6 +375,11 @@ def run_checkpointed_ingestion(
         settings.DAILY_TARGET_ARTICLES,
         article_target,
     )
+    low_yield_rss_row_ids = {
+        int(row.id)
+        for row in progress_rows
+        if row.source_type == "rss" and row.feed_name in low_yield_rss_sources
+    }
 
     owner = _owner_token()
     ttl_ms = int(os.getenv("INGESTION_LEASE_TTL_MS", "60000"))
@@ -249,6 +399,13 @@ def run_checkpointed_ingestion(
     retry_max_seconds = int(os.getenv("INGESTION_RETRY_MAX_SECONDS", "300"))
 
     def _process_batch(row_id: int, batch: int) -> Dict[str, object]:
+        if int(row_id) in low_yield_rss_row_ids:
+            return {
+                "row_id": row_id,
+                "status": "skipped_low_ready_yield",
+                "inserted": 0,
+                "attempted": 0,
+            }
         return _process_progress_row_batch(
             row_id=row_id,
             day_utc=day,
@@ -269,9 +426,27 @@ def run_checkpointed_ingestion(
     )
 
     if max_workers <= 1:
+        loop_repo = repo
+        if low_yield_rss_sources:
+            class _YieldGuardedRepo:
+                def __getattr__(self, name):
+                    return getattr(repo, name)
+
+                def list_incomplete(self, *, day_utc):
+                    return [
+                        row
+                        for row in repo.list_incomplete(day_utc=day_utc)
+                        if not (
+                            row.source_type == "rss"
+                            and row.feed_name in low_yield_rss_sources
+                        )
+                    ]
+
+            loop_repo = _YieldGuardedRepo()
+
         return _run_checkpoint_loop(
             day=day,
-            repo=repo,
+            repo=loop_repo,
             process_row=lambda rid: _process_batch(int(rid), batch_size),
             ingest_until_targets=ingest_until_targets,
             poll_seconds=poll_seconds,
@@ -315,6 +490,8 @@ def run_checkpointed_ingestion(
 
             tasks: List[TaskRef] = []
             for r in rows:
+                if r.source_type == "rss" and r.feed_name in low_yield_rss_sources:
+                    continue
                 ct = _ct_for_source_type(r.source_type)
                 if remaining_by_type.get(ct, 0) <= 0:
                     continue
