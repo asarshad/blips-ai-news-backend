@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from app.core.logging import get_logger
 from app.scheduler.job_stats import log_job_start
 from app.services.content_event_dispatcher import ContentEventDispatcher
@@ -13,7 +15,8 @@ def run_content_event_dispatch_job() -> None:
     """Dispatch pending content lifecycle events."""
     stats = log_job_start("content_events")
     try:
-        processed = ContentEventDispatcher().process_pending(limit=500)
+        limit = max(1, int(os.getenv("CONTENT_EVENT_SCHEDULED_BATCH_SIZE", "25")))
+        processed = ContentEventDispatcher().process_pending(limit=limit)
         stats.items_processed = processed
         logger.info("[content_events] processed=%d", processed)
     except Exception as exc:

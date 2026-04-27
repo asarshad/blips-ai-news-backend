@@ -6,6 +6,7 @@ import os
 import signal
 import threading
 import time
+import gc
 from typing import Iterable
 
 from app.core.logging import get_logger, setup_logging
@@ -15,6 +16,23 @@ setup_logging()
 logger = get_logger(__name__)
 
 STOP_EVENT = threading.Event()
+
+
+def _log_memory_snapshot(label: str) -> None:
+    """Emit lightweight RSS telemetry for diagnosing worker OOM pressure."""
+    try:
+        from app.core.observability import get_process_runtime_stats
+
+        stats = get_process_runtime_stats()
+        logger.info(
+            "[content_event_worker:%s] process_memory rss_mb=%s peak_rss_mb=%s uptime_seconds=%s",
+            label,
+            stats.get("rss_mb"),
+            stats.get("peak_rss_mb"),
+            stats.get("uptime_seconds"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Failed to capture content event worker memory snapshot: %s", exc)
 
 
 def _handle_stop(_signum, _frame) -> None:
@@ -67,6 +85,8 @@ def run_content_event_worker(
             processed,
             ",".join(tuple(event_types or ())) or "*",
         )
+        gc.collect()
+        _log_memory_snapshot(",".join(tuple(event_types or ())) or "all")
 
     logger.info("Content event worker stopping")
     return 0

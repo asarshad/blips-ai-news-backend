@@ -173,9 +173,11 @@ projects:
               - key: CONTENT_EVENT_WORKER_SPECS
                 value: "content.promotion_eval.requested;content.ai_summary.requested;article.image_verification.requested,content.ready,content.unready"
               - key: CONTENT_EVENT_BATCH_SIZE
-                value: "50"
+                value: "10"
+              - key: CONTENT_EVENT_AI_BATCH_SIZE
+                value: "2"
               - key: CONTENT_EVENT_POLL_SECONDS
-                value: "1.0"
+                value: "2.0"
               - key: CONTENT_PROMOTION_QUEUE_DELAY_SECONDS
                 value: "60"
               - key: CONTENT_PROMOTION_FETCH_DEFERRAL_SECONDS
