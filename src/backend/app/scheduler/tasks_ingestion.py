@@ -7,7 +7,15 @@ from app.core.dependencies import get_redis
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.scheduler.job_stats import JobStats, log_job_start
-from app.scheduler.runtime import FETCH_NEWS_JOB, log_memory_snapshot, mark_job_finished, mark_job_started
+from app.scheduler.runtime import (
+    FETCH_NEWS_JOB,
+    current_rss_mb,
+    log_memory_snapshot,
+    mark_job_finished,
+    mark_job_started,
+    memory_hard_limit_mb,
+    memory_over_hard_limit,
+)
 from app.services.video_content_policy import youtube_discovery_enabled
 
 logger = get_logger(__name__)
@@ -23,6 +31,13 @@ def fetch_and_process_news():
 
     if not feature_flags.is_enabled("ingestion"):
         logger.info("[fetch_news] SKIPPED - ingestion feature is disabled")
+        return
+    if memory_over_hard_limit():
+        logger.warning(
+            "[fetch_news] SKIPPED - worker memory is above hard limit rss_mb=%s hard_limit_mb=%s",
+            current_rss_mb(),
+            memory_hard_limit_mb(),
+        )
         return
 
     stats = log_job_start("fetch_news")

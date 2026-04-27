@@ -470,8 +470,6 @@ def run_worker():
         logger.info("Scheduler initialized successfully")
         sys.stdout.flush()
 
-        content_event_threads = _start_content_event_worker_threads(_stop_event)
-
         # Run initial fetch (catch ALL errors so it never kills the worker)
         startup_lock_stop_event = threading.Event()
         startup_lock_failures: list[int] = []
@@ -508,6 +506,12 @@ def run_worker():
             logger.error("Worker lock maintenance failed during startup fetch — exiting for restart")
             sys.stdout.flush()
             return 1
+
+        # Start queue-drain lanes only after the startup ingestion burst.
+        # On a single 2Gi worker, running image/AI/promotion event drains
+        # concurrently with initial fetch has repeatedly pushed peak RSS over
+        # Render's memory limit.
+        content_event_threads = _start_content_event_worker_threads(_stop_event)
 
         # Keep the worker running and refresh lock.
         logger.info("Worker running. Press Ctrl+C to stop.")

@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import gc
 import os
 import signal
 import threading
 import time
-import gc
 from typing import Iterable
 
 from app.core.logging import get_logger, setup_logging
+from app.scheduler.runtime import (
+    FETCH_NEWS_JOB,
+    current_rss_mb,
+    is_job_active,
+    memory_over_soft_limit,
+    memory_soft_limit_mb,
+)
 from app.services.content_event_dispatcher import ContentEventDispatcher
 
 setup_logging()
@@ -33,6 +40,42 @@ def _log_memory_snapshot(label: str) -> None:
         )
     except Exception as exc:  # noqa: BLE001
         logger.debug("Failed to capture content event worker memory snapshot: %s", exc)
+
+
+def _pause_for_shared_worker_pressure(
+    *,
+    event_types: tuple[str, ...],
+    stop_event: threading.Event,
+    poll_seconds: float,
+) -> bool:
+    """Back off when the single Render worker is busy or near its memory budget."""
+    label = ",".join(event_types) or "*"
+    if os.getenv("CONTENT_EVENT_PAUSE_DURING_FETCH", "true").lower() in {
+        "true",
+        "1",
+        "yes",
+        "on",
+    } and is_job_active(FETCH_NEWS_JOB):
+        logger.info(
+            "[content_event_worker] paused while fetch_news is active event_types=%s",
+            label,
+        )
+        stop_event.wait(timeout=max(1.0, float(poll_seconds)))
+        return True
+
+    if memory_over_soft_limit():
+        gc.collect()
+        rss_mb = current_rss_mb()
+        logger.warning(
+            "[content_event_worker] memory throttle rss_mb=%s soft_limit_mb=%s event_types=%s",
+            rss_mb,
+            memory_soft_limit_mb(),
+            label,
+        )
+        stop_event.wait(timeout=max(5.0, float(poll_seconds)))
+        return True
+
+    return False
 
 
 def _handle_stop(_signum, _frame) -> None:
@@ -76,6 +119,14 @@ def run_content_event_worker(
     )
 
     while not resolved_stop_event.is_set():
+        event_type_tuple = tuple(event_types or ())
+        if _pause_for_shared_worker_pressure(
+            event_types=event_type_tuple,
+            stop_event=resolved_stop_event,
+            poll_seconds=poll_seconds,
+        ):
+            continue
+
         processed = dispatcher.process_pending(limit=max(1, int(batch_size)))
         if processed <= 0:
             resolved_stop_event.wait(timeout=max(0.1, float(poll_seconds)))

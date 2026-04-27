@@ -116,6 +116,43 @@ def log_memory_snapshot(logger, label: str) -> None:
         logger.debug("Failed to capture process memory snapshot for %s: %s", label, exc)
 
 
+def current_rss_mb() -> float | None:
+    """Return current process RSS in MiB, when available."""
+    try:
+        from app.core.observability import get_process_runtime_stats
+
+        rss_mb = get_process_runtime_stats().get("rss_mb")
+        return float(rss_mb) if rss_mb is not None else None
+    except Exception:
+        return None
+
+
+def memory_soft_limit_mb() -> int:
+    raw = os.getenv("WORKER_MEMORY_SOFT_LIMIT_MB", "1400")
+    try:
+        return max(256, int(raw))
+    except ValueError:
+        return 1400
+
+
+def memory_hard_limit_mb() -> int:
+    raw = os.getenv("WORKER_MEMORY_HARD_LIMIT_MB", "1700")
+    try:
+        return max(memory_soft_limit_mb(), int(raw))
+    except ValueError:
+        return 1700
+
+
+def memory_over_soft_limit() -> bool:
+    rss_mb = current_rss_mb()
+    return rss_mb is not None and rss_mb >= memory_soft_limit_mb()
+
+
+def memory_over_hard_limit() -> bool:
+    rss_mb = current_rss_mb()
+    return rss_mb is not None and rss_mb >= memory_hard_limit_mb()
+
+
 def reset_job_runtime_state() -> None:
     with _LOCK:
         _STATE.clear()

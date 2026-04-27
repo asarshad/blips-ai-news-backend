@@ -178,6 +178,12 @@ projects:
                 value: "2"
               - key: CONTENT_EVENT_POLL_SECONDS
                 value: "2.0"
+              - key: CONTENT_EVENT_PAUSE_DURING_FETCH
+                value: "true"
+              - key: WORKER_MEMORY_SOFT_LIMIT_MB
+                value: "1400"
+              - key: WORKER_MEMORY_HARD_LIMIT_MB
+                value: "1700"
               - key: CONTENT_PROMOTION_QUEUE_DELAY_SECONDS
                 value: "60"
               - key: CONTENT_PROMOTION_FETCH_DEFERRAL_SECONDS
@@ -211,7 +217,7 @@ projects:
               - key: INGEST_UNTIL_TARGETS
                 value: "true"
               - key: INGEST_CATCHUP_MAX_SECONDS
-                value: "1800"
+                value: "600"
               - key: DAILY_TARGET_ARTICLES
                 value: "200"
               - key: YOUTUBE_VIDEO_SEARCH_MIN_INTERVAL_MINUTES
