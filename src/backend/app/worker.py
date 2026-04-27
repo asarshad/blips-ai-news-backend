@@ -80,6 +80,7 @@ DEFAULT_CONTENT_EVENT_WORKER_SPECS = (
     "content.ai_summary.requested;"
     "article.image_verification.requested,content.ready,content.unready"
 )
+PROMOTION_EVENT_TYPE = "content.promotion_eval.requested"
 
 
 def _request_worker_stop() -> None:
@@ -346,7 +347,29 @@ def _resolve_content_event_worker_specs() -> tuple[tuple[str, ...], ...]:
     return tuple(parsed)
 
 
-def _start_content_event_worker_threads(stop_event: threading.Event) -> list[threading.Thread]:
+def _startup_content_event_worker_specs() -> tuple[tuple[str, ...], ...]:
+    """Start the cheap promotion lane before the initial ingestion burst."""
+    return tuple(
+        event_types
+        for event_types in _resolve_content_event_worker_specs()
+        if event_types == (PROMOTION_EVENT_TYPE,)
+    )
+
+
+def _steady_state_content_event_worker_specs() -> tuple[tuple[str, ...], ...]:
+    """Delay heavier event lanes until after startup fetch to protect memory."""
+    return tuple(
+        event_types
+        for event_types in _resolve_content_event_worker_specs()
+        if event_types != (PROMOTION_EVENT_TYPE,)
+    )
+
+
+def _start_content_event_worker_threads(
+    stop_event: threading.Event,
+    *,
+    specs: tuple[tuple[str, ...], ...] | None = None,
+) -> list[threading.Thread]:
     if not _content_event_threads_enabled():
         return []
 
@@ -358,7 +381,7 @@ def _start_content_event_worker_threads(stop_event: threading.Event) -> list[thr
     ai_batch_size = int(os.getenv("CONTENT_EVENT_AI_BATCH_SIZE", "5"))
     poll_seconds = float(os.getenv("CONTENT_EVENT_POLL_SECONDS", "1.0"))
     threads: list[threading.Thread] = []
-    for idx, event_types in enumerate(_resolve_content_event_worker_specs(), start=1):
+    for idx, event_types in enumerate(specs or _resolve_content_event_worker_specs(), start=1):
         effective_batch = (
             ai_batch_size
             if "content.ai_summary.requested" in event_types
@@ -470,6 +493,16 @@ def run_worker():
         logger.info("Scheduler initialized successfully")
         sys.stdout.flush()
 
+        # Promotion is cheap DB work and needs to keep draining even while the
+        # startup fetch performs catch-up ingestion. Heavy AI/image lanes still
+        # wait until after startup fetch so we stay under the 2 GiB worker cap.
+        content_event_threads.extend(
+            _start_content_event_worker_threads(
+                _stop_event,
+                specs=_startup_content_event_worker_specs(),
+            )
+        )
+
         # Run initial fetch (catch ALL errors so it never kills the worker)
         startup_lock_stop_event = threading.Event()
         startup_lock_failures: list[int] = []
@@ -507,11 +540,15 @@ def run_worker():
             sys.stdout.flush()
             return 1
 
-        # Start queue-drain lanes only after the startup ingestion burst.
-        # On a single 2Gi worker, running image/AI/promotion event drains
-        # concurrently with initial fetch has repeatedly pushed peak RSS over
-        # Render's memory limit.
-        content_event_threads = _start_content_event_worker_threads(_stop_event)
+        # Start heavier queue-drain lanes only after the startup ingestion burst.
+        # On a single 2Gi worker, running image/AI drains concurrently with
+        # initial fetch has repeatedly pushed peak RSS over Render's memory limit.
+        content_event_threads.extend(
+            _start_content_event_worker_threads(
+                _stop_event,
+                specs=_steady_state_content_event_worker_specs(),
+            )
+        )
 
         # Keep the worker running and refresh lock.
         logger.info("Worker running. Press Ctrl+C to stop.")

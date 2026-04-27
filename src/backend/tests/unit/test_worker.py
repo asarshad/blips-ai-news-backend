@@ -120,6 +120,20 @@ def test_resolve_content_event_worker_specs_parses_semicolon_groups(monkeypatch)
     )
 
 
+def test_startup_content_event_worker_specs_only_includes_promotion(monkeypatch):
+    monkeypatch.setenv(
+        "CONTENT_EVENT_WORKER_SPECS",
+        "content.promotion_eval.requested;content.ai_summary.requested",
+    )
+
+    assert worker._startup_content_event_worker_specs() == (
+        ("content.promotion_eval.requested",),
+    )
+    assert worker._steady_state_content_event_worker_specs() == (
+        ("content.ai_summary.requested",),
+    )
+
+
 def test_run_worker_starts_content_event_threads_when_enabled(monkeypatch):
     _patch_signal_handlers(monkeypatch)
     worker._stop_event.clear()
@@ -134,12 +148,13 @@ def test_run_worker_starts_content_event_threads_when_enabled(monkeypatch):
     monkeypatch.setattr(worker, "init_scheduler", lambda: DummyScheduler())
     monkeypatch.setattr(worker, "fetch_and_process_news", lambda: None)
 
-    started_specs: list[object] = []
-    monkeypatch.setattr(
-        worker,
-        "_start_content_event_worker_threads",
-        lambda stop_event: started_specs.append(stop_event) or [],
-    )
+    started_specs: list[tuple[object, tuple[tuple[str, ...], ...] | None]] = []
+
+    def _fake_start_threads(stop_event, *, specs=None):
+        started_specs.append((stop_event, specs))
+        return []
+
+    monkeypatch.setattr(worker, "_start_content_event_worker_threads", _fake_start_threads)
     monkeypatch.setattr(
         worker,
         "_maintain_worker_lock",
@@ -150,7 +165,20 @@ def test_run_worker_starts_content_event_threads_when_enabled(monkeypatch):
     exit_code = worker.run_worker()
 
     assert exit_code == 0
-    assert started_specs == [worker._stop_event]
+    assert started_specs == [
+        (worker._stop_event, (("content.promotion_eval.requested",),)),
+        (
+            worker._stop_event,
+            (
+                ("content.ai_summary.requested",),
+                (
+                    "article.image_verification.requested",
+                    "content.ready",
+                    "content.unready",
+                ),
+            ),
+        ),
+    ]
 
 
 def test_maintain_worker_lock_exits_nonzero_when_reacquire_fails(monkeypatch):
