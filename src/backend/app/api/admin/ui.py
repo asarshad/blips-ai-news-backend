@@ -214,6 +214,7 @@ def _nav(key: str, active: str = "") -> str:
           <div class="rounded-[1.4rem] bg-slate-950 p-1.5 shadow-[0_18px_50px_-24px_rgba(15,23,42,0.95)] ring-1 ring-slate-800/80">
             <div class="no-scrollbar flex items-center gap-1 overflow-x-auto px-0.5">
               {_link("/api/v1/admin/ui/dashboard", "Dashboard", "dashboard")}
+              {_link("/api/v1/admin/ui/ai-usage", "AI Usage", "ai-usage")}
               {_link("/api/v1/admin/ui/video-lanes", "Video Lanes", "video-lanes")}
               {_link("/api/v1/admin/ui/video-sources", "Video Sources", "video-sources")}
               {_link("/api/v1/admin/ui/review", "Review Queue", "review")}
@@ -1725,6 +1726,145 @@ def ui_dashboard(
         )
     }"""
     return _base(body, key=admin_key, active="dashboard")
+
+
+# ---------------------------------------------------------------------------
+# GET /admin/ui/ai-usage
+# ---------------------------------------------------------------------------
+
+
+@router.get("/ai-usage", response_class=HTMLResponse)
+def ui_ai_usage(
+    days: int = Query(7, ge=1, le=31),
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_ui_auth),
+):
+    from app.services.ai_usage_metrics_service import compute_ai_usage_metrics
+
+    metrics = compute_ai_usage_metrics(db, days=days)
+    totals = metrics["totals"]
+
+    def money(value: float) -> str:
+        return f"${float(value or 0.0):,.4f}"
+
+    def number(value: int | float) -> str:
+        return f"{int(value or 0):,}"
+
+    def usage_rows(rows: list[dict[str, Any]], labels: list[tuple[str, str]]) -> str:
+        if not rows:
+            return '<tr><td colspan="8" class="px-4 py-6 text-sm text-slate-500">No AI usage recorded in this window yet.</td></tr>'
+        rendered = []
+        for row in rows:
+            label_cells = "".join(
+                f'<td class="px-3 py-3 text-sm text-slate-700">{_esc(row.get(key) or "—")}</td>'
+                for key, _label in labels
+            )
+            failure_tone = "red" if int(row.get("failures") or 0) else "green"
+            rendered.append(
+                f"""
+                <tr class="border-t border-slate-100">
+                  {label_cells}
+                  <td class="px-3 py-3 text-sm font-semibold text-slate-950">{number(row.get("calls", 0))}</td>
+                  <td class="px-3 py-3 text-sm">{_badge(f'{row.get("success_rate_pct", 0)}%', 'green' if row.get('success_rate_pct', 0) >= 95 else 'yellow')}</td>
+                  <td class="px-3 py-3 text-sm">{_badge(str(row.get("failures", 0)), failure_tone)}</td>
+                  <td class="px-3 py-3 text-sm text-slate-700">{number(row.get("total_tokens", 0))}</td>
+                  <td class="px-3 py-3 text-sm font-semibold text-slate-950">{money(row.get("estimated_cost_usd", 0.0))}</td>
+                </tr>
+                """
+            )
+        return "".join(rendered)
+
+    def usage_table(title: str, rows: list[dict[str, Any]], labels: list[tuple[str, str]]) -> str:
+        headers = "".join(
+            f'<th class="px-3 py-3 text-left">{_esc(label)}</th>' for _key, label in labels
+        )
+        return _panel(
+            title,
+            f"""
+            <div class="table-shell">
+              <table class="min-w-full overflow-hidden rounded-[1.5rem] bg-white/80">
+                <thead class="bg-slate-50/90">
+                  <tr class="text-xs uppercase tracking-[0.16em] text-slate-500">
+                    {headers}
+                    <th class="px-3 py-3 text-left">Calls</th>
+                    <th class="px-3 py-3 text-left">Success</th>
+                    <th class="px-3 py-3 text-left">Failures</th>
+                    <th class="px-3 py-3 text-left">Tokens</th>
+                    <th class="px-3 py-3 text-left">Est. Cost</th>
+                  </tr>
+                </thead>
+                <tbody>{usage_rows(rows, labels)}</tbody>
+              </table>
+            </div>
+            """,
+            tone="purple",
+        )
+
+    error_rows = "".join(
+        f"""
+        <tr class="border-t border-slate-100">
+          <td class="px-3 py-3 text-xs text-slate-500">{_esc(err.get("created_at") or "—")}</td>
+          <td class="px-3 py-3 text-sm text-slate-700">{_esc(err.get("use_case") or "—")}</td>
+          <td class="px-3 py-3 text-sm text-slate-700">{_esc(err.get("model") or "—")}</td>
+          <td class="px-3 py-3 text-sm">{_badge(err.get("error_code") or "error", "red")}</td>
+          <td class="px-3 py-3 text-xs leading-5 text-slate-500">{_esc(err.get("error_message") or "")}</td>
+        </tr>
+        """
+        for err in metrics.get("recent_errors", [])
+    ) or '<tr><td colspan="5" class="px-4 py-6 text-sm text-slate-500">No recent AI errors in this window.</td></tr>'
+
+    body = f"""
+    <div class="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <div>
+        <p class="panel-kicker">AI Usage</p>
+        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Model-wise AI spend and reliability</h1>
+        <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+          Tracks Blips-owned LLM calls for summaries, relevance checks, image extraction, starter generation, and in-app AI chat.
+        </p>
+      </div>
+      <form method="get" action="/api/v1/admin/ui/ai-usage" class="flex items-end gap-2 rounded-2xl bg-white/75 p-3 ring-1 ring-slate-200">
+        <label class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Window
+          <input type="number" min="1" max="31" name="days" value="{days}" class="mt-1 w-24 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900">
+        </label>
+        <button class="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white">Apply</button>
+      </form>
+    </div>
+
+    <div class="mb-6 grid gap-4 md:grid-cols-4">
+      {_stat_card("Estimated Cost", money(totals["estimated_cost_usd"]), f"last {days} days", "purple")}
+      {_stat_card("Total Calls", number(totals["calls"]), f'{totals["success_rate_pct"]}% success rate', "blue")}
+      {_stat_card("Tokens", number(totals["total_tokens"]), f'{number(totals["input_tokens"])} in / {number(totals["output_tokens"])} out', "green")}
+      {_stat_card("Failures", number(totals["failures"]), "quota, rate limit, model, and validation failures", "red" if totals["failures"] else "green")}
+    </div>
+
+    <div class="grid gap-6">
+      {usage_table("By Model", metrics["by_model"], [("provider", "Provider"), ("model", "Model")])}
+      {usage_table("By Use Case", metrics["by_use_case"], [("use_case", "Use Case")])}
+      {usage_table("Daily Trend", metrics["daily"], [("day", "Day")])}
+      {_panel(
+          "Recent Errors",
+          f'''
+          <div class="table-shell">
+            <table class="min-w-full overflow-hidden rounded-[1.5rem] bg-white/80">
+              <thead class="bg-slate-50/90">
+                <tr class="text-xs uppercase tracking-[0.16em] text-slate-500">
+                  <th class="px-3 py-3 text-left">Time</th>
+                  <th class="px-3 py-3 text-left">Use Case</th>
+                  <th class="px-3 py-3 text-left">Model</th>
+                  <th class="px-3 py-3 text-left">Code</th>
+                  <th class="px-3 py-3 text-left">Message</th>
+                </tr>
+              </thead>
+              <tbody>{error_rows}</tbody>
+            </table>
+          </div>
+          ''',
+          subtitle="This is the page that should make quota and model issues obvious before feed quality drops.",
+          tone="red",
+      )}
+    </div>
+    """
+    return _base(body, key=admin_key, active="ai-usage")
 
 
 # ---------------------------------------------------------------------------

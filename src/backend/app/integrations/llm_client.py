@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from redis.exceptions import RedisError
 from tenacity import (
@@ -31,11 +31,8 @@ LLM_REQUEST_TIMEOUT = (
     int(settings.LLM_REQUEST_TIMEOUT) if hasattr(settings, "LLM_REQUEST_TIMEOUT") else 30
 )
 
-# Daily cost ceiling (USD) — tracked in Redis
-LLM_DAILY_COST_CEILING = float(getattr(settings, "LLM_DAILY_COST_CEILING", 5.0))
-
 # Token prices are USD per 1M tokens. Keep this small table near the call
-# sites so the Redis cost ceiling tracks actual model choice, not just volume.
+# sites so usage telemetry tracks actual model choice, not just volume.
 _OPENAI_TOKEN_PRICES_PER_1M = {
     "gpt-5-nano": (0.05, 0.40),
     "gpt-5-mini": (0.25, 2.00),
@@ -285,6 +282,7 @@ class BaseLLMClient(ABC):
         previous_response_id: Optional[str] = None,
         store: bool = False,
         model: Optional[str] = None,
+        usage_context: str = "unknown",
     ) -> ChatResponse:
         """Send a chat completion request."""
         pass
@@ -355,6 +353,7 @@ class OpenAILLMClient(BaseLLMClient):
         previous_response_id: Optional[str] = None,
         store: bool = False,
         model: Optional[str] = None,
+        usage_context: str = "unknown",
     ) -> ChatResponse:
         if not self.is_configured():
             raise RuntimeError(
@@ -389,7 +388,18 @@ class OpenAILLMClient(BaseLLMClient):
                     request_model,
                 )
 
-            response = self._client.responses.create(**request_kwargs)
+            try:
+                response = self._client.responses.create(**request_kwargs)
+            except Exception as effort_error:
+                if "unsupported value: 'minimal'" not in str(effort_error).lower():
+                    raise
+                logger.warning(
+                    "OpenAI model '%s' rejected reasoning effort '%s'; retrying without reasoning",
+                    request_model,
+                    self._REASONING_EFFORT,
+                )
+                request_kwargs.pop("reasoning", None)
+                response = self._client.responses.create(**request_kwargs)
             content = (response.output_text or "").strip()
             if not content:
                 raise ValueError("Empty text output returned from OpenAI Responses API")
@@ -463,6 +473,7 @@ class MistralLLMClient(BaseLLMClient):
         previous_response_id: Optional[str] = None,
         store: bool = False,
         model: Optional[str] = None,
+        usage_context: str = "unknown",
     ) -> ChatResponse:
         if not self.is_configured():
             raise RuntimeError(
@@ -552,12 +563,10 @@ class LLMClient:
         previous_response_id: Optional[str] = None,
         store: bool = False,
         model: Optional[str] = None,
+        usage_context: str = "unknown",
     ) -> ChatResponse:
         """
         Send a chat completion request to the configured provider.
-
-        Enforces daily cost ceiling via Redis counter. Raises RuntimeError
-        if the ceiling has been reached.
 
         Args:
             messages: List of ChatMessage objects
@@ -567,20 +576,35 @@ class LLMClient:
         Returns:
             ChatResponse with content and usage info
         """
-        # --- Daily cost ceiling check ---
-        self._enforce_cost_ceiling()
-
-        response = self._client.chat(
-            messages,
-            max_tokens,
-            temperature,
-            previous_response_id=previous_response_id,
-            store=store,
-            model=model,
+        request_model = (
+            (model or "").strip()
+            or str(getattr(self._client, "model", "") or "").strip()
+            or settings.OPENAI_MODEL
+            or "default"
         )
+        provider = self.get_provider()
+
+        try:
+            response = self._client.chat(
+                messages,
+                max_tokens,
+                temperature,
+                previous_response_id=previous_response_id,
+                store=store,
+                model=model,
+            )
+        except Exception as exc:
+            self._record_ai_usage_attempt(
+                provider=provider,
+                model=request_model,
+                usage_context=usage_context,
+                status="error",
+                error=exc,
+            )
+            raise
 
         # --- Track token spend and estimated dollar spend ---
-        self._record_usage(response)
+        self._record_usage(response, usage_context=usage_context)
 
         return response
 
@@ -602,30 +626,6 @@ class LLMClient:
         """Redis key for today's full-model summary rescue calls."""
         today = date.today().isoformat()
         return f"llm:summary_rescue_calls:{today}"
-
-    def _enforce_cost_ceiling(self) -> None:
-        """Raise RuntimeError if daily estimated spend exceeds ceiling."""
-        if LLM_DAILY_COST_CEILING <= 0:
-            return  # disabled
-        try:
-            from app.core.dependencies import get_redis
-
-            r = get_redis()
-            raw = r.get(self._cost_redis_key())
-            if raw is not None:
-                estimated_cost = float(raw)
-                if estimated_cost >= LLM_DAILY_COST_CEILING:
-                    logger.warning(
-                        f"LLM daily cost ceiling reached: ${estimated_cost:.4f} >= ${LLM_DAILY_COST_CEILING}"
-                    )
-                    raise RuntimeError(
-                        f"LLM daily cost ceiling of ${LLM_DAILY_COST_CEILING} reached"
-                    )
-        except RuntimeError:
-            raise
-        except RedisError as e:
-            # If Redis is down, allow the request rather than blocking AI entirely
-            logger.warning(f"Cost ceiling check failed (allowing request): {e}")
 
     def _estimate_response_cost_usd(self, response: ChatResponse) -> float:
         """Estimate request cost from usage details and the response model."""
@@ -650,8 +650,20 @@ class LLMClient:
             output_tokens / 1_000_000.0
         ) * output_price
 
-    def _record_usage(self, response: ChatResponse) -> None:
+    def _record_usage(self, response: ChatResponse, *, usage_context: str) -> None:
         """Increment today's raw-token and estimated-dollar counters."""
+        estimated_cost = self._estimate_response_cost_usd(response)
+        self._record_ai_usage_attempt(
+            provider=response.provider,
+            model=response.model,
+            usage_context=usage_context,
+            status="success",
+            input_tokens=response.input_tokens or 0,
+            output_tokens=response.output_tokens or 0,
+            total_tokens=response.tokens_used or 0,
+            estimated_cost_usd=estimated_cost,
+            response_id=response.response_id,
+        )
         if response.tokens_used <= 0:
             return
         try:
@@ -662,10 +674,51 @@ class LLMClient:
             cost_key = self._cost_redis_key()
             r.incrby(token_key, response.tokens_used)
             r.expire(token_key, 90_000)  # 25 hours — auto-expire stale counters
-            r.incrbyfloat(cost_key, self._estimate_response_cost_usd(response))
+            r.incrbyfloat(cost_key, estimated_cost)
             r.expire(cost_key, 90_000)
         except RedisError as e:
             logger.warning(f"Token tracking failed (non-fatal): {e}")
+
+    def _record_ai_usage_attempt(
+        self,
+        *,
+        provider: str,
+        model: str,
+        usage_context: str,
+        status: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        total_tokens: int = 0,
+        estimated_cost_usd: float = 0.0,
+        response_id: Optional[str] = None,
+        error: Exception | None = None,
+    ) -> None:
+        """Persist LLM call telemetry without affecting the product path."""
+        try:
+            from app.db.base import SessionLocal
+            from app.models.ai_usage import AIUsage
+
+            error_message = str(error)[:2000] if error is not None else None
+            error_code = _openai_error_code(error) if error is not None else None
+            with SessionLocal() as db:
+                db.add(
+                    AIUsage(
+                        provider=(provider or "unknown")[:32],
+                        model=(model or "default")[:128],
+                        use_case=(usage_context or "unknown")[:96],
+                        status=(status or "unknown")[:32],
+                        input_tokens=max(0, int(input_tokens or 0)),
+                        output_tokens=max(0, int(output_tokens or 0)),
+                        total_tokens=max(0, int(total_tokens or 0)),
+                        estimated_cost_usd=max(0.0, float(estimated_cost_usd or 0.0)),
+                        response_id=(response_id or None),
+                        error_code=(error_code or None),
+                        error_message=error_message,
+                    )
+                )
+                db.commit()
+        except Exception as telemetry_error:
+            logger.warning("AI usage telemetry write failed: %s", telemetry_error)
 
     def _summary_models(
         self,
@@ -757,6 +810,7 @@ class LLMClient:
             max_tokens=max_tokens,
             temperature=temperature,
             model=model,
+            usage_context=f"summary.{surface}.{tier}",
         )
 
     def _parse_article_summary_response(self, text: str) -> SummaryResult:
@@ -1165,6 +1219,7 @@ Return JSON only. Do not wrap it in markdown.
                 ],
                 max_tokens=180,
                 temperature=0.1,
+                usage_context="classification.blips_tech_relevance",
             )
 
             text = response.content.strip()
@@ -1253,6 +1308,7 @@ Article Document:
                 ],
                 max_tokens=120,
                 temperature=0.1,
+                usage_context="article_image.extract_url",
             )
         except (RuntimeError, ValueError) as e:
             logger.error(f"Article image extraction error: {str(e)}")
@@ -1313,6 +1369,7 @@ If asked about topics unrelated to the article, politely redirect to the article
                     temperature=0.7,
                     previous_response_id=previous_response_id,
                     store=True,
+                    usage_context="ai_chat.response",
                 )
             except Exception as error:
                 if _is_previous_response_not_found(error):
@@ -1336,6 +1393,7 @@ If asked about topics unrelated to the article, politely redirect to the article
             max_tokens=300,
             temperature=0.7,
             store=self.get_provider() == "openai",
+            usage_context="ai_chat.response",
         )
 
 

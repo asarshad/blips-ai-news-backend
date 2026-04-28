@@ -68,7 +68,6 @@ class Settings(BaseSettings):
 
     # LLM resilience / cost controls
     LLM_REQUEST_TIMEOUT: int = 30
-    LLM_DAILY_COST_CEILING: float = 5.0
     SUMMARY_RESCUE_DAILY_CALL_LIMIT: int = 50
 
     # News sources

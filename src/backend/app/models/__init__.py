@@ -1,3 +1,4 @@
+from app.models.ai_usage import AIUsage
 from app.models.candidate_audit import CandidateAuditEvent
 from app.models.content import (
     ContentItem,
@@ -22,6 +23,7 @@ from app.models.video_source import VideoDiscoveryRun, VideoSourceProfile
 __all__ = [
     "Conversation",
     "Usage",
+    "AIUsage",
     "DeviceSession",
     "CandidateAuditEvent",
     "ContentItem",

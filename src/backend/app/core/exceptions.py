@@ -69,18 +69,6 @@ class ChatGenerationError(ExternalServiceError):
     pass
 
 
-class LLMQuotaExceededError(ExternalServiceError):
-    """Raised when LLM daily cost ceiling is exceeded."""
-
-    def __init__(self, ceiling: float, current_spend: float):
-        super().__init__(
-            "Daily LLM cost ceiling exceeded",
-            f"Ceiling: ${ceiling:.2f}, Current: ${current_spend:.2f}",
-        )
-        self.ceiling = ceiling
-        self.current_spend = current_spend
-
-
 class LLMConfigurationError(ExternalServiceError):
     """Raised when LLM API keys are not configured."""
 

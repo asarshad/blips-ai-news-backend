@@ -205,7 +205,10 @@ class ConversationStartersService:
             )
 
             response = self.llm_client.chat(
-                messages=[ChatMessage(role="user", content=prompt)], max_tokens=300, temperature=0.7
+                messages=[ChatMessage(role="user", content=prompt)],
+                max_tokens=300,
+                temperature=0.7,
+                usage_context="conversation_starters.generate",
             )
 
             starters = parse_starters_response(response.content)
@@ -369,6 +372,7 @@ Starter prompts:
                 messages=[ChatMessage(role="user", content=prompt)],
                 max_tokens=700,
                 temperature=0.4,
+                usage_context="conversation_starters.answer",
             )
             payload = _parse_starter_answers_response(response.content)
         except Exception as exc:

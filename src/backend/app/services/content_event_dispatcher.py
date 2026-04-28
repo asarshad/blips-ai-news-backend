@@ -10,6 +10,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.models.content_event import ContentEventOutbox
+from app.services.article_image_service import (
+    ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE,
+    process_article_image_verification_request,
+)
 from app.services.content_ai_service import (
     CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE,
     process_content_ai_summary_request,
@@ -18,13 +22,9 @@ from app.services.content_promotion_service import (
     CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE,
     process_content_promotion_request,
 )
-from app.services.article_image_service import (
-    ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE,
-    process_article_image_verification_request,
-)
-from app.services.playlist_service import refresh_cached_playlist_items
 from app.services.content_readiness import CONTENT_READY_EVENT_TYPE, CONTENT_UNREADY_EVENT_TYPE
 from app.services.inventory_service import Surface
+from app.services.playlist_service import refresh_cached_playlist_items
 from app.services.push_service import PushNotificationService
 from app.services.tiered_feed_service import invalidate_tiered_feed_cache
 
@@ -237,11 +237,10 @@ def _retry_delay(
 ) -> timedelta:
     error = (error_message or "").lower()
     if event_type == CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE:
-        if (
-            "daily call limit reached" in error
-            or "daily cost ceiling" in error
-        ):
+        if "daily call limit reached" in error:
             return _until_next_utc_budget_window()
+        if "insufficient_quota" in error or "exceeded your current quota" in error:
+            return timedelta(hours=1)
         if "offset-naive and offset-aware" in error:
             return timedelta(hours=1)
 
