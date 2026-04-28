@@ -68,8 +68,6 @@ class Settings(BaseSettings):
 
     # LLM resilience / cost controls
     LLM_REQUEST_TIMEOUT: int = 30
-    SUMMARY_RESCUE_DAILY_CALL_LIMIT: int = 50
-
     # News sources
     RSS_FEEDS: List[str] = [
         "https://techcrunch.com/feed/",

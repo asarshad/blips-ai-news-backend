@@ -11,10 +11,10 @@ from sqlalchemy.orm import sessionmaker
 from app.models.content import ContentItem, ContentType
 from app.models.content_event import ContentEventOutbox
 from app.services import content_event_dispatcher as dispatcher_module
-from app.services.content_ai_service import CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE
-from app.services.content_promotion_service import CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE
-from app.services.content_event_dispatcher import ContentEventDispatcher
 from app.services.article_image_service import ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE
+from app.services.content_ai_service import CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE
+from app.services.content_event_dispatcher import ContentEventDispatcher
+from app.services.content_promotion_service import CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE
 
 
 @compiles(JSONB, "sqlite")
@@ -200,14 +200,14 @@ def test_dispatch_content_promotion_event_processes_one_content_item(monkeypatch
     assert processed == [(db, 88)]
 
 
-def test_ai_daily_limit_failures_back_off_until_next_budget_window():
+def test_ai_provider_quota_failures_back_off_for_an_hour():
     delay = dispatcher_module._retry_delay(
         3,
         event_type=CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE,
-        error_message="Summary rescue daily call limit reached",
+        error_message="Error code: 429 - insufficient_quota",
     )
 
-    assert delay >= dispatcher_module.timedelta(minutes=15)
+    assert delay == dispatcher_module.timedelta(hours=1)
     assert delay > dispatcher_module.timedelta(minutes=5)
 
 

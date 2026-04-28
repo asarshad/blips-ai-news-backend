@@ -185,8 +185,6 @@ def test_article_summary_falls_back_then_rescues_when_allowed(monkeypatch):
             ),
         ]
     )
-    monkeypatch.setattr(client, "_try_consume_summary_rescue_budget", lambda: True)
-
     result = client.summarize_article("Apple developer tools", "Long article text", allow_rescue=True)
 
     assert result.summary == summary

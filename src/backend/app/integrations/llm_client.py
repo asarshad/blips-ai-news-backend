@@ -622,11 +622,6 @@ class LLMClient:
         today = date.today().isoformat()
         return f"llm:tokens:{today}"
 
-    def _rescue_calls_redis_key(self) -> str:
-        """Redis key for today's full-model summary rescue calls."""
-        today = date.today().isoformat()
-        return f"llm:summary_rescue_calls:{today}"
-
     def _estimate_response_cost_usd(self, response: ChatResponse) -> float:
         """Estimate request cost from usage details and the response model."""
         if response.tokens_used <= 0:
@@ -757,34 +752,6 @@ class LLMClient:
             deduped.append((normalized, tier))
         return deduped
 
-    def _try_consume_summary_rescue_budget(self) -> bool:
-        """Consume one full-model rescue call if today's budget allows it."""
-        limit = int(getattr(settings, "SUMMARY_RESCUE_DAILY_CALL_LIMIT", 50))
-        if limit <= 0:
-            return False
-        try:
-            from app.core.dependencies import get_redis
-
-            r = get_redis()
-            key = self._rescue_calls_redis_key()
-            current = int(r.incr(key))
-            r.expire(key, 90_000)
-            if current > limit:
-                try:
-                    r.decr(key)
-                except RedisError:
-                    pass
-                logger.warning(
-                    "Summary rescue daily call limit reached: %s >= %s",
-                    current - 1,
-                    limit,
-                )
-                return False
-            return True
-        except RedisError as exc:
-            logger.warning("Summary rescue budget check failed; allowing rescue: %s", exc)
-            return True
-
     def _summary_chat(
         self,
         *,
@@ -796,8 +763,6 @@ class LLMClient:
         temperature: float,
     ) -> ChatResponse:
         """Run one summary attempt and log the chosen tier/model."""
-        if tier == "rescue" and not self._try_consume_summary_rescue_budget():
-            raise RuntimeError("Summary rescue daily call limit reached")
         logger.info(
             "Running %s summary attempt tier=%s model=%s provider=%s",
             surface,

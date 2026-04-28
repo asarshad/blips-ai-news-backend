@@ -237,8 +237,6 @@ def _retry_delay(
 ) -> timedelta:
     error = (error_message or "").lower()
     if event_type == CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE:
-        if "daily call limit reached" in error:
-            return _until_next_utc_budget_window()
         if "insufficient_quota" in error or "exceeded your current quota" in error:
             return timedelta(hours=1)
         if "offset-naive and offset-aware" in error:
