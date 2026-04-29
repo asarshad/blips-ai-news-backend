@@ -23,7 +23,14 @@ from app.core.dependencies import get_db, get_redis
 from app.core.logging import get_logger
 from app.core.session_auth import AuthenticatedSession, require_session_token
 from app.db.base import SessionLocal
-from app.models.content import ContentItem, ContentReport, ContentType, EventType, InteractionEvent, UserPreference, UserProfile
+from app.models.content import (
+    ContentReport,
+    ContentType,
+    EventType,
+    InteractionEvent,
+    UserPreference,
+    UserProfile,
+)
 from app.models.device_session import DeviceSession
 from app.models.push import PushSubscription
 from app.models.usage import Usage
