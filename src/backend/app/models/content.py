@@ -461,5 +461,47 @@ class UserCategorySelection(Base):
         )
 
 
+class ContentReport(Base):
+    """
+    User-submitted moderation reports for content items and AI chat responses.
+
+    Created by POST /session/reports when a user taps Report or Block Source.
+    Reviewed by the operator within 24 hours per the Terms of Service.
+    """
+
+    __tablename__ = "content_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(
+        String(255),
+        ForeignKey("user_profiles.device_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    content_item_id = Column(
+        Integer,
+        ForeignKey("content_items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Surface where the report originated: 'articles', 'videos', 'reels', 'chat'
+    surface = Column(String(32), nullable=False)
+    # Reason key: 'hateful', 'violence', 'explicit', 'spam', 'misinformation',
+    #             'other', 'blocked_source'
+    reason = Column(String(64), nullable=False)
+    # For chat reports — identifies the specific AI message
+    message_id = Column(String(255), nullable=True)
+    # Moderation workflow
+    reviewed = Column(Boolean, default=False, nullable=False)
+    reviewed_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (
+        Index("ix_content_reports_device_created", "device_id", "created_at"),
+        Index("ix_content_reports_reviewed", "reviewed", "created_at"),
+    )
+
+
 # NOTE: ContentCluster table removed - clusters are now implicit via cluster_id on ContentItem.
 # Cluster metadata (item_count, etc.) is computed on-the-fly from content_items aggregation.

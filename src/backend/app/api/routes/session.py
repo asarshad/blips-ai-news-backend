@@ -4,6 +4,7 @@ Session and playlist routes for personalized content delivery.
 Endpoints:
 - GET /session/playlist: Get personalized playlist (session snapshots)
 - POST /session/interactions: Record user interaction
+- POST /session/reports: Submit a moderation report
 - GET /session/playlist-stats: Get playlist generation stats (internal ops)
 """
 
@@ -22,7 +23,7 @@ from app.core.dependencies import get_db, get_redis
 from app.core.logging import get_logger
 from app.core.session_auth import AuthenticatedSession, require_session_token
 from app.db.base import SessionLocal
-from app.models.content import ContentType, EventType, InteractionEvent, UserPreference, UserProfile
+from app.models.content import ContentItem, ContentReport, ContentType, EventType, InteractionEvent, UserPreference, UserProfile
 from app.models.device_session import DeviceSession
 from app.models.push import PushSubscription
 from app.models.usage import Usage
@@ -92,6 +93,27 @@ class InteractionResponse(BaseModel):
 
     success: bool
     event_id: Optional[int] = None
+    message: Optional[str] = None
+
+
+class ReportRequest(BaseModel):
+    """Request body for submitting a content report."""
+
+    content_item_id: int
+    # Surface: 'articles', 'videos', 'reels', 'chat'
+    surface: str
+    # Reason: 'hateful', 'violence', 'explicit', 'spam', 'misinformation',
+    #         'other', 'blocked_source'
+    reason: str
+    # For chat reports — identifies the specific AI message
+    message_id: Optional[str] = None
+
+
+class ReportResponse(BaseModel):
+    """Response for content report submission."""
+
+    success: bool
+    report_id: Optional[int] = None
     message: Optional[str] = None
 
 
@@ -430,6 +452,59 @@ def record_interaction(
                 invalidate_tiered_feed_cache(surface=surface, device_id=session.device_id)
 
     return InteractionResponse(success=True, event_id=event.id)
+
+
+@router.post("/reports", response_model=ReportResponse)
+def submit_report(
+    request: ReportRequest,
+    session: AuthenticatedSession = Depends(require_session_token),
+    db: Session = Depends(get_db),
+):
+    """
+    Submit a moderation report for a content item or AI chat message.
+
+    Reason values:
+    - hateful: Hateful or discriminatory content
+    - violence: Violent or graphic content
+    - explicit: Sexually explicit content
+    - spam: Spam or misleading content
+    - misinformation: False or misleading information
+    - other: Other objectionable content
+    - blocked_source: User blocked this source (also triggers LESS_FROM_CREATOR)
+    """
+    try:
+        report = ContentReport(
+            device_id=session.device_id,
+            content_item_id=request.content_item_id,
+            surface=request.surface,
+            reason=request.reason,
+            message_id=request.message_id,
+        )
+        db.add(report)
+        db.commit()
+        db.refresh(report)
+        logger.info(
+            "Content report submitted",
+            extra={
+                "device_id": session.device_id,
+                "content_item_id": request.content_item_id,
+                "surface": request.surface,
+                "reason": request.reason,
+                "report_id": report.id,
+            },
+        )
+        return ReportResponse(success=True, report_id=report.id)
+    except Exception as exc:
+        db.rollback()
+        logger.error(
+            "Failed to save content report",
+            extra={
+                "device_id": session.device_id,
+                "content_item_id": request.content_item_id,
+                "error": str(exc),
+            },
+        )
+        return ReportResponse(success=False, message="Failed to submit report")
 
 
 # ============================================================================
