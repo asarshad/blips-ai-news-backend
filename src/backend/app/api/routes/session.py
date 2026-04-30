@@ -13,12 +13,14 @@ from enum import Enum
 from typing import Dict, List, Optional
 
 import redis
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+import requests as _requests
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.feed_headers import FeedMetadata
 from app.core.auth import require_admin_key
+from app.core.config import settings
 from app.core.dependencies import get_db, get_redis
 from app.core.logging import get_logger
 from app.core.session_auth import AuthenticatedSession, require_session_token
@@ -461,9 +463,51 @@ def record_interaction(
     return InteractionResponse(success=True, event_id=event.id)
 
 
+_REASON_EMOJI = {
+    "blocked_source": "🚫",
+    "hateful": "😡",
+    "violence": "⚔️",
+    "explicit": "🔞",
+    "spam": "📢",
+    "misinformation": "❌",
+    "other": "🚩",
+}
+
+
+def _post_report_to_discord(
+    report_id: int,
+    content_item_id: int,
+    surface: str,
+    reason: str,
+    device_id: str,
+    message_id: Optional[str],
+) -> None:
+    """Fire-and-forget Discord webhook notification for a new content report."""
+    webhook_url = settings.DISCORD_REPORTS_WEBHOOK_URL
+    if not webhook_url:
+        return
+    emoji = _REASON_EMOJI.get(reason, "🚩")
+    lines = [
+        f"{emoji} **New Report** (ID #{report_id})",
+        f"**Surface:** {surface}  |  **Reason:** {reason}",
+        f"**Content ID:** {content_item_id}  |  **Device:** `{device_id[:8]}…`",
+    ]
+    if message_id:
+        lines.append(f"**Message ID:** {message_id}")
+    try:
+        _requests.post(
+            webhook_url,
+            json={"content": "\n".join(lines)},
+            timeout=5,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Discord report webhook failed", extra={"error": str(exc)})
+
+
 @router.post("/reports", response_model=ReportResponse)
 def submit_report(
     request: ReportRequest,
+    background_tasks: BackgroundTasks,
     session: AuthenticatedSession = Depends(require_session_token),
     db: Session = Depends(get_db),
 ):
@@ -499,6 +543,15 @@ def submit_report(
                 "reason": request.reason,
                 "report_id": report.id,
             },
+        )
+        background_tasks.add_task(
+            _post_report_to_discord,
+            report_id=report.id,
+            content_item_id=request.content_item_id,
+            surface=request.surface,
+            reason=request.reason,
+            device_id=session.device_id,
+            message_id=request.message_id,
         )
         return ReportResponse(success=True, report_id=report.id)
     except Exception as exc:

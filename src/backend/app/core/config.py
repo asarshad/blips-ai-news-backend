@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     ALERT_ENABLED: bool = False
     ALERT_WEBHOOK_URL: str = ""
 
+    # Discord notifications
+    DISCORD_REPORTS_WEBHOOK_URL: str = "https://discord.com/api/webhooks/REDACTED"
+
     # Database
     DATABASE_URL: str = "postgresql://postgres:postgres@db:5432/blips"
     DB_POOL_SIZE: int = 3
