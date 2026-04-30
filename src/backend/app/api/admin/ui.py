@@ -48,7 +48,7 @@ from app.core.auth import (
 from app.core.config import settings
 from app.core.dependencies import get_db, get_redis
 from app.domain.editorial.service import EditorialApprovalBlockedError, EditorialService
-from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.content import ContentItem, ContentReport, ContentStatus, ContentType
 from app.models.push import PushSendLog
 from app.repositories.editorial_repo import EditorialRepository
 from app.schemas.push import PushMode, PushRuntimeConfigPatch
@@ -218,6 +218,7 @@ def _nav(key: str, active: str = "") -> str:
               {_link("/api/v1/admin/ui/video-lanes", "Video Lanes", "video-lanes")}
               {_link("/api/v1/admin/ui/video-sources", "Video Sources", "video-sources")}
               {_link("/api/v1/admin/ui/review", "Review Queue", "review")}
+              {_link("/api/v1/admin/ui/reports", "Reports", "reports")}
               {_link("/api/v1/admin/ui/content", "Content", "content")}
               {_link("/api/v1/admin/ui/submit", "Submit URL", "submit")}
               <form method="post" action="/api/v1/admin/ui/logout" class="shrink-0">
@@ -4311,3 +4312,266 @@ def ui_add_note(
         next_url=next_path,
         referer=referer,
     )
+
+
+# ---------------------------------------------------------------------------
+# Reports
+# ---------------------------------------------------------------------------
+
+_REPORT_REASON_LABELS: dict[str, tuple[str, str]] = {
+    "blocked_source":  ("🚫", "Blocked Source"),
+    "hateful":         ("😡", "Hateful"),
+    "violence":        ("⚔️",  "Violence"),
+    "explicit":        ("🔞", "Explicit"),
+    "spam":            ("📢", "Spam"),
+    "misinformation":  ("❌", "Misinformation"),
+    "other":           ("🚩", "Other"),
+}
+
+_REPORTS_PAGE = "/api/v1/admin/ui/reports"
+
+
+def _reason_badge(reason: str) -> str:
+    emoji, label = _REPORT_REASON_LABELS.get(reason, ("🚩", reason))
+    color_map = {
+        "blocked_source": "bg-slate-100 text-slate-700",
+        "hateful":        "bg-red-100 text-red-700",
+        "violence":       "bg-orange-100 text-orange-700",
+        "explicit":       "bg-pink-100 text-pink-700",
+        "spam":           "bg-yellow-100 text-yellow-700",
+        "misinformation": "bg-purple-100 text-purple-700",
+        "other":          "bg-gray-100 text-gray-700",
+    }
+    cls = color_map.get(reason, "bg-gray-100 text-gray-700")
+    return f'<span class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium {cls}">{emoji} {label}</span>'
+
+
+def _reports_action_form(report_id: int, action: str, label: str, btn_cls: str) -> str:
+    return f"""
+    <form method="post" action="{_REPORTS_PAGE}/{report_id}/{action}"
+          class="inline"
+          onsubmit="return confirm('Are you sure?');">
+      <input type="hidden" name="next" value="{_REPORTS_PAGE}">
+      <button type="submit"
+              class="rounded px-2.5 py-1 text-xs font-medium transition {btn_cls}">
+        {label}
+      </button>
+    </form>"""
+
+
+@router.get("/reports", response_class=HTMLResponse)
+def ui_reports(
+    show: str = Query("unreviewed"),
+    surface: Optional[str] = Query(None),
+    reason: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    flash: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_ui_auth),
+):
+    """Moderation reports submitted by users."""
+    page_size = 50
+
+    q = (
+        db.query(ContentReport, ContentItem)
+        .join(ContentItem, ContentItem.id == ContentReport.content_item_id, isouter=True)
+    )
+    if show == "unreviewed":
+        q = q.filter(ContentReport.reviewed.is_(False))
+    if surface:
+        q = q.filter(ContentReport.surface == surface)
+    if reason:
+        q = q.filter(ContentReport.reason == reason)
+    q = q.order_by(ContentReport.created_at.desc())
+
+    total = q.count()
+    pages = max(1, math.ceil(total / page_size))
+    page = min(page, pages)
+    rows = q.offset((page - 1) * page_size).limit(page_size).all()
+
+    unreviewed_count = db.query(ContentReport).filter(ContentReport.reviewed.is_(False)).count()
+
+    # ── flash banner ────────────────────────────────────────────────────────
+    flash_html = ""
+    if flash:
+        is_err = "error" in flash.lower()
+        color = "bg-red-50 border-red-200 text-red-800" if is_err else "bg-green-50 border-green-200 text-green-800"
+        flash_html = f'<div class="mb-4 rounded-lg border px-4 py-3 text-sm {color}">{_esc(flash)}</div>'
+
+    # ── filter bar ──────────────────────────────────────────────────────────
+    def _tab(label: str, value: str) -> str:
+        active = show == value
+        cls = (
+            "px-4 py-2 text-sm font-medium rounded-full transition "
+            + ("bg-slate-900 text-white" if active else "text-slate-600 hover:bg-slate-100")
+        )
+        return f'<a href="{_REPORTS_PAGE}?show={value}" class="{cls}">{label}</a>'
+
+    filter_bar = f"""
+    <div class="flex items-center gap-2 mb-4">
+      {_tab(f"Unreviewed ({unreviewed_count})", "unreviewed")}
+      {_tab("All", "all")}
+    </div>"""
+
+    # ── table ───────────────────────────────────────────────────────────────
+    if not rows:
+        empty = '<p class="py-12 text-center text-slate-400 text-sm">No reports found.</p>'
+        table_html = empty
+    else:
+        header = """
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <th class="pb-2 pr-4">Reason</th>
+              <th class="pb-2 pr-4">Surface</th>
+              <th class="pb-2 pr-4">Content</th>
+              <th class="pb-2 pr-4">Source</th>
+              <th class="pb-2 pr-4">Device</th>
+              <th class="pb-2 pr-4">Reported</th>
+              <th class="pb-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">"""
+
+        body_rows = []
+        for report, item in rows:
+            title = _esc(item.title[:70] + "…" if item and len(item.title) > 70 else (item.title if item else "—"))
+            detail_url = f"/api/v1/admin/ui/detail/{report.content_item_id}"
+            title_cell = f'<a href="{detail_url}" class="text-blue-600 hover:underline">{title}</a>' if item else f'<span class="text-slate-400">ID {report.content_item_id} (deleted)</span>'
+            source_cell = _esc(item.source or "—") if item else "—"
+            device = _esc(report.device_id[:10] + "…") if report.device_id else "—"
+            reported_at = _fmt_admin_dt(report.created_at)
+            reviewed_mark = ' <span class="text-xs text-slate-400">(reviewed)</span>' if report.reviewed else ""
+
+            suppress_btn = _reports_action_form(report.id, "suppress-and-dismiss", "Suppress", "bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200") if item and not item.is_suppressed else ""
+            delete_btn = _reports_action_form(report.id, "delete-and-dismiss", "Delete", "bg-red-50 text-red-700 hover:bg-red-100 border border-red-200") if item else ""
+            dismiss_btn = _reports_action_form(report.id, "dismiss", "Dismiss", "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200") if not report.reviewed else ""
+
+            body_rows.append(f"""
+            <tr class="hover:bg-slate-50/60">
+              <td class="py-3 pr-4">{_reason_badge(report.reason)}{reviewed_mark}</td>
+              <td class="py-3 pr-4 text-slate-500">{_esc(report.surface)}</td>
+              <td class="py-3 pr-4 max-w-xs">{title_cell}</td>
+              <td class="py-3 pr-4 text-slate-500">{source_cell}</td>
+              <td class="py-3 pr-4 font-mono text-xs text-slate-400">{device}</td>
+              <td class="py-3 pr-4 text-slate-400 whitespace-nowrap">{reported_at}</td>
+              <td class="py-3">
+                <div class="flex items-center gap-1.5">
+                  {suppress_btn}{delete_btn}{dismiss_btn}
+                </div>
+              </td>
+            </tr>""")
+
+        table_html = header + "\n".join(body_rows) + "</tbody></table>"
+
+    # ── pagination ──────────────────────────────────────────────────────────
+    pager = ""
+    if pages > 1:
+        prev_cls = "px-3 py-1 rounded text-sm border" + (" border-slate-200 text-slate-600 hover:bg-slate-50" if page > 1 else " border-slate-100 text-slate-300 pointer-events-none")
+        next_cls = "px-3 py-1 rounded text-sm border" + (" border-slate-200 text-slate-600 hover:bg-slate-50" if page < pages else " border-slate-100 text-slate-300 pointer-events-none")
+        prev_href = f"{_REPORTS_PAGE}?show={show}&page={page - 1}"
+        next_href = f"{_REPORTS_PAGE}?show={show}&page={page + 1}"
+        pager = f"""
+        <div class="mt-4 flex items-center justify-between text-sm text-slate-500">
+          <span>Page {page} of {pages} — {total} report{"s" if total != 1 else ""}</span>
+          <div class="flex gap-2">
+            <a href="{prev_href}" class="{prev_cls}">← Prev</a>
+            <a href="{next_href}" class="{next_cls}">Next →</a>
+          </div>
+        </div>"""
+
+    body = f"""
+    <div class="mb-6">
+      <h1 class="text-2xl font-bold tracking-tight text-slate-900">Moderation Reports</h1>
+      <p class="mt-1 text-sm text-slate-500">User-submitted content reports. Suppress or delete content, then dismiss.</p>
+    </div>
+    {flash_html}
+    <div class="glass-panel rounded-2xl p-6">
+      {filter_bar}
+      <div class="overflow-x-auto">
+        {table_html}
+      </div>
+      {pager}
+    </div>"""
+
+    return _base(body, admin_key, active="reports")
+
+
+@router.post("/reports/{report_id}/suppress-and-dismiss")
+def ui_report_suppress_and_dismiss(
+    report_id: int,
+    next_path: str = Form("", alias="next"),
+    referer: Optional[str] = Header(None, alias="Referer"),
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_ui_auth),
+):
+    report = db.query(ContentReport).filter(ContentReport.id == report_id).first()
+    if not report:
+        target = _resolve_ui_url(admin_key=admin_key, fallback_path=_REPORTS_PAGE, next_url=next_path, referer=referer)
+        return RedirectResponse(_add_flash(target, "Error: report not found"), status_code=303)
+
+    item = db.query(ContentItem).filter(ContentItem.id == report.content_item_id).first()
+    if item:
+        item.is_suppressed = True
+        item.last_modified_by = ACTOR
+        item.last_modified_at = datetime.utcnow()
+
+    report.reviewed = True
+    report.reviewed_at = datetime.utcnow()
+    db.commit()
+    invalidate_tiered_feed_cache()
+
+    target = _resolve_ui_url(admin_key=admin_key, fallback_path=_REPORTS_PAGE, next_url=next_path, referer=referer)
+    return RedirectResponse(_add_flash(target, "Content suppressed and report dismissed"), status_code=303)
+
+
+@router.post("/reports/{report_id}/delete-and-dismiss")
+def ui_report_delete_and_dismiss(
+    report_id: int,
+    next_path: str = Form("", alias="next"),
+    referer: Optional[str] = Header(None, alias="Referer"),
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_ui_auth),
+):
+    report = db.query(ContentReport).filter(ContentReport.id == report_id).first()
+    if not report:
+        target = _resolve_ui_url(admin_key=admin_key, fallback_path=_REPORTS_PAGE, next_url=next_path, referer=referer)
+        return RedirectResponse(_add_flash(target, "Error: report not found"), status_code=303)
+
+    content_item_id = report.content_item_id
+    # Mark all reports for this content reviewed before deletion cascade removes them
+    db.query(ContentReport).filter(
+        ContentReport.content_item_id == content_item_id,
+        ContentReport.reviewed.is_(False),
+    ).update({"reviewed": True, "reviewed_at": datetime.utcnow()})
+
+    item = db.query(ContentItem).filter(ContentItem.id == content_item_id).first()
+    if item:
+        db.delete(item)
+
+    db.commit()
+    invalidate_tiered_feed_cache()
+
+    target = _resolve_ui_url(admin_key=admin_key, fallback_path=_REPORTS_PAGE, next_url=next_path, referer=referer)
+    return RedirectResponse(_add_flash(target, "Content deleted and report dismissed"), status_code=303)
+
+
+@router.post("/reports/{report_id}/dismiss")
+def ui_report_dismiss(
+    report_id: int,
+    next_path: str = Form("", alias="next"),
+    referer: Optional[str] = Header(None, alias="Referer"),
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_ui_auth),
+):
+    report = db.query(ContentReport).filter(ContentReport.id == report_id).first()
+    if not report:
+        target = _resolve_ui_url(admin_key=admin_key, fallback_path=_REPORTS_PAGE, next_url=next_path, referer=referer)
+        return RedirectResponse(_add_flash(target, "Error: report not found"), status_code=303)
+
+    report.reviewed = True
+    report.reviewed_at = datetime.utcnow()
+    db.commit()
+
+    target = _resolve_ui_url(admin_key=admin_key, fallback_path=_REPORTS_PAGE, next_url=next_path, referer=referer)
+    return RedirectResponse(_add_flash(target, "Report dismissed"), status_code=303)
