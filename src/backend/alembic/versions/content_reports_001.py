@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "content_reports_001"
-down_revision = "x_signal_source_001"
+down_revision = "ai_usage_001"
 branch_labels = None
 depends_on = None
 
