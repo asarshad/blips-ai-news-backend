@@ -3669,6 +3669,10 @@ def ui_content_detail(
           </form>
         </div>
         <div class="glass-panel rounded-[1.5rem] p-5">
+          <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Visibility</h3>
+          {suppress_btn}
+        </div>
+        <div class="glass-panel rounded-[1.5rem] p-5">
           <div class="flex items-center justify-between gap-3">
             <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide">Push delivery</h3>
             {_badge(push_config.mode.value, "purple" if push_config.mode == PushMode.auto_all else "blue" if push_config.mode == PushMode.manual else "gray")}
@@ -3698,10 +3702,6 @@ def ui_content_detail(
               <tbody>{push_log_rows or '<tr><td colspan="6" class="px-3 py-4 text-center text-sm text-slate-400">No push sends yet</td></tr>'}</tbody>
             </table>
           </div>
-        </div>
-        <div class="glass-panel rounded-[1.5rem] p-5">
-          <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Visibility</h3>
-          {suppress_btn}
         </div>
         <div class="glass-panel rounded-[1.5rem] p-5">
           <h3 class="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-3">Editorial boost</h3>
@@ -4443,7 +4443,12 @@ def ui_reports(
             reported_at = _fmt_admin_dt(report.created_at)
             reviewed_mark = ' <span class="text-xs text-slate-400">(reviewed)</span>' if report.reviewed else ""
 
-            suppress_btn = _reports_action_form(report.id, "suppress-and-dismiss", "Suppress", "bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200") if item and not item.is_suppressed else ""
+            if item and item.is_suppressed:
+                suppress_btn = _reports_action_form(report.id, "unsuppress", "Unsuppress", "bg-green-50 text-green-700 hover:bg-green-100 border border-green-200")
+            elif item:
+                suppress_btn = _reports_action_form(report.id, "suppress-and-dismiss", "Suppress", "bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200")
+            else:
+                suppress_btn = ""
             delete_btn = _reports_action_form(report.id, "delete-and-dismiss", "Delete", "bg-red-50 text-red-700 hover:bg-red-100 border border-red-200") if item else ""
             dismiss_btn = _reports_action_form(report.id, "dismiss", "Dismiss", "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200") if not report.reviewed else ""
 
@@ -4554,6 +4559,31 @@ def ui_report_delete_and_dismiss(
 
     target = _resolve_ui_url(admin_key=admin_key, fallback_path=_REPORTS_PAGE, next_url=next_path, referer=referer)
     return RedirectResponse(_add_flash(target, "Content deleted and report dismissed"), status_code=303)
+
+
+@router.post("/reports/{report_id}/unsuppress")
+def ui_report_unsuppress(
+    report_id: int,
+    next_path: str = Form("", alias="next"),
+    referer: Optional[str] = Header(None, alias="Referer"),
+    db: Session = Depends(get_db),
+    admin_key: str = Depends(_require_admin_ui_auth),
+):
+    report = db.query(ContentReport).filter(ContentReport.id == report_id).first()
+    if not report:
+        target = _resolve_ui_url(admin_key=admin_key, fallback_path=_REPORTS_PAGE, next_url=next_path, referer=referer)
+        return RedirectResponse(_add_flash(target, "Error: report not found"), status_code=303)
+
+    item = db.query(ContentItem).filter(ContentItem.id == report.content_item_id).first()
+    if item:
+        item.is_suppressed = False
+        item.last_modified_by = ACTOR
+        item.last_modified_at = datetime.utcnow()
+        db.commit()
+        invalidate_tiered_feed_cache()
+
+    target = _resolve_ui_url(admin_key=admin_key, fallback_path=_REPORTS_PAGE, next_url=next_path, referer=referer)
+    return RedirectResponse(_add_flash(target, "Content unsuppressed"), status_code=303)
 
 
 @router.post("/reports/{report_id}/dismiss")
