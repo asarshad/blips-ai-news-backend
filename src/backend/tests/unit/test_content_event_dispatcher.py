@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from sqlalchemy import create_engine
@@ -25,6 +25,58 @@ def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
 def _create_test_tables(engine) -> None:
     ContentItem.__table__.create(bind=engine)
     ContentEventOutbox.__table__.create(bind=engine)
+
+
+def test_claim_article_image_events_prioritizes_newest_content():
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    older = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Old",
+        title="Old article",
+        source_url="https://example.com/old",
+        published_at=datetime.utcnow() - timedelta(days=3),
+    )
+    newer = ContentItem(
+        type=ContentType.ARTICLE,
+        source="New",
+        title="New article",
+        source_url="https://example.com/new",
+        published_at=datetime.utcnow(),
+    )
+    db.add_all([older, newer])
+    db.commit()
+
+    old_event = ContentEventOutbox(
+        content_item_id=older.id,
+        event_type=ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE,
+        payload={"content_id": older.id},
+        status="pending",
+        available_at=datetime.utcnow(),
+        created_at=datetime.utcnow() - timedelta(hours=1),
+        updated_at=datetime.utcnow() - timedelta(hours=1),
+    )
+    new_event = ContentEventOutbox(
+        content_item_id=newer.id,
+        event_type=ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE,
+        payload={"content_id": newer.id},
+        status="pending",
+        available_at=datetime.utcnow(),
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add_all([old_event, new_event])
+    db.commit()
+
+    dispatcher = ContentEventDispatcher(
+        session_factory=SessionLocal,
+        event_types=(ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE,),
+    )
+
+    assert dispatcher._claim_pending(limit=1) == [new_event.id]
 
 
 def test_dispatch_ready_event_invalidates_cache_and_triggers_auto_push(monkeypatch):

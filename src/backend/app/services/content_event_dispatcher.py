@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
+from app.models.content import ContentItem
 from app.models.content_event import ContentEventOutbox
 from app.services.article_image_service import (
     ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE,
@@ -74,12 +75,18 @@ class ContentEventDispatcher:
             )
             if self._event_types:
                 query = query.filter(ContentEventOutbox.event_type.in_(self._event_types))
-            rows = (
-                query.order_by(ContentEventOutbox.created_at.asc())
-                .with_for_update(skip_locked=True)
-                .limit(limit)
-                .all()
-            )
+            if self._event_types == (ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE,):
+                query = query.join(
+                    ContentItem,
+                    ContentItem.id == ContentEventOutbox.content_item_id,
+                )
+                query = query.order_by(
+                    ContentItem.published_at.desc(),
+                    ContentEventOutbox.created_at.asc(),
+                )
+            else:
+                query = query.order_by(ContentEventOutbox.created_at.asc())
+            rows = query.with_for_update(skip_locked=True).limit(limit).all()
 
             claimed_ids: list[int] = []
             for row in rows:
