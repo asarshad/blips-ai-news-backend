@@ -16,6 +16,7 @@ import socket
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
+from datetime import datetime
 from threading import Lock
 from typing import Optional
 from urllib.parse import urljoin, urlparse
@@ -25,6 +26,11 @@ import requests
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.ingestion.source_response_policy import (
+    FetchOutcome,
+    classify_http_response,
+    cooldown_until_for_outcome,
+)
 
 logger = get_logger(__name__)
 
@@ -93,6 +99,10 @@ class FetchResult:
     error: Optional[str] = None
     not_modified: bool = False  # 304
     elapsed_ms: float = 0.0
+    response_action: str = "success"
+    retry_after_seconds: Optional[int] = None
+    canonical_url: Optional[str] = None
+    redirect_count: int = 0
 
 
 # ── SSRF protection ───────────────────────────────────────────────────────────
@@ -128,6 +138,7 @@ def _is_private_host(host: str) -> bool:
 # ── Per-domain rate limiter (in-memory, bounded) ──────────────────────────────
 
 _domain_last_request: "OrderedDict[str, float]" = OrderedDict()
+_domain_response_cooldowns: "OrderedDict[str, float]" = OrderedDict()
 _domain_lock = Lock()
 _DOMAIN_CACHE_MAX = 1000  # Evict oldest entries to prevent unbounded growth
 
@@ -152,6 +163,29 @@ def _rate_limit_domain(domain: str, min_interval: float) -> None:
         while len(_domain_last_request) >= _DOMAIN_CACHE_MAX:
             _domain_last_request.popitem(last=False)
         _domain_last_request[domain] = time.monotonic()
+
+
+def _active_response_cooldown_seconds(domain: str) -> Optional[int]:
+    now = time.monotonic()
+    with _domain_lock:
+        until = _domain_response_cooldowns.get(domain)
+        if until is None:
+            return None
+        if until <= now:
+            _domain_response_cooldowns.pop(domain, None)
+            return None
+        return max(1, int(until - now))
+
+
+def _remember_response_cooldown(domain: str, outcome: FetchOutcome) -> None:
+    cooldown_until = cooldown_until_for_outcome(outcome)
+    if cooldown_until is None:
+        return
+    ttl_seconds = max(1, int((cooldown_until - datetime.utcnow()).total_seconds()))
+    with _domain_lock:
+        while len(_domain_response_cooldowns) >= _DOMAIN_CACHE_MAX:
+            _domain_response_cooldowns.popitem(last=False)
+        _domain_response_cooldowns[domain] = time.monotonic() + ttl_seconds
 
 
 # ── Shared httpx client ──────────────────────────────────────────────────────
@@ -218,6 +252,16 @@ def fetch_url(
     max_retries = int(getattr(s, "EXTRACTION_MAX_RETRIES", 3))
     domain_min_interval = float(getattr(s, "EXTRACTION_DOMAIN_MIN_INTERVAL", 1.0))
 
+    cooldown_seconds = _active_response_cooldown_seconds(domain)
+    if cooldown_seconds is not None:
+        return FetchResult(
+            url=url,
+            status_code=0,
+            error=f"SOURCE_COOLDOWN: retry after {cooldown_seconds}s",
+            response_action="rate_limited",
+            retry_after_seconds=cooldown_seconds,
+        )
+
     _rate_limit_domain(domain, domain_min_interval)
 
     headers: dict[str, str] = {}
@@ -234,30 +278,44 @@ def fetch_url(
     for attempt in range(1, max_retries + 1):
         t0 = time.monotonic()
         try:
-            resp, elapsed = _get_with_validated_redirects(client, url, headers)
+            resp, elapsed, redirect_statuses = _get_with_validated_redirects(client, url, headers)
 
             if resp.status_code in _BOT_BLOCK_STATUS and not tried_browser_fallback:
                 tried_browser_fallback = True
                 browser_headers = _build_browser_fallback_headers(headers)
-                fallback_resp, fallback_elapsed = _get_with_validated_redirects(
+                fallback_resp, fallback_elapsed, fallback_redirect_statuses = _get_with_validated_redirects(
                     client,
                     url,
                     browser_headers,
                 )
                 resp = fallback_resp
                 elapsed += fallback_elapsed
+                redirect_statuses = fallback_redirect_statuses
 
             if _should_try_requests_browser_fallback(
                 resp
             ) and not _response_prefers_browser_variant(resp):
                 browser_headers = _build_browser_fallback_headers(headers)
-                fallback_resp, fallback_elapsed = _requests_get_with_validated_redirects(
+                (
+                    fallback_resp,
+                    fallback_elapsed,
+                    fallback_redirect_statuses,
+                ) = _requests_get_with_validated_redirects(
                     url,
                     browser_headers,
                 )
                 elapsed += fallback_elapsed
                 if _response_prefers_browser_variant(fallback_resp):
                     resp = fallback_resp
+                    redirect_statuses = fallback_redirect_statuses
+
+            outcome = classify_http_response(
+                status_code=resp.status_code,
+                headers=resp.headers,
+                original_url=url,
+                final_url=str(resp.url),
+                redirect_statuses=redirect_statuses,
+            )
 
             if resp.status_code == 304:
                 return FetchResult(
@@ -267,28 +325,53 @@ def fetch_url(
                     etag=resp.headers.get("ETag"),
                     last_modified=resp.headers.get("Last-Modified"),
                     elapsed_ms=elapsed,
+                    response_action=outcome.action,
+                    retry_after_seconds=outcome.retry_after_seconds,
+                    canonical_url=outcome.canonical_url,
+                    redirect_count=outcome.redirect_count,
                 )
 
             if protection_reason := _detect_bot_protection_response(resp):
+                _remember_response_cooldown(domain, outcome)
                 return FetchResult(
                     url=str(resp.url),
                     status_code=resp.status_code,
                     content_type=resp.headers.get("Content-Type", ""),
                     error=f"BOT_PROTECTED: {protection_reason}",
                     elapsed_ms=elapsed,
+                    response_action="blocked",
+                    canonical_url=outcome.canonical_url,
+                    redirect_count=outcome.redirect_count,
                 )
 
             if resp.status_code in _TRANSIENT_STATUS:
                 last_error = f"HTTP {resp.status_code}"
+                _remember_response_cooldown(domain, outcome)
+                if attempt >= max_retries:
+                    return FetchResult(
+                        url=str(resp.url),
+                        status_code=resp.status_code,
+                        error=last_error,
+                        elapsed_ms=elapsed,
+                        response_action=outcome.action,
+                        retry_after_seconds=outcome.retry_after_seconds,
+                        canonical_url=outcome.canonical_url,
+                        redirect_count=outcome.redirect_count,
+                    )
                 _backoff(attempt)
                 continue
 
             if resp.status_code >= 400:
+                _remember_response_cooldown(domain, outcome)
                 return FetchResult(
                     url=str(resp.url),
                     status_code=resp.status_code,
                     error=f"HTTP {resp.status_code}",
                     elapsed_ms=elapsed,
+                    response_action=outcome.action,
+                    retry_after_seconds=outcome.retry_after_seconds,
+                    canonical_url=outcome.canonical_url,
+                    redirect_count=outcome.redirect_count,
                 )
 
             ct = resp.headers.get("Content-Type", "")
@@ -300,6 +383,9 @@ def fetch_url(
                     etag=resp.headers.get("ETag"),
                     last_modified=resp.headers.get("Last-Modified"),
                     elapsed_ms=elapsed,
+                    response_action=outcome.action,
+                    canonical_url=outcome.canonical_url,
+                    redirect_count=outcome.redirect_count,
                 )
 
             raw = _read_response_bytes_limited(resp, max_bytes=MAX_RESPONSE_BYTES)
@@ -314,6 +400,9 @@ def fetch_url(
                 etag=resp.headers.get("ETag"),
                 last_modified=resp.headers.get("Last-Modified"),
                 elapsed_ms=elapsed,
+                response_action=outcome.action,
+                canonical_url=outcome.canonical_url,
+                redirect_count=outcome.redirect_count,
             )
 
         except httpx.TimeoutException as exc:
@@ -359,6 +448,7 @@ def fetch_url(
         status_code=0,
         error=last_error or "All retries exhausted",
         elapsed_ms=elapsed,
+        response_action="transient_error",
     )
 
 
@@ -525,10 +615,11 @@ def _get_with_validated_redirects(
     client: httpx.Client,
     url: str,
     headers: dict[str, str],
-) -> tuple[httpx.Response, float]:
+) -> tuple[httpx.Response, float, list[int]]:
     """Issue a GET request while validating each redirect hop before following it."""
     current_url = url
     total_elapsed_ms = 0.0
+    redirect_statuses: list[int] = []
 
     for _ in range(_MAX_REDIRECTS + 1):
         t0 = time.monotonic()
@@ -538,12 +629,14 @@ def _get_with_validated_redirects(
 
         if response.status_code not in _REDIRECT_STATUS:
             response.read()  # buffer body so .content is accessible for inspection
-            return response, total_elapsed_ms
+            return response, total_elapsed_ms, redirect_statuses
+
+        redirect_statuses.append(response.status_code)
 
         location = response.headers.get("Location")
         if not location:
             response.read()
-            return response, total_elapsed_ms
+            return response, total_elapsed_ms, redirect_statuses
 
         next_url = urljoin(str(response.url), location)
         target_error = _validate_fetch_target(next_url)
@@ -560,13 +653,14 @@ def _get_with_validated_redirects(
 def _requests_get_with_validated_redirects(
     url: str,
     headers: dict[str, str],
-) -> tuple[requests.Response, float]:
+) -> tuple[requests.Response, float, list[int]]:
     """Browser-style fallback fetch with the same redirect validation rules."""
     settings = get_settings()
     connect_timeout = float(getattr(settings, "EXTRACTION_CONNECT_TIMEOUT", 10))
     read_timeout = float(getattr(settings, "EXTRACTION_READ_TIMEOUT", 20))
     current_url = url
     total_elapsed_ms = 0.0
+    redirect_statuses: list[int] = []
 
     session = requests.Session()
     try:
@@ -581,11 +675,13 @@ def _requests_get_with_validated_redirects(
             total_elapsed_ms += (time.monotonic() - t0) * 1000
 
             if response.status_code not in _REDIRECT_STATUS:
-                return response, total_elapsed_ms
+                return response, total_elapsed_ms, redirect_statuses
+
+            redirect_statuses.append(response.status_code)
 
             location = response.headers.get("Location")
             if not location:
-                return response, total_elapsed_ms
+                return response, total_elapsed_ms, redirect_statuses
 
             next_url = urljoin(str(response.url), location)
             target_error = _validate_fetch_target(next_url)

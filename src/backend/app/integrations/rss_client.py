@@ -25,6 +25,12 @@ from app.article_image_selection import ArticleImageCandidate, select_best_artic
 from app.core.logging import get_logger
 from app.extraction.metadata import extract_best_image_from_fragment
 from app.extraction.normalize import make_absolute_url, validate_image_url
+from app.ingestion.source_response_policy import (
+    ACTION_TRANSIENT_ERROR,
+    FetchOutcome,
+    classify_exception,
+    classify_http_response,
+)
 from app.integrations.rss_feeds import (
     DecayProfile,
     FeedConfig,
@@ -106,6 +112,7 @@ class RSSClient:
         self._backoff_base_seconds = max(
             0.0, float(os.getenv("CONNECTOR_BACKOFF_BASE_SECONDS", "0.5"))
         )
+        self._last_fetch_outcomes: Dict[str, FetchOutcome] = {}
         self._image_fallback_enabled = os.getenv("RSS_IMAGE_FALLBACK_ENABLED", "true").lower() in {
             "1",
             "true",
@@ -166,6 +173,13 @@ class RSSClient:
 
         return entries
 
+    def get_last_fetch_outcome(self, feed_url: str) -> Optional[FetchOutcome]:
+        """Return the latest structured fetch outcome for a feed URL."""
+        return self._last_fetch_outcomes.get(feed_url)
+
+    def _record_fetch_outcome(self, feed_url: str, outcome: FetchOutcome) -> None:
+        self._last_fetch_outcomes[feed_url] = outcome
+
     def fetch_feed(self, feed_url: str, max_entries: int = 10) -> List[FeedEntry]:
         """
         Fetch entries from a single RSS feed.
@@ -185,6 +199,10 @@ class RSSClient:
             # Allow tests / explicit XML input to bypass network.
             if feed_url.lstrip().startswith("<"):
                 feed = feedparser.parse(feed_url)
+                self._record_fetch_outcome(
+                    feed_url,
+                    FetchOutcome(action="success", status_code=200),
+                )
             else:
                 content = self._fetch_feed_content_with_retries(feed_url)
                 if content is None:
@@ -251,34 +269,58 @@ class RSSClient:
         for attempt in range(1, attempts + 1):
             try:
                 response = requests.get(feed_url, headers=headers, timeout=self._timeout_seconds)
-                response.raise_for_status()
-                return response.content
-            except requests.RequestException as exc:
-                last_attempt = attempt >= attempts
-                budget_exhausted = self._retry_budget_remaining <= 0
-                if last_attempt or budget_exhausted:
+                outcome = classify_http_response(
+                    status_code=response.status_code,
+                    headers=response.headers,
+                    original_url=feed_url,
+                    final_url=response.url,
+                    redirect_statuses=[r.status_code for r in response.history],
+                )
+                self._record_fetch_outcome(feed_url, outcome)
+                if outcome.succeeded:
+                    return response.content
+                if outcome.action != ACTION_TRANSIENT_ERROR:
                     logger.warning(
-                        "RSS fetch failed (url=%s attempt=%s/%s budget_left=%s): %s",
+                        "RSS fetch actionable failure (url=%s action=%s status=%s retry_after=%s): %s",
                         feed_url,
-                        attempt,
-                        attempts,
-                        self._retry_budget_remaining,
-                        exc,
+                        outcome.action,
+                        outcome.status_code,
+                        outcome.retry_after_seconds,
+                        outcome.error,
                     )
                     return None
-
-                self._retry_budget_remaining -= 1
-                delay = self._backoff_base_seconds * (2 ** (attempt - 1))
-                logger.warning(
-                    "RSS fetch retry scheduled (url=%s next_attempt=%s/%s delay=%.2fs budget_left=%s)",
-                    feed_url,
-                    attempt + 1,
-                    attempts,
-                    delay,
-                    self._retry_budget_remaining,
+                exc: requests.RequestException = requests.HTTPError(
+                    outcome.error or f"HTTP {response.status_code}"
                 )
-                if delay > 0:
-                    time.sleep(delay)
+            except requests.RequestException as exc:
+                outcome = classify_exception(exc)
+                self._record_fetch_outcome(feed_url, outcome)
+
+            last_attempt = attempt >= attempts
+            budget_exhausted = self._retry_budget_remaining <= 0
+            if last_attempt or budget_exhausted:
+                logger.warning(
+                    "RSS fetch failed (url=%s attempt=%s/%s budget_left=%s): %s",
+                    feed_url,
+                    attempt,
+                    attempts,
+                    self._retry_budget_remaining,
+                    exc,
+                )
+                return None
+
+            self._retry_budget_remaining -= 1
+            delay = self._backoff_base_seconds * (2 ** (attempt - 1))
+            logger.warning(
+                "RSS fetch retry scheduled (url=%s next_attempt=%s/%s delay=%.2fs budget_left=%s)",
+                feed_url,
+                attempt + 1,
+                attempts,
+                delay,
+                self._retry_budget_remaining,
+            )
+            if delay > 0:
+                time.sleep(delay)
 
         return None
 

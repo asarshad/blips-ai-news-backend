@@ -19,10 +19,15 @@ from app.ingestion.checkpoint_locks import pg_advisory_unlock, try_pg_advisory_l
 from app.ingestion.extractors import extract_entities, extract_topics
 from app.ingestion.language_filter import is_english
 from app.ingestion.leases import claim_lease, lease_key, release_lease
+from app.ingestion.source_response_policy import (
+    ACTION_RATE_LIMITED,
+    FetchOutcome,
+)
 from app.ingestion.url_normalizer import normalize_url
 from app.models.content import ContentItem, ContentType
 from app.repositories.ingestion_budget_repo import IngestionBudgetRepository
 from app.repositories.ingestion_progress_repo import IngestionProgressRepository
+from app.repositories.source_fetch_state_repo import SourceFetchStateRepository
 from app.services.content_readiness import evaluate_content_readiness, queue_content_ready_event
 from app.video_surface_rules import classify_video_like_item
 
@@ -51,6 +56,87 @@ def _should_pause_rss_source(progress, error: str) -> bool:
         return True
     normalized_error = str(error or "").lower()
     return "exhausted attempts" in normalized_error
+
+
+def _retry_delay_for_fetch_outcome(outcome: FetchOutcome, *, retry_count: int) -> int:
+    if outcome.retry_after_seconds is not None:
+        return max(60, min(int(outcome.retry_after_seconds), 6 * 60 * 60))
+    if outcome.action == ACTION_RATE_LIMITED:
+        return 30 * 60
+    return min(60 * 60, max(5 * 60, 5 * 60 * max(1, retry_count + 1)))
+
+
+def _handle_rss_fetch_outcome(
+    db: Session,
+    *,
+    progress,
+    cfg,
+    day_utc: date,
+    outcome: FetchOutcome,
+    progress_repo: IngestionProgressRepository,
+    state_repo: SourceFetchStateRepository,
+    rss,
+) -> dict | None:
+    """Persist feed response state and apply scheduler-visible backoff actions."""
+    state = state_repo.record_outcome(
+        source_type="rss",
+        feed_name=progress.feed_name,
+        source_url=cfg.url,
+        outcome=outcome,
+    )
+    if outcome.succeeded:
+        return None
+
+    if outcome.should_pause_for_day:
+        progress_repo.mark_failed(
+            progress.id,
+            f"Source fetch {outcome.action}: {outcome.error or outcome.status_code}",
+        )
+        _reallocate_rss_shortfall(
+            db,
+            day_utc=day_utc,
+            failed_progress=progress,
+            rss=rss,
+            repo=progress_repo,
+        )
+        return {
+            "row_id": progress.id,
+            "status": f"source_{outcome.action}",
+            "inserted": 0,
+            "attempted": 0,
+        }
+
+    if outcome.should_retry_source_later:
+        retry_at = state.cooldown_until or (
+            datetime.utcnow()
+            + timedelta(
+                seconds=_retry_delay_for_fetch_outcome(
+                    outcome,
+                    retry_count=int(progress.retry_count or 0),
+                )
+            )
+        )
+        progress_repo.schedule_retry(
+            row_id=progress.id,
+            error=f"Source fetch {outcome.action}: {outcome.error or outcome.status_code}",
+            retry_at=retry_at,
+        )
+        _reallocate_rss_shortfall(
+            db,
+            day_utc=day_utc,
+            failed_progress=progress,
+            rss=rss,
+            repo=progress_repo,
+        )
+        return {
+            "row_id": progress.id,
+            "status": f"source_{outcome.action}",
+            "inserted": 0,
+            "attempted": 0,
+            "retry_at": retry_at.isoformat(),
+        }
+
+    return None
 
 
 def _reallocate_rss_shortfall(db: Session, *, day_utc: date, failed_progress, rss, repo) -> dict | None:
@@ -283,6 +369,7 @@ def process_progress_row_batch(
     db = SessionLocal()
     repo = IngestionProgressRepository(db)
     budget_repo = IngestionBudgetRepository(db)
+    source_state_repo = SourceFetchStateRepository(db)
     article_hydrator = ArticleHydrationService()
 
     rss = RSSClient()
@@ -347,11 +434,46 @@ def process_progress_row_batch(
                 repo.mark_failed(row_id, f"Unknown RSS feed: {progress.feed_name}")
                 return {"row_id": row_id, "status": "failed", "inserted": 0}
 
+            cooldown = source_state_repo.get_active_cooldown(
+                source_type="rss",
+                feed_name=progress.feed_name,
+            )
+            if cooldown is not None:
+                repo.schedule_retry(
+                    row_id=row_id,
+                    error=(
+                        f"Source cooldown active: {cooldown.last_action} "
+                        f"until {cooldown.cooldown_until.isoformat()}"
+                    ),
+                    retry_at=cooldown.cooldown_until,
+                )
+                return {
+                    "row_id": row_id,
+                    "status": "source_cooldown",
+                    "inserted": 0,
+                    "attempted": 0,
+                    "retry_at": cooldown.cooldown_until.isoformat(),
+                }
+
             max_entries = int(os.getenv("RSS_ENTRIES_PER_FEED", "50"))
             logger.info(
                 f"RSS fetch: feed={progress.feed_name} url={cfg.url} max_entries={max_entries}"
             )
             entries = rss.fetch_feed(cfg.url, max_entries=max_entries)
+            fetch_outcome = rss.get_last_fetch_outcome(cfg.url)
+            if fetch_outcome is not None:
+                handled = _handle_rss_fetch_outcome(
+                    db,
+                    progress=progress,
+                    cfg=cfg,
+                    day_utc=day_utc,
+                    outcome=fetch_outcome,
+                    progress_repo=repo,
+                    state_repo=source_state_repo,
+                    rss=rss,
+                )
+                if handled is not None:
+                    return handled
             if not entries:
                 logger.info(f"RSS fetch: feed={progress.feed_name} no entries returned")
                 return {"row_id": row_id, "status": "no_entries", "inserted": 0, "attempted": 0}
