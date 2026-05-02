@@ -44,12 +44,10 @@ def test_run_content_event_worker_uses_event_type_scope(monkeypatch):
 def test_promotion_lane_does_not_pause_during_fetch(monkeypatch):
     stop_event = threading.Event()
 
-    monkeypatch.setenv("CONTENT_EVENT_PAUSE_DURING_FETCH", "true")
-    monkeypatch.setattr(worker, "is_job_active", lambda _job: True)
     monkeypatch.setattr(worker, "memory_over_soft_limit", lambda: False)
 
     paused = worker._pause_for_shared_worker_pressure(
-        event_types=(worker.PROMOTION_EVENT_TYPE,),
+        event_types=("content.promotion_eval.requested",),
         stop_event=stop_event,
         poll_seconds=0.01,
     )
@@ -57,11 +55,10 @@ def test_promotion_lane_does_not_pause_during_fetch(monkeypatch):
     assert paused is False
 
 
-def test_ai_lane_pauses_during_fetch(monkeypatch):
+def test_ai_lane_does_not_pause_for_fetch_state(monkeypatch):
     stop_event = threading.Event()
 
-    monkeypatch.setenv("CONTENT_EVENT_PAUSE_DURING_FETCH", "true")
-    monkeypatch.setattr(worker, "is_job_active", lambda _job: True)
+    monkeypatch.setattr(worker, "memory_over_soft_limit", lambda: False)
 
     paused = worker._pause_for_shared_worker_pressure(
         event_types=("content.ai_summary.requested",),
@@ -69,4 +66,4 @@ def test_ai_lane_pauses_during_fetch(monkeypatch):
         poll_seconds=0.01,
     )
 
-    assert paused is True
+    assert paused is False

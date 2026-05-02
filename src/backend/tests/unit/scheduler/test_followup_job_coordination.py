@@ -3,8 +3,6 @@ from unittest.mock import MagicMock
 from app.scheduler import tasks_curation, tasks_promotion
 from app.scheduler.runtime import (
     CLUSTERING_JOB,
-    FETCH_NEWS_INLINE_CLUSTERING,
-    FETCH_NEWS_INLINE_PROMOTION,
     FETCH_NEWS_JOB,
     PROMOTION_JOB,
     is_job_active,
@@ -19,58 +17,88 @@ def setup_function():
     reset_job_runtime_state()
 
 
-def test_scheduled_clustering_skips_when_fetch_news_is_active(monkeypatch):
+def test_scheduled_clustering_does_not_wait_on_fetch_state(monkeypatch):
     started_at = mark_job_started(FETCH_NEWS_JOB)
     try:
         monkeypatch.setattr(tasks_curation.feature_flags, "is_enabled", lambda name: True)
-        session_factory = MagicMock()
-        monkeypatch.setattr(tasks_curation, "SessionLocal", session_factory)
+        db = MagicMock()
+        monkeypatch.setattr(tasks_curation, "SessionLocal", lambda: db)
+        monkeypatch.setattr(tasks_curation, "log_job_start", lambda _name: MagicMock())
+        monkeypatch.setattr(
+            "app.clustering.ClusteringService",
+            lambda _repo: MagicMock(run_clustering_job=lambda: {"items_clustered": 0}),
+        )
+        monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: MagicMock())
 
         tasks_curation.run_clustering_job()
 
-        session_factory.assert_not_called()
+        assert db.close.called
     finally:
         mark_job_finished(FETCH_NEWS_JOB, started_at, success=False)
 
 
-def test_scheduled_clustering_skips_after_recent_inline_run(monkeypatch):
-    inline_started_at = mark_job_started(FETCH_NEWS_INLINE_CLUSTERING)
-    mark_job_finished(FETCH_NEWS_INLINE_CLUSTERING, inline_started_at, success=True)
-
+def test_scheduled_clustering_runs_after_recent_inline_state(monkeypatch):
     monkeypatch.setattr(tasks_curation.feature_flags, "is_enabled", lambda name: True)
-    session_factory = MagicMock()
-    monkeypatch.setattr(tasks_curation, "SessionLocal", session_factory)
+    db = MagicMock()
+    monkeypatch.setattr(tasks_curation, "SessionLocal", lambda: db)
+    monkeypatch.setattr(tasks_curation, "log_job_start", lambda _name: MagicMock())
+    monkeypatch.setattr(
+        "app.clustering.ClusteringService",
+        lambda _repo: MagicMock(run_clustering_job=lambda: {"items_clustered": 0}),
+    )
+    monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: MagicMock())
 
     tasks_curation.run_clustering_job()
 
-    session_factory.assert_not_called()
+    assert db.close.called
 
 
-def test_scheduled_promotion_skips_when_fetch_news_is_active(monkeypatch):
+def test_scheduled_promotion_does_not_wait_on_fetch_state(monkeypatch):
     started_at = mark_job_started(FETCH_NEWS_JOB)
     try:
         monkeypatch.setattr(tasks_promotion.feature_flags, "is_enabled", lambda name: True)
-        session_factory = MagicMock()
-        monkeypatch.setattr(tasks_promotion, "SessionLocal", session_factory)
+        db = MagicMock()
+        monkeypatch.setattr(tasks_promotion, "SessionLocal", lambda: db)
+        monkeypatch.setattr(tasks_promotion, "log_job_start", lambda _name: MagicMock())
+        monkeypatch.setattr(
+            "app.services.promotion_service.PromotionService",
+            lambda _db: MagicMock(
+                run_promotion_job=lambda: MagicMock(
+                    promoted_count=0,
+                    candidates_evaluated=0,
+                    already_promoted_rescored=0,
+                    errors=[],
+                )
+            ),
+        )
 
         tasks_promotion.run_promotion_job()
 
-        session_factory.assert_not_called()
+        assert db.close.called
     finally:
         mark_job_finished(FETCH_NEWS_JOB, started_at, success=False)
 
 
-def test_scheduled_promotion_skips_after_recent_inline_run(monkeypatch):
-    inline_started_at = mark_job_started(FETCH_NEWS_INLINE_PROMOTION)
-    mark_job_finished(FETCH_NEWS_INLINE_PROMOTION, inline_started_at, success=True)
-
+def test_scheduled_promotion_runs_after_recent_inline_state(monkeypatch):
     monkeypatch.setattr(tasks_promotion.feature_flags, "is_enabled", lambda name: True)
-    session_factory = MagicMock()
-    monkeypatch.setattr(tasks_promotion, "SessionLocal", session_factory)
+    db = MagicMock()
+    monkeypatch.setattr(tasks_promotion, "SessionLocal", lambda: db)
+    monkeypatch.setattr(tasks_promotion, "log_job_start", lambda _name: MagicMock())
+    monkeypatch.setattr(
+        "app.services.promotion_service.PromotionService",
+        lambda _db: MagicMock(
+            run_promotion_job=lambda: MagicMock(
+                promoted_count=0,
+                candidates_evaluated=0,
+                already_promoted_rescored=0,
+                errors=[],
+            )
+        ),
+    )
 
     tasks_promotion.run_promotion_job()
 
-    session_factory.assert_not_called()
+    assert db.close.called
 
 
 def test_try_mark_job_started_is_atomic_with_blockers():

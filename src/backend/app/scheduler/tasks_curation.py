@@ -11,13 +11,9 @@ from app.scheduler.job_stats import log_job_start
 from app.scheduler.runtime import (
     CLUSTERING_JOB,
     FETCH_NEWS_INLINE_CLUSTERING,
-    FETCH_NEWS_JOB,
-    get_followup_cooldown_seconds,
-    is_job_active,
     log_memory_snapshot,
     mark_job_finished,
     mark_job_started,
-    succeeded_within,
 )
 
 logger = get_logger(__name__)
@@ -54,17 +50,6 @@ def run_clustering_job(*, trigger: str = "scheduled"):
     if not feature_flags.is_enabled("clustering"):
         logger.info("[clustering] SKIPPED - clustering feature is disabled")
         return
-
-    if trigger == "scheduled":
-        if is_job_active(FETCH_NEWS_JOB):
-            logger.info("[clustering] SKIPPED - fetch_news is still active")
-            return
-        if succeeded_within(
-            FETCH_NEWS_INLINE_CLUSTERING,
-            within_seconds=get_followup_cooldown_seconds(),
-        ):
-            logger.info("[clustering] SKIPPED - recent inline clustering already ran")
-            return
 
     stats = log_job_start("clustering")
     job_key = FETCH_NEWS_INLINE_CLUSTERING if trigger == "fetch_news" else CLUSTERING_JOB

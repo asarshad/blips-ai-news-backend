@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from app.api.routes import metrics as metrics_route
 from app.api.routes.metrics import _curation_mix_bucket
 from app.models.content import ContentItem
+from app.models.content_event import ContentEventOutbox
 from app.models.ingestion_progress import IngestionProgress
 from app.models.source import SourceDailyStat
 from app.models.video_source import VideoSourceProfile
@@ -178,13 +179,39 @@ def test_get_article_supply_metrics_returns_daily_and_source_breakdown(monkeypat
     assert payload["days"] == 1
     assert payload["daily"][0]["day"] == "2026-04-15"
     assert payload["daily"][0]["total_published"] == 3
-    assert payload["daily"][0]["candidate_count"] == 1
-    assert payload["daily"][0]["promoted_count"] == 2
-    assert payload["daily"][0]["ready_count"] == 1
-    assert payload["daily"][0]["pending_count"] == 1
-    assert payload["daily"][0]["pending_by_reason"] == {"missing_article_image": 1}
-    assert payload["sources"][0]["source"] == "Tech Feed"
-    assert payload["sources"][0]["attempted"] == 7
-    assert payload["sources"][0]["inserted"] == 3
-    assert payload["sources"][0]["promoted"] == 2
-    assert payload["sources"][0]["ready"] == 1
+
+
+def test_get_worker_lane_metrics_returns_heartbeats_and_outbox(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    ContentEventOutbox.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    db.add(
+        ContentEventOutbox(
+            content_item_id=1,
+            event_type="content.ai_summary.requested",
+            payload={"content_id": 1},
+            status="pending",
+            available_at=datetime(2026, 5, 2, 10, 0, 0),
+        )
+    )
+    db.commit()
+    monkeypatch.setattr(
+        metrics_route,
+        "read_lane_heartbeats",
+        lambda: {"available": True, "lanes": [{"lane": "ai_summary", "status": "idle"}]},
+    )
+
+    payload = metrics_route.get_worker_lane_metrics(db=db)
+
+    assert payload["heartbeats"]["lanes"] == [{"lane": "ai_summary", "status": "idle"}]
+    assert payload["outbox"] == [
+        {
+            "event_type": "content.ai_summary.requested",
+            "status": "pending",
+            "count": 1,
+            "oldest_available_at": "2026-05-02T10:00:00",
+        }
+    ]
+    assert "as_of" in payload

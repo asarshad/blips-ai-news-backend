@@ -24,8 +24,6 @@ from app.scheduler.job_stats import log_job_start
 from app.scheduler.runtime import (
     AI_RETRY_JOB,
     FETCH_NEWS_INLINE_AI_RETRY,
-    FETCH_NEWS_JOB,
-    is_job_active,
     log_memory_snapshot,
     mark_job_finished,
     mark_job_started,
@@ -247,13 +245,6 @@ def process_ai_summaries(
 
     if not feature_flags.is_enabled("summarization"):
         logger.info("[ai_retry] SKIPPED - summarization feature is disabled")
-        return
-
-    # Scheduled ticks must defer while ingestion is running on the same
-    # worker process. The inline ai_retry invoked from fetch_news is
-    # deliberately exempt — it is the authoritative post-ingest pass.
-    if trigger == "scheduled" and is_job_active(FETCH_NEWS_JOB):
-        logger.info("[ai_retry] SKIPPED - fetch_news cycle is currently active")
         return
 
     stats = log_job_start("ai_retry")
@@ -503,9 +494,6 @@ def process_ai_summaries(
             # image recovery on the 15-min LLM cadence.
         else:
             logger.info("[ai_retry] Maintenance skipped for this run")
-        from app.scheduler.tasks_content_events import run_content_event_dispatch_job
-
-        run_content_event_dispatch_job()
         run_success = not stats.errors
 
     except Exception as e:

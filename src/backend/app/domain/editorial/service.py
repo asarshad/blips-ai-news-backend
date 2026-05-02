@@ -29,7 +29,6 @@ from app.integrations.youtube_client import YouTubeClient
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.ranking.quality import compute_source_weight
 from app.repositories.editorial_repo import EditorialRepository
-from app.scheduler.tasks_content_events import run_content_event_dispatch_job
 from app.services.content_readiness import (
     ContentReadinessStatus,
     describe_readiness_reason,
@@ -556,10 +555,7 @@ class EditorialService:
         return self._llm_client
 
     def dispatch_content_events_best_effort(self) -> None:
-        try:
-            run_content_event_dispatch_job()
-        except Exception as exc:
-            logger.warning("Content event dispatch failed after editorial action: %s", exc)
+        logger.info("Editorial action queued content events for async worker lanes")
 
     @staticmethod
     def _content_type_value(

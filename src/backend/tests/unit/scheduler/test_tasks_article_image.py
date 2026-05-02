@@ -4,9 +4,6 @@ from unittest.mock import MagicMock
 
 from app.scheduler import tasks_article_image
 from app.scheduler.runtime import (
-    FETCH_NEWS_JOB,
-    mark_job_finished,
-    mark_job_started,
     reset_job_runtime_state,
 )
 
@@ -29,29 +26,25 @@ def setup_function():
     reset_job_runtime_state()
 
 
-def test_run_article_image_verification_job_skips_when_fetch_news_is_active(monkeypatch):
-    """Concurrent fetch+image verification would double-load the worker DB;
-    the image-verification tick defers until the fetch cycle releases."""
-    session_factory = MagicMock()
+def test_run_article_image_verification_job_does_not_wait_on_fetch_state(monkeypatch):
+    """The async image lane owns its own resource limits and does not wait on ingestion."""
+    db = MagicMock()
     repair_calls = []
 
-    monkeypatch.setattr(tasks_article_image, "SessionLocal", session_factory)
+    monkeypatch.setattr(tasks_article_image, "SessionLocal", lambda: db)
     monkeypatch.setattr(
         tasks_article_image,
         "repair_article_image_metadata",
-        lambda *args, **kwargs: repair_calls.append((args, kwargs)) or {},
+        lambda *args, **kwargs: (
+            repair_calls.append((args, kwargs))
+            or {"scanned": 1, "updated": 0, "failures": 0}
+        ),
     )
     monkeypatch.setattr(tasks_article_image, "log_job_start", lambda _name: _FakeStats())
 
-    fetch_started_at = mark_job_started(FETCH_NEWS_JOB)
-    try:
-        tasks_article_image.run_article_image_verification_job()
-    finally:
-        mark_job_finished(FETCH_NEWS_JOB, fetch_started_at, success=True)
+    tasks_article_image.run_article_image_verification_job()
 
-    # Must NOT open a DB session and must NOT invoke the repair routine.
-    session_factory.assert_not_called()
-    assert repair_calls == []
+    assert len(repair_calls) == 1
 
 
 def test_run_article_image_verification_job_runs_when_fetch_news_is_idle(monkeypatch):

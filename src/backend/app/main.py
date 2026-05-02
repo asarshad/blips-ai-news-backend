@@ -33,7 +33,6 @@ from app.core.config import settings
 from app.core.dependencies import get_redis
 from app.core.logging import get_logger, setup_logging
 from app.db.base import Base, SessionLocal, engine
-from app.scheduler import init_scheduler
 from app.scheduler.tasks import fetch_and_process_news
 
 # Configure logging first
@@ -152,19 +151,23 @@ def _run_initial_fetch():
 
 
 def _start_scheduler() -> None:
-    """Initialize background scheduler and run initial fetch.
+    """Initialize legacy API-hosted scheduler only when explicitly enabled.
 
-    Preferred: run scheduler in a dedicated worker service.
-    Single-service deployments may run scheduler in the API service by setting
-    `SCHEDULER_ENABLED=true`. A Redis leader lock ensures only one process runs it.
+    Production worker lanes run outside the API process. Keeping this path
+    behind a separate flag prevents accidental double execution if someone
+    toggles ``SCHEDULER_ENABLED`` on the web service.
     """
-    # Check if scheduler is enabled (disabled on web service in production)
-    scheduler_enabled = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
-    if not scheduler_enabled:
-        logger.info("Scheduler disabled via SCHEDULER_ENABLED=false (running in worker)")
+    legacy_api_scheduler_enabled = os.getenv(
+        "API_LEGACY_SCHEDULER_ENABLED",
+        "false",
+    ).lower() in {"true", "1", "yes", "on"}
+    if not legacy_api_scheduler_enabled:
+        logger.info("API legacy scheduler disabled; worker lanes own background jobs")
         return
 
     try:
+        from app.scheduler import init_scheduler
+
         redis_client = get_redis()
 
         # Try to acquire a leader lock (process-unique token) with TTL.
@@ -177,10 +180,7 @@ def _start_scheduler() -> None:
         )
 
         if not lock_acquired:
-            logger.info("Scheduler already running on another worker - skipping scheduler init")
-            # Still run initial fetch - important for resuming after restarts
-            logger.info("Starting initial fetch check in background (non-leader)")
-            threading.Thread(target=_run_initial_fetch, daemon=True).start()
+            logger.info("Legacy API scheduler already running elsewhere - skipping init")
             return
 
         logger.info("Acquired scheduler lock - initializing scheduler")
@@ -223,9 +223,7 @@ def _start_scheduler() -> None:
     except RedisError as e:
         logger.error(f"Error starting scheduler: {str(e)}")
 
-    # Always run initial fetch check regardless of scheduler lock
-    # This ensures we resume ingestion after restart if targets not met
-    logger.info("Starting initial fetch check in background")
+    logger.info("Starting legacy initial fetch check in background")
     threading.Thread(target=_run_initial_fetch, daemon=True).start()
 
 

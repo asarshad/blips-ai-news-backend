@@ -1,0 +1,170 @@
+"""Low-frequency maintenance lane for non-queue periodic work."""
+
+from __future__ import annotations
+
+import os
+import signal
+import threading
+import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Callable
+
+from app.core.config import settings
+from app.core.logging import get_logger, setup_logging
+from app.db.base import SessionLocal
+from app.services.worker_lane_metrics import record_lane_heartbeat
+
+setup_logging()
+logger = get_logger(__name__)
+
+STOP_EVENT = threading.Event()
+
+
+@dataclass
+class LaneTask:
+    name: str
+    run: Callable[[], None]
+    interval_seconds: int | None = None
+    next_run_at: float = 0.0
+    utc_hour: int | None = None
+    utc_minute: int = 0
+
+
+def _handle_stop(signum, _frame) -> None:
+    logger.info("Received signal %s; stopping maintenance lane", signum)
+    STOP_EVENT.set()
+
+
+def _minutes_env(name: str, default: int, *, minimum: int = 1) -> int:
+    try:
+        return max(minimum, int(os.getenv(name, str(default))))
+    except ValueError:
+        return max(minimum, default)
+
+
+def _next_utc_time(hour: int, minute: int) -> float:
+    now = datetime.now(timezone.utc)
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return time.monotonic() + (target - now).total_seconds()
+
+
+def _run_event_backfill() -> None:
+    db = SessionLocal()
+    try:
+        from app.services.content_event_backfill_service import enqueue_pending_content_events
+
+        result = enqueue_pending_content_events(
+            db,
+            lookback_days=_minutes_env("CONTENT_EVENT_BACKFILL_LOOKBACK_DAYS", 7),
+            limit=_minutes_env("CONTENT_EVENT_BACKFILL_LIMIT", 500),
+            pending_only=True,
+        )
+        logger.info("[maintenance_lane] event backfill: %s", result)
+    finally:
+        db.close()
+
+
+def _task_catalog() -> list[LaneTask]:
+    signal_minutes = max(int(getattr(settings, "SIGNAL_INTERVAL_MINUTES", 60) or 60), 15)
+    backfill_hours = _minutes_env("BACKFILL_INTERVAL_HOURS", 6)
+    event_backfill_minutes = _minutes_env("CONTENT_EVENT_BACKFILL_INTERVAL_MINUTES", 10)
+
+    from app.scheduler.tasks_backfill import run_backfill_job
+    from app.scheduler.tasks_cleanup import run_data_cleanup_job
+    from app.scheduler.tasks_curation import (
+        run_clustering_job,
+        run_preference_decay_job,
+        run_scoring_job,
+    )
+    from app.scheduler.tasks_health import check_ingestion_health, check_inventory_health
+    from app.scheduler.tasks_promotion import run_promotion_job
+    from app.scheduler.tasks_signals import run_signal_ingestion_job
+
+    now = time.monotonic()
+    return [
+        LaneTask("event_backfill", _run_event_backfill, event_backfill_minutes * 60, now + 15),
+        LaneTask("clustering", run_clustering_job, 15 * 60, now + 30),
+        LaneTask("promotion_sweep", run_promotion_job, 30 * 60, now + 2 * 60),
+        LaneTask("scoring", run_scoring_job, 60 * 60, now + 5 * 60),
+        LaneTask("signal_ingestion", run_signal_ingestion_job, signal_minutes * 60, now + 6 * 60),
+        LaneTask("backfill", run_backfill_job, backfill_hours * 60 * 60, now + 10 * 60),
+        LaneTask("ingestion_health", check_ingestion_health, 30 * 60, now + 3 * 60),
+        LaneTask("inventory_health", check_inventory_health, 30 * 60, now + 4 * 60),
+        LaneTask("preference_decay", run_preference_decay_job, utc_hour=3, utc_minute=0),
+        LaneTask("data_cleanup", run_data_cleanup_job, utc_hour=4, utc_minute=0),
+    ]
+
+
+def _schedule_next(task: LaneTask) -> None:
+    if task.utc_hour is not None:
+        task.next_run_at = _next_utc_time(task.utc_hour, task.utc_minute)
+    elif task.interval_seconds is not None:
+        task.next_run_at = time.monotonic() + task.interval_seconds
+    else:
+        task.next_run_at = time.monotonic() + 3600
+
+
+def main() -> int:
+    signal.signal(signal.SIGTERM, _handle_stop)
+    signal.signal(signal.SIGINT, _handle_stop)
+
+    tasks = _task_catalog()
+    for task in tasks:
+        if task.utc_hour is not None:
+            _schedule_next(task)
+
+    logger.info("Starting maintenance lane with tasks=%s", [task.name for task in tasks])
+    record_lane_heartbeat(
+        "maintenance",
+        status="starting",
+        details={"tasks": [task.name for task in tasks]},
+    )
+
+    while not STOP_EVENT.is_set():
+        now = time.monotonic()
+        due = [task for task in tasks if task.next_run_at <= now]
+        if not due:
+            next_due = min(task.next_run_at for task in tasks)
+            STOP_EVENT.wait(timeout=min(5.0, max(0.1, next_due - now)))
+            continue
+
+        for task in sorted(due, key=lambda item: item.next_run_at):
+            if STOP_EVENT.is_set():
+                break
+            started = time.monotonic()
+            record_lane_heartbeat("maintenance", status="running", details={"task": task.name})
+            try:
+                logger.info("[maintenance_lane] starting task=%s", task.name)
+                task.run()
+                duration = round(time.monotonic() - started, 2)
+                logger.info(
+                    "[maintenance_lane] finished task=%s duration_seconds=%s",
+                    task.name,
+                    duration,
+                )
+                record_lane_heartbeat(
+                    "maintenance",
+                    status="idle",
+                    details={"last_task": task.name, "last_duration_seconds": duration},
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("[maintenance_lane] task failed task=%s: %s", task.name, exc)
+                record_lane_heartbeat(
+                    "maintenance",
+                    status="error",
+                    details={"task": task.name, "error": str(exc)},
+                )
+            finally:
+                _schedule_next(task)
+
+    record_lane_heartbeat("maintenance", status="stopped")
+    logger.info("Maintenance lane stopped")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+

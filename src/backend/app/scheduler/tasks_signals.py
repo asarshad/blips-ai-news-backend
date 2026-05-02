@@ -38,7 +38,6 @@ def run_signal_ingestion_job() -> None:
     try:
         from app.core.config import get_settings
         from app.ingestion.signal_ingestion import run_signal_ingestion
-        from app.scheduler.tasks_content_events import run_content_event_dispatch_job
 
         settings = get_settings()
         yt_api_key: str = getattr(settings, "YOUTUBE_API_KEY", "") or ""
@@ -132,7 +131,6 @@ def run_signal_ingestion_job() -> None:
             x_signals_cohort_accounts=x_cohort_accounts,
             x_signals_query_terms=x_query_terms,
         )
-        run_content_event_dispatch_job()
 
         stats.items_processed = result.stubs_created + result.signal_hits_bumped
         logger.info(

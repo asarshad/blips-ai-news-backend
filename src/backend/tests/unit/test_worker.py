@@ -1,247 +1,296 @@
-"""Unit tests for the dedicated background worker entrypoint."""
+"""Unit tests for the worker launcher entrypoints."""
 
 from __future__ import annotations
 
 import app.worker as worker
+from app.workers import launcher
+from app.workers.leader_lock import WorkerLeaderLock
 
 
-def _patch_signal_handlers(monkeypatch):
-    monkeypatch.setattr(worker.signal, "signal", lambda *_args, **_kwargs: None)
+def test_app_worker_delegates_to_launcher(monkeypatch):
+    monkeypatch.setattr(worker, "run_launcher", lambda: 7)
+
+    assert worker.run_worker() == 7
 
 
-def test_run_worker_returns_zero_when_scheduler_disabled(monkeypatch):
-    _patch_signal_handlers(monkeypatch)
-    worker._stop_event.clear()
-    monkeypatch.setenv("SCHEDULER_ENABLED", "false")
+def test_launcher_defines_independent_lane_processes():
+    lane_names = [lane.name for lane in launcher.DEFAULT_LANES]
 
-    idle_calls: list[str] = []
-    monkeypatch.setattr(worker, "_idle_forever", lambda: idle_calls.append("idle"))
-
-    exit_code = worker.run_worker()
-
-    assert exit_code == 0
-    assert idle_calls == ["idle"]
-
-
-def test_run_worker_exits_nonzero_when_lock_never_acquired(monkeypatch):
-    _patch_signal_handlers(monkeypatch)
-    worker._stop_event.clear()
-    monkeypatch.setenv("SCHEDULER_ENABLED", "true")
-    monkeypatch.setattr(worker, "_acquire_lock_with_retry", lambda: False)
-    monkeypatch.setattr(worker, "_idle_forever", lambda: (_ for _ in ()).throw(AssertionError()))
-
-    exit_code = worker.run_worker()
-
-    assert exit_code == 1
+    assert lane_names == [
+        "ingestion",
+        "promotion",
+        "ai_summary",
+        "article_images",
+        "ready_events",
+        "maintenance",
+    ]
 
 
-def test_acquire_lock_with_retry_retries_redis_unavailability(monkeypatch):
-    worker._stop_event.clear()
+def test_launcher_uses_per_lane_db_pool_env(monkeypatch):
+    lane = launcher.DEFAULT_LANES[0]
+    monkeypatch.setenv("LANE_DB_POOL_SIZE", "1")
+    monkeypatch.setenv("LANE_DB_MAX_OVERFLOW", "1")
+    monkeypatch.setenv("DB_POOL_SIZE", "9")
+    monkeypatch.setenv("DB_MAX_OVERFLOW", "9")
+
+    env = launcher._child_env(lane)
+
+    assert env["WORKER_LANE_NAME"] == "ingestion"
+    assert env["DB_POOL_SIZE"] == "1"
+    assert env["DB_MAX_OVERFLOW"] == "1"
+
+
+def test_leader_lock_acquire_retries_redis_unavailability(monkeypatch):
+    lock = WorkerLeaderLock(key="test-lock", ttl_seconds=30, token="token")
+    stop_event = launcher.threading.Event()
     attempts = iter([None, True])
     waits: list[float] = []
 
-    monkeypatch.setattr(worker, "acquire_worker_lock", lambda: next(attempts))
+    monkeypatch.setattr(lock, "acquire", lambda: next(attempts))
     monkeypatch.setattr(
-        worker._stop_event,
+        stop_event,
         "wait",
         lambda timeout=None: waits.append(timeout) or False,
     )
 
-    assert worker._acquire_lock_with_retry(max_attempts=3, base_delay=5.0) is True
+    assert lock.acquire_with_retry(stop_event, max_attempts=3, base_delay_seconds=5.0) is True
     assert waits == [5.0]
 
 
-def test_run_worker_refreshes_lock_during_startup_fetch(monkeypatch):
-    _patch_signal_handlers(monkeypatch)
-    worker._stop_event.clear()
-    monkeypatch.setenv("SCHEDULER_ENABLED", "true")
-    monkeypatch.setattr(worker, "_acquire_lock_with_retry", lambda: True)
+def test_launcher_detects_stale_lane_heartbeat(monkeypatch):
+    monkeypatch.setattr(
+        launcher,
+        "read_lane_heartbeats",
+        lambda: {
+            "available": True,
+            "lanes": [
+                {
+                    "lane": "ingestion",
+                    "status": "idle",
+                    "updated_at": "2026-05-02T10:00:00+00:00",
+                }
+            ],
+        },
+    )
 
-    class DummyScheduler:
-        def shutdown(self, wait=False):  # noqa: ARG002
+    class _FakeDateTime:
+        @staticmethod
+        def fromisoformat(value):
+            from datetime import datetime
+
+            return datetime.fromisoformat(value)
+
+        @staticmethod
+        def now(tz=None):
+            from datetime import datetime
+
+            return datetime(2026, 5, 2, 10, 20, 1, tzinfo=tz)
+
+    monkeypatch.setattr(launcher, "datetime", _FakeDateTime)
+    monkeypatch.setattr(launcher.time, "monotonic", lambda: 1000.0)
+
+    stale = launcher._stale_lanes(
+        {"ingestion", "ai_summary"},
+        stale_after_seconds=900,
+        startup_grace_seconds=120,
+        launched_at=0.0,
+    )
+
+    assert stale == ["ai_summary", "ingestion"]
+
+
+def test_launcher_ignores_stale_heartbeats_during_startup_grace(monkeypatch):
+    monkeypatch.setattr(launcher, "read_lane_heartbeats", lambda: {"available": True, "lanes": []})
+    monkeypatch.setattr(launcher.time, "monotonic", lambda: 10.0)
+
+    stale = launcher._stale_lanes(
+        {"ingestion"},
+        stale_after_seconds=1,
+        startup_grace_seconds=120,
+        launched_at=0.0,
+    )
+
+    assert stale == []
+
+
+def test_launcher_does_not_fail_when_heartbeat_snapshot_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        launcher,
+        "read_lane_heartbeats",
+        lambda: {"available": False, "error": "redis down", "lanes": []},
+    )
+    monkeypatch.setattr(launcher.time, "monotonic", lambda: 1000.0)
+
+    stale = launcher._stale_lanes(
+        {"ingestion"},
+        stale_after_seconds=1,
+        startup_grace_seconds=120,
+        launched_at=0.0,
+    )
+
+    assert stale == []
+
+
+def test_stop_lanes_uses_per_lane_grace_window():
+    waits: list[float] = []
+
+    class _FakeProcess:
+        def __init__(self):
+            self.returncode = None
+            self.pid = 0
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
             return None
 
-    monkeypatch.setattr(worker, "init_scheduler", lambda: DummyScheduler())
-    monkeypatch.setattr(worker, "fetch_and_process_news", lambda: None)
+        def wait(self, timeout=None):
+            waits.append(timeout)
+            self.returncode = 0
+            return 0
 
-    started_threads: list[tuple[object, bool | None, str | None]] = []
-    joined_threads: list[tuple[str | None, float | None]] = []
+    launcher._stop_lanes({"one": _FakeProcess(), "two": _FakeProcess()}, grace_seconds=7)
 
-    class DummyThread:
-        def __init__(self, target=None, daemon=None, name=None):
-            self.target = target
-            self.daemon = daemon
-            self.name = name
-
-        def start(self):
-            started_threads.append((self.target, self.daemon, self.name))
-
-        def join(self, timeout=None):
-            joined_threads.append((self.name, timeout))
-
-    monkeypatch.setattr(worker.threading, "Thread", DummyThread)
-    monkeypatch.setattr(
-        worker,
-        "_maintain_worker_lock",
-        lambda *args, **kwargs: worker._stop_event.set() or 0,
-    )
-    monkeypatch.setattr(worker, "release_worker_lock", lambda: True)
-
-    exit_code = worker.run_worker()
-
-    assert exit_code == 0
-    assert any(name == "worker-startup-lock-refresher" and daemon for _, daemon, name in started_threads)
-    assert ("worker-startup-lock-refresher", None) in joined_threads
+    assert waits == [7, 7]
 
 
-def test_resolve_content_event_worker_specs_uses_default_groups(monkeypatch):
-    monkeypatch.delenv("CONTENT_EVENT_WORKER_SPECS", raising=False)
+def test_start_lanes_stops_started_lanes_when_spawn_fails(monkeypatch):
+    stopped: list[str] = []
+    calls = []
 
-    assert worker._resolve_content_event_worker_specs() == (
-        ("content.promotion_eval.requested",),
-        ("content.ai_summary.requested",),
-        ("article.image_verification.requested",),
-        ("content.ready", "content.unready"),
-    )
+    class _FakeProcess:
+        pid = 123
 
+    def _fake_popen(command, env=None):  # noqa: ARG001
+        calls.append(command)
+        if len(calls) == 2:
+            raise OSError("spawn failed")
+        return _FakeProcess()
 
-def test_resolve_content_event_worker_specs_parses_semicolon_groups(monkeypatch):
-    monkeypatch.setenv(
-        "CONTENT_EVENT_WORKER_SPECS",
-        "content.ready,content.unready; content.ai_summary.requested ",
-    )
+    monkeypatch.setattr(launcher.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(launcher, "_stop_lanes", lambda processes: stopped.extend(processes))
+    monkeypatch.setattr(launcher, "record_lane_heartbeat", lambda *a, **k: None)
 
-    assert worker._resolve_content_event_worker_specs() == (
-        ("content.ready", "content.unready"),
-        ("content.ai_summary.requested",),
-    )
-
-
-def test_startup_content_event_worker_specs_only_includes_promotion(monkeypatch):
-    monkeypatch.setenv(
-        "CONTENT_EVENT_WORKER_SPECS",
-        "content.promotion_eval.requested;content.ai_summary.requested",
-    )
-
-    assert worker._startup_content_event_worker_specs() == (
-        ("content.promotion_eval.requested",),
-    )
-    assert worker._steady_state_content_event_worker_specs() == (
-        ("content.ai_summary.requested",),
-    )
-
-
-def test_run_worker_starts_content_event_threads_when_enabled(monkeypatch):
-    _patch_signal_handlers(monkeypatch)
-    worker._stop_event.clear()
-    monkeypatch.setenv("SCHEDULER_ENABLED", "true")
-    monkeypatch.setenv("CONTENT_EVENT_THREADS_ENABLED", "true")
-    monkeypatch.setattr(worker, "_acquire_lock_with_retry", lambda: True)
-
-    class DummyScheduler:
-        def shutdown(self, wait=False):  # noqa: ARG002
-            return None
-
-    monkeypatch.setattr(worker, "init_scheduler", lambda: DummyScheduler())
-    monkeypatch.setattr(worker, "fetch_and_process_news", lambda: None)
-
-    started_specs: list[tuple[object, tuple[tuple[str, ...], ...] | None]] = []
-
-    def _fake_start_threads(stop_event, *, specs=None):
-        started_specs.append((stop_event, specs))
-        return []
-
-    monkeypatch.setattr(worker, "_start_content_event_worker_threads", _fake_start_threads)
-    monkeypatch.setattr(
-        worker,
-        "_maintain_worker_lock",
-        lambda *args, **kwargs: worker._stop_event.set() or 0,
-    )
-    monkeypatch.setattr(worker, "release_worker_lock", lambda: True)
-
-    exit_code = worker.run_worker()
-
-    assert exit_code == 0
-    assert started_specs == [
-        (
-            worker._stop_event,
+    try:
+        launcher._start_lanes(
             (
-                ("content.promotion_eval.requested",),
-                ("content.ai_summary.requested",),
-                ("article.image_verification.requested",),
-                ("content.ready", "content.unready"),
-            ),
-        ),
-    ]
-
-
-def test_maintain_worker_lock_exits_nonzero_when_reacquire_fails(monkeypatch):
-    worker._stop_event.clear()
-    stop_event = worker.threading.Event()
-
-    monkeypatch.setattr(stop_event, "wait", lambda timeout=None: False)
-    monkeypatch.setattr(worker, "refresh_worker_lock", lambda: False)
-    monkeypatch.setattr(worker, "_attempt_lock_reacquire", lambda: False)
-
-    assert (
-        worker._maintain_worker_lock(
-            stop_event,
-            refresh_interval_seconds=0,
-            phase="test",
+                launcher.LaneSpec("one", "app.one"),
+                launcher.LaneSpec("two", "app.two"),
+            )
         )
-        == 1
-    )
+    except OSError:
+        pass
+    else:
+        raise AssertionError("Expected spawn failure")
+
+    assert stopped == ["one"]
 
 
-def test_run_worker_releases_lock_and_exits_nonzero_when_scheduler_init_fails(monkeypatch):
-    _patch_signal_handlers(monkeypatch)
-    worker._stop_event.clear()
+def test_leader_lock_refresh_and_release_use_cas(monkeypatch):
+    calls = []
+
+    class _FakeRedis:
+        def eval(self, *args):
+            calls.append(args)
+            return 1
+
+    monkeypatch.setattr("app.workers.leader_lock.get_redis", lambda: _FakeRedis())
+    lock = WorkerLeaderLock(key="k", ttl_seconds=30, token="tok")
+
+    assert lock.refresh() is True
+    assert lock.release() is True
+    assert calls[0][2:] == ("k", "tok", "30")
+    assert calls[1][2:] == ("k", "tok")
+
+
+def test_run_launcher_exits_when_lock_refresh_repeatedly_fails(monkeypatch):
     monkeypatch.setenv("SCHEDULER_ENABLED", "true")
-    monkeypatch.setattr(worker, "_acquire_lock_with_retry", lambda: True)
-    monkeypatch.setattr(worker, "init_scheduler", lambda: None)
-    monkeypatch.setattr(worker._stop_event, "wait", lambda timeout=None: False)
+    launcher.STOP_EVENT.clear()
 
-    release_calls: list[str] = []
-    monkeypatch.setattr(worker, "release_worker_lock", lambda: release_calls.append("release") or True)
+    class _FakeLock:
+        refresh_interval_seconds = 0
 
-    exit_code = worker.run_worker()
+        def acquire_with_retry(self, stop_event):  # noqa: ARG002
+            return True
 
-    assert exit_code == 1
-    assert release_calls == ["release"]
+        def refresh(self):
+            return None
+
+        def release(self):
+            return True
+
+    class _FakeProcess:
+        pid = 1
+        returncode = None
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):  # noqa: ARG002
+            self.returncode = 0
+            return 0
+
+    monkeypatch.setattr(launcher.signal, "signal", lambda *a, **k: None)
+    monkeypatch.setattr(launcher, "WorkerLeaderLock", _FakeLock)
+    monkeypatch.setattr(launcher, "_start_lanes", lambda lanes: {"ingestion": _FakeProcess()})
+    monkeypatch.setattr(launcher, "record_lane_heartbeat", lambda *a, **k: None)
+    monkeypatch.setattr(launcher, "_bool_env", lambda name, default: False)
+
+    assert launcher.run_launcher() == 1
+    launcher.STOP_EVENT.clear()
 
 
-def test_run_worker_exits_nonzero_when_lock_recovery_fails(monkeypatch):
-    _patch_signal_handlers(monkeypatch)
-    worker._stop_event.clear()
+def test_run_launcher_watchdog_failure_exits_for_render_restart(monkeypatch):
     monkeypatch.setenv("SCHEDULER_ENABLED", "true")
-    monkeypatch.setattr(worker, "_acquire_lock_with_retry", lambda: True)
+    launcher.STOP_EVENT.clear()
 
-    class DummyScheduler:
-        def shutdown(self, wait=False):  # noqa: ARG002
+    class _FakeLock:
+        refresh_interval_seconds = 1000
+
+        def acquire_with_retry(self, stop_event):  # noqa: ARG002
+            return True
+
+        def refresh(self):
+            return True
+
+        def release(self):
+            return True
+
+    class _FakeProcess:
+        pid = 1
+        returncode = None
+
+        def poll(self):
             return None
 
-    monkeypatch.setattr(worker, "init_scheduler", lambda: DummyScheduler())
-    monkeypatch.setattr(worker, "fetch_and_process_news", lambda: None)
-
-    class DummyThread:
-        def __init__(self, target=None, daemon=None, name=None):  # noqa: ARG002
-            self.target = target
-            self.daemon = daemon
-            self.name = name
-
-        def start(self):
+        def terminate(self):
             return None
 
-        def join(self, timeout=None):  # noqa: ARG002
-            return None
+        def wait(self, timeout=None):  # noqa: ARG002
+            self.returncode = 0
+            return 0
 
-    monkeypatch.setattr(worker.threading, "Thread", DummyThread)
-    monkeypatch.setattr(worker, "_maintain_worker_lock", lambda *args, **kwargs: 1)
+    monotonic_values = iter([0, 0, 0, 1000])
+    monkeypatch.setattr(launcher.signal, "signal", lambda *a, **k: None)
+    monkeypatch.setattr(launcher, "WorkerLeaderLock", _FakeLock)
+    monkeypatch.setattr(launcher, "_start_lanes", lambda lanes: {"ingestion": _FakeProcess()})
+    monkeypatch.setattr(launcher, "record_lane_heartbeat", lambda *a, **k: None)
+    monkeypatch.setattr(launcher, "_stale_lanes", lambda *a, **k: ["ingestion"])
+    monkeypatch.setattr(launcher.time, "monotonic", lambda: next(monotonic_values, 32))
 
-    release_calls: list[str] = []
-    monkeypatch.setattr(worker, "release_worker_lock", lambda: release_calls.append("release") or True)
+    class _FakeDateTime:
+        @staticmethod
+        def now(tz=None):
+            from datetime import datetime
 
-    exit_code = worker.run_worker()
+            return datetime(2026, 5, 2, 10, 0, 0, tzinfo=tz)
 
-    assert exit_code == 1
-    assert release_calls == ["release"]
+    monkeypatch.setattr(launcher, "datetime", _FakeDateTime)
+    monkeypatch.setattr(launcher, "_int_env", lambda name, default, minimum=1: 0 if "GRACE" in name else 30)
+
+    assert launcher.run_launcher() == 1
+    launcher.STOP_EVENT.clear()

@@ -1,6 +1,5 @@
 import sys
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 from app.scheduler import tasks_ingestion
 from app.scheduler.job_stats import JobStats
@@ -61,7 +60,7 @@ def test_fetch_and_process_news_skips_when_ingestion_disabled(monkeypatch):
     assert ingestion_ran == []
 
 
-def test_run_curation_ingestion_runs_clustering_and_queues_promotion_via_outbox(monkeypatch):
+def test_run_curation_ingestion_queues_followup_work_without_inline_clustering(monkeypatch):
     checkpoint_calls = []
     clustering_calls = []
     promotion_calls = []
@@ -97,6 +96,6 @@ def test_run_curation_ingestion_runs_clustering_and_queues_promotion_via_outbox(
     tasks_ingestion._run_curation_ingestion_with_stats(db, stats)
 
     assert checkpoint_calls == [(db, None)]
-    assert clustering_calls == ["fetch_news"]
-    # Promotion is always event-driven now; the inline run_promotion_job is never called
+    # Follow-up work is lane-driven now; ingestion only queues durable events.
+    assert clustering_calls == []
     assert promotion_calls == []

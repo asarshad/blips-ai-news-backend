@@ -15,11 +15,9 @@ from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.scheduler.job_stats import log_job_start
 from app.scheduler.runtime import (
-    FETCH_NEWS_JOB,
-    is_job_active,
     log_memory_snapshot,
     mark_job_finished,
-    try_mark_job_started,
+    mark_job_started,
 )
 from app.services.article_image_service import repair_article_image_metadata
 
@@ -31,33 +29,16 @@ ARTICLE_IMAGE_VERIFICATION_JOB = "article_image_verification"
 def run_article_image_verification_job() -> None:
     """Run the dedicated article image verification pass.
 
-    Skipped transparently while a ``fetch_news`` cycle is in flight — the
-    ingestion path already triggers verification for newly-promoted rows
-    and we want to avoid two image-heavy DB workloads overlapping on the
-    single worker process.
+    Kept for manual/scheduled maintenance. The primary path is the durable
+    ``article.image_verification.requested`` lane, so this job no longer
+    waits on ingestion state.
     """
-    if is_job_active(FETCH_NEWS_JOB):
-        logger.info(
-            "[%s] fetch_news is active; skipping image verification tick",
-            ARTICLE_IMAGE_VERIFICATION_JOB,
-        )
-        return
-
     stats = log_job_start(ARTICLE_IMAGE_VERIFICATION_JOB)
     run_started_at = None
     run_success = False
     db = None
     try:
-        run_started_at = try_mark_job_started(
-            ARTICLE_IMAGE_VERIFICATION_JOB,
-            unless_active=(FETCH_NEWS_JOB,),
-        )
-        if run_started_at is None:
-            logger.info(
-                "[%s] fetch_news started concurrently; skipping image verification tick",
-                ARTICLE_IMAGE_VERIFICATION_JOB,
-            )
-            return
+        run_started_at = mark_job_started(ARTICLE_IMAGE_VERIFICATION_JOB)
         log_memory_snapshot(logger, f"{ARTICLE_IMAGE_VERIFICATION_JOB}:start")
         db = SessionLocal()
         result = repair_article_image_metadata(

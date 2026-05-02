@@ -204,11 +204,10 @@ def process_content_ai_summary_request(
             llm_client=resolved_llm_client,
         )
 
+    cache_refresh = None
     if changed:
         invalidate_tiered_feed_cache()
         cache_refresh = refresh_cached_playlist_items(db, content_ids=[int(item.id)])
-    else:
-        cache_refresh = None
 
     logger.info(
         "[content_ai] processed content_id=%s changed=%s type=%s ai_processed=%s readiness=%s",

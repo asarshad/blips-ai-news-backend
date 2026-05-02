@@ -1,5 +1,5 @@
-from types import SimpleNamespace
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from app.models.content import ContentType
@@ -410,22 +410,35 @@ def test_process_ai_summaries_defers_recent_unskimmable_articles(monkeypatch):
     db.commit.assert_called()
 
 
-def test_process_ai_summaries_scheduled_skips_when_fetch_news_is_active(monkeypatch):
-    """Scheduled ai_retry must defer while a fetch_news cycle is active."""
+def test_process_ai_summaries_scheduled_does_not_wait_on_fetch_state(monkeypatch):
+    """The async AI lane owns its own resource limits and does not wait on ingestion."""
     fetch_started_at = mark_job_started(FETCH_NEWS_JOB)
     try:
-        session_factory = MagicMock()
-        repo_factory = MagicMock()
+        db = MagicMock()
+        repo = MagicMock()
+        repo.get_recent_promoted_articles_pending_ai.return_value = []
+        repo.get_recent_promoted_videos_pending_ai.return_value = []
+        repo.get_articles_with_short_summaries.return_value = []
+        repo.get_articles_with_long_summaries.return_value = []
+        repo.get_videos_with_short_summaries.return_value = []
+        llm_client = MagicMock()
+        llm_client.is_configured.return_value = True
+
         monkeypatch.setattr(tasks_ai_retry.feature_flags, "is_enabled", lambda name: True)
-        monkeypatch.setattr(tasks_ai_retry, "SessionLocal", session_factory)
+        monkeypatch.setattr(tasks_ai_retry, "SessionLocal", lambda: db)
         monkeypatch.setattr(tasks_ai_retry, "log_job_start", lambda _name: _FakeStats())
-        monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", repo_factory)
+        monkeypatch.setattr(tasks_ai_retry, "_backfill_starters", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr("app.integrations.LLMClient", lambda: llm_client)
+        monkeypatch.setattr("app.repositories.content_repo.ContentItemRepository", lambda _db: repo)
+        monkeypatch.setattr(
+            "app.article_hydration.ArticleHydrationService",
+            lambda llm_client=None: MagicMock(),
+        )
 
         tasks_ai_retry.process_ai_summaries(trigger="scheduled")
 
-        # Mutex must short-circuit before any DB/session/repo work happens.
-        session_factory.assert_not_called()
-        repo_factory.assert_not_called()
+        repo.get_recent_promoted_articles_pending_ai.assert_called_once()
+        repo.get_recent_promoted_videos_pending_ai.assert_called_once()
     finally:
         mark_job_finished(FETCH_NEWS_JOB, fetch_started_at, success=False)
 
@@ -844,4 +857,4 @@ def test_process_ai_summaries_skips_maintenance_for_immediate_runs(monkeypatch):
     tasks_ai_retry.process_ai_summaries(max_items=1, include_maintenance=False)
 
     assert stats.items_processed == 1
-    assert maintenance_calls == {"starters": 0, "events": 1}
+    assert maintenance_calls == {"starters": 0, "events": 0}

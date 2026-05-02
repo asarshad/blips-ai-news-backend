@@ -18,6 +18,7 @@ from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.extraction.metrics import extraction_metrics
 from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.content_event import ContentEventOutbox
 from app.models.ingestion_progress import IngestionProgress
 from app.models.source import SourceDailyStat
 from app.services.ai_metrics import compute_ai_feed_metrics
@@ -30,6 +31,7 @@ from app.services.video_metrics_service import (
     compute_video_source_metrics,
     compute_video_supply_metrics,
 )
+from app.services.worker_lane_metrics import read_lane_heartbeats
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -636,4 +638,41 @@ def get_video_source_metrics(db: Session = Depends(get_db)) -> Dict[str, Any]:
         return compute_video_source_metrics(db)
     except Exception as exc:
         logger.error("Error getting video source metrics: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/worker/lanes", dependencies=[Depends(require_admin_key)])
+def get_worker_lane_metrics(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """Get single-worker lane heartbeats and durable outbox queue depth."""
+    try:
+        queue_rows = (
+            db.query(
+                ContentEventOutbox.event_type,
+                ContentEventOutbox.status,
+                func.count(ContentEventOutbox.id).label("count"),
+                func.min(ContentEventOutbox.available_at).label("oldest_available_at"),
+            )
+            .filter(ContentEventOutbox.status.in_(("pending", "processing")))
+            .group_by(ContentEventOutbox.event_type, ContentEventOutbox.status)
+            .order_by(ContentEventOutbox.event_type, ContentEventOutbox.status)
+            .all()
+        )
+        queue_depth = [
+            {
+                "event_type": row.event_type,
+                "status": row.status,
+                "count": int(row.count or 0),
+                "oldest_available_at": (
+                    row.oldest_available_at.isoformat() if row.oldest_available_at else None
+                ),
+            }
+            for row in queue_rows
+        ]
+        return {
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "heartbeats": read_lane_heartbeats(),
+            "outbox": queue_depth,
+        }
+    except Exception as exc:
+        logger.error("Error getting worker lane metrics: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc)) from exc

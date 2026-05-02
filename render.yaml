@@ -84,6 +84,8 @@ projects:
                 sync: false
               - key: SCHEDULER_ENABLED
                 value: "false"          # Prod: worker owns scheduler
+              - key: API_LEGACY_SCHEDULER_ENABLED
+                value: "false"
               - key: DOCS_ENABLED
                 value: "false"
               - key: INGESTION_ENABLED
@@ -114,7 +116,8 @@ projects:
                 value: "300"
 
           # ── Prod Worker (Background Jobs) ─────────────────────────────────
-          # Runs APScheduler: ingestion, scoring, clustering, cleanup, AI retry.
+          # One Render service; several small lane processes inside the same
+          # Linux container. Lanes coordinate through durable DB/Redis state.
           - type: worker
             name: blips-worker
             runtime: python
@@ -123,7 +126,7 @@ projects:
             region: oregon
             rootDir: src/backend
             buildCommand: pip install -r requirements.lock
-            startCommand: python -u -m app.worker
+            startCommand: python -u -m app.workers.launcher
             envVars:
               - key: PYTHON_VERSION
                 value: "3.11.4"
@@ -153,7 +156,15 @@ projects:
               - key: LOG_LEVEL
                 sync: false
               - key: SCHEDULER_ENABLED
-                value: "true"           # Worker owns all scheduled jobs
+                value: "true"           # Worker launcher enabled
+              - key: LANE_DB_POOL_SIZE
+                value: "1"
+              - key: LANE_DB_MAX_OVERFLOW
+                value: "1"
+              - key: DB_POOL_SIZE
+                value: "1"
+              - key: DB_MAX_OVERFLOW
+                value: "1"
               - key: INGESTION_ENABLED
                 value: "true"
               - key: API_PUBLIC_BASE_URL
@@ -168,10 +179,6 @@ projects:
                 value: "true"           # Queue-first promotion; scheduled promotion remains fallback
               - key: AUTO_APPROVE_REVIEW_CONTENT
                 sync: false
-              - key: CONTENT_EVENT_THREADS_ENABLED
-                value: "true"           # One Render worker, multiple in-process queue lanes
-              - key: CONTENT_EVENT_WORKER_SPECS
-                value: "content.promotion_eval.requested;content.ai_summary.requested;article.image_verification.requested;content.ready,content.unready"
               - key: CONTENT_EVENT_BATCH_SIZE
                 value: "10"
               - key: CONTENT_EVENT_AI_BATCH_SIZE
@@ -180,6 +187,20 @@ projects:
                 value: "2.0"
               - key: CONTENT_EVENT_PAUSE_DURING_FETCH
                 value: "false"
+              - key: INGESTION_RECURRING_MAX_SECONDS
+                value: "240"
+              - key: INGEST_CATCHUP_MAX_SECONDS
+                value: "240"
+              - key: CONTENT_EVENT_BACKFILL_INTERVAL_MINUTES
+                value: "10"
+              - key: WORKER_LANE_WATCHDOG_ENABLED
+                value: "true"
+              - key: WORKER_LANE_STALE_SECONDS
+                value: "900"
+              - key: WORKER_LANE_WATCHDOG_INTERVAL_SECONDS
+                value: "30"
+              - key: WORKER_LANE_STARTUP_GRACE_SECONDS
+                value: "120"
               - key: WORKER_MEMORY_SOFT_LIMIT_MB
                 value: "1400"
               - key: WORKER_MEMORY_HARD_LIMIT_MB

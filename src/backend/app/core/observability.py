@@ -266,6 +266,10 @@ def get_ingestion_health_status() -> Dict[str, Any]:
 def get_scheduler_status() -> Dict[str, Any]:
     """Inspect distributed scheduler visibility via the shared Redis leader lock."""
     scheduler_enabled = os.getenv("SCHEDULER_ENABLED", "true").lower() == "true"
+    api_legacy_scheduler_enabled = (
+        os.getenv("API_LEGACY_SCHEDULER_ENABLED", "false").lower()
+        in {"true", "1", "yes", "on"}
+    )
     ingestion_enabled = os.getenv("INGESTION_ENABLED", "true").lower() == "true"
     external_scheduler_expected = (
         os.getenv("EXTERNAL_SCHEDULER_EXPECTED", "false").lower() == "true"
@@ -273,8 +277,9 @@ def get_scheduler_status() -> Dict[str, Any]:
     lock_key = os.getenv("SCHEDULER_LEADER_LOCK_KEY", "scheduler_lock")
 
     status: Dict[str, Any] = {
-        "mode": "local" if scheduler_enabled else "external",
+        "mode": "legacy_api" if api_legacy_scheduler_enabled else "external_worker",
         "scheduler_enabled": scheduler_enabled,
+        "api_legacy_scheduler_enabled": api_legacy_scheduler_enabled,
         "ingestion_enabled": ingestion_enabled,
         "external_scheduler_expected": external_scheduler_expected,
         "lock_key": lock_key,

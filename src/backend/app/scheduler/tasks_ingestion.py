@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from app.core.feature_flags import feature_flags
 from app.core.dependencies import get_redis
+from app.core.feature_flags import feature_flags
 from app.core.logging import get_logger
 from app.db.base import SessionLocal
 from app.scheduler.job_stats import JobStats, log_job_start
@@ -78,7 +78,6 @@ def fetch_and_process_news():
 def _run_curation_ingestion_with_stats(db, stats: JobStats):
     try:
         from app.ingestion.checkpointing import run_checkpointed_ingestion
-        from app.scheduler.tasks_curation import run_clustering_job
 
         redis_client = None
         try:
@@ -102,8 +101,6 @@ def _run_curation_ingestion_with_stats(db, stats: JobStats):
         else:
             logger.info("[fetch_news] Curated-only mode active; discovery ingestion skipped")
 
-        logger.info("[fetch_news] Running clustering before promotion")
-        run_clustering_job(trigger="fetch_news")
-        logger.info("[fetch_news] Promotion requests queued via outbox; draining asynchronously")
+        logger.info("[fetch_news] Follow-up work queued via outbox; lanes will drain asynchronously")
     except Exception as e:
         stats.errors.append(f"Curation ingestion: {str(e)}")

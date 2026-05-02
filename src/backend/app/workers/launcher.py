@@ -1,0 +1,315 @@
+"""Process launcher for the single Render worker service."""
+
+from __future__ import annotations
+
+import os
+import signal
+import subprocess
+import sys
+import threading
+import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from app.core.logging import get_logger, setup_logging
+from app.services.worker_lane_metrics import read_lane_heartbeats, record_lane_heartbeat
+from app.workers.leader_lock import WorkerLeaderLock
+
+setup_logging()
+logger = get_logger(__name__)
+
+STOP_EVENT = threading.Event()
+
+
+@dataclass(frozen=True)
+class LaneSpec:
+    name: str
+    module: str
+    args: tuple[str, ...] = ()
+
+
+DEFAULT_LANES: tuple[LaneSpec, ...] = (
+    LaneSpec("ingestion", "app.workers.ingestion_lane"),
+    LaneSpec(
+        "promotion",
+        "app.workers.content_event_lane",
+        (
+            "--lane-name",
+            "promotion",
+            "--event-types",
+            "content.promotion_eval.requested",
+        ),
+    ),
+    LaneSpec(
+        "ai_summary",
+        "app.workers.content_event_lane",
+        (
+            "--lane-name",
+            "ai_summary",
+            "--event-types",
+            "content.ai_summary.requested",
+        ),
+    ),
+    LaneSpec(
+        "article_images",
+        "app.workers.content_event_lane",
+        (
+            "--lane-name",
+            "article_images",
+            "--event-types",
+            "article.image_verification.requested",
+        ),
+    ),
+    LaneSpec(
+        "ready_events",
+        "app.workers.content_event_lane",
+        (
+            "--lane-name",
+            "ready_events",
+            "--event-types",
+            "content.ready,content.unready",
+        ),
+    ),
+    LaneSpec("maintenance", "app.workers.maintenance_lane"),
+)
+
+
+def _handle_stop(signum, _frame) -> None:
+    logger.info("Received signal %s; stopping worker launcher", signum)
+    STOP_EVENT.set()
+
+
+def _child_env(lane: LaneSpec) -> dict[str, str]:
+    env = os.environ.copy()
+    env["WORKER_LANE_NAME"] = lane.name
+    env["DB_POOL_SIZE"] = os.getenv("LANE_DB_POOL_SIZE", os.getenv("DB_POOL_SIZE", "1"))
+    env["DB_MAX_OVERFLOW"] = os.getenv(
+        "LANE_DB_MAX_OVERFLOW",
+        os.getenv("DB_MAX_OVERFLOW", "1"),
+    )
+    return env
+
+
+def _command_for_lane(lane: LaneSpec) -> list[str]:
+    return [sys.executable, "-u", "-m", lane.module, *lane.args]
+
+
+def _start_lanes(lanes: tuple[LaneSpec, ...]) -> dict[str, subprocess.Popen]:
+    processes: dict[str, subprocess.Popen] = {}
+    for lane in lanes:
+        command = _command_for_lane(lane)
+        logger.info("Starting worker lane %s: %s", lane.name, " ".join(command))
+        try:
+            processes[lane.name] = subprocess.Popen(command, env=_child_env(lane))  # noqa: S603
+        except Exception:
+            _stop_lanes(processes)
+            raise
+        record_lane_heartbeat(
+            lane.name,
+            status="launched",
+            details={"pid": processes[lane.name].pid},
+        )
+    return processes
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _int_env(name: str, default: int, *, minimum: int = 1) -> int:
+    try:
+        return max(minimum, int(os.getenv(name, str(default))))
+    except ValueError:
+        return max(minimum, default)
+
+
+def _parse_heartbeat_time(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _stale_lanes(
+    expected_lanes: set[str],
+    *,
+    stale_after_seconds: int,
+    startup_grace_seconds: int,
+    launched_at: float,
+) -> list[str]:
+    """Return lane names whose heartbeat is missing or stale."""
+    if time.monotonic() - launched_at < startup_grace_seconds:
+        return []
+
+    snapshot = read_lane_heartbeats()
+    if not snapshot.get("available"):
+        logger.warning("Worker lane heartbeat snapshot unavailable: %s", snapshot.get("error"))
+        return []
+
+    now = datetime.now(timezone.utc)
+    by_lane = {
+        str(row.get("lane")): row
+        for row in snapshot.get("lanes", [])
+        if isinstance(row, dict) and row.get("lane")
+    }
+    stale: list[str] = []
+    for lane_name in sorted(expected_lanes):
+        payload = by_lane.get(lane_name)
+        if payload is None:
+            stale.append(lane_name)
+            continue
+        updated_at = _parse_heartbeat_time(payload.get("updated_at"))
+        if updated_at is None:
+            stale.append(lane_name)
+            continue
+        age_seconds = (now - updated_at).total_seconds()
+        if age_seconds > stale_after_seconds:
+            stale.append(lane_name)
+    return stale
+
+
+def _stop_lanes(processes: dict[str, subprocess.Popen], *, grace_seconds: float = 20.0) -> None:
+    """Terminate every lane with an independent grace window."""
+    for name, process in processes.items():
+        if process.poll() is None:
+            logger.info("Terminating worker lane %s pid=%s", name, process.pid)
+            process.terminate()
+
+    for name, process in processes.items():
+        if process.poll() is not None:
+            logger.info("Worker lane %s exited code=%s", name, process.returncode)
+            continue
+        try:
+            process.wait(timeout=grace_seconds)
+            logger.info("Worker lane %s exited code=%s", name, process.returncode)
+        except subprocess.TimeoutExpired:
+            logger.warning("Killing unresponsive worker lane %s pid=%s", name, process.pid)
+            process.kill()
+            process.wait(timeout=5)
+
+
+def run_launcher() -> int:
+    signal.signal(signal.SIGTERM, _handle_stop)
+    signal.signal(signal.SIGINT, _handle_stop)
+
+    if os.getenv("SCHEDULER_ENABLED", "true").lower() not in {"true", "1", "yes", "on"}:
+        logger.info("Worker launcher disabled via SCHEDULER_ENABLED=false; idling")
+        while not STOP_EVENT.is_set():
+            STOP_EVENT.wait(timeout=3600)
+        return 0
+
+    lock = WorkerLeaderLock()
+    if not lock.acquire_with_retry(STOP_EVENT):
+        if STOP_EVENT.is_set():
+            return 0
+        logger.error("Could not acquire worker leader lock; exiting for restart")
+        return 1
+
+    logger.info("Worker leader lock acquired; launching lanes")
+    processes: dict[str, subprocess.Popen] = {}
+    exit_code = 0
+    redis_failures = 0
+    launched_at = time.monotonic()
+    next_lock_refresh = time.monotonic() + lock.refresh_interval_seconds
+    watchdog_enabled = _bool_env("WORKER_LANE_WATCHDOG_ENABLED", True)
+    watchdog_interval_seconds = _int_env("WORKER_LANE_WATCHDOG_INTERVAL_SECONDS", 30)
+    watchdog_stale_seconds = _int_env("WORKER_LANE_STALE_SECONDS", 900)
+    watchdog_startup_grace_seconds = _int_env("WORKER_LANE_STARTUP_GRACE_SECONDS", 120)
+    watchdog_grace_until = datetime.now(timezone.utc) + timedelta(
+        seconds=watchdog_startup_grace_seconds
+    )
+    next_watchdog_check = time.monotonic() + watchdog_interval_seconds
+    try:
+        processes = _start_lanes(DEFAULT_LANES)
+        record_lane_heartbeat(
+            "launcher",
+            status="running",
+            details={"lanes": list(processes.keys())},
+        )
+        while not STOP_EVENT.is_set():
+            for name, process in processes.items():
+                code = process.poll()
+                if code is None:
+                    continue
+                logger.error("Worker lane %s exited unexpectedly code=%s", name, code)
+                record_lane_heartbeat(name, status="exited", details={"exit_code": code})
+                exit_code = code or 1
+                STOP_EVENT.set()
+                break
+
+            now = time.monotonic()
+            if (
+                watchdog_enabled
+                and now >= next_watchdog_check
+                and not STOP_EVENT.is_set()
+                and datetime.now(timezone.utc) >= watchdog_grace_until
+            ):
+                stale = _stale_lanes(
+                    set(processes.keys()),
+                    stale_after_seconds=watchdog_stale_seconds,
+                    startup_grace_seconds=watchdog_startup_grace_seconds,
+                    launched_at=launched_at,
+                )
+                if stale:
+                    logger.error(
+                        "Worker lane heartbeat stale for lanes=%s; stopping for Render restart",
+                        stale,
+                    )
+                    record_lane_heartbeat(
+                        "launcher",
+                        status="watchdog_failed",
+                        details={"stale_lanes": stale},
+                    )
+                    exit_code = 1
+                    STOP_EVENT.set()
+                next_watchdog_check = now + watchdog_interval_seconds
+
+            if now >= next_lock_refresh and not STOP_EVENT.is_set():
+                refreshed = lock.refresh()
+                if refreshed is True:
+                    redis_failures = 0
+                    next_lock_refresh = now + lock.refresh_interval_seconds
+                    record_lane_heartbeat("launcher", status="running")
+                elif refreshed is None:
+                    redis_failures += 1
+                    logger.warning("Worker lock refresh failed (%s/5)", redis_failures)
+                    watchdog_grace_until = datetime.now(timezone.utc) + timedelta(
+                        seconds=watchdog_startup_grace_seconds
+                    )
+                    if redis_failures >= 5:
+                        logger.error("Redis lock refresh failed repeatedly; stopping lanes")
+                        exit_code = 1
+                        STOP_EVENT.set()
+                    next_lock_refresh = now + lock.refresh_interval_seconds
+                else:
+                    logger.error("Worker leader lock lost; stopping lanes")
+                    exit_code = 1
+                    STOP_EVENT.set()
+
+            STOP_EVENT.wait(timeout=1.0)
+    finally:
+        logger.info("Worker launcher stopping lanes")
+        _stop_lanes(processes)
+        if lock.release():
+            logger.info("Worker leader lock released")
+        else:
+            logger.info("Worker leader lock not released; already lost or unavailable")
+        record_lane_heartbeat("launcher", status="stopped", details={"exit_code": exit_code})
+    return exit_code
+
+
+def main() -> int:
+    return run_launcher()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

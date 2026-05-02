@@ -356,14 +356,18 @@ def get_content_stats():
 
 @router.post("/trigger-fetch")
 def trigger_fetch():
-    """Manually trigger content ingestion + AI summarization."""
+    """Manually trigger ingestion.
+
+    Follow-up summarization/image/cache work is handled by worker lanes through
+    durable outbox events.
+    """
     from app.scheduler.tasks import fetch_and_process_news
 
     try:
         fetch_and_process_news()
         return {
             "status": "triggered",
-            "message": "Ingestion + AI summarization triggered successfully",
+            "message": "Ingestion triggered successfully; worker lanes will drain follow-up events",
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
