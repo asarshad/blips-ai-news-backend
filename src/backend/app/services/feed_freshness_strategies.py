@@ -173,13 +173,12 @@ class ArticleRecentHeadV1FeedFreshnessStrategy(CurrentFeedFreshnessStrategy):
         if surface != Surface.ARTICLES:
             return super().tier_a_order_clauses(surface=surface, offset=offset)
 
-        if offset <= 0:
-            return (
-                desc(ContentItem.published_at),
-                desc(ContentItem.promotion_score),
-                desc(ContentItem.global_score),
-            )
-        return super().tier_a_order_clauses(surface=surface, offset=offset)
+        return (
+            desc(func.date(ContentItem.published_at)),
+            desc(ContentItem.promotion_score),
+            desc(ContentItem.global_score),
+            desc(ContentItem.published_at),
+        )
 
     def resume_continuity_window_minutes(self, *, surface: Surface) -> Optional[int]:
         if surface == Surface.ARTICLES:

@@ -503,6 +503,15 @@ def get_tiered_feed(
     # Enforce position-based channel caps (videos/reels only)
     mixed_items = enforce_channel_caps(mixed_items, surface=surface_name)
 
+    # Restore day-first grouping after diversity mixing. mix_feed() re-orders
+    # items for source/topic diversity without date awareness, allowing items
+    # from different days to interleave. Python's stable sort preserves the
+    # diversity mixer's relative ordering within each day.
+    mixed_items.sort(
+        key=lambda item: item.published_at.date() if item.published_at else datetime.min.date(),
+        reverse=True,
+    )
+
     # Map back to tiered items
     item_to_tiered = {t.item.id: t for t in results}
     mixed_tiered = [item_to_tiered[item.id] for item in mixed_items if item.id in item_to_tiered]
