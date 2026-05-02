@@ -171,7 +171,7 @@ projects:
               - key: CONTENT_EVENT_THREADS_ENABLED
                 value: "true"           # One Render worker, multiple in-process queue lanes
               - key: CONTENT_EVENT_WORKER_SPECS
-                value: "content.promotion_eval.requested;content.ai_summary.requested;article.image_verification.requested,content.ready,content.unready"
+                value: "content.promotion_eval.requested;content.ai_summary.requested;article.image_verification.requested;content.ready,content.unready"
               - key: CONTENT_EVENT_BATCH_SIZE
                 value: "10"
               - key: CONTENT_EVENT_AI_BATCH_SIZE
@@ -212,6 +212,10 @@ projects:
                 value: "50"
               - key: ARTICLE_IMAGE_VERIFICATION_INTERVAL_MINUTES
                 value: "5"
+              - key: ARTICLE_IMAGE_REPAIR_LIMIT
+                value: "60"
+              - key: ARTICLE_IMAGE_REPAIR_MAX_SECONDS
+                value: "180"
               - key: SIGNAL_INGESTION_COMMIT_EVERY
                 value: "10"
               - key: INGEST_UNTIL_TARGETS
@@ -259,7 +263,7 @@ projects:
               - key: PREFERENCE_DECAY_FACTOR
                 value: "0.95"
               - key: DB_POOL_SIZE
-                value: "3"
+                value: "5"
               - key: DB_MAX_OVERFLOW
                 value: "5"
               - key: REDIS_MAX_CONNECTIONS

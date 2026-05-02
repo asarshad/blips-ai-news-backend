@@ -64,6 +64,7 @@ def run_article_image_verification_job() -> None:
             db,
             lookback_days=settings.ARTICLE_IMAGE_REPAIR_LOOKBACK_DAYS,
             limit=settings.ARTICLE_IMAGE_REPAIR_LIMIT,
+            max_seconds=settings.ARTICLE_IMAGE_REPAIR_MAX_SECONDS,
             include_generic=True,
             promoted_only=True,
             readiness_reasons=(

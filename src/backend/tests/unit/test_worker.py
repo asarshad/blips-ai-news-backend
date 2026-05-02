@@ -100,11 +100,8 @@ def test_resolve_content_event_worker_specs_uses_default_groups(monkeypatch):
     assert worker._resolve_content_event_worker_specs() == (
         ("content.promotion_eval.requested",),
         ("content.ai_summary.requested",),
-        (
-            "article.image_verification.requested",
-            "content.ready",
-            "content.unready",
-        ),
+        ("article.image_verification.requested",),
+        ("content.ready", "content.unready"),
     )
 
 
@@ -171,11 +168,8 @@ def test_run_worker_starts_content_event_threads_when_enabled(monkeypatch):
             worker._stop_event,
             (
                 ("content.ai_summary.requested",),
-                (
-                    "article.image_verification.requested",
-                    "content.ready",
-                    "content.unready",
-                ),
+                ("article.image_verification.requested",),
+                ("content.ready", "content.unready"),
             ),
         ),
     ]

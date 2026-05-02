@@ -47,12 +47,10 @@ def fetch_and_process_news():
     try:
         run_started_at = try_mark_job_started(
             FETCH_NEWS_JOB,
-            unless_active=("article_image_verification",),
+            unless_active=(FETCH_NEWS_JOB,),
         )
         if run_started_at is None:
-            logger.info(
-                "[fetch_news] SKIPPED - article image verification is currently active"
-            )
+            logger.info("[fetch_news] SKIPPED - fetch_news is already active")
             return
         log_memory_snapshot(logger, "fetch_news:start")
 

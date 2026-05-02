@@ -79,6 +79,7 @@ def test_run_article_image_verification_job_runs_when_fetch_news_is_idle(monkeyp
         "missing_article_image",
         "awaiting_article_image_verification",
     )
+    assert kwargs["max_seconds"] == tasks_article_image.settings.ARTICLE_IMAGE_REPAIR_MAX_SECONDS
     # DB session is always released.
     assert db.close.called
 

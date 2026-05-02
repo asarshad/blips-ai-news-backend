@@ -78,7 +78,8 @@ LOCK_REACQUIRE_DELAY_SECONDS = 5.0
 DEFAULT_CONTENT_EVENT_WORKER_SPECS = (
     "content.promotion_eval.requested;"
     "content.ai_summary.requested;"
-    "article.image_verification.requested,content.ready,content.unready"
+    "article.image_verification.requested;"
+    "content.ready,content.unready"
 )
 PROMOTION_EVENT_TYPE = "content.promotion_eval.requested"
 

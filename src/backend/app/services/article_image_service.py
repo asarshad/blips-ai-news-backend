@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
@@ -97,11 +98,13 @@ def repair_article_image_metadata(
     *,
     lookback_days: int = 14,
     limit: int = 200,
+    max_seconds: int | None = None,
     include_generic: bool = True,
     promoted_only: bool = False,
     readiness_reasons: tuple[str, ...] | None = None,
 ) -> Dict[str, int]:
     """Backfill missing or suspicious article image/canonical metadata."""
+    started_monotonic = time.monotonic()
     hydrator = ArticleHydrationService()
     hydrator.fetch_article_page_metadata = fetch_article_page_metadata
     cutoff = datetime.utcnow() - timedelta(days=lookback_days)
@@ -145,8 +148,19 @@ def repair_article_image_metadata(
     verified_missing = 0
     placeholder_applied = 0
     pending_changes = 0
+    stopped_due_time_limit = False
 
     for item in items:
+        if max_seconds is not None and max_seconds > 0:
+            if time.monotonic() - started_monotonic >= max_seconds:
+                stopped_due_time_limit = True
+                logger.info(
+                    "Article image repair reached time budget max_seconds=%s scanned=%s limit=%s",
+                    max_seconds,
+                    scanned,
+                    limit,
+                )
+                break
         scanned += 1
         source_url = item.canonical_url or item.source_url or ""
         was_missing = not (item.image_url or "").strip()
@@ -213,6 +227,7 @@ def repair_article_image_metadata(
         "replaced_suspicious": replaced_suspicious,
         "verified_missing": verified_missing,
         "placeholder_applied": placeholder_applied,
+        "stopped_due_time_limit": int(stopped_due_time_limit),
         "lookback_days": lookback_days,
     }
 
