@@ -494,13 +494,14 @@ def run_worker():
         logger.info("Scheduler initialized successfully")
         sys.stdout.flush()
 
-        # Promotion is cheap DB work and needs to keep draining even while the
-        # startup fetch performs catch-up ingestion. Heavy AI/image lanes still
-        # wait until after startup fetch so we stay under the 2 GiB worker cap.
+        # Start all queue-drain lanes before the startup fetch. The lanes have
+        # their own batch limits and memory throttle, and keeping them live
+        # prevents freshly ingested content from sitting pending until a long
+        # catch-up fetch fully completes.
         content_event_threads.extend(
             _start_content_event_worker_threads(
                 _stop_event,
-                specs=_startup_content_event_worker_specs(),
+                specs=_resolve_content_event_worker_specs(),
             )
         )
 
@@ -540,16 +541,6 @@ def run_worker():
             logger.error("Worker lock maintenance failed during startup fetch — exiting for restart")
             sys.stdout.flush()
             return 1
-
-        # Start heavier queue-drain lanes only after the startup ingestion burst.
-        # On a single 2Gi worker, running image/AI drains concurrently with
-        # initial fetch has repeatedly pushed peak RSS over Render's memory limit.
-        content_event_threads.extend(
-            _start_content_event_worker_threads(
-                _stop_event,
-                specs=_steady_state_content_event_worker_specs(),
-            )
-        )
 
         # Keep the worker running and refresh lock.
         logger.info("Worker running. Press Ctrl+C to stop.")

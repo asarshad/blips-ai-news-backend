@@ -179,7 +179,7 @@ projects:
               - key: CONTENT_EVENT_POLL_SECONDS
                 value: "2.0"
               - key: CONTENT_EVENT_PAUSE_DURING_FETCH
-                value: "true"
+                value: "false"
               - key: WORKER_MEMORY_SOFT_LIMIT_MB
                 value: "1400"
               - key: WORKER_MEMORY_HARD_LIMIT_MB

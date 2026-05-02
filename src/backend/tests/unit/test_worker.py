@@ -163,10 +163,10 @@ def test_run_worker_starts_content_event_threads_when_enabled(monkeypatch):
 
     assert exit_code == 0
     assert started_specs == [
-        (worker._stop_event, (("content.promotion_eval.requested",),)),
         (
             worker._stop_event,
             (
+                ("content.promotion_eval.requested",),
                 ("content.ai_summary.requested",),
                 ("article.image_verification.requested",),
                 ("content.ready", "content.unready"),
