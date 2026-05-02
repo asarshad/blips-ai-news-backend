@@ -102,5 +102,13 @@ def _run_curation_ingestion_with_stats(db, stats: JobStats):
             logger.info("[fetch_news] Curated-only mode active; discovery ingestion skipped")
 
         logger.info("[fetch_news] Follow-up work queued via outbox; lanes will drain asynchronously")
+
+        try:
+            from app.scheduler.tasks_curation import run_clustering_job
+
+            run_clustering_job(trigger="fetch_news")
+        except Exception as cluster_exc:
+            logger.error("[fetch_news] Inline clustering failed: %s", cluster_exc)
+            stats.errors.append(f"Inline clustering: {cluster_exc}")
     except Exception as e:
         stats.errors.append(f"Curation ingestion: {str(e)}")

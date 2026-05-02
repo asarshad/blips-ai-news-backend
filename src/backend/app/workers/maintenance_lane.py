@@ -86,8 +86,8 @@ def _task_catalog() -> list[LaneTask]:
     now = time.monotonic()
     return [
         LaneTask("event_backfill", _run_event_backfill, event_backfill_minutes * 60, now + 15),
-        LaneTask("clustering", run_clustering_job, 15 * 60, now + 30),
-        LaneTask("promotion_sweep", run_promotion_job, 30 * 60, now + 2 * 60),
+        LaneTask("clustering", run_clustering_job, 5 * 60, now + 30),
+        LaneTask("promotion_sweep", run_promotion_job, 5 * 60, now + 2 * 60),
         LaneTask("scoring", run_scoring_job, 60 * 60, now + 5 * 60),
         LaneTask("signal_ingestion", run_signal_ingestion_job, signal_minutes * 60, now + 6 * 60),
         LaneTask("backfill", run_backfill_job, backfill_hours * 60 * 60, now + 10 * 60),

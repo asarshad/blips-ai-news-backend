@@ -60,7 +60,7 @@ def test_fetch_and_process_news_skips_when_ingestion_disabled(monkeypatch):
     assert ingestion_ran == []
 
 
-def test_run_curation_ingestion_queues_followup_work_without_inline_clustering(monkeypatch):
+def test_run_curation_ingestion_triggers_inline_clustering(monkeypatch):
     checkpoint_calls = []
     clustering_calls = []
     promotion_calls = []
@@ -96,6 +96,7 @@ def test_run_curation_ingestion_queues_followup_work_without_inline_clustering(m
     tasks_ingestion._run_curation_ingestion_with_stats(db, stats)
 
     assert checkpoint_calls == [(db, None)]
-    # Follow-up work is lane-driven now; ingestion only queues durable events.
-    assert clustering_calls == []
+    # Clustering runs inline so freshly ingested items are eligible immediately;
+    # promotion still flows through the per-item outbox + content-event lane.
+    assert clustering_calls == ["fetch_news"]
     assert promotion_calls == []
