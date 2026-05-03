@@ -75,7 +75,6 @@ def _task_catalog() -> list[LaneTask]:
     from app.scheduler.tasks_backfill import run_backfill_job
     from app.scheduler.tasks_cleanup import run_data_cleanup_job
     from app.scheduler.tasks_curation import (
-        run_clustering_job,
         run_preference_decay_job,
         run_scoring_job,
     )
@@ -86,7 +85,6 @@ def _task_catalog() -> list[LaneTask]:
     now = time.monotonic()
     return [
         LaneTask("event_backfill", _run_event_backfill, event_backfill_minutes * 60, now + 15),
-        LaneTask("clustering", run_clustering_job, 5 * 60, now + 30),
         LaneTask("promotion_sweep", run_promotion_job, 5 * 60, now + 2 * 60),
         LaneTask("scoring", run_scoring_job, 60 * 60, now + 5 * 60),
         LaneTask("signal_ingestion", run_signal_ingestion_job, signal_minutes * 60, now + 6 * 60),
@@ -107,6 +105,33 @@ def _schedule_next(task: LaneTask) -> None:
         task.next_run_at = time.monotonic() + 3600
 
 
+def _heartbeat_interval_seconds() -> float:
+    try:
+        return max(5.0, float(os.getenv("WORKER_LANE_HEARTBEAT_SECONDS", "60")))
+    except ValueError:
+        return 60.0
+
+
+def _start_background_heartbeat(current_status: dict) -> threading.Thread:
+    """Emit maintenance heartbeats on a fixed cadence regardless of task duration."""
+    interval = _heartbeat_interval_seconds()
+
+    def _loop() -> None:
+        while not STOP_EVENT.wait(timeout=interval):
+            try:
+                record_lane_heartbeat(
+                    "maintenance",
+                    status=current_status.get("status", "alive"),
+                    details=current_status.get("details"),
+                )
+            except Exception:
+                pass
+
+    thread = threading.Thread(target=_loop, name="maintenance-heartbeat", daemon=True)
+    thread.start()
+    return thread
+
+
 def main() -> int:
     signal.signal(signal.SIGTERM, _handle_stop)
     signal.signal(signal.SIGINT, _handle_stop)
@@ -122,6 +147,11 @@ def main() -> int:
         status="starting",
         details={"tasks": [task.name for task in tasks]},
     )
+    current_status: dict = {
+        "status": "starting",
+        "details": {"tasks": [task.name for task in tasks]},
+    }
+    _start_background_heartbeat(current_status)
 
     while not STOP_EVENT.is_set():
         now = time.monotonic()
@@ -135,6 +165,8 @@ def main() -> int:
             if STOP_EVENT.is_set():
                 break
             started = time.monotonic()
+            current_status["status"] = "running"
+            current_status["details"] = {"task": task.name}
             record_lane_heartbeat("maintenance", status="running", details={"task": task.name})
             try:
                 logger.info("[maintenance_lane] starting task=%s", task.name)
@@ -145,6 +177,11 @@ def main() -> int:
                     task.name,
                     duration,
                 )
+                current_status["status"] = "idle"
+                current_status["details"] = {
+                    "last_task": task.name,
+                    "last_duration_seconds": duration,
+                }
                 record_lane_heartbeat(
                     "maintenance",
                     status="idle",
@@ -152,6 +189,8 @@ def main() -> int:
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.exception("[maintenance_lane] task failed task=%s: %s", task.name, exc)
+                current_status["status"] = "error"
+                current_status["details"] = {"task": task.name, "error": str(exc)}
                 record_lane_heartbeat(
                     "maintenance",
                     status="error",

@@ -8,7 +8,7 @@ from app.scheduler.job_stats import JobStats
 def test_run_curation_ingestion_runs_video_discovery(monkeypatch):
     checkpoint_calls = []
     discovery_calls = []
-    db = object()
+    db = SimpleNamespace(commit=lambda: None, rollback=lambda: None)
 
     monkeypatch.setitem(
         sys.modules,
@@ -27,6 +27,13 @@ def test_run_curation_ingestion_runs_video_discovery(monkeypatch):
                 discovery_calls.append(db)
                 or {"videos_ingested": 2, "reels_ingested": 1, "errors": 0}
             )
+        ),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "app.scheduler.tasks_curation",
+        SimpleNamespace(
+            queue_content_clustering_request=lambda db, *, trigger="fetch_news": object(),
         ),
     )
     monkeypatch.setattr(tasks_ingestion, "get_redis", lambda: None)
@@ -60,11 +67,12 @@ def test_fetch_and_process_news_skips_when_ingestion_disabled(monkeypatch):
     assert ingestion_ran == []
 
 
-def test_run_curation_ingestion_triggers_inline_clustering(monkeypatch):
+def test_run_curation_ingestion_enqueues_clustering_event(monkeypatch):
     checkpoint_calls = []
-    clustering_calls = []
+    clustering_enqueue_calls = []
     promotion_calls = []
-    db = object()
+    commits = []
+    db = SimpleNamespace(commit=lambda: commits.append(True), rollback=lambda: None)
 
     monkeypatch.setitem(
         sys.modules,
@@ -79,7 +87,9 @@ def test_run_curation_ingestion_triggers_inline_clustering(monkeypatch):
         sys.modules,
         "app.scheduler.tasks_curation",
         SimpleNamespace(
-            run_clustering_job=lambda *, trigger="scheduled": clustering_calls.append(trigger),
+            queue_content_clustering_request=lambda db, *, trigger="fetch_news": (
+                clustering_enqueue_calls.append((db, trigger)) or object()
+            ),
         ),
     )
     monkeypatch.setitem(
@@ -96,7 +106,9 @@ def test_run_curation_ingestion_triggers_inline_clustering(monkeypatch):
     tasks_ingestion._run_curation_ingestion_with_stats(db, stats)
 
     assert checkpoint_calls == [(db, None)]
-    # Clustering runs inline so freshly ingested items are eligible immediately;
-    # promotion still flows through the per-item outbox + content-event lane.
-    assert clustering_calls == ["fetch_news"]
+    # Clustering is now event-driven: ingestion enqueues a single clustering
+    # request which the clustering lane drains asynchronously. Promotion still
+    # flows through the per-item outbox + content-event lane.
+    assert clustering_enqueue_calls == [(db, "fetch_news")]
+    assert commits == [True]
     assert promotion_calls == []

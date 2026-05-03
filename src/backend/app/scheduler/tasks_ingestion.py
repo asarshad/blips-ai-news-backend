@@ -104,11 +104,17 @@ def _run_curation_ingestion_with_stats(db, stats: JobStats):
         logger.info("[fetch_news] Follow-up work queued via outbox; lanes will drain asynchronously")
 
         try:
-            from app.scheduler.tasks_curation import run_clustering_job
+            from app.scheduler.tasks_curation import queue_content_clustering_request
 
-            run_clustering_job(trigger="fetch_news")
+            queued = queue_content_clustering_request(db, trigger="fetch_news")
+            db.commit()
+            logger.info(
+                "[fetch_news] Clustering event %s",
+                "enqueued" if queued is not None else "skipped (already pending)",
+            )
         except Exception as cluster_exc:
-            logger.error("[fetch_news] Inline clustering failed: %s", cluster_exc)
-            stats.errors.append(f"Inline clustering: {cluster_exc}")
+            db.rollback()
+            logger.error("[fetch_news] Clustering enqueue failed: %s", cluster_exc)
+            stats.errors.append(f"Clustering enqueue: {cluster_exc}")
     except Exception as e:
         stats.errors.append(f"Curation ingestion: {str(e)}")

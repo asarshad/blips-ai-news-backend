@@ -23,6 +23,10 @@ from app.services.content_promotion_service import (
     CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE,
     process_content_promotion_request,
 )
+
+# Mirrors app.scheduler.tasks_curation.CONTENT_CLUSTERING_REQUESTED_EVENT_TYPE.
+# Inlined here to avoid a circular import (scheduler imports services).
+CONTENT_CLUSTERING_REQUESTED_EVENT_TYPE = "content.clustering.requested"
 from app.services.content_readiness import CONTENT_READY_EVENT_TYPE, CONTENT_UNREADY_EVENT_TYPE
 from app.services.inventory_service import Surface
 from app.services.playlist_service import refresh_cached_playlist_items
@@ -160,6 +164,8 @@ class ContentEventDispatcher:
             self._dispatch_content_ai_summary_event(event, db)
         elif event.event_type == CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE:
             self._dispatch_content_promotion_event(event, db)
+        elif event.event_type == CONTENT_CLUSTERING_REQUESTED_EVENT_TYPE:
+            self._dispatch_clustering_event(event)
 
     def _invalidate_surfaces(self, payload: dict) -> None:
         for surface_name in payload.get("surfaces", []):
@@ -217,6 +223,14 @@ class ContentEventDispatcher:
             result.get("ai_processed"),
             result.get("readiness_status"),
         )
+
+    def _dispatch_clustering_event(self, event: ContentEventOutbox) -> None:
+        from app.scheduler.tasks_curation import run_clustering_job
+
+        payload = dict(event.payload or {})
+        trigger = str(payload.get("trigger") or "event")
+        run_clustering_job(trigger=trigger)
+        logger.info("[content_events] clustering trigger=%s", trigger)
 
     def _dispatch_content_promotion_event(
         self,

@@ -71,6 +71,16 @@ DEFAULT_LANES: tuple[LaneSpec, ...] = (
             "content.ready,content.unready",
         ),
     ),
+    LaneSpec(
+        "clustering",
+        "app.workers.content_event_lane",
+        (
+            "--lane-name",
+            "clustering",
+            "--event-types",
+            "content.clustering.requested",
+        ),
+    ),
     LaneSpec("maintenance", "app.workers.maintenance_lane"),
 )
 
@@ -177,6 +187,49 @@ def _stale_lanes(
     return stale
 
 
+def _restart_lane(
+    processes: dict[str, subprocess.Popen],
+    lane_name: str,
+    *,
+    grace_seconds: float = 10.0,
+) -> bool:
+    """Terminate one lane process and start a fresh one in its place."""
+    lane = next((spec for spec in DEFAULT_LANES if spec.name == lane_name), None)
+    if lane is None:
+        return False
+
+    process = processes.get(lane_name)
+    if process is not None and process.poll() is None:
+        logger.warning("Restarting stale worker lane %s pid=%s", lane_name, process.pid)
+        process.terminate()
+        try:
+            process.wait(timeout=grace_seconds)
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "Killing unresponsive stale worker lane %s pid=%s",
+                lane_name,
+                process.pid,
+            )
+            process.kill()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+
+    command = _command_for_lane(lane)
+    try:
+        processes[lane_name] = subprocess.Popen(command, env=_child_env(lane))  # noqa: S603
+    except Exception:
+        logger.exception("Failed to restart stale worker lane %s", lane_name)
+        return False
+    record_lane_heartbeat(
+        lane_name,
+        status="restarted",
+        details={"pid": processes[lane_name].pid, "reason": "watchdog_stale"},
+    )
+    return True
+
+
 def _stop_lanes(processes: dict[str, subprocess.Popen], *, grace_seconds: float = 20.0) -> None:
     """Terminate every lane with an independent grace window."""
     for name, process in processes.items():
@@ -260,17 +313,45 @@ def run_launcher() -> int:
                     launched_at=launched_at,
                 )
                 if stale:
-                    logger.error(
-                        "Worker lane heartbeat stale for lanes=%s; stopping for Render restart",
-                        stale,
-                    )
-                    record_lane_heartbeat(
-                        "launcher",
-                        status="watchdog_failed",
-                        details={"stale_lanes": stale},
-                    )
-                    exit_code = 1
-                    STOP_EVENT.set()
+                    # Don't blow up the whole worker for one stale lane —
+                    # heartbeats can lag during long ingestion or maintenance
+                    # work even when the process is alive. Restart just the
+                    # affected lane(s); only escalate to a full worker exit
+                    # if the lane process itself is already dead.
+                    dead_lanes = [
+                        name
+                        for name in stale
+                        if name in processes and processes[name].poll() is not None
+                    ]
+                    if dead_lanes:
+                        logger.error(
+                            "Worker lane(s) %s exited and stale; stopping for Render restart",
+                            dead_lanes,
+                        )
+                        record_lane_heartbeat(
+                            "launcher",
+                            status="watchdog_failed",
+                            details={"stale_lanes": stale, "dead_lanes": dead_lanes},
+                        )
+                        exit_code = 1
+                        STOP_EVENT.set()
+                    else:
+                        logger.warning(
+                            "Worker lane heartbeat stale for lanes=%s; restarting affected lanes",
+                            stale,
+                        )
+                        record_lane_heartbeat(
+                            "launcher",
+                            status="watchdog_restart",
+                            details={"stale_lanes": stale},
+                        )
+                        for lane_name in stale:
+                            _restart_lane(processes, lane_name)
+                        # Reset grace so newly started lanes have time to
+                        # register a heartbeat before another check fires.
+                        watchdog_grace_until = datetime.now(timezone.utc) + timedelta(
+                            seconds=watchdog_startup_grace_seconds
+                        )
                 next_watchdog_check = now + watchdog_interval_seconds
 
             if now >= next_lock_refresh and not STOP_EVENT.is_set():

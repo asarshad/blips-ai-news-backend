@@ -252,6 +252,29 @@ def test_dispatch_content_promotion_event_processes_one_content_item(monkeypatch
     assert processed == [(db, 88)]
 
 
+def test_dispatch_clustering_event_runs_clustering_job(monkeypatch):
+    import sys
+    from types import ModuleType
+
+    triggers = []
+
+    fake_module = ModuleType("app.scheduler.tasks_curation")
+    fake_module.run_clustering_job = lambda *, trigger="scheduled": triggers.append(trigger)
+    fake_module.CONTENT_CLUSTERING_REQUESTED_EVENT_TYPE = "content.clustering.requested"
+    monkeypatch.setitem(sys.modules, "app.scheduler.tasks_curation", fake_module)
+
+    dispatcher = ContentEventDispatcher()
+    event = SimpleNamespace(
+        event_type="content.clustering.requested",
+        content_item_id=None,
+        payload={"trigger": "fetch_news"},
+    )
+
+    dispatcher._dispatch_clustering_event(event)
+
+    assert triggers == ["fetch_news"]
+
+
 def test_ai_provider_quota_failures_back_off_for_an_hour():
     delay = dispatcher_module._retry_delay(
         3,

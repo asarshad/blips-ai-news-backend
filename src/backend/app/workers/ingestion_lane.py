@@ -49,6 +49,41 @@ def _apply_recurring_timebox_default() -> None:
         os.environ["INGEST_CATCHUP_MAX_SECONDS"] = configured
 
 
+def _heartbeat_interval_seconds() -> float:
+    raw = os.getenv("WORKER_LANE_HEARTBEAT_SECONDS", "60")
+    try:
+        return max(5.0, float(raw))
+    except ValueError:
+        return 60.0
+
+
+def _start_background_heartbeat(lane: str, current_status: dict) -> threading.Thread:
+    """Emit lane heartbeats on a fixed cadence regardless of work progress.
+
+    The launcher watchdog only inspects heartbeat age, so a long-running
+    ingestion cycle (or a long idle wait) was previously being killed even
+    though the lane process was alive. Decouple the heartbeat from work so
+    the watchdog only fires when the lane is genuinely wedged.
+    """
+    interval = _heartbeat_interval_seconds()
+
+    def _loop() -> None:
+        while not STOP_EVENT.wait(timeout=interval):
+            try:
+                record_lane_heartbeat(
+                    lane,
+                    status=current_status.get("status", "alive"),
+                    details=current_status.get("details"),
+                )
+            except Exception:
+                # Heartbeat must not crash the lane.
+                pass
+
+    thread = threading.Thread(target=_loop, name=f"{lane}-heartbeat", daemon=True)
+    thread.start()
+    return thread
+
+
 def main() -> int:
     signal.signal(signal.SIGTERM, _handle_stop)
     signal.signal(signal.SIGINT, _handle_stop)
@@ -66,6 +101,9 @@ def main() -> int:
         details={"interval_seconds": interval_seconds},
     )
 
+    current_status: dict = {"status": "starting", "details": {"interval_seconds": interval_seconds}}
+    _start_background_heartbeat("ingestion", current_status)
+
     next_run = 0.0
     while not STOP_EVENT.is_set():
         now = time.monotonic()
@@ -74,10 +112,14 @@ def main() -> int:
             continue
 
         started = time.monotonic()
+        current_status["status"] = "running"
+        current_status["details"] = None
         record_lane_heartbeat("ingestion", status="running")
         try:
             fetch_and_process_news()
             duration = round(time.monotonic() - started, 2)
+            current_status["status"] = "idle"
+            current_status["details"] = {"last_duration_seconds": duration}
             record_lane_heartbeat(
                 "ingestion",
                 status="idle",
@@ -85,6 +127,8 @@ def main() -> int:
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("[ingestion_lane] fetch failed: %s", exc)
+            current_status["status"] = "error"
+            current_status["details"] = {"error": str(exc)}
             record_lane_heartbeat("ingestion", status="error", details={"error": str(exc)})
 
         next_run = time.monotonic() + interval_seconds

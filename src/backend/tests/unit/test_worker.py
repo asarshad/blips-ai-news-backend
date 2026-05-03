@@ -22,8 +22,19 @@ def test_launcher_defines_independent_lane_processes():
         "ai_summary",
         "article_images",
         "ready_events",
+        "clustering",
         "maintenance",
     ]
+
+
+def test_launcher_clustering_lane_consumes_clustering_event_only():
+    clustering_lanes = [lane for lane in launcher.DEFAULT_LANES if lane.name == "clustering"]
+    assert len(clustering_lanes) == 1
+    lane = clustering_lanes[0]
+    assert lane.module == "app.workers.content_event_lane"
+    assert "--event-types" in lane.args
+    event_types = lane.args[lane.args.index("--event-types") + 1]
+    assert event_types == "content.clustering.requested"
 
 
 def test_launcher_uses_per_lane_db_pool_env(monkeypatch):
@@ -244,7 +255,10 @@ def test_run_launcher_exits_when_lock_refresh_repeatedly_fails(monkeypatch):
     launcher.STOP_EVENT.clear()
 
 
-def test_run_launcher_watchdog_failure_exits_for_render_restart(monkeypatch):
+def test_run_launcher_watchdog_restarts_stale_alive_lane(monkeypatch):
+    """Stale heartbeat with an alive process restarts the lane in place
+    instead of crashing the whole worker. Render only restarts us when a
+    lane process is actually dead — see the dead-lane test below."""
     monkeypatch.setenv("SCHEDULER_ENABLED", "true")
     launcher.STOP_EVENT.clear()
 
@@ -274,10 +288,78 @@ def test_run_launcher_watchdog_failure_exits_for_render_restart(monkeypatch):
             self.returncode = 0
             return 0
 
+    restarted: list[str] = []
+
+    def _fake_restart_lane(processes, lane_name, **_kwargs):
+        restarted.append(lane_name)
+        # Stop the loop so the test exits cleanly after the restart fires.
+        launcher.STOP_EVENT.set()
+        return True
+
     monotonic_values = iter([0, 0, 0, 1000])
     monkeypatch.setattr(launcher.signal, "signal", lambda *a, **k: None)
     monkeypatch.setattr(launcher, "WorkerLeaderLock", _FakeLock)
     monkeypatch.setattr(launcher, "_start_lanes", lambda lanes: {"ingestion": _FakeProcess()})
+    monkeypatch.setattr(launcher, "record_lane_heartbeat", lambda *a, **k: None)
+    monkeypatch.setattr(launcher, "_stale_lanes", lambda *a, **k: ["ingestion"])
+    monkeypatch.setattr(launcher, "_restart_lane", _fake_restart_lane)
+    monkeypatch.setattr(launcher.time, "monotonic", lambda: next(monotonic_values, 32))
+
+    class _FakeDateTime:
+        @staticmethod
+        def now(tz=None):
+            from datetime import datetime
+
+            return datetime(2026, 5, 2, 10, 0, 0, tzinfo=tz)
+
+    monkeypatch.setattr(launcher, "datetime", _FakeDateTime)
+    monkeypatch.setattr(
+        launcher,
+        "_int_env",
+        lambda name, default, minimum=1: 0 if "GRACE" in name else 30,
+    )
+
+    # Returns 0 — alive stale lane is restarted, worker keeps running.
+    assert launcher.run_launcher() == 0
+    assert restarted == ["ingestion"]
+    launcher.STOP_EVENT.clear()
+
+
+def test_run_launcher_watchdog_exits_when_lane_process_is_dead(monkeypatch):
+    """Stale heartbeat AND a dead lane process is the only case where we
+    bail out for a Render restart."""
+    monkeypatch.setenv("SCHEDULER_ENABLED", "true")
+    launcher.STOP_EVENT.clear()
+
+    class _FakeLock:
+        refresh_interval_seconds = 1000
+
+        def acquire_with_retry(self, stop_event):  # noqa: ARG002
+            return True
+
+        def refresh(self):
+            return True
+
+        def release(self):
+            return True
+
+    class _DeadProcess:
+        pid = 1
+        returncode = 1
+
+        def poll(self):
+            return 1
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):  # noqa: ARG002
+            return 1
+
+    monotonic_values = iter([0, 0, 0, 1000])
+    monkeypatch.setattr(launcher.signal, "signal", lambda *a, **k: None)
+    monkeypatch.setattr(launcher, "WorkerLeaderLock", _FakeLock)
+    monkeypatch.setattr(launcher, "_start_lanes", lambda lanes: {"ingestion": _DeadProcess()})
     monkeypatch.setattr(launcher, "record_lane_heartbeat", lambda *a, **k: None)
     monkeypatch.setattr(launcher, "_stale_lanes", lambda *a, **k: ["ingestion"])
     monkeypatch.setattr(launcher.time, "monotonic", lambda: next(monotonic_values, 32))
@@ -290,7 +372,11 @@ def test_run_launcher_watchdog_failure_exits_for_render_restart(monkeypatch):
             return datetime(2026, 5, 2, 10, 0, 0, tzinfo=tz)
 
     monkeypatch.setattr(launcher, "datetime", _FakeDateTime)
-    monkeypatch.setattr(launcher, "_int_env", lambda name, default, minimum=1: 0 if "GRACE" in name else 30)
+    monkeypatch.setattr(
+        launcher,
+        "_int_env",
+        lambda name, default, minimum=1: 0 if "GRACE" in name else 30,
+    )
 
     assert launcher.run_launcher() == 1
     launcher.STOP_EVENT.clear()
