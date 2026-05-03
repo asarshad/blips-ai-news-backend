@@ -206,6 +206,8 @@ def run_extraction(
             result.text_quality_score = compute_text_quality_score(text_result.text)
             if text_result.extractor == "trafilatura":
                 result.extraction_status = ExtractionStatus.OK
+            elif text_result.extractor == "next_data":
+                result.extraction_status = ExtractionStatus.OK
             else:
                 result.extraction_status = ExtractionStatus.FALLBACK_USED
         elif text_result.text:

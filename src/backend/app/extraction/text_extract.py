@@ -1,6 +1,7 @@
 """Main text extraction with cascading fallbacks.
 
 Strategy:
+  0. __NEXT_DATA__ JSON (Next.js SPAs) — zero extra requests, per-domain path map
   1. trafilatura (primary) — best at boilerplate removal
   2. readability-lxml (fallback) — good at finding the main content block
   3. RSS description/summary (last resort) — stored as excerpt_fallback
@@ -28,6 +29,35 @@ class TextResult:
     extractor: str = "none"  # trafilatura | readability | rss_only
     word_count: int = 0
     is_good: bool = False
+
+
+def extract_with_next_data(html: str, url: Optional[str] = None) -> TextResult:
+    """Extract article text from a Next.js ``__NEXT_DATA__`` JSON blob.
+
+    Tries per-domain path candidates for known SPA-heavy sites (CNET,
+    Engadget, 9to5Mac, The Verge, Ars Technica) then falls back to a set
+    of generic paths.  Returns an empty ``TextResult`` when the page has
+    no ``__NEXT_DATA__`` tag or no candidate path resolves.
+    """
+    if not url or not html:
+        return TextResult(extractor="next_data")
+    try:
+        from app.extraction.next_data import extract_text_from_next_data
+
+        text = extract_text_from_next_data(html, url)
+        if text:
+            text = clean_text(text)
+            wc = len(text.split())
+            return TextResult(
+                text=text,
+                extractor="next_data",
+                word_count=wc,
+                is_good=is_good_text(text),
+            )
+    except Exception as exc:
+        logger.warning("[text_extract] next_data extraction failed for %s: %s", url, exc)
+
+    return TextResult(extractor="next_data")
 
 
 def extract_with_trafilatura(html: str, url: Optional[str] = None) -> TextResult:
@@ -106,6 +136,7 @@ def extract_text(
 ) -> TextResult:
     """Extract main text with cascading fallbacks.
 
+    0. Try __NEXT_DATA__ JSON (Next.js SPAs — no extra HTTP request)
     1. Try trafilatura (best quality)
     2. If poor quality, fallback to readability-lxml
     3. If still poor, use RSS description as excerpt
@@ -130,6 +161,11 @@ def extract_text(
                 is_good=is_good_text(cleaned),
             )
         return TextResult()
+
+    # 0. Try __NEXT_DATA__ (Next.js SPA sites)
+    nd_result = extract_with_next_data(html, url=url)
+    if nd_result.is_good:
+        return nd_result
 
     # 1. Try trafilatura
     result = extract_with_trafilatura(html, url=url)
