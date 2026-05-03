@@ -20,7 +20,7 @@ class ContentEventOutbox(Base):
     content_item_id = Column(
         Integer,
         ForeignKey("content_items.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     event_type = Column(String(64), nullable=False, index=True)
