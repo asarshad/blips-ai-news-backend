@@ -265,6 +265,15 @@ class BlipsTechRelevanceResult:
     reason: str
 
 
+@dataclass
+class MajorTechNewsResult:
+    """Result from major-tech-news fast-path classification."""
+
+    is_major_tech_news: str
+    confidence: float
+    reason: str
+
+
 class BaseLLMClient(ABC):
     """Abstract base class for LLM clients."""
 
@@ -1227,6 +1236,102 @@ Return JSON only. Do not wrap it in markdown.
             )
         except (RuntimeError, ValueError) as e:
             logger.error(f"Blips tech relevance classification error: {str(e)}")
+            raise
+
+    def classify_major_tech_news(
+        self,
+        *,
+        title: str,
+        summary: str,
+        source: str,
+        url: Optional[str] = None,
+    ) -> MajorTechNewsResult:
+        """Classify whether a Blips-relevant item is a major tech-news story."""
+        if not self.is_configured():
+            raise RuntimeError(f"{self.get_provider()} API key is not configured")
+
+        url_line = f"URL: {url}\n" if (url or "").strip() else ""
+        prompt = f"""
+You are classifying whether a Blips tech-news item is major enough for a fast-path freshness lane.
+
+The item has already been judged relevant to a tech-news audience. Your task is narrower:
+- is_major_tech_news: yes | no
+
+Classify as yes when the story is likely important to many tech-news readers today, including:
+- major tech companies or AI labs
+- semiconductors, chips, GPUs, cloud, app stores, social platforms, internet infrastructure
+- major policy, antitrust, privacy, export controls, bans, lawsuits, or regulation affecting tech
+- earnings, acquisitions, leadership changes, layoffs, strategy shifts, or market moves involving major tech firms
+- important people in tech when the news materially affects a company, platform, policy, or market
+
+Classify as no when the story is tech-relevant but narrower, evergreen, niche, local, tutorial-like, minor product coverage, or mostly opinion without a timely major-news hook.
+
+Input:
+Title: {title}
+Summary: {summary}
+Source: {source}
+{url_line}
+Output:
+Return JSON only in this exact format:
+{{
+  "is_major_tech_news": "yes" | "no",
+  "confidence": 0.0-1.0,
+  "reason": "short explanation"
+}}
+
+Reason requirements:
+- Keep it brief and concrete
+- Mention the major-news hook if yes
+- Mention why it is too narrow or not urgent if no
+
+Return JSON only. Do not wrap it in markdown.
+"""
+
+        try:
+            response = self.chat(
+                messages=[
+                    ChatMessage(
+                        role="system",
+                        content=(
+                            "You classify whether tech-news items are major enough for a "
+                            "bounded fast path. Return JSON only."
+                        ),
+                    ),
+                    ChatMessage(role="user", content=prompt),
+                ],
+                max_tokens=180,
+                temperature=0.1,
+                usage_context="classification.major_tech_news",
+            )
+
+            text = response.content.strip()
+            if not text:
+                raise ValueError("Empty response returned from LLM")
+
+            try:
+                payload = json.loads(_strip_json_fence(text))
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "Malformed JSON returned from LLM for major tech-news classification"
+                ) from exc
+
+            if not isinstance(payload, dict):
+                raise ValueError("Major tech-news classifier returned a non-object payload")
+
+            classification = normalize_blips_tech_relevance(payload.get("is_major_tech_news"))
+            confidence = normalize_video_classifier_confidence(payload.get("confidence"))
+            reason = normalize_blips_tech_reason(payload.get("reason"))
+
+            if classification is None or confidence is None:
+                raise ValueError("Invalid major tech-news classifier payload")
+
+            return MajorTechNewsResult(
+                is_major_tech_news=classification,
+                confidence=confidence,
+                reason=reason,
+            )
+        except (RuntimeError, ValueError) as e:
+            logger.error(f"Major tech-news classification error: {str(e)}")
             raise
 
     def extract_article_image_url(

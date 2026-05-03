@@ -187,6 +187,9 @@ class ContentItem(Base):
     tech_relevance = Column(String(16), nullable=True, index=True)
     tech_relevance_confidence = Column(Float, nullable=True)
     tech_relevance_reason = Column(String(255), nullable=True)
+    is_major_tech_news = Column(Boolean, nullable=True, index=True)
+    major_tech_news_confidence = Column(Float, nullable=True)
+    major_tech_news_reason = Column(String(255), nullable=True)
     is_mixed_roundup = Column(Boolean, nullable=True, index=True)
 
     # Candidate provenance fields (set by signal ingestion when created as CANDIDATE).

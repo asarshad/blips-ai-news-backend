@@ -28,6 +28,7 @@ from app.services.article_unskimmable_service import (
     reject_terminal_unskimmable_article,
 )
 from app.services.content_readiness import seed_content_readiness, sync_content_readiness
+from app.services.major_news_constants import MAJOR_NEWS_DISCOVERED_VIA
 from app.services.playlist_service import refresh_cached_playlist_items
 from app.services.tiered_feed_service import invalidate_tiered_feed_cache
 from app.services.video_relevance_service import classify_video_blips_relevance
@@ -330,6 +331,9 @@ def _process_article_summary(
     tech_relevance = None
     tech_relevance_confidence = None
     tech_relevance_reason = None
+    is_major_tech_news = None
+    major_tech_news_confidence = None
+    major_tech_news_reason = None
     if settings.ARTICLE_TECH_CLASSIFIER_ENABLED:
         try:
             tech = llm_client.classify_blips_tech_relevance(
@@ -347,6 +351,26 @@ def _process_article_summary(
                 tech.is_blips_tech_relevant,
                 tech.confidence,
             )
+            if (
+                tech.is_blips_tech_relevant == "yes"
+                and (getattr(item, "discovered_via", None) or "") == MAJOR_NEWS_DISCOVERED_VIA
+                and getattr(item, "is_major_tech_news", None) is None
+            ):
+                major = llm_client.classify_major_tech_news(
+                    title=item.title or "",
+                    summary=summary,
+                    source=item.source or "",
+                    url=item.source_url or None,
+                )
+                is_major_tech_news = major.is_major_tech_news == "yes"
+                major_tech_news_confidence = major.confidence
+                major_tech_news_reason = major.reason
+                logger.info(
+                    "[content_ai] article major-news content_id=%s major=%s confidence=%.2f",
+                    item.id,
+                    is_major_tech_news,
+                    major.confidence,
+                )
         except Exception as exc:
             logger.warning(
                 "[content_ai] article tech relevance classification failed content_id=%s: %s",
@@ -361,6 +385,9 @@ def _process_article_summary(
         tech_relevance=tech_relevance,
         tech_relevance_confidence=tech_relevance_confidence,
         tech_relevance_reason=tech_relevance_reason,
+        is_major_tech_news=is_major_tech_news,
+        major_tech_news_confidence=major_tech_news_confidence,
+        major_tech_news_reason=major_tech_news_reason,
         commit=False,
     )
 

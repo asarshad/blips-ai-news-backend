@@ -23,10 +23,6 @@ from app.services.content_promotion_service import (
     CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE,
     process_content_promotion_request,
 )
-
-# Mirrors app.scheduler.tasks_curation.CONTENT_CLUSTERING_REQUESTED_EVENT_TYPE.
-# Inlined here to avoid a circular import (scheduler imports services).
-CONTENT_CLUSTERING_REQUESTED_EVENT_TYPE = "content.clustering.requested"
 from app.services.content_readiness import CONTENT_READY_EVENT_TYPE, CONTENT_UNREADY_EVENT_TYPE
 from app.services.inventory_service import Surface
 from app.services.playlist_service import refresh_cached_playlist_items
@@ -34,6 +30,10 @@ from app.services.push_service import PushNotificationService
 from app.services.tiered_feed_service import invalidate_tiered_feed_cache
 
 logger = get_logger(__name__)
+
+# Mirrors app.scheduler.tasks_curation.CONTENT_CLUSTERING_REQUESTED_EVENT_TYPE.
+# Inlined here to avoid a circular import (scheduler imports services).
+CONTENT_CLUSTERING_REQUESTED_EVENT_TYPE = "content.clustering.requested"
 
 # Per-event-type lock timeout overrides. Most events should finish well under
 # the default; long-running batch jobs (clustering) need a wider window so the
@@ -117,10 +117,14 @@ class ContentEventDispatcher:
                 )
                 query = query.order_by(
                     ContentItem.published_at.desc(),
+                    ContentEventOutbox.available_at.asc(),
                     ContentEventOutbox.created_at.asc(),
                 )
             else:
-                query = query.order_by(ContentEventOutbox.created_at.asc())
+                query = query.order_by(
+                    ContentEventOutbox.available_at.asc(),
+                    ContentEventOutbox.created_at.asc(),
+                )
             rows = query.with_for_update(skip_locked=True).limit(limit).all()
 
             claimed_ids: list[int] = []

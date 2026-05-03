@@ -129,6 +129,11 @@ SOURCE_QUALITY_WEIGHTS: Dict[str, float] = {
     "wired": 0.85,
     "the new stack": 0.85,
     "infoq": 0.85,
+    "cnbc technology": 0.88,
+    "platformer": 0.90,
+    "big technology": 0.88,
+    "fabricated knowledge": 0.90,
+    "benedict evans": 0.88,
     # Company official blogs (0.70-0.95 - down-ranked for primary sources)
     "google": 0.70,
     "microsoft": 0.70,

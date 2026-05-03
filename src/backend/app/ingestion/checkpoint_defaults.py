@@ -235,6 +235,8 @@ def build_defaults(*, db=None, day_utc: date | None = None) -> List[FeedDefault]
     # RSS: 1 row per feed
     rss_client = RSSClient()
     for cfg in rss_client.feed_configs:
+        if getattr(getattr(cfg, "role", None), "value", None) == "major_news":
+            continue
         key = f"rss:{cfg.name}"
         target = int(overrides.get(key, cfg.daily_cap))
         defaults.append(FeedDefault("rss", cfg.name, max(0, target)))

@@ -113,6 +113,9 @@ class FakeLLMClient(BaseLLMClient):
         if '"is_blips_tech_relevant"' in combined:
             return self._generate_blips_tech_relevance_response(user_message)
 
+        if '"is_major_tech_news"' in combined:
+            return self._generate_major_tech_news_response(user_message)
+
         # Detect summarization request
         if "summary" in combined or "summarize" in combined:
             return self._generate_summary_response(user_message)
@@ -274,6 +277,54 @@ TAGS: technology, innovation, ai, software, testing"""
                 "is_blips_tech_relevant": "no",
                 "confidence": 0.9,
                 "reason": "General news item with no meaningful tech company, product, or policy angle.",
+            }
+        return json.dumps(payload)
+
+    def _generate_major_tech_news_response(self, user_message: str) -> str:
+        """Generate deterministic major tech-news classification JSON."""
+
+        def _extract(label: str) -> str:
+            match = re.search(rf"^{label}:\s*(.+)$", user_message, re.IGNORECASE | re.MULTILINE)
+            return match.group(1).strip() if match else ""
+
+        combined = " ".join(
+            [
+                _extract("Title"),
+                _extract("Summary"),
+                _extract("Source"),
+                _extract("URL"),
+            ]
+        ).lower()
+        if any(
+            keyword in combined
+            for keyword in (
+                "apple",
+                "google",
+                "microsoft",
+                "meta",
+                "amazon",
+                "openai",
+                "anthropic",
+                "nvidia",
+                "chip",
+                "semiconductor",
+                "antitrust",
+                "earnings",
+                "lawsuit",
+                "export control",
+                "app store",
+            )
+        ):
+            payload = {
+                "is_major_tech_news": "yes",
+                "confidence": 0.91,
+                "reason": "Major tech company, policy, or chip-market story with broad reader impact.",
+            }
+        else:
+            payload = {
+                "is_major_tech_news": "no",
+                "confidence": 0.86,
+                "reason": "Tech-relevant but too narrow for the major-news fast path.",
             }
         return json.dumps(payload)
 

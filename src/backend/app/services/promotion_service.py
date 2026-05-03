@@ -39,6 +39,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.integrations.llm_client import LLMClient
 from app.integrations.youtube_channels import (
     ChannelConfig,
     ChannelRole,
@@ -51,6 +52,11 @@ from app.models.video_source import VideoSourceProfile
 from app.ranking.quality import compute_source_weight
 from app.repositories.video_source_repo import VideoSourceProfileRepository
 from app.services.content_readiness import sync_content_readiness
+from app.services.major_news_constants import (
+    MAJOR_NEWS_CLASSIFIER_MIN_CONFIDENCE,
+    MAJOR_NEWS_DISCOVERED_VIA,
+    MAJOR_NEWS_SAME_DAY_SCORE_BOOST,
+)
 from app.services.video_content_policy import apply_content_policy
 from app.video_surface_rules import visible_promotion_filter
 
@@ -449,6 +455,14 @@ def _safe_text(value: Optional[str]) -> str:
     return value.lower() if isinstance(value, str) else ""
 
 
+def _is_published_today_utc(published_at: datetime | None) -> bool:
+    if published_at is None:
+        return False
+    if published_at.tzinfo is not None:
+        published_at = published_at.astimezone(timezone.utc).replace(tzinfo=None)
+    return published_at.date() == datetime.utcnow().date()
+
+
 def _llm_broad_news_block_reason(item: ContentItem, *, suffix: str) -> str | None:
     """Use persisted classifier metadata to block clear non-tech broad-news items."""
     if not settings.VIDEO_TECH_CLASSIFIER_ENABLED:
@@ -764,6 +778,12 @@ def score_candidate(
         - config.w_creator_fatigue * creator_fatigue
         - lane_penalty
     )
+    if (
+        getattr(item, "type", None) == ContentType.ARTICLE
+        and bool(getattr(item, "is_major_tech_news", False))
+        and _is_published_today_utc(getattr(item, "published_at", None))
+    ):
+        score += MAJOR_NEWS_SAME_DAY_SCORE_BOOST
     return round(score, 4)
 
 
@@ -1008,6 +1028,74 @@ class PromotionService:
         actor = getattr(item, "last_modified_by", None)
         return isinstance(actor, str) and bool(actor.strip())
 
+    def _maybe_classify_major_news_candidate(self, item: ContentItem) -> None:
+        """Persist bounded major-news classification for fast-path RSS candidates."""
+        if item.type != ContentType.ARTICLE:
+            return
+        if (getattr(item, "discovered_via", None) or "") != MAJOR_NEWS_DISCOVERED_VIA:
+            return
+        if getattr(item, "is_major_tech_news", None) is not None:
+            return
+        if not settings.ARTICLE_TECH_CLASSIFIER_ENABLED:
+            return
+
+        summary = (item.description or item.content_text or item.title or "").strip()
+        if not summary:
+            return
+
+        try:
+            llm_client = LLMClient()
+            if not llm_client.is_configured():
+                return
+
+            tech_relevance = _safe_text(getattr(item, "tech_relevance", None))
+            tech_confidence = _safe_float(
+                getattr(item, "tech_relevance_confidence", None),
+                default=-1.0,
+            )
+            if tech_relevance not in {"yes", "no"}:
+                tech = llm_client.classify_blips_tech_relevance(
+                    title=item.title or "",
+                    summary=summary,
+                    source=item.source or "",
+                    url=item.source_url or None,
+                )
+                item.tech_relevance = tech.is_blips_tech_relevant
+                item.tech_relevance_confidence = tech.confidence
+                item.tech_relevance_reason = tech.reason
+                tech_relevance = tech.is_blips_tech_relevant
+                tech_confidence = tech.confidence
+
+            if tech_relevance != "yes" or tech_confidence < MAJOR_NEWS_CLASSIFIER_MIN_CONFIDENCE:
+                item.is_major_tech_news = False
+                item.major_tech_news_confidence = tech_confidence if tech_confidence >= 0 else None
+                item.major_tech_news_reason = "Not eligible: Blips tech relevance was not confirmed."
+                return
+
+            major = llm_client.classify_major_tech_news(
+                title=item.title or "",
+                summary=summary,
+                source=item.source or "",
+                url=item.source_url or None,
+            )
+            item.is_major_tech_news = major.is_major_tech_news == "yes"
+            item.major_tech_news_confidence = major.confidence
+            item.major_tech_news_reason = major.reason
+            logger.info(
+                "[promotion] major-news classification content_id=%s major=%s confidence=%.2f",
+                item.id,
+                item.is_major_tech_news,
+                major.confidence,
+            )
+        except Exception as exc:  # noqa: BLE001
+            item.is_major_tech_news = False
+            item.major_tech_news_reason = f"classifier_failed: {str(exc)[:220]}"
+            logger.warning(
+                "[promotion] major-news classifier failed content_id=%s: %s",
+                item.id,
+                exc,
+            )
+
     def _score_candidate_batch(
         self,
         content_type: ContentType,
@@ -1025,6 +1113,7 @@ class PromotionService:
         for item in candidates:
             source_profile = source_profiles.get(getattr(item, "channel_id", None) or "")
             channel_config = _channel_config_for_item(item)
+            self._maybe_classify_major_news_candidate(item)
             score = score_candidate(
                 item,
                 cluster_sizes,

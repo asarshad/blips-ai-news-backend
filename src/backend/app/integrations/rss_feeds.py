@@ -30,6 +30,7 @@ class FeedRole(Enum):
     BUSINESS: Startups, funding, acquisitions, market analysis
     DEV: Developer tools, tutorials, programming trends
     PRIMARY: Official company blogs (down-ranked unless corroborated)
+    MAJOR_NEWS: Fast-path first-party feeds for major tech-company/news events
     """
 
     BREAKING = "breaking"
@@ -40,6 +41,7 @@ class FeedRole(Enum):
     BUSINESS = "business"
     DEV = "dev"
     PRIMARY = "primary"
+    MAJOR_NEWS = "major_news"
 
 
 class QualityTier(Enum):
@@ -94,6 +96,7 @@ ROLE_QUOTAS: Dict[FeedRole, int] = {
     FeedRole.BUSINESS: 4,  # Startups/funding
     FeedRole.DEV: 5,  # Developer content + mobile
     FeedRole.PRIMARY: 2,  # Official blogs (down-ranked)
+    FeedRole.MAJOR_NEWS: 12,  # Bounded fast-path probe; separate from normal RSS defaults
 }
 
 
@@ -133,6 +136,62 @@ class FeedConfig:
 # Target after deduplication: ~50-55 articles/day
 
 FEED_REGISTRY: List[FeedConfig] = [
+    # =========================================================================
+    # MAJOR NEWS FAST PATH
+    # First-party feeds only; probed by the bounded major_news_probe task.
+    # These are excluded from normal checkpointed RSS defaults to avoid double
+    # counting and keep the fast path operationally isolated.
+    # =========================================================================
+    FeedConfig(
+        url="https://www.cnbc.com/id/19854910/device/rss/rss.html",
+        name="CNBC Technology",
+        role=FeedRole.MAJOR_NEWS,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=5,
+        decay_profile=DecayProfile.FAST,
+        base_quality_weight=0.88,
+        notes="Fast major-company, market, and policy coverage",
+    ),
+    FeedConfig(
+        url="https://www.platformer.news/rss/",
+        name="Platformer",
+        role=FeedRole.MAJOR_NEWS,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=3,
+        decay_profile=DecayProfile.FAST,
+        base_quality_weight=0.90,
+        notes="Social platforms, AI companies, governance, major tech power",
+    ),
+    FeedConfig(
+        url="https://www.bigtechnology.com/feed",
+        name="Big Technology",
+        role=FeedRole.MAJOR_NEWS,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=2,
+        decay_profile=DecayProfile.FAST,
+        base_quality_weight=0.88,
+        notes="Big Tech reporting and interviews",
+    ),
+    FeedConfig(
+        url="https://www.fabricatedknowledge.com/feed",
+        name="Fabricated Knowledge",
+        role=FeedRole.MAJOR_NEWS,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.90,
+        notes="Semiconductors and AI infrastructure supply chain",
+    ),
+    FeedConfig(
+        url="https://www.ben-evans.com/benedictevans?format=rss",
+        name="Benedict Evans",
+        role=FeedRole.MAJOR_NEWS,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.88,
+        notes="Macro tech strategy and market structure",
+    ),
     # =========================================================================
     # BREAKING NEWS
     # Fast-moving tech news, product launches, industry updates

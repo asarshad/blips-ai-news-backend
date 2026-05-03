@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, Dict
 
@@ -28,6 +28,8 @@ def compute_article_supply_metrics(db: Session, *, days: int = 14) -> Dict[str, 
             "ready_count": 0,
             "pending_count": 0,
             "pending_by_reason": {},
+            "major_news_probe_count": 0,
+            "major_news_confirmed_count": 0,
         }
         for offset in range(window_days)
     }
@@ -67,10 +69,18 @@ def compute_article_supply_metrics(db: Session, *, days: int = 14) -> Dict[str, 
                 "ready": 0,
                 "pending": 0,
                 "pending_by_reason": {},
+                "major_news_probe": 0,
+                "major_news_confirmed": 0,
                 "status": "healthy",
                 "ingestion_status": None,
             },
         )
+        if (getattr(item, "discovered_via", None) or "") == "major_news_probe":
+            row["major_news_probe_count"] += 1
+            source_row["major_news_probe"] += 1
+        if getattr(item, "is_major_tech_news", None) is True:
+            row["major_news_confirmed_count"] += 1
+            source_row["major_news_confirmed"] += 1
 
         if item.curation_status == ContentStatus.CANDIDATE:
             row["candidate_count"] += 1
@@ -117,6 +127,8 @@ def compute_article_supply_metrics(db: Session, *, days: int = 14) -> Dict[str, 
                 "ready": 0,
                 "pending": 0,
                 "pending_by_reason": {},
+                "major_news_probe": 0,
+                "major_news_confirmed": 0,
                 "status": "healthy",
                 "ingestion_status": None,
             },
