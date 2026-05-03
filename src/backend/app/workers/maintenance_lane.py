@@ -13,7 +13,12 @@ from typing import Callable
 from app.core.config import settings
 from app.core.logging import get_logger, setup_logging
 from app.db.base import SessionLocal
-from app.services.worker_lane_metrics import record_lane_heartbeat
+from app.scheduler.runtime import (
+    current_worker_memory_mb,
+    memory_over_soft_limit,
+    memory_soft_limit_mb,
+)
+from app.services.worker_lane_metrics import read_lane_heartbeats, record_lane_heartbeat
 
 setup_logging()
 logger = get_logger(__name__)
@@ -112,6 +117,58 @@ def _heartbeat_interval_seconds() -> float:
         return 60.0
 
 
+def _parse_heartbeat_time(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _lane_recently_running(lane_name: str, *, max_age_seconds: int = 180) -> bool:
+    snapshot = read_lane_heartbeats()
+    if not snapshot.get("available"):
+        return False
+    now = datetime.now(timezone.utc)
+    for row in snapshot.get("lanes", []):
+        if not isinstance(row, dict) or row.get("lane") != lane_name:
+            continue
+        status = str(row.get("status") or "").strip().lower()
+        updated_at = _parse_heartbeat_time(row.get("updated_at"))
+        if updated_at is None:
+            return False
+        age_seconds = (now - updated_at).total_seconds()
+        return status == "running" and age_seconds <= max_age_seconds
+    return False
+
+
+def _defer_seconds_for_task(task: LaneTask) -> int | None:
+    if memory_over_soft_limit():
+        logger.warning(
+            "[maintenance_lane] deferring task=%s due to worker memory "
+            "worker_memory_mb=%s soft_limit_mb=%s",
+            task.name,
+            current_worker_memory_mb(),
+            memory_soft_limit_mb(),
+        )
+        return 60
+
+    if task.name in {"backfill", "scoring", "inventory_health"} and _lane_recently_running(
+        "ingestion"
+    ):
+        logger.info(
+            "[maintenance_lane] deferring task=%s while ingestion lane is running",
+            task.name,
+        )
+        return 120
+
+    return None
+
+
 def _start_background_heartbeat(current_status: dict) -> threading.Thread:
     """Emit maintenance heartbeats on a fixed cadence regardless of task duration."""
     interval = _heartbeat_interval_seconds()
@@ -164,6 +221,20 @@ def main() -> int:
         for task in sorted(due, key=lambda item: item.next_run_at):
             if STOP_EVENT.is_set():
                 break
+            defer_seconds = _defer_seconds_for_task(task)
+            if defer_seconds is not None:
+                task.next_run_at = time.monotonic() + defer_seconds
+                current_status["status"] = "deferred"
+                current_status["details"] = {
+                    "task": task.name,
+                    "defer_seconds": defer_seconds,
+                }
+                record_lane_heartbeat(
+                    "maintenance",
+                    status="deferred",
+                    details={"task": task.name, "defer_seconds": defer_seconds},
+                )
+                continue
             started = time.monotonic()
             current_status["status"] = "running"
             current_status["details"] = {"task": task.name}
@@ -206,4 +277,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

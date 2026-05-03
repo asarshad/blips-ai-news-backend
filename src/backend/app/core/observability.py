@@ -200,10 +200,60 @@ def _peak_rss_bytes() -> int | None:
         return None
 
 
+def _read_int_file(path: str) -> int | None:
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            value = handle.read().strip()
+    except OSError:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def _current_cgroup_memory_bytes() -> int | None:
+    """Best-effort memory usage for the whole container/cgroup."""
+    # Render runs Linux containers. cgroup v2 exposes memory.current; older
+    # hosts may expose the v1 memory.usage_in_bytes path.
+    for path in (
+        "/sys/fs/cgroup/memory.current",
+        "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+    ):
+        value = _read_int_file(path)
+        if value is not None and value > 0:
+            return value
+    return None
+
+
+def _cgroup_memory_limit_bytes() -> int | None:
+    for path in (
+        "/sys/fs/cgroup/memory.max",
+        "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+    ):
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                raw = handle.read().strip()
+        except OSError:
+            continue
+        if not raw or raw == "max":
+            continue
+        try:
+            value = int(raw)
+        except ValueError:
+            continue
+        # cgroup v1 can report an effectively-unlimited sentinel.
+        if value > 0 and value < 1 << 60:
+            return value
+    return None
+
+
 def get_process_runtime_stats() -> Dict[str, Any]:
     """Return lightweight process runtime diagnostics for ops endpoints."""
     rss_bytes = _current_rss_bytes()
     peak_rss_bytes = _peak_rss_bytes()
+    cgroup_memory_bytes = _current_cgroup_memory_bytes()
+    cgroup_limit_bytes = _cgroup_memory_limit_bytes()
     uptime_seconds = round((datetime.utcnow() - metrics_collector._start_time).total_seconds(), 2)
     return {
         "pid": os.getpid(),
@@ -215,6 +265,14 @@ def get_process_runtime_stats() -> Dict[str, Any]:
         "peak_rss_bytes": peak_rss_bytes,
         "peak_rss_mb": round(peak_rss_bytes / (1024 * 1024), 2)
         if peak_rss_bytes is not None
+        else None,
+        "container_memory_bytes": cgroup_memory_bytes,
+        "container_memory_mb": round(cgroup_memory_bytes / (1024 * 1024), 2)
+        if cgroup_memory_bytes is not None
+        else None,
+        "container_memory_limit_bytes": cgroup_limit_bytes,
+        "container_memory_limit_mb": round(cgroup_limit_bytes / (1024 * 1024), 2)
+        if cgroup_limit_bytes is not None
         else None,
     }
 

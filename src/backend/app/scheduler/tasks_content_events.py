@@ -6,7 +6,11 @@ import os
 
 from app.core.logging import get_logger
 from app.scheduler.job_stats import log_job_start
-from app.scheduler.runtime import current_rss_mb, memory_over_soft_limit, memory_soft_limit_mb
+from app.scheduler.runtime import (
+    current_worker_memory_mb,
+    memory_over_soft_limit,
+    memory_soft_limit_mb,
+)
 from app.services.content_event_dispatcher import ContentEventDispatcher
 
 logger = get_logger(__name__)
@@ -16,8 +20,9 @@ def run_content_event_dispatch_job() -> None:
     """Dispatch pending content lifecycle events."""
     if memory_over_soft_limit():
         logger.warning(
-            "[content_events] SKIPPED - worker memory is above soft limit rss_mb=%s soft_limit_mb=%s",
-            current_rss_mb(),
+            "[content_events] SKIPPED - worker memory is above soft limit "
+            "worker_memory_mb=%s soft_limit_mb=%s",
+            current_worker_memory_mb(),
             memory_soft_limit_mb(),
         )
         return

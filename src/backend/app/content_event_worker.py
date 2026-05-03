@@ -11,7 +11,7 @@ from typing import Iterable
 
 from app.core.logging import get_logger, setup_logging
 from app.scheduler.runtime import (
-    current_rss_mb,
+    current_worker_memory_mb,
     memory_over_soft_limit,
     memory_soft_limit_mb,
 )
@@ -31,10 +31,13 @@ def _log_memory_snapshot(label: str) -> None:
 
         stats = get_process_runtime_stats()
         logger.info(
-            "[content_event_worker:%s] process_memory rss_mb=%s peak_rss_mb=%s uptime_seconds=%s",
+            "[content_event_worker:%s] process_memory rss_mb=%s peak_rss_mb=%s "
+            "container_mb=%s container_limit_mb=%s uptime_seconds=%s",
             label,
             stats.get("rss_mb"),
             stats.get("peak_rss_mb"),
+            stats.get("container_memory_mb"),
+            stats.get("container_memory_limit_mb"),
             stats.get("uptime_seconds"),
         )
     except Exception as exc:  # noqa: BLE001
@@ -51,10 +54,11 @@ def _pause_for_shared_worker_pressure(
     label = ",".join(event_types) or "*"
     if memory_over_soft_limit():
         gc.collect()
-        rss_mb = current_rss_mb()
+        memory_mb = current_worker_memory_mb()
         logger.warning(
-            "[content_event_worker] memory throttle rss_mb=%s soft_limit_mb=%s event_types=%s",
-            rss_mb,
+            "[content_event_worker] memory throttle worker_memory_mb=%s soft_limit_mb=%s "
+            "event_types=%s",
+            memory_mb,
             memory_soft_limit_mb(),
             label,
         )

@@ -123,10 +123,13 @@ def log_memory_snapshot(logger, label: str) -> None:
 
         stats = get_process_runtime_stats()
         logger.info(
-            "[%s] process_memory rss_mb=%s peak_rss_mb=%s uptime_seconds=%s",
+            "[%s] process_memory rss_mb=%s peak_rss_mb=%s container_mb=%s "
+            "container_limit_mb=%s uptime_seconds=%s",
             label,
             stats.get("rss_mb"),
             stats.get("peak_rss_mb"),
+            stats.get("container_memory_mb"),
+            stats.get("container_memory_limit_mb"),
             stats.get("uptime_seconds"),
         )
     except Exception as exc:  # noqa: BLE001
@@ -142,6 +145,20 @@ def current_rss_mb() -> float | None:
         return float(rss_mb) if rss_mb is not None else None
     except Exception:
         return None
+
+
+def current_worker_memory_mb() -> float | None:
+    """Return container memory when available, otherwise process RSS."""
+    try:
+        from app.core.observability import get_process_runtime_stats
+
+        stats = get_process_runtime_stats()
+        memory_mb = stats.get("container_memory_mb")
+        if memory_mb is None:
+            memory_mb = stats.get("rss_mb")
+        return float(memory_mb) if memory_mb is not None else None
+    except Exception:
+        return current_rss_mb()
 
 
 def memory_soft_limit_mb() -> int:
@@ -161,13 +178,13 @@ def memory_hard_limit_mb() -> int:
 
 
 def memory_over_soft_limit() -> bool:
-    rss_mb = current_rss_mb()
-    return rss_mb is not None and rss_mb >= memory_soft_limit_mb()
+    memory_mb = current_worker_memory_mb()
+    return memory_mb is not None and memory_mb >= memory_soft_limit_mb()
 
 
 def memory_over_hard_limit() -> bool:
-    rss_mb = current_rss_mb()
-    return rss_mb is not None and rss_mb >= memory_hard_limit_mb()
+    memory_mb = current_worker_memory_mb()
+    return memory_mb is not None and memory_mb >= memory_hard_limit_mb()
 
 
 def reset_job_runtime_state() -> None:

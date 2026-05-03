@@ -9,7 +9,7 @@ from app.db.base import SessionLocal
 from app.scheduler.job_stats import JobStats, log_job_start
 from app.scheduler.runtime import (
     FETCH_NEWS_JOB,
-    current_rss_mb,
+    current_worker_memory_mb,
     log_memory_snapshot,
     mark_job_finished,
     memory_hard_limit_mb,
@@ -35,7 +35,7 @@ def fetch_and_process_news():
     if memory_over_hard_limit():
         logger.warning(
             "[fetch_news] SKIPPED - worker memory is above hard limit rss_mb=%s hard_limit_mb=%s",
-            current_rss_mb(),
+            current_worker_memory_mb(),
             memory_hard_limit_mb(),
         )
         return
