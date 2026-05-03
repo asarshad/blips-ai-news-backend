@@ -1228,7 +1228,10 @@
     "daily_cap": 2,
     "quality_tier": "supplemental",
     "ingestion_stream": "expansion",
-    "notes": "Expansion stream: activated only when video or reel inventory needs fill."
+    "language": "hi",
+    "region": "IN",
+    "enabled": false,
+    "notes": "Hindi-language Indian tech channel. Disabled from the current English-global feed; re-enable once region-aware feeds ship and we can target IN users."
   },
   {
     "channel_id": "UCYO_jab_esuFRV4b17AJtAw",

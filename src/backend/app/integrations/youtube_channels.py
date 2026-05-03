@@ -69,6 +69,15 @@ class ChannelConfig:
     quality_tier: QualityTier = QualityTier.STANDARD
     ingestion_stream: IngestionStream = IngestionStream.PRIMARY
     enabled: bool = True
+    # Authoritative channel-level language and region overrides, used by the
+    # ingestion language filter. Set when the channel publishes primarily in a
+    # language other than English (e.g. Hindi tech tutorials whose titles look
+    # English to langdetect) so we can correctly tag content for future
+    # region-based feeds. BCP-47 language codes ("en", "hi", "ta") and ISO-3166
+    # region codes ("IN", "US"); both optional, default None means
+    # "treat as English-global for now".
+    language: Optional[str] = None
+    region: Optional[str] = None
     notes: str = ""
 
     @property
@@ -174,6 +183,16 @@ def _load_channel_registry() -> List[ChannelConfig]:
                 quality_tier=QualityTier(entry.get("quality_tier", "standard")),
                 ingestion_stream=IngestionStream(entry.get("ingestion_stream", "primary")),
                 enabled=bool(entry.get("enabled", True)),
+                language=(
+                    str(entry["language"]).strip().lower()
+                    if entry.get("language")
+                    else None
+                ),
+                region=(
+                    str(entry["region"]).strip().upper()
+                    if entry.get("region")
+                    else None
+                ),
                 notes=str(entry.get("notes", "")),
             )
         )
