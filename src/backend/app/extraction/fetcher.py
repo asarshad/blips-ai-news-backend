@@ -278,15 +278,23 @@ def fetch_url(
     for attempt in range(1, max_retries + 1):
         t0 = time.monotonic()
         try:
-            resp, elapsed, redirect_statuses = _get_with_validated_redirects(client, url, headers)
+            resp, elapsed, redirect_statuses = _normalize_fetch_response_tuple(
+                _get_with_validated_redirects(client, url, headers)
+            )
 
             if resp.status_code in _BOT_BLOCK_STATUS and not tried_browser_fallback:
                 tried_browser_fallback = True
                 browser_headers = _build_browser_fallback_headers(headers)
-                fallback_resp, fallback_elapsed, fallback_redirect_statuses = _get_with_validated_redirects(
-                    client,
-                    url,
-                    browser_headers,
+                (
+                    fallback_resp,
+                    fallback_elapsed,
+                    fallback_redirect_statuses,
+                ) = _normalize_fetch_response_tuple(
+                    _get_with_validated_redirects(
+                        client,
+                        url,
+                        browser_headers,
+                    )
                 )
                 resp = fallback_resp
                 elapsed += fallback_elapsed
@@ -300,9 +308,11 @@ def fetch_url(
                     fallback_resp,
                     fallback_elapsed,
                     fallback_redirect_statuses,
-                ) = _requests_get_with_validated_redirects(
-                    url,
-                    browser_headers,
+                ) = _normalize_fetch_response_tuple(
+                    _requests_get_with_validated_redirects(
+                        url,
+                        browser_headers,
+                    )
                 )
                 elapsed += fallback_elapsed
                 if _response_prefers_browser_variant(fallback_resp):
@@ -609,6 +619,15 @@ def _detect_bot_protection_response(response) -> Optional[str]:
                 return reason
 
     return None
+
+
+def _normalize_fetch_response_tuple(result) -> tuple[object, float, list[int]]:
+    """Accept old two-value test doubles and the current redirect-aware tuple."""
+    response, elapsed, *rest = result
+    redirect_statuses = rest[0] if rest else []
+    if redirect_statuses is None:
+        redirect_statuses = []
+    return response, elapsed, list(redirect_statuses)
 
 
 def _get_with_validated_redirects(

@@ -5,12 +5,22 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+import app.extraction.fetcher as fetcher_module
 from app.extraction.fetcher import (
     BROWSER_FALLBACK_USER_AGENT,
     _is_private_host,
     _rate_limit_domain,
     fetch_url,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_fetcher_global_state():
+    fetcher_module._domain_last_request.clear()
+    fetcher_module._domain_response_cooldowns.clear()
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # _is_private_host

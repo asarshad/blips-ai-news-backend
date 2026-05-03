@@ -34,6 +34,10 @@ from app.services.ai_retry_state import (
     record_video_summary_failure,
     video_summary_retry_state,
 )
+from app.services.article_unskimmable_service import (
+    is_terminal_unskimmable_article,
+    reject_terminal_unskimmable_article,
+)
 
 logger = get_logger(__name__)
 
@@ -152,7 +156,8 @@ def _select_retry_eligible_articles(items, *, limit: int):
     now = datetime.utcnow()
     eligible = []
     for item in items:
-        if _article_retry_state(item, now=now)["eligible"]:
+        state = _article_retry_state(item, now=now)
+        if state["eligible"] or not is_terminal_unskimmable_article(item):
             eligible.append(item)
         if len(eligible) >= limit:
             break
@@ -211,6 +216,11 @@ def _record_article_retry_deferral(db: Session, item, *, now: datetime | None = 
     seed_content_readiness(item, now=now)
     db.commit()
     return attempts
+
+
+def _reject_terminal_unskimmable_article(db: Session, item, *, reason: str) -> None:
+    reject_terminal_unskimmable_article(db, item, reason=reason)
+    db.commit()
 
 
 def _record_video_summary_failure(db: Session, item, *, reason: str) -> dict[str, object]:
@@ -332,23 +342,38 @@ def process_ai_summaries(
                         if _is_recent_article_for_maintenance(item):
                             item.summary = previous_summary
                             attempt = _record_article_retry_deferral(db, item)
+                            if attempt >= int(settings.ARTICLE_UNSKIMMABLE_RETRY_MAX_ATTEMPTS):
+                                _reject_terminal_unskimmable_article(
+                                    db,
+                                    item,
+                                    reason="max_unskimmable_attempts",
+                                )
+                                touched_content_ids.add(int(item.id))
+                                stats.items_processed += 1
+                                logger.info(
+                                    "[ai_retry] Terminally rejected unskimmable article after attempt %s: %s",
+                                    attempt,
+                                    item.title[:80],
+                                )
+                                continue
                             logger.info(
                                 "[ai_retry] Deferred unskimmable article retry attempt %s: %s",
                                 attempt,
                                 item.title[:80],
                             )
                         else:
-                            content_repo.mark_ai_processed(
-                                item.id,
-                                summary="",
-                                topics=item.topics or [],
-                                commit=False,
+                            _reject_terminal_unskimmable_article(
+                                db,
+                                item,
+                                reason="outside_retry_lookback",
                             )
-                            db.commit()
+                            touched_content_ids.add(int(item.id))
                             logger.info(
-                                "[ai_retry] Giving up on older unskimmable article (marked processed): %s",
+                                "[ai_retry] Terminally rejected older unskimmable article: %s",
                                 item.title[:80],
                             )
+                            stats.items_processed += 1
+                            continue
                         stats.items_skipped += 1
                         continue
 

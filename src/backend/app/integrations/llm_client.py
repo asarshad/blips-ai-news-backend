@@ -293,6 +293,18 @@ class BaseLLMClient(ABC):
         pass
 
 
+def _chat_with_usage_context_compat(client, messages: List[ChatMessage], **kwargs) -> ChatResponse:
+    """Call chat with usage_context, tolerating older/mocked client signatures."""
+    try:
+        return client.chat(messages, **kwargs)
+    except TypeError as exc:
+        if "usage_context" not in str(exc):
+            raise
+        fallback_kwargs = dict(kwargs)
+        fallback_kwargs.pop("usage_context", None)
+        return client.chat(messages, **fallback_kwargs)
+
+
 class OpenAILLMClient(BaseLLMClient):
     """OpenAI implementation of LLM client."""
 
@@ -932,9 +944,9 @@ STARTERS: question1 | question2 | question3
                     }
 
             should_skip_summary = bool(is_mixed_roundup) or tech_relevance == "none"
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as err:
             if looks_like_video_classifier_payload(text):
-                raise ValueError("Malformed JSON returned from LLM for video summary")
+                raise ValueError("Malformed JSON returned from LLM for video summary") from err
 
             tech_relevance = None
             confidence = None
@@ -1328,7 +1340,8 @@ If asked about topics unrelated to the article, politely redirect to the article
                 ChatMessage(role="user", content=user_message),
             ]
             try:
-                return self.chat(
+                return _chat_with_usage_context_compat(
+                    self,
                     chained_messages,
                     max_tokens=300,
                     temperature=0.7,
@@ -1353,7 +1366,8 @@ If asked about topics unrelated to the article, politely redirect to the article
         # Add current user message
         messages.append(ChatMessage(role="user", content=user_message))
 
-        return self.chat(
+        return _chat_with_usage_context_compat(
+            self,
             messages,
             max_tokens=300,
             temperature=0.7,

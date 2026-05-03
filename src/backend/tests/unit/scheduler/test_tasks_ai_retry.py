@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from app.models.content import ContentType
+from app.models.content import ContentStatus, ContentType
 from app.scheduler import tasks_ai_retry
 from app.scheduler.runtime import (
     AI_RETRY_JOB,
@@ -46,6 +46,11 @@ def test_process_ai_summaries_uses_article_hydrator_for_articles(monkeypatch):
         conversation_starters=None,
         summary=None,
         ai_processed=False,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        tech_relevance_reason=None,
+        readiness_status="PENDING",
+        readiness_reason="awaiting_ai_processing",
     )
     repo.get_recent_promoted_articles_pending_ai.return_value = [item]
     repo.get_articles_with_short_summaries.return_value = []
@@ -348,13 +353,15 @@ def test_process_ai_summaries_skips_empty_article_input_without_error(monkeypatc
 
     tasks_ai_retry.process_ai_summaries()
 
-    assert stats.items_skipped == 1
+    assert stats.items_processed == 1
+    assert stats.items_skipped == 0
     assert stats.items_failed == 0
     assert stats.errors == []
-    # Article is permanently marked processed with empty summary so it stops
-    # re-entering the retry queue, but remains PENDING/missing_article_summary
-    # in the feed (evaluate_content_readiness checks for non-empty summary).
-    repo.mark_ai_processed.assert_called_once_with(15, summary="", topics=[], commit=False)
+    assert item.is_suppressed is True
+    assert item.curation_status == ContentStatus.CANDIDATE
+    assert item.summary is None
+    assert item.ai_processed is True
+    repo.mark_ai_processed.assert_not_called()
     llm_client.summarize_article.assert_not_called()
 
 

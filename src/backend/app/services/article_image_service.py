@@ -22,6 +22,7 @@ from app.extraction.normalize import is_suspicious_image_url
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.content_event import ContentEventOutbox
 from app.services.article_image_placeholder import (
+    apply_source_placeholder,
     is_placeholder_image_url,
 )
 from app.services.content_readiness import sync_content_readiness
@@ -257,7 +258,7 @@ def repair_single_article_image(
         source_url=source_url,
         force_reconcile_image=True,
     )
-    finalize_article_image_verification(item, allow_placeholder_fallback=True)
+    _finalize_with_terminal_placeholder(item)
     sync_content_readiness(db, item)
     db.commit()
     db.refresh(item)
@@ -303,7 +304,7 @@ def process_article_image_verification_request(
         source_url=source_url,
         force_reconcile_image=True,
     )
-    finalize_article_image_verification(item, allow_placeholder_fallback=True)
+    _finalize_with_terminal_placeholder(item)
     sync_content_readiness(db, item)
 
     return {
@@ -320,6 +321,17 @@ def process_article_image_verification_request(
         "previous_readiness_reason": previous_readiness_reason,
         "readiness_reason": (getattr(item, "readiness_reason", None) or "").strip() or None,
     }
+
+
+def _finalize_with_terminal_placeholder(item: ContentItem) -> None:
+    finalize_article_image_verification(item, allow_placeholder_fallback=True)
+    if (item.image_url or "").strip():
+        return
+    # Explicit repair/event handlers run after real-image recovery has already
+    # been attempted; use the source-branded placeholder as the terminal image
+    # fallback instead of leaving the article pending forever.
+    apply_source_placeholder(item)
+    finalize_article_image_verification(item, allow_placeholder_fallback=True)
 
 
 def evaluate_llm_article_image_recovery(

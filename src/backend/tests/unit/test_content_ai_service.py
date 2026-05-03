@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
 from sqlalchemy import create_engine
@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.content_event import ContentEventOutbox
+from app.models.ingestion_budget import IngestionBudget
 from app.services import content_ai_service
 from app.services.content_readiness import sync_content_readiness
 
@@ -26,6 +27,7 @@ def _recent_dt(*, hours_ago: int = 0, minutes_ago: int = 0) -> datetime:
 def _create_test_tables(engine) -> None:
     ContentItem.__table__.create(bind=engine)
     ContentEventOutbox.__table__.create(bind=engine)
+    IngestionBudget.__table__.create(bind=engine)
 
 
 def test_queue_content_ai_summary_request_dedupes_pending_rows():
@@ -64,7 +66,7 @@ def test_queue_content_ai_summary_request_dedupes_pending_rows():
     assert rows[0].event_type == content_ai_service.CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE
 
 
-def test_queue_content_ai_summary_request_skips_exhausted_article_retry_window():
+def test_queue_content_ai_summary_request_allows_exhausted_article_retry_terminalization():
     engine = create_engine("sqlite:///:memory:")
     _create_test_tables(engine)
     SessionLocal = sessionmaker(bind=engine)
@@ -92,8 +94,8 @@ def test_queue_content_ai_summary_request_skips_exhausted_article_retry_window()
     event = content_ai_service.queue_content_ai_summary_request(db, item)
     db.commit()
 
-    assert event is None
-    assert db.query(ContentEventOutbox).count() == 0
+    assert event is not None
+    assert db.query(ContentEventOutbox).count() == 1
 
 
 def test_sync_content_readiness_queues_ai_summary_when_flag_enabled(monkeypatch):
@@ -247,10 +249,23 @@ def test_process_content_ai_summary_request_skips_exhausted_article_retry_window
         curation_status=ContentStatus.PROMOTED,
         readiness_status="PENDING",
         readiness_reason="article_unskimmable_retry",
+        ingestion_day=date.today(),
         created_at=_recent_dt(hours_ago=1, minutes_ago=55),
         updated_at=_recent_dt(hours_ago=1, minutes_ago=55),
     )
     db.add(item)
+    db.add(
+        IngestionBudget(
+            day=date.today(),
+            content_type=ContentType.ARTICLE,
+            target=10,
+            inserted=5,
+            reserved=0,
+            seen=5,
+            suppressed=0,
+            attempts=5,
+        )
+    )
     db.commit()
 
     result = content_ai_service.process_content_ai_summary_request(db, content_id=item.id)
@@ -258,11 +273,97 @@ def test_process_content_ai_summary_request_skips_exhausted_article_retry_window
 
     refreshed_item = db.get(ContentItem, item.id)
 
-    assert result["skipped"] is True
-    assert result["reason"] == "article_retry_window_exhausted"
-    assert result["changed"] is False
-    assert refreshed_item.summary.startswith("__blips_article_retry__:v1:3:")
-    assert refreshed_item.readiness_reason == "article_unskimmable_retry"
+    assert result["skipped"] is False
+    assert result["reason"] == "article_unskimmable_terminal"
+    assert result["changed"] is True
+    assert refreshed_item.is_suppressed is True
+    assert refreshed_item.curation_status == ContentStatus.CANDIDATE
+    assert refreshed_item.summary is None
+    assert refreshed_item.ai_processed is True
+    assert refreshed_item.readiness_reason == "suppressed"
+    budget = db.get(IngestionBudget, (date.today(), ContentType.ARTICLE))
+    assert budget.inserted == 4
+
+
+def test_process_content_ai_summary_request_rechecks_text_before_terminal_reject(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/story",
+        canonical_url="https://example.com/story",
+        published_at=_recent_dt(hours_ago=2),
+        title="Retry exhausted article now skimmable",
+        content_text=("Recovered article text about AI infrastructure and worker queues. " * 40).strip(),
+        summary=f"__blips_article_retry__:v1:3:{_recent_dt(hours_ago=1).isoformat()}",
+        ai_processed=False,
+        image_url="https://cdn.example.com/hero.jpg",
+        article_image_status="VERIFIED",
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status="PENDING",
+        readiness_reason="article_unskimmable_retry",
+        ingestion_day=date.today(),
+        created_at=_recent_dt(hours_ago=1, minutes_ago=55),
+        updated_at=_recent_dt(hours_ago=1, minutes_ago=55),
+    )
+    db.add(item)
+    db.add(
+        IngestionBudget(
+            day=date.today(),
+            content_type=ContentType.ARTICLE,
+            target=10,
+            inserted=5,
+            reserved=0,
+            seen=5,
+            suppressed=0,
+            attempts=5,
+        )
+    )
+    db.commit()
+
+    class _FakeLLMClient:
+        def is_configured(self):
+            return True
+
+        def get_provider(self):
+            return "fake"
+
+    class _FakeArticleHydrator:
+        def populate_article_summary(self, target, **_kwargs):
+            target.summary = (
+                "Recovered article summary is now long enough to satisfy the ready "
+                "threshold after source text became available during retry."
+            )
+            target.topics = ["ai", "infrastructure"]
+            target.ai_processed = True
+            return True
+
+        def refresh_article_annotations(self, target):
+            return None
+
+    result = content_ai_service.process_content_ai_summary_request(
+        db,
+        content_id=item.id,
+        llm_client=_FakeLLMClient(),
+        article_hydrator=_FakeArticleHydrator(),
+    )
+    db.commit()
+
+    refreshed_item = db.get(ContentItem, item.id)
+    budget = db.get(IngestionBudget, (date.today(), ContentType.ARTICLE))
+
+    assert result["changed"] is True
+    assert result["reason"] is None
+    assert refreshed_item.is_suppressed is False
+    assert refreshed_item.curation_status == ContentStatus.PROMOTED
+    assert refreshed_item.ai_processed is True
+    assert refreshed_item.readiness_status == "READY"
+    assert refreshed_item.readiness_reason == "article_ready"
+    assert budget.inserted == 5
 
 
 def test_process_content_ai_summary_request_marks_article_ready(monkeypatch):

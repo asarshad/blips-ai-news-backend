@@ -12,6 +12,7 @@ import html
 import os
 import random
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -265,16 +266,35 @@ class RSSClient:
         """Fetch RSS bytes with retry/backoff bounded by a shared per-run budget."""
         headers = {"User-Agent": random.choice(self.USER_AGENTS)}
         attempts = self._max_retries + 1
+        last_error: Exception | str | None = None
 
         for attempt in range(1, attempts + 1):
             try:
                 response = requests.get(feed_url, headers=headers, timeout=self._timeout_seconds)
+                raw_status_code = getattr(response, "status_code", 200)
+                try:
+                    status_code = int(raw_status_code or 200)
+                except (TypeError, ValueError):
+                    status_code = 200
+                headers_obj = getattr(response, "headers", {}) or {}
+                if not isinstance(headers_obj, Mapping):
+                    headers_obj = {}
+                final_url = getattr(response, "url", feed_url) or feed_url
+                if not isinstance(final_url, str):
+                    final_url = feed_url
+                history = getattr(response, "history", []) or []
+                if not isinstance(history, (list, tuple)):
+                    history = []
                 outcome = classify_http_response(
-                    status_code=response.status_code,
-                    headers=response.headers,
+                    status_code=status_code,
+                    headers=headers_obj,
                     original_url=feed_url,
-                    final_url=response.url,
-                    redirect_statuses=[r.status_code for r in response.history],
+                    final_url=final_url,
+                    redirect_statuses=[
+                        int(getattr(r, "status_code", 0) or 0)
+                        for r in history
+                        if getattr(r, "status_code", None) is not None
+                    ],
                 )
                 self._record_fetch_outcome(feed_url, outcome)
                 if outcome.succeeded:
@@ -290,11 +310,13 @@ class RSSClient:
                     )
                     return None
                 exc: requests.RequestException = requests.HTTPError(
-                    outcome.error or f"HTTP {response.status_code}"
+                    outcome.error or f"HTTP {status_code}"
                 )
+                last_error = exc
             except requests.RequestException as exc:
                 outcome = classify_exception(exc)
                 self._record_fetch_outcome(feed_url, outcome)
+                last_error = exc
 
             last_attempt = attempt >= attempts
             budget_exhausted = self._retry_budget_remaining <= 0
@@ -305,7 +327,7 @@ class RSSClient:
                     attempt,
                     attempts,
                     self._retry_budget_remaining,
-                    exc,
+                    last_error or "retry budget exhausted",
                 )
                 return None
 

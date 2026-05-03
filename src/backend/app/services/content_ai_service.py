@@ -23,6 +23,10 @@ from app.services.ai_retry_state import (
     record_article_retry_deferral,
     record_video_summary_failure,
 )
+from app.services.article_unskimmable_service import (
+    is_terminal_unskimmable_article,
+    reject_terminal_unskimmable_article,
+)
 from app.services.content_readiness import seed_content_readiness, sync_content_readiness
 from app.services.playlist_service import refresh_cached_playlist_items
 from app.services.tiered_feed_service import invalidate_tiered_feed_cache
@@ -47,7 +51,7 @@ def should_queue_content_ai_summary(item: Any) -> bool:
         getattr(item, "type", None) == ContentType.ARTICLE
         and not article_retry_state(item)["eligible"]
     ):
-        return False
+        return not is_terminal_unskimmable_article(item)
     return not bool(getattr(item, "ai_processed", False))
 
 
@@ -150,35 +154,8 @@ def process_content_ai_summary_request(
             "ai_processed": True,
         }
 
-    if item.type == ContentType.ARTICLE:
-        retry_state = article_retry_state(item)
-        if not retry_state["eligible"]:
-            seed_content_readiness(item)
-            logger.info(
-                "[content_ai] skipping article outside unskimmable retry window "
-                "content_id=%s attempts=%s",
-                item.id,
-                retry_state["attempts"],
-            )
-            return {
-                "content_id": int(item.id),
-                "changed": False,
-                "skipped": True,
-                "reason": "article_retry_window_exhausted",
-                "content_type": item.type.value,
-                "ai_processed": bool(item.ai_processed),
-                "readiness_status": (
-                    getattr(item, "readiness_status", None) or ""
-                ).strip()
-                or None,
-                "readiness_reason": (
-                    getattr(item, "readiness_reason", None) or ""
-                ).strip()
-                or None,
-            }
-
     resolved_llm_client = llm_client or LLMClient()
-    if not resolved_llm_client.is_configured():
+    if item.type != ContentType.ARTICLE and not resolved_llm_client.is_configured():
         raise RuntimeError(
             f"{resolved_llm_client.get_provider()} API key not configured for event-driven AI"
         )
@@ -196,6 +173,9 @@ def process_content_ai_summary_request(
             article_hydrator=hydrator,
             llm_client=resolved_llm_client,
         )
+        terminal_reason = (
+            "article_unskimmable_terminal" if is_terminal_unskimmable_article(item) else None
+        )
     else:
         changed = _process_video_summary(
             db,
@@ -203,6 +183,7 @@ def process_content_ai_summary_request(
             content_repo=content_repo,
             llm_client=resolved_llm_client,
         )
+        terminal_reason = None
 
     cache_refresh = None
     if changed:
@@ -228,6 +209,7 @@ def process_content_ai_summary_request(
         "readiness_status": (getattr(item, "readiness_status", None) or "").strip() or None,
         "readiness_reason": (getattr(item, "readiness_reason", None) or "").strip() or None,
         "cache_refresh": cache_refresh,
+        "reason": terminal_reason,
     }
 
 
@@ -259,6 +241,13 @@ def _process_article_summary(
         if _is_recent_article_for_maintenance(item):
             item.summary = previous_summary
             attempt = record_article_retry_deferral(item)
+            if attempt >= int(settings.ARTICLE_UNSKIMMABLE_RETRY_MAX_ATTEMPTS):
+                reject_terminal_unskimmable_article(
+                    db,
+                    item,
+                    reason="max_unskimmable_attempts",
+                )
+                return True
             seed_content_readiness(item)
             logger.info(
                 "[content_ai] deferred unskimmable article content_id=%s attempt=%s",
@@ -267,17 +256,21 @@ def _process_article_summary(
             )
             return True
 
-        content_repo.mark_ai_processed(
-            item.id,
-            summary="",
-            topics=item.topics or [],
-            commit=False,
+        reject_terminal_unskimmable_article(
+            db,
+            item,
+            reason="outside_retry_lookback",
         )
         logger.info(
-            "[content_ai] marked older unskimmable article processed content_id=%s",
+            "[content_ai] terminally rejected older unskimmable article content_id=%s",
             item.id,
         )
         return True
+
+    if not llm_client.is_configured():
+        raise RuntimeError(
+            f"{llm_client.get_provider()} API key not configured for event-driven AI"
+        )
 
     article_hydrator.populate_article_summary(
         item,

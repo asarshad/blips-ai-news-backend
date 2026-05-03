@@ -466,7 +466,10 @@ def _llm_broad_news_block_reason(item: ContentItem, *, suffix: str) -> str | Non
 
     if (
         tech_relevance == "none"
-        and confidence >= max(min(1.0, float(settings.VIDEO_TECH_NONE_BLOCK_CONFIDENCE)), 0.50)
+        and confidence >= max(
+            0.50,
+            min(1.0, float(settings.VIDEO_TECH_NONE_BLOCK_CONFIDENCE), 0.55),
+        )
     ):
         return f"llm_non_tech_broad_news_{suffix}"
 
