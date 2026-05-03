@@ -277,6 +277,11 @@ def run_launcher() -> int:
     watchdog_interval_seconds = _int_env("WORKER_LANE_WATCHDOG_INTERVAL_SECONDS", 30)
     watchdog_stale_seconds = _int_env("WORKER_LANE_STALE_SECONDS", 900)
     watchdog_startup_grace_seconds = _int_env("WORKER_LANE_STARTUP_GRACE_SECONDS", 120)
+    # Flap protection: if a lane keeps going stale we still want Render to
+    # restart the whole worker rather than restart-loop forever in silence.
+    flap_window_seconds = _int_env("WORKER_LANE_FLAP_WINDOW_SECONDS", 1800)
+    flap_max_restarts = _int_env("WORKER_LANE_FLAP_MAX_RESTARTS", 5)
+    lane_restart_history: dict[str, list[float]] = {}
     watchdog_grace_until = datetime.now(timezone.utc) + timedelta(
         seconds=watchdog_startup_grace_seconds
     )
@@ -336,22 +341,57 @@ def run_launcher() -> int:
                         exit_code = 1
                         STOP_EVENT.set()
                     else:
-                        logger.warning(
-                            "Worker lane heartbeat stale for lanes=%s; restarting affected lanes",
-                            stale,
-                        )
-                        record_lane_heartbeat(
-                            "launcher",
-                            status="watchdog_restart",
-                            details={"stale_lanes": stale},
-                        )
+                        # Flap protection: count restarts within the rolling
+                        # window. If any lane exceeds the cap, escalate to a
+                        # full worker exit so Render restarts us with backoff
+                        # instead of letting the lane silently restart-loop.
+                        cutoff = now - flap_window_seconds
+                        flapping_lanes: list[str] = []
                         for lane_name in stale:
-                            _restart_lane(processes, lane_name)
-                        # Reset grace so newly started lanes have time to
-                        # register a heartbeat before another check fires.
-                        watchdog_grace_until = datetime.now(timezone.utc) + timedelta(
-                            seconds=watchdog_startup_grace_seconds
-                        )
+                            history = lane_restart_history.setdefault(lane_name, [])
+                            history[:] = [t for t in history if t >= cutoff]
+                            if len(history) >= flap_max_restarts:
+                                flapping_lanes.append(lane_name)
+                        if flapping_lanes:
+                            logger.error(
+                                "Worker lane(s) %s exceeded %s restarts in %ss; "
+                                "stopping for Render restart",
+                                flapping_lanes,
+                                flap_max_restarts,
+                                flap_window_seconds,
+                            )
+                            record_lane_heartbeat(
+                                "launcher",
+                                status="watchdog_failed",
+                                details={
+                                    "stale_lanes": stale,
+                                    "flapping_lanes": flapping_lanes,
+                                    "restart_window_seconds": flap_window_seconds,
+                                },
+                            )
+                            exit_code = 1
+                            STOP_EVENT.set()
+                        else:
+                            logger.warning(
+                                "Worker lane heartbeat stale for lanes=%s; "
+                                "restarting affected lanes",
+                                stale,
+                            )
+                            record_lane_heartbeat(
+                                "launcher",
+                                status="watchdog_restart",
+                                details={"stale_lanes": stale},
+                            )
+                            for lane_name in stale:
+                                if _restart_lane(processes, lane_name):
+                                    lane_restart_history.setdefault(lane_name, []).append(
+                                        now
+                                    )
+                            # Reset grace so newly started lanes have time to
+                            # register a heartbeat before another check fires.
+                            watchdog_grace_until = datetime.now(timezone.utc) + timedelta(
+                                seconds=watchdog_startup_grace_seconds
+                            )
                 next_watchdog_check = now + watchdog_interval_seconds
 
             if now >= next_lock_refresh and not STOP_EVENT.is_set():

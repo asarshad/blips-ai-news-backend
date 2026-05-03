@@ -35,6 +35,23 @@ from app.services.tiered_feed_service import invalidate_tiered_feed_cache
 
 logger = get_logger(__name__)
 
+# Per-event-type lock timeout overrides. Most events should finish well under
+# the default; long-running batch jobs (clustering) need a wider window so the
+# dispatcher doesn't re-claim a still-running event as "stale processing" and
+# fire a duplicate run.
+_EVENT_LOCK_TIMEOUT_OVERRIDES: dict[str, timedelta] = {
+    CONTENT_CLUSTERING_REQUESTED_EVENT_TYPE: timedelta(minutes=30),
+}
+
+# Per-event-type max attempt count before an event is marked failed and
+# stops being retried. A clustering job that fails 5 times in a row is almost
+# certainly a code bug, not a transient — better to stop and surface it than
+# silently retry forever.
+DEFAULT_MAX_ATTEMPTS = 10
+_EVENT_MAX_ATTEMPTS_OVERRIDES: dict[str, int] = {
+    CONTENT_CLUSTERING_REQUESTED_EVENT_TYPE: 5,
+}
+
 
 class ContentEventDispatcher:
     """Claim and process content lifecycle events from the outbox."""
@@ -59,9 +76,23 @@ class ContentEventDispatcher:
                 processed += 1
         return processed
 
+    def _lock_timeout_for(self, event_type: str | None) -> timedelta:
+        if event_type is None:
+            return self._lock_timeout
+        return _EVENT_LOCK_TIMEOUT_OVERRIDES.get(event_type, self._lock_timeout)
+
     def _claim_pending(self, *, limit: int) -> list[int]:
         now = datetime.utcnow()
-        stale_before = now - self._lock_timeout
+        # Pick the widest applicable lock timeout for the lane's event types
+        # so long-running events (clustering) aren't re-claimed mid-run.
+        if self._event_types:
+            stale_lock_timeout = max(
+                (self._lock_timeout_for(et) for et in self._event_types),
+                default=self._lock_timeout,
+            )
+        else:
+            stale_lock_timeout = self._lock_timeout
+        stale_before = now - stale_lock_timeout
 
         with self._session_factory() as db:
             query = db.query(ContentEventOutbox).filter(
@@ -141,15 +172,35 @@ class ContentEventDispatcher:
             event = db.query(ContentEventOutbox).filter(ContentEventOutbox.id == event_id).first()
             if event is None:
                 return False
-            event.status = "pending"
-            event.locked_at = None
-            event.available_at = datetime.utcnow() + _retry_delay(
-                event.attempt_count,
-                event_type=event.event_type,
-                error_message=error_message,
+            attempt_count = int(event.attempt_count or 0)
+            max_attempts = _EVENT_MAX_ATTEMPTS_OVERRIDES.get(
+                event.event_type, DEFAULT_MAX_ATTEMPTS
             )
-            event.last_error = error_message[:4000]
-            event.updated_at = datetime.utcnow()
+            now_dt = datetime.utcnow()
+            if attempt_count >= max_attempts:
+                # Stop retrying — this is almost certainly a code bug rather
+                # than a transient failure. Mark the row as failed so it
+                # surfaces in monitoring instead of looping silently.
+                logger.error(
+                    "Content event %s (%s) exceeded max_attempts=%s; marking failed",
+                    event.id,
+                    event.event_type,
+                    max_attempts,
+                )
+                event.status = "failed"
+                event.locked_at = None
+                event.last_error = error_message[:4000]
+                event.updated_at = now_dt
+            else:
+                event.status = "pending"
+                event.locked_at = None
+                event.available_at = now_dt + _retry_delay(
+                    event.attempt_count,
+                    event_type=event.event_type,
+                    error_message=error_message,
+                )
+                event.last_error = error_message[:4000]
+                event.updated_at = now_dt
             db.commit()
         return False
 

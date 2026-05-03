@@ -275,6 +275,56 @@ def test_dispatch_clustering_event_runs_clustering_job(monkeypatch):
     assert triggers == ["fetch_news"]
 
 
+def test_clustering_event_uses_extended_lock_timeout():
+    """The dispatcher widens its stale-processing window for clustering so a
+    long-running clustering job isn't re-claimed and double-fired."""
+    dispatcher = ContentEventDispatcher(
+        event_types=("content.clustering.requested",),
+    )
+    assert dispatcher._lock_timeout_for("content.clustering.requested") == (
+        dispatcher_module.timedelta(minutes=30)
+    )
+    assert dispatcher._lock_timeout_for(CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE) == (
+        dispatcher_module.timedelta(minutes=10)
+    )
+
+
+def test_process_claimed_marks_event_failed_after_max_attempts(monkeypatch):
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    event = ContentEventOutbox(
+        content_item_id=None,
+        event_type="content.clustering.requested",
+        payload={"trigger": "fetch_news"},
+        status="processing",
+        # Already at the clustering cap of 5 — next failure should mark failed.
+        attempt_count=5,
+        available_at=datetime.utcnow(),
+        locked_at=datetime.utcnow(),
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+    )
+    db.add(event)
+    db.commit()
+
+    def _boom(_event):
+        raise RuntimeError("clustering exploded")
+
+    dispatcher = ContentEventDispatcher(session_factory=SessionLocal)
+    monkeypatch.setattr(dispatcher, "_dispatch_clustering_event", _boom)
+
+    assert dispatcher._process_claimed(event.id) is False
+
+    refreshed = SessionLocal().get(ContentEventOutbox, event.id)
+    assert refreshed is not None
+    assert refreshed.status == "failed"
+    assert refreshed.locked_at is None
+    assert refreshed.last_error and "clustering exploded" in refreshed.last_error
+
+
 def test_ai_provider_quota_failures_back_off_for_an_hour():
     delay = dispatcher_module._retry_delay(
         3,

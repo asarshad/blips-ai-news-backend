@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 from apscheduler.triggers.cron import CronTrigger
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.feature_flags import feature_flags
@@ -32,7 +33,13 @@ def queue_content_clustering_request(
     trigger: str = "fetch_news",
     now: Optional[datetime] = None,
 ) -> ContentEventOutbox | None:
-    """Enqueue a single global clustering request, deduplicating pending events."""
+    """Enqueue a single global clustering request, deduplicating pending events.
+
+    Dedup is enforced by both a SELECT pre-check (fast path) and a partial
+    unique index `uq_content_event_outbox_clustering_pending` (correctness
+    backstop for races between concurrent ingestion runs). On the index's
+    IntegrityError we treat the event as already-queued and return None.
+    """
     existing = (
         db.query(ContentEventOutbox.id)
         .filter(
@@ -55,7 +62,15 @@ def queue_content_clustering_request(
         updated_at=queued_at,
     )
     db.add(event)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        # Lost the race against the partial unique index — another ingestion
+        # run already enqueued a pending clustering event. Roll back the
+        # SAVEPOINT (ORM auto-begins a nested txn around flush) and treat
+        # this as a successful no-op so the caller still sees dedup.
+        db.rollback()
+        return None
     return event
 
 

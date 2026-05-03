@@ -325,6 +325,86 @@ def test_run_launcher_watchdog_restarts_stale_alive_lane(monkeypatch):
     launcher.STOP_EVENT.clear()
 
 
+def test_run_launcher_watchdog_exits_when_lane_flaps_repeatedly(monkeypatch):
+    """A lane that keeps going stale should escalate to a full worker exit
+    so Render restarts us with backoff instead of silently restart-looping."""
+    monkeypatch.setenv("SCHEDULER_ENABLED", "true")
+    launcher.STOP_EVENT.clear()
+
+    class _FakeLock:
+        refresh_interval_seconds = 1000
+
+        def acquire_with_retry(self, stop_event):  # noqa: ARG002
+            return True
+
+        def refresh(self):
+            return True
+
+        def release(self):
+            return True
+
+    class _FakeProcess:
+        pid = 1
+        returncode = None
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):  # noqa: ARG002
+            return 0
+
+    restart_calls: list[str] = []
+
+    def _fake_restart_lane(processes, lane_name, **_kwargs):
+        restart_calls.append(lane_name)
+        return True
+
+    monkeypatch.setattr(launcher.signal, "signal", lambda *a, **k: None)
+    monkeypatch.setattr(launcher, "WorkerLeaderLock", _FakeLock)
+    monkeypatch.setattr(launcher, "_start_lanes", lambda lanes: {"ingestion": _FakeProcess()})
+    monkeypatch.setattr(launcher, "record_lane_heartbeat", lambda *a, **k: None)
+    monkeypatch.setattr(launcher, "_stale_lanes", lambda *a, **k: ["ingestion"])
+    monkeypatch.setattr(launcher, "_restart_lane", _fake_restart_lane)
+
+    # Always-current monotonic so every loop iteration triggers the watchdog
+    # branch immediately. The flap window is plenty wide (default 1800s) so
+    # all restarts land inside it.
+    monkeypatch.setattr(launcher.time, "monotonic", lambda: 0)
+
+    class _FakeDateTime:
+        @staticmethod
+        def now(tz=None):
+            from datetime import datetime
+
+            return datetime(2026, 5, 2, 10, 0, 0, tzinfo=tz)
+
+    monkeypatch.setattr(launcher, "datetime", _FakeDateTime)
+
+    def _int_env(name, default, minimum=1):
+        if "GRACE" in name:
+            return 0
+        if "INTERVAL" in name:
+            return 0  # fire watchdog every loop iteration
+        if name == "WORKER_LANE_FLAP_MAX_RESTARTS":
+            return 3
+        if name == "WORKER_LANE_FLAP_WINDOW_SECONDS":
+            return 1800
+        return 30
+
+    monkeypatch.setattr(launcher, "_int_env", _int_env)
+
+    assert launcher.run_launcher() == 1
+    # 3 restarts allowed before flap-cap fires, then the 4th stale check
+    # exits without calling restart again. We can't pin the exact count
+    # without driving the loop more deterministically, but we know it
+    # restarted at least flap_max_restarts times.
+    assert len(restart_calls) >= 3
+    launcher.STOP_EVENT.clear()
+
+
 def test_run_launcher_watchdog_exits_when_lane_process_is_dead(monkeypatch):
     """Stale heartbeat AND a dead lane process is the only case where we
     bail out for a Render restart."""
