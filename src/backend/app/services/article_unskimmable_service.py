@@ -54,6 +54,7 @@ def reject_terminal_unskimmable_article(
     item.is_suppressed = True
     item.ai_processed = True
     item.summary = None
+    item.promotion_score = None
     item.tech_relevance_reason = marker
     item.promotion_reason = "Rejected automatically: no extractable article text"
     item.last_modified_by = "system:article_unskimmable"

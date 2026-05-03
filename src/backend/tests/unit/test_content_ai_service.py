@@ -699,3 +699,126 @@ def test_process_article_summary_persists_tech_relevance_via_mark_ai_processed(m
     refreshed = db.get(ContentItem, item.id)
     assert refreshed.tech_relevance == "yes"
     assert refreshed.tech_relevance_confidence == 0.97
+
+
+def test_reject_terminal_unskimmable_article_clears_promotion_score():
+    """Fix 1 — promotion_score must be cleared on terminal rejection so stale scores
+    from pre-rejection scoring runs cannot surface through the API."""
+    from app.services.article_unskimmable_service import reject_terminal_unskimmable_article
+
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="CNET",
+        source_url="https://cnet.com/article/123",
+        canonical_url="https://cnet.com/article/123",
+        published_at=_recent_dt(hours_ago=3),
+        title="Yellowstone sequel Marshals release date",
+        description="Luke Grimes leads the Yellowstone sequel.",
+        curation_status=ContentStatus.PROMOTED,
+        promotion_score=0.4313,
+        created_at=_recent_dt(hours_ago=2),
+        updated_at=_recent_dt(hours_ago=2),
+    )
+    db.add(item)
+    db.commit()
+
+    result = reject_terminal_unskimmable_article(db, item, reason="max_unskimmable_attempts")
+    db.commit()
+
+    refreshed = db.get(ContentItem, item.id)
+    assert result is True
+    assert refreshed.promotion_score is None
+    assert refreshed.is_suppressed is True
+    assert "article_unskimmable_terminal" in (refreshed.tech_relevance_reason or "")
+
+
+def test_process_article_summary_fallback_classifier_rejects_non_tech_when_body_too_short(
+    monkeypatch,
+):
+    """Fix 2 — when body is below the summary threshold, the tech classifier should
+    run on title + description; articles classified 'no' with confidence >= 0.50
+    must be terminally rejected with reason 'llm_non_tech_article'."""
+    from unittest.mock import MagicMock
+
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="CNET",
+        source_url="https://cnet.com/article/456",
+        canonical_url="https://cnet.com/article/456",
+        published_at=_recent_dt(hours_ago=2),
+        title="Yellowstone sequel Marshals release date and full schedule",
+        # Description is short — well under the 120-word body threshold
+        description="Luke Grimes leads the Yellowstone sequel.",
+        content_text="Luke Grimes leads the Yellowstone sequel.",
+        image_url="https://cdn.example.com/hero.jpg",
+        article_image_status="VERIFIED",
+        curation_status=ContentStatus.PROMOTED,
+        promotion_score=0.4313,
+        ingestion_day=date.today(),
+        created_at=_recent_dt(hours_ago=1),
+        updated_at=_recent_dt(hours_ago=1),
+    )
+    db.add(item)
+    db.add(
+        IngestionBudget(
+            day=date.today(),
+            content_type=ContentType.ARTICLE,
+            target=10,
+            inserted=5,
+            reserved=0,
+            seen=5,
+            suppressed=0,
+            attempts=5,
+        )
+    )
+    db.commit()
+
+    fake_llm = MagicMock()
+    fake_llm.is_configured.return_value = True
+    fake_llm.get_provider.return_value = "fake"
+    fake_llm.classify_blips_tech_relevance.return_value = SimpleNamespace(
+        is_blips_tech_relevant="no",
+        confidence=0.95,
+        reason="TV entertainment article with no tech angle.",
+    )
+
+    fake_hydrator = MagicMock()
+    fake_hydrator.refresh_http_metadata = MagicMock(return_value=None)
+    fake_hydrator.refresh_canonical_url = MagicMock(return_value=None)
+    fake_hydrator.refresh_image = MagicMock(return_value=None)
+
+    result = content_ai_service.process_content_ai_summary_request(
+        db,
+        content_id=item.id,
+        llm_client=fake_llm,
+        article_hydrator=fake_hydrator,
+    )
+    db.commit()
+
+    refreshed = db.get(ContentItem, item.id)
+    assert result["changed"] is True
+    # Article should be terminally rejected, not just deferred
+    assert refreshed.is_suppressed is True
+    assert refreshed.curation_status == ContentStatus.CANDIDATE
+    # Promotion score must be cleared
+    assert refreshed.promotion_score is None
+    # Rejection reason must identify the llm classifier path
+    assert "llm_non_tech_article" in (refreshed.tech_relevance_reason or "")
+    assert refreshed.tech_relevance == "no"
+    assert refreshed.tech_relevance_confidence == 0.95
+    assert refreshed.promotion_reason == "Rejected automatically: non-tech article"
+    # The classifier was called with the title + description fallback, not body text
+    fake_llm.classify_blips_tech_relevance.assert_called_once()
+    call_kwargs = fake_llm.classify_blips_tech_relevance.call_args.kwargs
+    assert call_kwargs["title"] == item.title
+    assert "Luke Grimes" in call_kwargs["summary"]

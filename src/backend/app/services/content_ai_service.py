@@ -238,6 +238,46 @@ def _process_article_summary(
 
     summary_input = bounded_article_summary_text(text)
     if not summary_input:
+        # Body is too short to summarise.  Before giving up entirely, run the
+        # tech-relevance classifier on the title + description so we can reject
+        # clearly off-topic articles (TV schedules, celebrity news, etc.) with
+        # an informative reason rather than the generic "unskimmable" marker.
+        if settings.ARTICLE_TECH_CLASSIFIER_ENABLED and llm_client.is_configured():
+            try:
+                fallback_summary = (item.description or "").strip() or (item.title or "").strip()
+                tech = llm_client.classify_blips_tech_relevance(
+                    title=item.title or "",
+                    summary=fallback_summary,
+                    source=item.source or "",
+                    url=item.source_url or None,
+                )
+                _FALLBACK_CLASSIFIER_MIN_CONFIDENCE = 0.50
+                if (
+                    tech.is_blips_tech_relevant == "no"
+                    and (tech.confidence or 0) >= _FALLBACK_CLASSIFIER_MIN_CONFIDENCE
+                ):
+                    reject_terminal_unskimmable_article(
+                        db,
+                        item,
+                        reason="llm_non_tech_article",
+                    )
+                    # Store the actual classifier signal (separate columns from the marker).
+                    item.tech_relevance = tech.is_blips_tech_relevant
+                    item.tech_relevance_confidence = tech.confidence
+                    item.promotion_reason = "Rejected automatically: non-tech article"
+                    logger.info(
+                        "[content_ai] early non-tech rejection content_id=%s confidence=%.2f",
+                        item.id,
+                        tech.confidence,
+                    )
+                    return True
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "[content_ai] fallback tech classifier failed content_id=%s: %s",
+                    item.id,
+                    exc,
+                )
+
         if _is_recent_article_for_maintenance(item):
             item.summary = previous_summary
             attempt = record_article_retry_deferral(item)
