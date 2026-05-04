@@ -22,8 +22,8 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Alert rate limiting: prevent spam
-ALERT_COOLDOWN_SECONDS = 300  # 5 minutes
+# Process boot time — used for warm-up grace after deploy/restart.
+_PROCESS_BOOT_AT = datetime.now(timezone.utc)
 
 
 class AlertSeverity(str, Enum):
@@ -60,36 +60,104 @@ def _get_redis_client():
         return None
 
 
-def _check_rate_limit(alert_key: str) -> bool:
-    """
-    Check if alert should be sent (not rate limited).
+_SEVERITY_RANK = {
+    AlertSeverity.INFO: 0,
+    AlertSeverity.WARNING: 1,
+    AlertSeverity.CRITICAL: 2,
+}
 
-    Args:
-        alert_key: Unique key for this alert type
+
+def _floor_severity() -> AlertSeverity:
+    raw = str(getattr(settings, "ALERT_MIN_SEVERITY", "warning") or "warning").lower()
+    try:
+        return AlertSeverity(raw)
+    except ValueError:
+        return AlertSeverity.WARNING
+
+
+def _meets_severity_floor(severity: AlertSeverity) -> bool:
+    return _SEVERITY_RANK[severity] >= _SEVERITY_RANK[_floor_severity()]
+
+
+def _cooldown_seconds(severity: AlertSeverity) -> int:
+    if severity == AlertSeverity.CRITICAL:
+        return int(getattr(settings, "ALERT_COOLDOWN_CRITICAL_SECONDS", 300) or 300)
+    return int(getattr(settings, "ALERT_COOLDOWN_WARNING_SECONDS", 86400) or 86400)
+
+
+def _in_warmup(severity: AlertSeverity) -> bool:
+    if severity == AlertSeverity.CRITICAL:
+        return False
+    grace = int(getattr(settings, "ALERT_WARMUP_GRACE_SECONDS", 7200) or 0)
+    if grace <= 0:
+        return False
+    return (datetime.now(timezone.utc) - _PROCESS_BOOT_AT).total_seconds() < grace
+
+
+def _in_quiet_hours(severity: AlertSeverity) -> bool:
+    if severity == AlertSeverity.CRITICAL:
+        return False
+    spec = str(getattr(settings, "ALERT_QUIET_HOURS_UTC", "") or "").strip()
+    if "-" not in spec:
+        return False
+    try:
+        start_str, end_str = spec.split("-", 1)
+        start = int(start_str)
+        end = int(end_str)
+    except ValueError:
+        return False
+    if not (0 <= start <= 23 and 0 <= end <= 23):
+        return False
+    hour = datetime.now(timezone.utc).hour
+    if start == end:
+        return False
+    if start < end:
+        return start <= hour < end
+    # Wraps midnight (e.g. 22-13 means 22:00..23:59 + 00:00..12:59)
+    return hour >= start or hour < end
+
+
+def _check_rate_limit(alert_key: str, severity: AlertSeverity) -> bool:
+    """
+    Check if alert should be sent. The cooldown TTL doubles as an
+    edge-trigger latch when paired with clear_alert_state().
 
     Returns:
         True if alert should be sent, False if rate limited
     """
     redis_client = _get_redis_client()
     if not redis_client:
-        # No Redis = no rate limiting, always send
         return True
 
     try:
         cache_key = f"blips:alert_cooldown:{alert_key}"
-
-        # Check if key exists (alert recently sent)
         if redis_client.exists(cache_key):
-            logger.debug(f"Alert rate limited: {alert_key}")
+            logger.debug("Alert rate limited: %s", alert_key)
             return False
 
-        # Set cooldown
-        redis_client.setex(cache_key, ALERT_COOLDOWN_SECONDS, "1")
+        redis_client.setex(cache_key, _cooldown_seconds(severity), "1")
         return True
 
     except Exception as e:
         logger.warning(f"Rate limit check failed: {e}")
         return True  # On error, allow alert
+
+
+def clear_alert_state(alert_key: str) -> bool:
+    """
+    Clear the cooldown latch for an alert key. Call this when the underlying
+    condition has resolved, so the next occurrence will alert immediately
+    instead of waiting for the cooldown TTL to expire.
+    """
+    redis_client = _get_redis_client()
+    if not redis_client:
+        return False
+    try:
+        deleted = redis_client.delete(f"blips:alert_cooldown:{alert_key}")
+        return bool(deleted)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("clear_alert_state failed for %s: %s", alert_key, e)
+        return False
 
 
 def _format_slack_payload(
@@ -212,6 +280,31 @@ def send_alert(
         logger.debug("Alerting disabled via ALERT_ENABLED=false")
         return False
 
+    if not _meets_severity_floor(severity):
+        logger.debug(
+            "Alert below severity floor (%s): [%s] %s",
+            _floor_severity().value,
+            severity.value,
+            message,
+        )
+        return False
+
+    if _in_warmup(severity):
+        logger.info(
+            "Alert suppressed during warm-up grace: [%s] %s",
+            severity.value,
+            message,
+        )
+        return False
+
+    if _in_quiet_hours(severity):
+        logger.info(
+            "Alert suppressed during quiet hours: [%s] %s",
+            severity.value,
+            message,
+        )
+        return False
+
     webhook_url = (
         getattr(settings, "ALERT_DISCORD_WEBHOOK_URL", "")
         or getattr(settings, "ALERT_WEBHOOK_URL", "")
@@ -223,7 +316,7 @@ def send_alert(
     # Rate limiting
     if not bypass_rate_limit:
         rate_key = alert_key or f"{severity.value}:{hash(message)}"
-        if not _check_rate_limit(rate_key):
+        if not _check_rate_limit(rate_key, severity):
             return False
 
     try:

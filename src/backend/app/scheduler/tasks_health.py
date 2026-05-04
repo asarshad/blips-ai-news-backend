@@ -69,6 +69,12 @@ def check_ingestion_health() -> None:
                 logger.error(f"Failed to send ingestion stall alert: {e}")
         else:
             logger.info("Ingestion health OK")
+            try:
+                from app.services.alerting_service import clear_alert_state
+
+                clear_alert_state("ingestion_stalled")
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Failed to clear ingestion_stalled latch: %s", e)
 
     except Exception as e:
         logger.error(f"Error checking ingestion health: {e}", exc_info=True)
@@ -82,7 +88,10 @@ def check_inventory_health() -> None:
 
     db = SessionLocal()
     try:
-        from app.services.alerting_service import alert_inventory_surface_degraded
+        from app.services.alerting_service import (
+            alert_inventory_surface_degraded,
+            clear_alert_state,
+        )
         from app.services.inventory_service import get_cached_inventory_health
 
         health = get_cached_inventory_health(db, force_refresh=True)
@@ -90,6 +99,8 @@ def check_inventory_health() -> None:
 
         for surface, metrics in health.surfaces.items():
             if metrics.is_healthy:
+                # Clear latch so a future degradation alerts immediately.
+                clear_alert_state(f"inventory_degraded_{surface.value}")
                 continue
 
             unhealthy_surfaces.append(surface.value)

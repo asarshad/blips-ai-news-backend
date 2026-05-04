@@ -44,6 +44,19 @@ class Settings(BaseSettings):
     ALERT_ENABLED: bool = False
     ALERT_WEBHOOK_URL: str = ""
     ALERT_DISCORD_WEBHOOK_URL: str = ""
+    # Drop alerts below this severity. One of: info, warning, critical.
+    ALERT_MIN_SEVERITY: str = "warning"
+    # Cooldown for CRITICAL: short — re-fire if still happening.
+    ALERT_COOLDOWN_CRITICAL_SECONDS: int = 300
+    # Hold-down for non-critical: long. Combined with clear_alert_state(),
+    # turns repeating standing conditions into edge-triggered alerts.
+    ALERT_COOLDOWN_WARNING_SECONDS: int = 86400
+    # Suppress non-critical alerts for this long after process boot — avoids
+    # rolling-window false positives right after a deploy/restart.
+    ALERT_WARMUP_GRACE_SECONDS: int = 7200
+    # Suppress non-critical alerts during these UTC hours. Format: "HH-HH"
+    # (e.g. "22-13" wraps midnight). Empty disables. Critical always alerts.
+    ALERT_QUIET_HOURS_UTC: str = ""
     STRATEGIC_CONTENT_ALERTS_ENABLED: bool = True
     STRATEGIC_ALERT_READY_STALL_HOURS: int = 6
     STRATEGIC_ALERT_SURFACE_STALL_HOURS: int = 12

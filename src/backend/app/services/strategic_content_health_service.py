@@ -328,15 +328,45 @@ def compute_strategic_content_health(
     }
 
 
+# All keys this checker may emit. Used to clear stale latches when an
+# issue resolves so the next occurrence alerts immediately.
+_STRATEGIC_ALERT_KEYS: tuple[str, ...] = (
+    "articles_ready_stalled",
+    "videos_ready_stalled",
+    "reels_ready_stalled",
+    "all_surfaces_ready_stalled",
+    "content_event_backlog",
+    "promoted_pending_backlog",
+    "major_news_probe_stale",
+    "major_news_all_feeds_cooling_down",
+    "major_news_no_recent_inserts",
+    "major_news_stuck_pending",
+)
+
+
 def emit_strategic_content_alerts(health: dict[str, Any]) -> int:
     """Emit deduped alerts for strategic issues and return sent count."""
     if not bool(getattr(settings, "STRATEGIC_CONTENT_ALERTS_ENABLED", True)):
         return 0
 
-    from app.services.alerting_service import AlertSeverity, alert_strategic_content_issue
+    from app.services.alerting_service import (
+        AlertSeverity,
+        alert_strategic_content_issue,
+        clear_alert_state,
+    )
+
+    issues = health.get("issues", []) or []
+    active_keys = {str(issue.get("key") or "") for issue in issues}
+
+    # Clear latches for any known key that is NOT currently firing.
+    # The cooldown TTL is long for warnings, so without this, a backlog
+    # that drains and re-grows wouldn't re-alert until the TTL expired.
+    for key in _STRATEGIC_ALERT_KEYS:
+        if key not in active_keys:
+            clear_alert_state(f"strategic_content_{key}")
 
     sent = 0
-    for issue in health.get("issues", []):
+    for issue in issues:
         severity_value = str(issue.get("severity") or "warning").lower()
         severity = (
             AlertSeverity.CRITICAL
