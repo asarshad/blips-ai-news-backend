@@ -691,6 +691,26 @@ FEED_REGISTRY: List[FeedConfig] = [
     # Target: 3-4 articles/day
     # =========================================================================
     FeedConfig(
+        url="https://blog.pragmaticengineer.com/rss/",
+        name="Pragmatic Engineer",
+        role=FeedRole.DEV,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=2,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.88,
+        notes="Gergely Orosz: big-tech engineering, compensation, layoffs, developer culture",
+    ),
+    FeedConfig(
+        url="https://www.quantamagazine.org/feed/",
+        name="Quanta Magazine",
+        role=FeedRole.DEV,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.SLOW,
+        base_quality_weight=0.90,
+        notes="Science/CS journalism: algorithms, cryptography, complexity, physics of computing",
+    ),
+    FeedConfig(
         url="https://news.ycombinator.com/rss",
         name="Hacker News",
         role=FeedRole.DEV,
