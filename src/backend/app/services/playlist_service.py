@@ -1179,13 +1179,24 @@ class PlaylistService:
             limit=500,
         )
 
-        # Deduplicate by ID
-        seen = set()
+        # Deduplicate by ID, then by canonical_key.
+        # The same article can be ingested via multiple feeds with different
+        # source_urls; those rows share a canonical_key but have different IDs
+        # and cluster_id=NULL (so cluster dedup doesn't catch them).
+        # Candidates are sorted score-desc so we keep the highest-scored copy.
+        seen_ids: set = set()
+        seen_canonical_keys: set = set()
         unique = []
         for item in candidates:
-            if item.id not in seen:
-                seen.add(item.id)
-                unique.append(item)
+            if item.id in seen_ids:
+                continue
+            seen_ids.add(item.id)
+            ck = getattr(item, "canonical_key", None)
+            if ck:
+                if ck in seen_canonical_keys:
+                    continue
+                seen_canonical_keys.add(ck)
+            unique.append(item)
 
         return unique
 
