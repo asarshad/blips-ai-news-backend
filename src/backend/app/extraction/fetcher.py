@@ -232,6 +232,7 @@ def fetch_url(
     *,
     etag: Optional[str] = None,
     last_modified: Optional[str] = None,
+    force_browser_ua: bool = False,
 ) -> FetchResult:
     """Fetch *url* with retries and per-domain rate limiting.
 
@@ -239,6 +240,12 @@ def fetch_url(
 
     Security: requests to private/loopback/link-local hosts are rejected
     before any connection is made to prevent SSRF attacks.
+
+    Args:
+        force_browser_ua: When True, skip the BlipsBot UA entirely and use
+            browser-like headers from the first attempt.  Use this for
+            sites known to silently serve stripped HTML to bot UAs even
+            when the HTTP status is 200 (e.g. CNET).
     """
     parsed = urlparse(url)
     domain = parsed.netloc
@@ -273,7 +280,10 @@ def fetch_url(
     client = _get_client()
     last_error: Optional[str] = None
     elapsed: float = 0.0  # Always defined — prevents NameError when max_retries=0
-    tried_browser_fallback = False
+    tried_browser_fallback = force_browser_ua  # Already using browser UA; skip 2nd attempt
+
+    if force_browser_ua:
+        headers = _build_browser_fallback_headers(headers)
 
     for attempt in range(1, max_retries + 1):
         t0 = time.monotonic()

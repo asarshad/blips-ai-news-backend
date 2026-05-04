@@ -188,6 +188,35 @@ def run_extraction(
         result.published_at = rss.published_date
 
     # ── Step 6: Text extraction ──────────────────────────────────────
+    # Some sites (e.g. CNET) silently serve stripped HTML to bot User-Agents
+    # while returning HTTP 200.  The standard 403-triggered browser-UA fallback
+    # in the fetcher never fires for these.  If we got HTML but extraction
+    # produces no usable text, do one retry with browser-like headers so that
+    # sites gating on UA get a second chance before we fall through to RSS only.
+    _browser_ua_retried = False
+
+    def _retry_with_browser_ua() -> str:
+        nonlocal _browser_ua_retried
+        if _browser_ua_retried or not html or result.fetch_error:
+            return html
+        _browser_ua_retried = True
+        try:
+            from app.extraction.fetcher import fetch_url
+
+            retry = fetch_url(source_url, force_browser_ua=True)
+            if retry.html and retry.html != html:
+                logger.info(
+                    "[extraction] browser-UA retry produced different HTML for %s "
+                    "(original=%d bytes retry=%d bytes)",
+                    source_url,
+                    len(html),
+                    len(retry.html),
+                )
+                return retry.html
+        except Exception as exc:
+            logger.debug("[extraction] browser-UA retry failed for %s: %s", source_url, exc)
+        return html
+
     try:
         from app.extraction.normalize import compute_text_quality_score
         from app.extraction.text_extract import extract_text
@@ -197,6 +226,17 @@ def run_extraction(
             url=source_url,
             rss_description=rss.description,
         )
+
+        # If extraction got nothing useful and we haven't tried browser UA yet,
+        # re-fetch with browser headers and try extraction once more.
+        if not text_result.is_good and not _browser_ua_retried:
+            retry_html = _retry_with_browser_ua()
+            if retry_html != html:
+                text_result = extract_text(
+                    html=retry_html,
+                    url=source_url,
+                    rss_description=rss.description,
+                )
 
         result.extractor_used = text_result.extractor
         result.word_count = text_result.word_count
