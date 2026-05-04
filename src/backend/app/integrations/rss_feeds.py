@@ -106,7 +106,7 @@ class FeedConfig:
     Configuration for a single RSS feed.
 
     Attributes:
-        url: RSS feed URL
+        url: RSS feed URL (or canonical page URL for scraped sources)
         name: Human-readable name for logging
         role: Editorial role (breaking, analysis, etc.)
         quality_tier: Quality tier for ranking modifiers
@@ -114,6 +114,10 @@ class FeedConfig:
         decay_profile: How quickly articles lose ranking
         enabled: Whether this feed is active
         base_quality_weight: Override for source quality (0.0-1.0)
+        scraper_key: When set, the RSSClient routes this feed through the
+            matching function in ``app.integrations.web_scrapers`` instead of
+            feedparser.  Used for sources that have no public RSS feed (e.g.
+            Anthropic, which dropped their rss.xml endpoint).
         notes: Internal documentation
     """
 
@@ -125,6 +129,7 @@ class FeedConfig:
     decay_profile: DecayProfile = DecayProfile.NORMAL
     enabled: bool = True
     base_quality_weight: Optional[float] = None
+    scraper_key: Optional[str] = None
     notes: str = ""
 
 
@@ -880,14 +885,19 @@ FEED_REGISTRY: List[FeedConfig] = [
         notes="Model releases, safety research, product launches",
     ),
     FeedConfig(
-        url="https://www.anthropic.com/rss.xml",
+        # anthropic.com/rss.xml returned 404 "gone" as of 2026-05.
+        # Their news page is a Next.js App Router site with no public feed.
+        # We scrape /news directly; url kept as the canonical page for
+        # source_fetch_states tracking.
+        url="https://www.anthropic.com/news",
         name="Anthropic Blog",
         role=FeedRole.AI,
         quality_tier=QualityTier.PREMIUM,
         daily_cap=2,
         decay_profile=DecayProfile.NORMAL,
         base_quality_weight=0.88,
-        notes="Claude updates, alignment research, interpretability",
+        scraper_key="anthropic_news",
+        notes="Claude updates, alignment research, interpretability. Scraped (no RSS).",
     ),
     FeedConfig(
         url="https://deepmind.google/blog/rss.xml",
