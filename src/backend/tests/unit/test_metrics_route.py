@@ -12,6 +12,7 @@ from app.models.content import ContentItem
 from app.models.content_event import ContentEventOutbox
 from app.models.ingestion_progress import IngestionProgress
 from app.models.source import SourceDailyStat
+from app.models.source_fetch_state import SourceFetchState
 from app.models.video_source import VideoSourceProfile
 from app.services import article_supply_metrics_service
 
@@ -179,6 +180,24 @@ def test_get_article_supply_metrics_returns_daily_and_source_breakdown(monkeypat
     assert payload["days"] == 1
     assert payload["daily"][0]["day"] == "2026-04-15"
     assert payload["daily"][0]["total_published"] == 3
+
+
+def test_get_strategic_content_health_metrics_returns_status():
+    engine = create_engine("sqlite:///:memory:")
+    for table in (
+        ContentItem.__table__,
+        ContentEventOutbox.__table__,
+        SourceFetchState.__table__,
+    ):
+        table.create(bind=engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    payload = metrics_route.get_strategic_content_health(db=db)
+
+    assert payload["status"] in {"healthy", "warning", "critical"}
+    assert "major_news" in payload
+    assert "event_backlog" in payload
 
 
 def test_get_worker_lane_metrics_returns_heartbeats_and_outbox(monkeypatch):

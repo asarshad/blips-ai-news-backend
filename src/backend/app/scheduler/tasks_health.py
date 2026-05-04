@@ -118,6 +118,35 @@ def check_inventory_health() -> None:
         db.close()
 
 
+def check_strategic_content_health() -> None:
+    """Alert on app-level content supply risks that are too important to miss."""
+    logger.info("Running strategic content health check")
+
+    db = SessionLocal()
+    try:
+        from app.services.strategic_content_health_service import (
+            compute_strategic_content_health,
+            emit_strategic_content_alerts,
+        )
+
+        health = compute_strategic_content_health(db)
+        issues = health.get("issues") or []
+        if issues:
+            logger.warning(
+                "Strategic content health degraded status=%s issues=%s",
+                health.get("status"),
+                [issue.get("key") for issue in issues],
+            )
+            sent = emit_strategic_content_alerts(health)
+            logger.info("Strategic content alerts sent=%s", sent)
+        else:
+            logger.info("Strategic content health OK")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Error checking strategic content health: %s", exc, exc_info=True)
+    finally:
+        db.close()
+
+
 def get_ingestion_metrics() -> dict:
     """
     Get ingestion metrics for the /metrics endpoint.

@@ -13,6 +13,7 @@ Features:
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -143,6 +144,49 @@ def _format_slack_payload(
     }
 
 
+def _is_discord_webhook(webhook_url: str) -> bool:
+    host = urlparse(webhook_url or "").netloc.lower()
+    return "discord.com" in host or "discordapp.com" in host
+
+
+def _format_discord_payload(
+    severity: AlertSeverity,
+    message: str,
+    context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Format alert as a native Discord webhook payload."""
+    timestamp = datetime.now(timezone.utc).isoformat()
+    emoji = SEVERITY_EMOJI.get(severity, "")
+    color = int(SEVERITY_COLORS.get(severity, "#808080").lstrip("#"), 16)
+    fields = [
+        {"name": "Service", "value": settings.PROJECT_NAME, "inline": True},
+        {"name": "Severity", "value": severity.value.upper(), "inline": True},
+        {"name": "Timestamp", "value": timestamp, "inline": False},
+    ]
+    if context:
+        for key, value in context.items():
+            fields.append(
+                {
+                    "name": key.replace("_", " ").title(),
+                    "value": str(value)[:1024] or "—",
+                    "inline": True,
+                }
+            )
+
+    return {
+        "content": f"{emoji} **Blips Alert**",
+        "embeds": [
+            {
+                "title": f"[{severity.value.upper()}] {message}",
+                "color": color,
+                "fields": fields[:25],
+                "footer": {"text": "Blips Monitoring"},
+                "timestamp": timestamp,
+            }
+        ],
+    }
+
+
 def send_alert(
     severity: AlertSeverity,
     message: str,
@@ -168,7 +212,10 @@ def send_alert(
         logger.debug("Alerting disabled via ALERT_ENABLED=false")
         return False
 
-    webhook_url = getattr(settings, "ALERT_WEBHOOK_URL", "")
+    webhook_url = (
+        getattr(settings, "ALERT_DISCORD_WEBHOOK_URL", "")
+        or getattr(settings, "ALERT_WEBHOOK_URL", "")
+    )
     if not webhook_url:
         logger.debug("No ALERT_WEBHOOK_URL configured")
         return False
@@ -180,7 +227,11 @@ def send_alert(
             return False
 
     try:
-        payload = _format_slack_payload(severity, message, context)
+        payload = (
+            _format_discord_payload(severity, message, context)
+            if _is_discord_webhook(webhook_url)
+            else _format_slack_payload(severity, message, context)
+        )
 
         response = requests.post(
             webhook_url,
@@ -189,7 +240,7 @@ def send_alert(
             headers={"Content-Type": "application/json"},
         )
 
-        if response.status_code == 200:
+        if 200 <= response.status_code < 300:
             logger.info(f"Alert sent: [{severity.value}] {message}")
             return True
         else:
@@ -346,6 +397,22 @@ def alert_scheduler_job_issue(
         message=message,
         context=context,
         alert_key=f"scheduler_{job_id}_{issue_type}",
+    )
+
+
+def alert_strategic_content_issue(
+    *,
+    issue_key: str,
+    message: str,
+    severity: AlertSeverity,
+    context: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Send an alert for app-level content freshness/supply risk."""
+    return send_alert(
+        severity=severity,
+        message=message,
+        context=context or {},
+        alert_key=f"strategic_content_{issue_key}",
     )
 
 

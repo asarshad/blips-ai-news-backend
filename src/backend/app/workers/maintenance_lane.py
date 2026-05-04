@@ -83,7 +83,11 @@ def _task_catalog() -> list[LaneTask]:
         run_preference_decay_job,
         run_scoring_job,
     )
-    from app.scheduler.tasks_health import check_ingestion_health, check_inventory_health
+    from app.scheduler.tasks_health import (
+        check_ingestion_health,
+        check_inventory_health,
+        check_strategic_content_health,
+    )
     from app.scheduler.tasks_major_news import run_major_news_probe_job
     from app.scheduler.tasks_promotion import run_promotion_job
     from app.scheduler.tasks_signals import run_signal_ingestion_job
@@ -99,6 +103,7 @@ def _task_catalog() -> list[LaneTask]:
         LaneTask("backfill", run_backfill_job, backfill_hours * 60 * 60, now + 10 * 60),
         LaneTask("ingestion_health", check_ingestion_health, 30 * 60, now + 3 * 60),
         LaneTask("inventory_health", check_inventory_health, 30 * 60, now + 4 * 60),
+        LaneTask("strategic_content_health", check_strategic_content_health, 30 * 60, now + 5 * 60),
         LaneTask("preference_decay", run_preference_decay_job, utc_hour=3, utc_minute=0),
         LaneTask("data_cleanup", run_data_cleanup_job, utc_hour=4, utc_minute=0),
     ]

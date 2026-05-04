@@ -41,12 +41,12 @@ from app.services.content_promotion_service import CONTENT_PROMOTION_EVAL_REQUES
 from app.services.major_news_constants import (
     MAJOR_NEWS_CLASSIFIER_MIN_CONFIDENCE,
     MAJOR_NEWS_DISCOVERED_VIA,
+    MAJOR_NEWS_SOURCE_TYPE,
 )
 from app.services.worker_lane_metrics import read_lane_heartbeats
 
 logger = get_logger(__name__)
 
-MAJOR_NEWS_SOURCE_TYPE = "major_news_rss"
 _MAJOR_NEWS_FAST_TRACK_EVENT_TYPES = (
     CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE,
     CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE,

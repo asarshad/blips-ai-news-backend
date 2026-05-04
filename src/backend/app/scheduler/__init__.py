@@ -18,6 +18,7 @@ from app.core.logging import get_logger
 from app.scheduler.tasks import (
     check_ingestion_health,
     check_inventory_health,
+    check_strategic_content_health,
     fetch_and_process_news,
     retry_ai_processing,
     run_article_image_verification_job,
@@ -281,6 +282,16 @@ def init_scheduler() -> Optional[BackgroundScheduler]:
             check_inventory_health,
             IntervalTrigger(minutes=30),
             id="inventory_health_check",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
+        )
+
+        scheduler.add_job(
+            check_strategic_content_health,
+            IntervalTrigger(minutes=30),
+            id="strategic_content_health_check",
             replace_existing=True,
             max_instances=1,
             coalesce=True,

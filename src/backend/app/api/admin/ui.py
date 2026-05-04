@@ -47,6 +47,7 @@ from app.core.auth import (
 )
 from app.core.config import settings
 from app.core.dependencies import get_db, get_redis
+from app.core.logging import get_logger
 from app.domain.editorial.service import EditorialApprovalBlockedError, EditorialService
 from app.models.content import ContentItem, ContentReport, ContentStatus, ContentType
 from app.models.push import PushSendLog
@@ -61,6 +62,8 @@ from app.services.push_service import (
     evaluate_push_eligibility,
 )
 from app.services.tiered_feed_service import invalidate_tiered_feed_cache
+
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Auth
@@ -824,6 +827,7 @@ def ui_dashboard(
     from app.models.signal import SignalURL
     from app.models.video_source import VideoSourceProfile
     from app.services.inventory_service import Surface, get_pipeline_counts
+    from app.services.strategic_content_health_service import compute_strategic_content_health
     from app.services.tiered_feed_service import get_cached_tiered_feed
     from app.services.video_metrics_service import (
         compute_video_lane_metrics,
@@ -842,6 +846,19 @@ def ui_dashboard(
     window_start = now - timedelta(days=7)
     video_supply = compute_video_supply_metrics(db)
     video_lanes = compute_video_lane_metrics(db, hours=24)
+    try:
+        if not isinstance(db, Session):
+            raise TypeError("strategic content health requires a SQLAlchemy session")
+        strategic_health = compute_strategic_content_health(db)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Strategic content health unavailable for admin dashboard: %s", exc)
+        strategic_health = {
+            "status": "unknown",
+            "issues": [],
+            "major_news": {},
+            "event_backlog": {},
+            "promoted_pending": {},
+        }
     feature_flags = FeatureFlags()
     hybrid_video_rerank = feature_flags.is_enabled("video_hybrid_rerank")
 
@@ -923,6 +940,37 @@ def ui_dashboard(
             <div class="mt-3 text-xs text-slate-500">{total} total items through this stage in the last 48 hours.</div>
           </div>
         </div>"""
+
+    def _strategic_health_panel() -> str:
+        status = str(strategic_health.get("status") or "healthy")
+        issues = strategic_health.get("issues") or []
+        major = strategic_health.get("major_news") or {}
+        backlog = strategic_health.get("event_backlog") or {}
+        pending = strategic_health.get("promoted_pending") or {}
+        issue_rows = [
+            (
+                str(issue.get("key") or "issue").replace("_", " "),
+                _badge(str(issue.get("severity") or "warning"), "red" if issue.get("severity") == "critical" else "yellow"),
+                str(issue.get("message") or "")[:120],
+            )
+            for issue in issues[:5]
+        ]
+        if not issue_rows:
+            issue_rows = [("No strategic issues", _badge("healthy", "green"), "No alert-worthy content risks are active.")]
+        return _panel(
+            "Strategic Content Alerts",
+            f'''
+          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {_mini_metric("Overall status", status.replace("_", " "), f"{len(issues)} active issues", "red" if status == "critical" else ("yellow" if status == "warning" else "green"))}
+            {_mini_metric("Event backlog", str(backlog.get("due_count", 0)), f"oldest {backlog.get('oldest_due_minutes') or '—'}m", "yellow" if backlog.get("due_count", 0) else "green")}
+            {_mini_metric("Promoted pending", str(pending.get("stuck_count", 0)), f"older than {pending.get('older_than_minutes') or '—'}m", "yellow" if pending.get("stuck_count", 0) else "green")}
+            {_mini_metric("Major-news probe", str(major.get("probe_insert_count", 0)), f"last probe {major.get('hours_since_latest_probe') or '—'}h ago", "yellow" if major.get("stuck_confirmed_major_count", 0) else "blue")}
+          </div>
+          <div class="mt-5">{_data_rows(issue_rows)}</div>
+          ''',
+            subtitle="These are the high-signal checks that can page Discord when the app risks looking stale or empty.",
+            action=f'<a href="/api/v1/metrics/content/strategic-health?key={admin_key}" class="text-sm font-medium text-sky-700 hover:underline">JSON diagnostics →</a>',
+        )
 
     def _sample_item_card(item: dict) -> str:
         age_seconds = item.get("published_age_seconds")
@@ -1551,6 +1599,7 @@ def ui_dashboard(
       {_video_kpi_card("videos", "Videos rolling inventory")}
       {_video_kpi_card("reels", "Reels rolling inventory")}
     </div>
+    {_strategic_health_panel()}
     {
         _panel(
             "Live Feed Experience",

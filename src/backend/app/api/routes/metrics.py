@@ -26,6 +26,7 @@ from app.services.ai_usage_metrics_service import compute_ai_usage_metrics
 from app.services.article_supply_metrics_service import compute_article_supply_metrics
 from app.services.feed_health import compute_inventory_health
 from app.services.freshness_metrics_service import compute_freshness_metrics
+from app.services.strategic_content_health_service import compute_strategic_content_health
 from app.services.video_metrics_service import (
     compute_video_lane_metrics,
     compute_video_source_metrics,
@@ -594,6 +595,18 @@ def get_article_supply_metrics(
         return compute_article_supply_metrics(db, days=days)
     except Exception as exc:
         logger.error("Error getting article supply metrics: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/content/strategic-health", dependencies=[Depends(require_admin_key)])
+def get_strategic_content_health(
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """Get strategic content-health diagnostics used for operator alerting."""
+    try:
+        return compute_strategic_content_health(db)
+    except Exception as exc:
+        logger.error("Error getting strategic content health: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
