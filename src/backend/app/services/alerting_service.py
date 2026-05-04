@@ -233,22 +233,41 @@ def send_alert(
             else _format_slack_payload(severity, message, context)
         )
 
-        response = requests.post(
-            webhook_url,
-            json=payload,
-            timeout=10,
-            headers={"Content-Type": "application/json"},
-        )
+        # Fire in a daemon thread so a slow or unreachable Discord endpoint
+        # cannot block the maintenance-lane task that called us.
+        import threading
 
-        if 200 <= response.status_code < 300:
-            logger.info(f"Alert sent: [{severity.value}] {message}")
+        result: dict = {}
+
+        def _send() -> None:
+            try:
+                r = requests.post(
+                    webhook_url,
+                    json=payload,
+                    timeout=8,
+                    headers={"Content-Type": "application/json"},
+                )
+                result["status_code"] = r.status_code
+                result["ok"] = 200 <= r.status_code < 300
+                if not result["ok"]:
+                    logger.warning("Alert webhook returned %s: %s", r.status_code, r.text[:200])
+            except requests.RequestException as exc:
+                result["ok"] = False
+                logger.error("Failed to send alert: %s", exc)
+
+        t = threading.Thread(target=_send, daemon=True)
+        t.start()
+        t.join(timeout=9)  # wait at most 9 s; daemon thread won't block process exit
+
+        if result.get("ok"):
+            logger.info("Alert sent: [%s] %s", severity.value, message)
             return True
-        else:
-            logger.warning(f"Alert webhook returned {response.status_code}: {response.text}")
-            return False
+        if not result:
+            logger.warning("Alert webhook timed out for [%s] %s", severity.value, message)
+        return False
 
-    except requests.RequestException as e:
-        logger.error(f"Failed to send alert: {e}")
+    except Exception as e:  # noqa: BLE001
+        logger.error("Failed to send alert: %s", e)
         return False
 
 
