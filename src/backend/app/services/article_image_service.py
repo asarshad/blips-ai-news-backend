@@ -133,7 +133,13 @@ def repair_article_image_metadata(
         needs_second_pass = (
             getattr(item, "article_image_status", "") or ""
         ).strip().upper() != "VERIFIED"
-        if needs_second_pass or hydrator.needs_article_metadata_repair(
+        # Also re-examine articles that were verified but only have a placeholder image —
+        # these were likely fetched at publish time before the CDN warmed up and got
+        # permanently locked out of future repair passes by the VERIFIED status.
+        is_verified_placeholder = (not needs_second_pass) and is_placeholder_image_url(
+            getattr(item, "image_url", None) or ""
+        )
+        if needs_second_pass or is_verified_placeholder or hydrator.needs_article_metadata_repair(
             item, include_generic=include_generic
         ):
             items.append(item)
@@ -146,6 +152,7 @@ def repair_article_image_metadata(
     filled_missing = 0
     replaced_generic = 0
     replaced_suspicious = 0
+    replaced_placeholder = 0
     verified_missing = 0
     placeholder_applied = 0
     pending_changes = 0
@@ -165,6 +172,7 @@ def repair_article_image_metadata(
         scanned += 1
         source_url = item.canonical_url or item.source_url or ""
         was_missing = not (item.image_url or "").strip()
+        was_placeholder = bool(item.image_url) and is_placeholder_image_url(item.image_url or "")
         was_generic = bool(item.image_url) and is_probably_generic_image_url(item.image_url)
         was_suspicious = bool(item.image_url) and is_suspicious_image_url(item.image_url)
         previous_verification_status = (getattr(item, "article_image_status", None) or "").strip()
@@ -176,6 +184,7 @@ def repair_article_image_metadata(
                 force_reconcile_image=(
                     (getattr(item, "article_image_status", "") or "").strip().upper()
                     == ARTICLE_IMAGE_STATUS_PENDING
+                    or is_placeholder_image_url(getattr(item, "image_url", None) or "")
                 ),
             )
         except Exception as exc:
@@ -200,13 +209,16 @@ def repair_article_image_metadata(
         if not changed:
             continue
 
-        if was_missing and (item.image_url or "").strip():
+        new_image = (item.image_url or "").strip()
+        if was_missing and new_image:
             filled_missing += 1
-        elif was_generic and (item.image_url or "").strip():
+        elif was_placeholder and new_image and not is_placeholder_image_url(new_image):
+            replaced_placeholder += 1
+        elif was_generic and new_image:
             replaced_generic += 1
-        elif was_suspicious and (item.image_url or "").strip():
+        elif was_suspicious and new_image:
             replaced_suspicious += 1
-        elif not (item.image_url or "").strip():
+        elif not new_image:
             verified_missing += 1
 
         updated += 1
@@ -224,6 +236,7 @@ def repair_article_image_metadata(
         "updated": updated,
         "failures": failures,
         "filled_missing": filled_missing,
+        "replaced_placeholder": replaced_placeholder,
         "replaced_generic": replaced_generic,
         "replaced_suspicious": replaced_suspicious,
         "verified_missing": verified_missing,
