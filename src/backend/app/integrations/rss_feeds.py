@@ -886,18 +886,16 @@ FEED_REGISTRY: List[FeedConfig] = [
     ),
     FeedConfig(
         # anthropic.com/rss.xml returned 404 "gone" as of 2026-05.
-        # Their news page is a Next.js App Router site with no public feed.
-        # We scrape /news directly; url kept as the canonical page for
-        # source_fetch_states tracking.
-        url="https://www.anthropic.com/news",
+        # 0xSMW/rss-feeds (GitHub Actions) generates a standard RSS feed from
+        # the Anthropic news page — no custom scraper required.
+        url="https://raw.githubusercontent.com/0xSMW/rss-feeds/main/feeds/feed_anthropic_news.xml",
         name="Anthropic Blog",
         role=FeedRole.AI,
         quality_tier=QualityTier.PREMIUM,
         daily_cap=2,
         decay_profile=DecayProfile.NORMAL,
         base_quality_weight=0.88,
-        scraper_key="anthropic_news",
-        notes="Claude updates, alignment research, interpretability. Scraped (no RSS).",
+        notes="Claude updates, alignment research, interpretability. Via 0xSMW/rss-feeds.",
     ),
     FeedConfig(
         url="https://deepmind.google/blog/rss.xml",
@@ -908,6 +906,46 @@ FEED_REGISTRY: List[FeedConfig] = [
         decay_profile=DecayProfile.NORMAL,
         base_quality_weight=0.92,
         notes="Gemini, AlphaFold, fundamental AI research",
+    ),
+    FeedConfig(
+        url="https://raw.githubusercontent.com/0xSMW/rss-feeds/main/feeds/feed_openai_alignment.xml",
+        name="OpenAI Alignment Research",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.88,
+        notes="OpenAI alignment/safety research posts. Via 0xSMW/rss-feeds.",
+    ),
+    FeedConfig(
+        url="https://raw.githubusercontent.com/0xSMW/rss-feeds/main/feeds/feed_openai_research.xml",
+        name="OpenAI Research",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=1,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.88,
+        notes="OpenAI technical research publications. Via 0xSMW/rss-feeds.",
+    ),
+    FeedConfig(
+        url="https://raw.githubusercontent.com/0xSMW/rss-feeds/main/feeds/feed_mistral_news.xml",
+        name="Mistral AI Blog",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=1,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.80,
+        notes="Mistral model releases and research. Via 0xSMW/rss-feeds.",
+    ),
+    FeedConfig(
+        url="https://raw.githubusercontent.com/0xSMW/rss-feeds/main/feeds/feed_xai_news.xml",
+        name="xAI Blog",
+        role=FeedRole.AI,
+        quality_tier=QualityTier.STANDARD,
+        daily_cap=1,
+        decay_profile=DecayProfile.NORMAL,
+        base_quality_weight=0.78,
+        notes="xAI / Grok model news. Via 0xSMW/rss-feeds.",
     ),
     FeedConfig(
         url="https://ai.meta.com/blog/rss/",

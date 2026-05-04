@@ -3,6 +3,7 @@ Data retention service for automated database cleanup.
 
 Implements safe, idempotent retention policies:
 - content_items:         RETAIN_CONTENT_DAYS (90d default), editorial items protected
+- content_event_outbox:  RETAIN_OUTBOX_DAYS (7d default), processed rows only
 - ingestion_progress:    RETAIN_INGESTION_PROGRESS_DAYS (14d)
 - ingestion_budgets:     RETAIN_INGESTION_PROGRESS_DAYS (14d) — same lifecycle
 - source_daily_stats:    RETAIN_INGESTION_PROGRESS_DAYS (14d) — same lifecycle
@@ -43,6 +44,7 @@ class CleanupResult:
     started_at: datetime = field(default_factory=datetime.utcnow)
     ended_at: Optional[datetime] = None
     content_items_deleted: int = 0
+    outbox_events_deleted: int = 0
     ingestion_progress_deleted: int = 0
     ingestion_budgets_deleted: int = 0
     source_daily_stats_deleted: int = 0
@@ -56,6 +58,7 @@ class CleanupResult:
     def total_deleted(self) -> int:
         return (
             self.content_items_deleted
+            + self.outbox_events_deleted
             + self.ingestion_progress_deleted
             + self.ingestion_budgets_deleted
             + self.source_daily_stats_deleted
@@ -81,6 +84,7 @@ class CleanupResult:
             "total_deleted": self.total_deleted,
             "tables": {
                 "content_items": self.content_items_deleted,
+                "content_event_outbox": self.outbox_events_deleted,
                 "ingestion_progress": self.ingestion_progress_deleted,
                 "ingestion_budgets": self.ingestion_budgets_deleted,
                 "source_daily_stats": self.source_daily_stats_deleted,
@@ -106,6 +110,9 @@ def run_retention_cleanup(db: Session) -> CleanupResult:
 
     # --- content_items ---
     _cleanup_content_items(db, now, result)
+
+    # --- content_event_outbox (processed rows only) ---
+    _cleanup_outbox_events(db, now, result)
 
     # --- ingestion_progress ---
     _cleanup_table(
@@ -233,6 +240,39 @@ def _cleanup_content_items(db: Session, now: datetime, result: CleanupResult) ->
         db.rollback()
         result.errors.append(f"content_items: {e}")
         logger.error(f"[retention] content_items cleanup failed: {e}")
+
+
+def _cleanup_outbox_events(db: Session, now: datetime, result: CleanupResult) -> None:
+    """
+    Delete processed outbox events older than RETAIN_OUTBOX_DAYS.
+
+    Only rows with status='processed' are eligible — pending/failed rows
+    are kept so the outbox consumer can still act on them.
+    """
+    cutoff = now - timedelta(days=settings.RETAIN_OUTBOX_DAYS)
+    try:
+        stmt = text("""
+            DELETE FROM content_event_outbox
+            WHERE id IN (
+                SELECT id FROM content_event_outbox
+                WHERE status = 'processed'
+                  AND created_at < :cutoff
+                ORDER BY created_at ASC
+                LIMIT :batch_limit
+            )
+        """)
+        res = db.execute(stmt, {"cutoff": cutoff, "batch_limit": MAX_DELETE_BATCH})
+        count = res.rowcount
+        db.commit()
+        result.outbox_events_deleted = count
+        logger.info(
+            f"[retention] content_event_outbox: deleted {count} processed rows "
+            f"older than {cutoff.date()}"
+        )
+    except Exception as e:
+        db.rollback()
+        result.errors.append(f"content_event_outbox: {e}")
+        logger.error(f"[retention] content_event_outbox cleanup failed: {e}")
 
 
 def _cleanup_table(

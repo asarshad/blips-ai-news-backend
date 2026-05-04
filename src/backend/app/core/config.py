@@ -355,6 +355,7 @@ class Settings(BaseSettings):
     RETAIN_USAGE_DAYS: int = 90
     RETAIN_EDITORIAL_DAYS: int = 180
     RETAIN_DEBUG_DAYS: int = 7
+    RETAIN_OUTBOX_DAYS: int = 7
 
     model_config = {
         "env_file": ".env",
