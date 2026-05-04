@@ -35,14 +35,18 @@ from app.ingestion.source_response_policy import (
 logger = get_logger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-# Version-dynamic User-Agent so it stays accurate after httpx upgrades.
+# We use a standard browser UA for all article fetches.  A self-identifying
+# "BlipsBot/1.0" UA causes many news sites (CNET, Engadget, Digital Trends,
+# TechCrunch, …) to silently serve a stripped HTML shell with no article body
+# while still returning HTTP 200, making the gating invisible to retry logic.
+# A browser UA is the only practical way to receive the full page content.
 USER_AGENT: str = (
-    f"BlipsBot/1.0 (+https://blips.dev/bot; content-extraction) httpx/{httpx.__version__}"
-)
-BROWSER_FALLBACK_USER_AGENT: str = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
 )
+# Kept for the 403/429-triggered escalation path; currently identical to
+# USER_AGENT since we already start with a browser UA.
+BROWSER_FALLBACK_USER_AGENT: str = USER_AGENT
 MAX_RESPONSE_BYTES: int = 5 * 1024 * 1024  # 5 MB byte cap
 
 _TRANSIENT_STATUS = {429, 500, 502, 503, 504}
