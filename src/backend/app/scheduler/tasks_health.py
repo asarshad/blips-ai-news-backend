@@ -98,6 +98,20 @@ def check_inventory_health() -> None:
                 surface.value,
                 "; ".join(metrics.issues) or "unknown issue",
             )
+
+            # Only alert when refresh count is meaningfully below threshold (< 75%).
+            # A minor miss (e.g. 10 vs 12) is normal daily variation and not actionable.
+            if metrics.recent_refresh_threshold > 0:
+                refresh_ratio = metrics.recent_refresh_count / metrics.recent_refresh_threshold
+                if refresh_ratio >= 0.75:
+                    logger.info(
+                        "Suppressing inventory alert for %s: refresh %d/%d is within tolerance",
+                        surface.value,
+                        metrics.recent_refresh_count,
+                        metrics.recent_refresh_threshold,
+                    )
+                    continue
+
             try:
                 alert_inventory_surface_degraded(
                     surface=surface.value,

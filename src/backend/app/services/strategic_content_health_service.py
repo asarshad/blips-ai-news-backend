@@ -281,7 +281,9 @@ def compute_strategic_content_health(
                 "context": major_news,
             }
         )
-    if major_probe_insert_count <= 0:
+    # Only alert on no-inserts when there are also stuck confirmed majors — otherwise
+    # it's indistinguishable from "no major news happened overnight", which is normal.
+    if major_probe_insert_count <= 0 and stuck_major >= int(settings.STRATEGIC_ALERT_MAJOR_NEWS_STUCK_MIN_COUNT):
         issues.append(
             {
                 "key": "major_news_no_recent_inserts",
@@ -290,7 +292,7 @@ def compute_strategic_content_health(
                 "context": major_news,
             }
         )
-    if stuck_major > 0:
+    if stuck_major >= int(settings.STRATEGIC_ALERT_MAJOR_NEWS_STUCK_MIN_COUNT):
         issues.append(
             {
                 "key": "major_news_stuck_pending",
