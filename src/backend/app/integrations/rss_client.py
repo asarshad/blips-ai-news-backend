@@ -150,10 +150,7 @@ class RSSClient:
             try:
                 max_entries = min(entries_per_feed, feed_config.daily_cap * _FETCH_HEADROOM)
 
-                if feed_config.scraper_key:
-                    feed_entries = self._fetch_scraped(feed_config, max_entries)
-                else:
-                    feed_entries = self.fetch_feed(feed_config.url, max_entries)
+                feed_entries = self.fetch_feed(feed_config.url, max_entries)
 
                 # Attach role metadata to entries
                 for entry in feed_entries:
@@ -184,62 +181,6 @@ class RSSClient:
 
     def _record_fetch_outcome(self, feed_url: str, outcome: FetchOutcome) -> None:
         self._last_fetch_outcomes[feed_url] = outcome
-
-    def _fetch_scraped(self, feed_config: FeedConfig, max_entries: int) -> List[FeedEntry]:
-        """Dispatch a scraper-keyed feed to its registered web scraper.
-
-        Converts ``ScrapedEntry`` objects to ``FeedEntry`` so they flow through
-        the same ingestion path as RSS entries.  Records a synthetic fetch
-        outcome for source_fetch_states health tracking.
-        """
-        from app.integrations.web_scrapers import get_scraper
-
-        scraper_fn = get_scraper(feed_config.scraper_key)
-        if scraper_fn is None:
-            logger.warning(
-                "[rss_client] No scraper registered for key %r (feed %s)",
-                feed_config.scraper_key,
-                feed_config.name,
-            )
-            self._record_fetch_outcome(
-                feed_config.url,
-                FetchOutcome(action="error", status_code=0),
-            )
-            return []
-
-        try:
-            scraped = scraper_fn(max_entries)
-            self._record_fetch_outcome(
-                feed_config.url,
-                FetchOutcome(action="success", status_code=200),
-            )
-        except Exception as exc:
-            logger.error("[rss_client] scraper %r failed for %s: %s",
-                         feed_config.scraper_key, feed_config.name, exc)
-            self._record_fetch_outcome(
-                feed_config.url,
-                FetchOutcome(action="error", status_code=0),
-            )
-            return []
-
-        entries: List[FeedEntry] = []
-        for item in scraped:
-            entries.append(
-                FeedEntry(
-                    title=item.title,
-                    url=item.url,
-                    content=item.description or "",
-                    image_url=item.image_url,
-                    published_date=item.published_date or datetime.now(tz=None).replace(tzinfo=None),
-                    feed_name=feed_config.name,
-                    feed_role=feed_config.role,
-                    quality_tier=feed_config.quality_tier,
-                    decay_profile=feed_config.decay_profile,
-                    base_quality_weight=feed_config.base_quality_weight,
-                )
-            )
-        logger.info("[rss_client] scraped %d entries from %s", len(entries), feed_config.name)
-        return entries
 
     def fetch_feed(self, feed_url: str, max_entries: int = 10) -> List[FeedEntry]:
         """

@@ -114,10 +114,6 @@ class FeedConfig:
         decay_profile: How quickly articles lose ranking
         enabled: Whether this feed is active
         base_quality_weight: Override for source quality (0.0-1.0)
-        scraper_key: When set, the RSSClient routes this feed through the
-            matching function in ``app.integrations.web_scrapers`` instead of
-            feedparser.  Used for sources that have no public RSS feed (e.g.
-            Anthropic, which dropped their rss.xml endpoint).
         notes: Internal documentation
     """
 
@@ -129,7 +125,6 @@ class FeedConfig:
     decay_profile: DecayProfile = DecayProfile.NORMAL
     enabled: bool = True
     base_quality_weight: Optional[float] = None
-    scraper_key: Optional[str] = None
     notes: str = ""
 
 
