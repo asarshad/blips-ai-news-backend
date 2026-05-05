@@ -46,14 +46,21 @@ _TRACKING_IMAGE_QUERY_KEYS = {
     "mc_cid",
     "mc_eid",
 }
+# Simple substring matches — these keywords are specific enough that a substring
+# match in the path is sufficient (unlikely to appear in photo filenames).
 _SUSPICIOUS_IMAGE_PATH_KEYWORDS = (
     "/analytics",
     "/tracking",
-    "/pixel",
     "/beacon",
-    "/event",
-    "/events",
     "/metrics",
+)
+# Segment-boundary matches — these keywords are short/common and could appear as
+# prefixes in legitimate image filenames (e.g. /pixel-11-cad-render-3.jpg,
+# /event-photography/...).  Only flag them when the keyword forms a complete
+# path segment, i.e. is followed by '/', '?', '#', or end-of-string.
+_SUSPICIOUS_IMAGE_PATH_SEGMENT_PATTERNS = tuple(
+    re.compile(rf"{re.escape(kw)}(?:[/?#]|$)")
+    for kw in ("/pixel", "/event", "/events")
 )
 _SUSPICIOUS_IMAGE_QUERY_KEYS = {
     "tid",
@@ -223,6 +230,11 @@ def is_suspicious_image_url(url: Optional[str]) -> bool:
     if any(keyword in host for keyword in _TRACKING_IMAGE_HOST_KEYWORDS):
         return True
     if any(keyword in path for keyword in _SUSPICIOUS_IMAGE_PATH_KEYWORDS):
+        return True
+    # Segment-boundary check: only flag when the keyword is a complete path segment,
+    # not a filename prefix (e.g. /pixel-11.jpg should NOT be flagged).
+    path_with_query = path + ("?" if parsed.query else "")
+    if any(pat.search(path_with_query) for pat in _SUSPICIOUS_IMAGE_PATH_SEGMENT_PATTERNS):
         return True
     if query_keys.intersection(_SUSPICIOUS_IMAGE_QUERY_KEYS) and not re.search(
         r"\.(jpg|jpeg|png|webp|gif|avif)$", path
