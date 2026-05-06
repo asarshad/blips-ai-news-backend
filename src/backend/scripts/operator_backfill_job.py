@@ -187,7 +187,11 @@ def _run_major_news_stale_probe_cleanup(db, options: dict[str, Any]) -> dict[str
     if not dry_run:
         db.commit()
         invalidate_tiered_feed_cache()
-        cache_refresh = refresh_cached_playlist_items(db, content_ids=touched_ids) if touched_ids else {}
+        cache_refresh = (
+            refresh_cached_playlist_items(db, content_ids=touched_ids)
+            if touched_ids
+            else {}
+        )
     else:
         cache_refresh = {}
 
