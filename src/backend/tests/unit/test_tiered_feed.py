@@ -101,6 +101,38 @@ class TestTieredItemToDict:
         assert result["read_time_minutes"] == 2
         assert result["tags"] == [{"name": "AI"}, {"name": "Technology"}]
 
+    def test_article_serialization_absolutizes_relative_placeholder_image(self):
+        """API-relative placeholder URLs become fetchable absolute URLs."""
+        from app.models.content import ContentType
+        from app.services.tiered_feed_service import TieredItem, tiered_item_to_dict
+
+        now = datetime(2026, 2, 6, 12, 0, 0)
+        item = MagicMock()
+        item.id = 124
+        item.title = "Placeholder Article"
+        item.source_url = "https://example.com/article"
+        item.summary = "A" * 200
+        item.image_url = "/api/v1/placeholder/source?source=Example"
+        item.source = "Example News"
+        item.created_at = now - timedelta(hours=1)
+        item.published_at = now - timedelta(hours=2)
+        item.type = ContentType.ARTICLE
+        item.topics = ["AI"]
+
+        tiered = TieredItem(
+            item=item,
+            tier=FreshnessTier.A,
+            reason="fresh_published",
+            published_age_seconds=7200,
+            added_age_seconds=3600,
+        )
+
+        result = tiered_item_to_dict(tiered)
+
+        assert (
+            result["image_url"] == "https://api.blips.tech/api/v1/placeholder/source?source=Example"
+        )
+
     def test_video_serialization(self):
         """Videos include video_url, thumbnail, category."""
         from app.models.content import ContentType

@@ -44,6 +44,7 @@ from app.services.inventory_service import (
     _get_surface_config,
     evergreen_min_global_score,
 )
+from app.services.media_url import public_media_url
 from app.services.video_content_policy import apply_content_policy
 from app.services.video_duration_hydration import hydrate_missing_video_durations
 from app.services.video_hybrid_rerank import rerank_video_candidates
@@ -625,7 +626,7 @@ def tiered_item_to_dict(
         else item.title,
         "source_url": item.source_url,
         "summary": summary,
-        "image_url": item.image_url or None,  # coerce empty string to null
+        "image_url": public_media_url(item.image_url),
         "source": item.source or "Unknown",
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "updated_at": getattr(item, "updated_at", None).isoformat()
@@ -667,7 +668,7 @@ def tiered_item_to_dict(
 
     elif item_type in (ContentType.VIDEO, ContentType.REEL):
         result["video_url"] = item.video_url or item.source_url
-        result["thumbnail_url"] = item.image_url or None  # coerce empty string
+        result["thumbnail_url"] = public_media_url(item.image_url)
         result["category"] = item.topics[0] if item.topics else "Technology"
         result["duration_seconds"] = duration_seconds
         result["hot_score"] = int(item.global_score * 100) if item.global_score else 0
@@ -747,7 +748,8 @@ def get_cached_tiered_feed(
     personalized_device_id = None if surface == Surface.ARTICLES else device_id
     strategy_source = (
         feed_freshness_strategies.strategy_source(surface)
-        if strategy is not None and strategy.name == feed_freshness_strategies.strategy_name(surface)
+        if strategy is not None
+        and strategy.name == feed_freshness_strategies.strategy_name(surface)
         else "session_snapshot"
     )
     cache_key = _cache_key(
@@ -788,9 +790,7 @@ def get_cached_tiered_feed(
                     surface=surface.value,
                     strategy_name=str(data.get("freshness_strategy") or strategy.name),
                     strategy_source=str(data.get("freshness_strategy_source") or strategy_source),
-                    resume_continuity_window_minutes=data.get(
-                        "resume_continuity_window_minutes"
-                    ),
+                    resume_continuity_window_minutes=data.get("resume_continuity_window_minutes"),
                     resume_snapshot_after_remote_window=bool(
                         data.get("resume_snapshot_after_remote_window", True)
                     ),
@@ -873,9 +873,7 @@ def get_cached_tiered_feed(
         remaining_window_count=remaining_window_count,
         strategy_name=strategy.name,
         strategy_source=strategy_source,
-        resume_continuity_window_minutes=strategy.resume_continuity_window_minutes(
-            surface=surface
-        ),
+        resume_continuity_window_minutes=strategy.resume_continuity_window_minutes(surface=surface),
         resume_snapshot_after_remote_window=strategy.resume_snapshot_after_remote_window(
             surface=surface
         ),

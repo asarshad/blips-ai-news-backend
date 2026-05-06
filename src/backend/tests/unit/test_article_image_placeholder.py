@@ -11,6 +11,7 @@ from app.services.article_image_placeholder import (
     apply_source_placeholder,
     build_source_placeholder_url,
     is_placeholder_image_url,
+    render_source_placeholder_png,
     render_source_placeholder_svg,
     should_apply_placeholder,
 )
@@ -32,9 +33,7 @@ def _make_settings(
 @pytest.fixture
 def _with_settings(monkeypatch):
     def _apply(**overrides):
-        monkeypatch.setattr(
-            placeholder_module, "_SETTINGS", _make_settings(**overrides)
-        )
+        monkeypatch.setattr(placeholder_module, "_SETTINGS", _make_settings(**overrides))
 
     return _apply
 
@@ -67,6 +66,13 @@ def test_render_source_placeholder_svg_is_deterministic():
     b = render_source_placeholder_svg(source="The Verge", category="technology")
 
     assert a == b
+
+
+def test_render_source_placeholder_png_is_mobile_renderable():
+    png = render_source_placeholder_png(source="InfoQ", category="technology")
+
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(png) > 1000
 
 
 def test_build_source_placeholder_url_relative_when_base_url_empty(_with_settings):

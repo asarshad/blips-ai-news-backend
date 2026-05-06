@@ -18,9 +18,13 @@ from __future__ import annotations
 
 import hashlib
 import html
+import io
 from datetime import datetime
+from functools import lru_cache
 from typing import Any, Optional
 from urllib.parse import quote, urlencode, urljoin
+
+from PIL import Image, ImageDraw, ImageFont
 
 from app.core.config import get_settings
 
@@ -156,6 +160,138 @@ def render_source_placeholder_svg(
 </svg>
 """.strip()
     return svg
+
+
+def render_source_placeholder_png(
+    *,
+    source: Optional[str],
+    category: Optional[str] = None,
+    width: int = 1200,
+    height: int = 630,
+) -> bytes:
+    """Return deterministic source-branded PNG bytes for mobile image clients."""
+    return _render_source_placeholder_png_cached(
+        _normalize_source(source),
+        _normalize_category(category) or "",
+        int(width),
+        int(height),
+    )
+
+
+@lru_cache(maxsize=512)
+def _render_source_placeholder_png_cached(
+    normalized_source: str,
+    normalized_category: str,
+    width: int,
+    height: int,
+) -> bytes:
+    start_color, end_color = _palette_for(normalized_source, normalized_category or None)
+    start_rgb = _hex_to_rgb(start_color)
+    end_rgb = _hex_to_rgb(end_color)
+    image = Image.new("RGB", (width, height), start_rgb)
+    pixels = image.load()
+
+    for y in range(height):
+        y_ratio = y / max(1, height - 1)
+        for x in range(width):
+            ratio = (x / max(1, width - 1) + y_ratio) / 2
+            pixels[x, y] = tuple(
+                int(start_rgb[channel] + (end_rgb[channel] - start_rgb[channel]) * ratio)
+                for channel in range(3)
+            )
+
+    overlay = Image.new("RGBA", (width, height), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(overlay)
+    grid_alpha = 14
+    for x in range(0, width, 48):
+        draw.line([(x, 0), (x, height)], fill=(255, 255, 255, grid_alpha), width=1)
+    for y in range(0, height, 48):
+        draw.line([(0, y), (width, y)], fill=(255, 255, 255, grid_alpha), width=1)
+
+    wordmark = normalized_source.upper()
+    initials = _initials_for(normalized_source)
+    badge_text = (normalized_category or "news").replace("_", " ").upper()
+    wordmark_size = _estimate_wordmark_font_size(wordmark, width=width)
+    watermark_font = _font(size=max(120, width // 2))
+    wordmark_font = _font(size=wordmark_size)
+    badge_font = _font(size=max(18, width // 54))
+
+    _draw_centered_text(
+        draw,
+        initials,
+        font=watermark_font,
+        center=(width // 2, height // 2),
+        fill=(255, 255, 255, 24),
+    )
+    _draw_centered_text(
+        draw,
+        wordmark,
+        font=wordmark_font,
+        center=(width // 2, height // 2),
+        fill=(255, 255, 255, 238),
+    )
+
+    badge_y = height // 2 + wordmark_size // 2 + 58
+    badge_width = max(240, min(width - 96, len(badge_text) * 18 + 120))
+    badge_height = 54
+    badge_rect = (
+        width // 2 - badge_width // 2,
+        badge_y - badge_height // 2,
+        width // 2 + badge_width // 2,
+        badge_y + badge_height // 2,
+    )
+    draw.rounded_rectangle(
+        badge_rect,
+        radius=badge_height // 2,
+        fill=(0, 0, 0, 92),
+        outline=(255, 255, 255, 42),
+        width=2,
+    )
+    _draw_centered_text(
+        draw,
+        badge_text,
+        font=badge_font,
+        center=(width // 2, badge_y - 1),
+        fill=(255, 255, 255, 230),
+    )
+
+    image = Image.alpha_composite(image.convert("RGBA"), overlay)
+    output = io.BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
+def _hex_to_rgb(value: str) -> tuple[int, int, int]:
+    cleaned = value.strip().lstrip("#")
+    return tuple(int(cleaned[index : index + 2], 16) for index in (0, 2, 4))
+
+
+def _font(*, size: int) -> ImageFont.ImageFont:
+    for name in ("DejaVuSans-Bold.ttf", "Arial Bold.ttf", "Arial.ttf"):
+        try:
+            return ImageFont.truetype(name, size=size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def _draw_centered_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    *,
+    font: ImageFont.ImageFont,
+    center: tuple[int, int],
+    fill: tuple[int, int, int, int],
+) -> None:
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    draw.text(
+        (center[0] - text_width / 2, center[1] - text_height / 2 - bbox[1]),
+        text,
+        font=font,
+        fill=fill,
+    )
 
 
 def build_source_placeholder_url(

@@ -45,6 +45,7 @@ from app.services.content_readiness import (
 from app.services.feed_freshness_strategies import CURRENT_STRATEGY, feed_freshness_strategies
 from app.services.feed_version import compute_feed_version
 from app.services.inventory_service import Surface
+from app.services.media_url import public_media_url
 from app.services.multi_factor_ranking_service import MultiFactorRankingService
 from app.services.personalization_service import PersonalizationService
 from app.services.tiered_feed_service import TIERED_FEED_ORDER_VERSION, get_cached_tiered_feed
@@ -205,9 +206,9 @@ def _serialize_content_item_for_cached_payload(
             else (_optional_text(item.title) or "Untitled"),
             "description": _optional_text(item.description),
             "summary": _optional_text(item.summary),
-            "image_url": _optional_text(item.image_url),
+            "image_url": public_media_url(item.image_url),
             "video_url": _optional_text(item.video_url),
-            "thumbnail_url": _optional_text(item.image_url),
+            "thumbnail_url": public_media_url(item.image_url),
             "duration": duration_seconds,
             "duration_seconds": duration_seconds,
             "category": topics[0] if topics else None,
@@ -347,7 +348,9 @@ def refresh_cached_playlist_items(
             "cached_items_updated": 0,
         }
 
-    patterns = _cache_patterns_for_types({effective_content_type(item) for item in items_by_id.values()})
+    patterns = _cache_patterns_for_types(
+        {effective_content_type(item) for item in items_by_id.values()}
+    )
     keys: List[str] = []
     for pattern in patterns:
         try:
@@ -583,9 +586,7 @@ class PlaylistService:
             "cache_hit": bool(snapshot.get("cache_hit", False)),
             "freshness_strategy": snapshot.get("freshness_strategy", strategy_name),
             "freshness_strategy_source": snapshot.get("freshness_strategy_source"),
-            "resume_continuity_window_minutes": snapshot.get(
-                "resume_continuity_window_minutes"
-            ),
+            "resume_continuity_window_minutes": snapshot.get("resume_continuity_window_minutes"),
             "resume_snapshot_after_remote_window": bool(
                 snapshot.get("resume_snapshot_after_remote_window", True)
             ),
@@ -809,9 +810,7 @@ class PlaylistService:
             )
             snapshot.setdefault(
                 "freshness_strategy_source",
-                feed_freshness_strategies.strategy_source(
-                    _surface_for_content_type(content_type)
-                ),
+                feed_freshness_strategies.strategy_source(_surface_for_content_type(content_type)),
             )
             strategy = feed_freshness_strategies.for_name(snapshot.get("freshness_strategy"))
             surface = _surface_for_content_type(content_type)
@@ -848,9 +847,7 @@ class PlaylistService:
                 ),
                 resume_continuity_window_minutes=feed_freshness_strategies.for_name(
                     self._strategy_name_for_content_type(content_type)
-                ).resume_continuity_window_minutes(
-                    surface=_surface_for_content_type(content_type)
-                ),
+                ).resume_continuity_window_minutes(surface=_surface_for_content_type(content_type)),
                 resume_snapshot_after_remote_window=feed_freshness_strategies.for_name(
                     self._strategy_name_for_content_type(content_type)
                 ).resume_snapshot_after_remote_window(
@@ -921,14 +918,10 @@ class PlaylistService:
             ),
             resume_continuity_window_minutes=feed_freshness_strategies.for_name(
                 self._strategy_name_for_content_type(content_type)
-            ).resume_continuity_window_minutes(
-                surface=_surface_for_content_type(content_type)
-            ),
+            ).resume_continuity_window_minutes(surface=_surface_for_content_type(content_type)),
             resume_snapshot_after_remote_window=feed_freshness_strategies.for_name(
                 self._strategy_name_for_content_type(content_type)
-            ).resume_snapshot_after_remote_window(
-                surface=_surface_for_content_type(content_type)
-            ),
+            ).resume_snapshot_after_remote_window(surface=_surface_for_content_type(content_type)),
         )
 
     def _ensure_snapshot_depth(
@@ -950,9 +943,7 @@ class PlaylistService:
 
         db = self.content_repo.db
         surface = _surface_for_content_type(content_type)
-        snapshot_strategy = feed_freshness_strategies.for_name(
-            snapshot.get("freshness_strategy")
-        )
+        snapshot_strategy = feed_freshness_strategies.for_name(snapshot.get("freshness_strategy"))
         hybrid_video_rerank = content_type in (
             ContentType.VIDEO,
             ContentType.REEL,
@@ -1463,11 +1454,11 @@ class PlaylistService:
             else (_optional_text(item.title) or "Untitled"),
             "description": _optional_text(item.description),
             "summary": _optional_text(item.summary),
-            "image_url": _optional_text(item.image_url),
+            "image_url": public_media_url(item.image_url),
             "video_url": _optional_text(item.video_url),
             "duration": _optional_int(duration_seconds),
             "duration_seconds": _optional_int(duration_seconds),
-            "thumbnail_url": _optional_text(item.image_url),
+            "thumbnail_url": public_media_url(item.image_url),
             "category": topics[0] if topics else None,
             "topics": topics,
             "entities": entities,
@@ -1511,7 +1502,7 @@ class PlaylistService:
                 "title": title,
                 "description": _optional_text(normalized.get("description")),
                 "summary": _optional_text(normalized.get("summary")),
-                "image_url": _optional_text(normalized.get("image_url")),
+                "image_url": public_media_url(normalized.get("image_url")),
                 "video_url": _optional_text(normalized.get("video_url")),
                 "duration": _optional_int(
                     normalized.get("duration", normalized.get("duration_seconds"))
@@ -1519,8 +1510,8 @@ class PlaylistService:
                 "duration_seconds": _optional_int(
                     normalized.get("duration_seconds", normalized.get("duration"))
                 ),
-                "thumbnail_url": _optional_text(normalized.get("thumbnail_url"))
-                or _optional_text(normalized.get("image_url")),
+                "thumbnail_url": public_media_url(normalized.get("thumbnail_url"))
+                or public_media_url(normalized.get("image_url")),
                 "category": _optional_text(normalized.get("category"))
                 or (topics[0] if topics else None),
                 "topics": topics,
