@@ -47,7 +47,7 @@ from app.services.feed_version import compute_feed_version
 from app.services.inventory_service import Surface
 from app.services.multi_factor_ranking_service import MultiFactorRankingService
 from app.services.personalization_service import PersonalizationService
-from app.services.tiered_feed_service import get_cached_tiered_feed
+from app.services.tiered_feed_service import TIERED_FEED_ORDER_VERSION, get_cached_tiered_feed
 from app.services.video_duration_hydration import hydrate_missing_video_durations
 from app.video_surface_rules import effective_content_type, has_explicit_shorts_url
 
@@ -83,6 +83,7 @@ PLAYLIST_CACHE_TTL_SECONDS = 300  # 5 minutes
 PLAYLIST_CACHE_PREFIX = "playlist:"
 VIDEO_REEL_PLAYLIST_CACHE_PREFIX = "playlist:video-reel-v4:"
 SESSION_SNAPSHOT_TTL_SECONDS = 3600  # 1 hour for session snapshots
+PLAYLIST_ORDER_VERSION = f"playlist-{TIERED_FEED_ORDER_VERSION}"
 
 
 def _get_playlist_redis_client():
@@ -739,6 +740,7 @@ class PlaylistService:
         newest_published_at, newest_created_at = self._newest_dates(items)
         return {
             "items": items,
+            "order_version": PLAYLIST_ORDER_VERSION,
             "generated_at": generated_at.isoformat(),
             "inventory_state": inventory_state,
             "feed_version": compute_feed_version(items, generated_at),
@@ -766,6 +768,8 @@ class PlaylistService:
             return None
 
         if isinstance(payload, dict):
+            if payload.get("order_version") != PLAYLIST_ORDER_VERSION:
+                return None
             items = payload.get("items")
             if not isinstance(items, list) or not self._is_cache_compatible(items, content_type):
                 return None

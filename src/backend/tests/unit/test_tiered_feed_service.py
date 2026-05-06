@@ -11,6 +11,7 @@ from app.services.inventory_service import FreshnessTier, Surface
 from app.services.tiered_feed_service import (
     TieredItem,
     _cache_key,
+    _day_score_order_key,
     _prioritize_unseen_items,
     tiered_item_to_dict,
 )
@@ -75,6 +76,7 @@ def test_cache_key_separates_hybrid_video_rerank_variants():
     assert base_key != hybrid_key
     assert base_key.endswith("hybrid0")
     assert hybrid_key.endswith("hybrid1")
+    assert ":ov" in base_key
 
 
 def test_cache_key_includes_device_hash_when_personalized():
@@ -139,6 +141,19 @@ def test_prioritize_unseen_items_only_uses_demoted_fill_when_needed():
 
     selected = _prioritize_unseen_items(primary, demoted, target_size=4)
     assert [item.id for item in selected] == [1, 2, 3, 4]
+
+
+def test_day_score_order_key_sorts_by_day_then_score_then_publish_time():
+    items = [
+        SimpleNamespace(id=1, published_at=datetime(2026, 5, 5, 18), promotion_score=0.99, global_score=0.99),
+        SimpleNamespace(id=2, published_at=datetime(2026, 5, 6, 9), promotion_score=0.3, global_score=0.9),
+        SimpleNamespace(id=3, published_at=datetime(2026, 5, 6, 16), promotion_score=0.7, global_score=0.1),
+        SimpleNamespace(id=4, published_at=datetime(2026, 5, 6, 10), promotion_score=0.3, global_score=0.8),
+    ]
+
+    ordered = sorted(items, key=_day_score_order_key, reverse=True)
+
+    assert [item.id for item in ordered] == [3, 2, 4, 1]
 
 
 def test_get_tiered_feed_applies_hybrid_rerank_to_reels_when_enabled(monkeypatch):

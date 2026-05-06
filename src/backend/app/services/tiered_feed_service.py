@@ -19,7 +19,7 @@ Includes Redis caching for performance with short TTL.
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import and_, desc, func, or_
@@ -53,6 +53,7 @@ logger = get_logger(__name__)
 
 # Cache TTL for tiered feed (seconds)
 TIERED_FEED_CACHE_TTL = 45  # 45 seconds - balance freshness vs DB load
+TIERED_FEED_ORDER_VERSION = "v2day_score"
 CONSUMED_SUPPRESSION_HOURS = 24
 EXPOSED_DEMOTION_HOURS = 6
 NEGATIVE_ITEM_SUPPRESSION_HOURS = 24
@@ -66,6 +67,36 @@ def _article_day_first_order_clauses():
         desc(ContentItem.promotion_score),
         desc(ContentItem.global_score),
         desc(ContentItem.published_at),
+    )
+
+
+def _published_at_timestamp(item: ContentItem) -> float:
+    published_at = getattr(item, "published_at", None)
+    if not isinstance(published_at, datetime):
+        return float("-inf")
+    if published_at.tzinfo is None:
+        published_at = published_at.replace(tzinfo=timezone.utc)
+    return published_at.timestamp()
+
+
+def _numeric_score(value: Any) -> float:
+    if value is None:
+        return float("-inf")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("-inf")
+
+
+def _day_score_order_key(item: ContentItem) -> Tuple[int, float, float, float]:
+    """Serve by published day first, then score within the day."""
+    published_at = getattr(item, "published_at", None)
+    day = published_at.date().toordinal() if isinstance(published_at, datetime) else 0
+    return (
+        day,
+        _numeric_score(getattr(item, "promotion_score", None)),
+        _numeric_score(getattr(item, "global_score", None)),
+        _published_at_timestamp(item),
     )
 
 
@@ -107,7 +138,8 @@ def _cache_key(
 ) -> str:
     """Generate cache key for tiered feed."""
     base_key = (
-        f"blips:tiered_feed:{surface.value}:s{strategy_name}:l{limit}:o{offset}:hybrid{int(hybrid_video_rerank)}"
+        f"blips:tiered_feed:{surface.value}:s{strategy_name}:l{limit}:o{offset}:"
+        f"ov{TIERED_FEED_ORDER_VERSION}:hybrid{int(hybrid_video_rerank)}"
     )
     if surface == Surface.ARTICLES or not device_id:
         return base_key
@@ -503,14 +535,12 @@ def get_tiered_feed(
     # Enforce position-based channel caps (videos/reels only)
     mixed_items = enforce_channel_caps(mixed_items, surface=surface_name)
 
-    # Restore day-first grouping after diversity mixing. mix_feed() re-orders
-    # items for source/topic diversity without date awareness, allowing items
-    # from different days to interleave. Python's stable sort preserves the
-    # diversity mixer's relative ordering within each day.
-    mixed_items.sort(
-        key=lambda item: item.published_at.date() if item.published_at else datetime.min.date(),
-        reverse=True,
-    )
+    if surface == Surface.ARTICLES:
+        # Restore the article ranking contract after diversity mixing.
+        # mix_feed() re-orders items for source/topic diversity without date
+        # awareness, so the final article serving pass must put newer days first
+        # and score within each day. Videos/reels keep their reranker order.
+        mixed_items.sort(key=_day_score_order_key, reverse=True)
 
     # Map back to tiered items
     item_to_tiered = {t.item.id: t for t in results}
