@@ -17,11 +17,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.db.base import SessionLocal
 from app.integrations.llm_client import LLMClient
-from app.models.content import ContentItem, ContentStatus, ContentType
+from app.models.content import ContentItem, ContentReadinessStatus, ContentStatus, ContentType
 from app.services.article_image_service import repair_article_image_metadata
 from app.services.article_quality_policy import classify_article_quality_block
 from app.services.content_readiness import sync_content_readiness
 from app.services.content_event_backfill_service import enqueue_pending_content_events
+from app.services.major_news_constants import MAJOR_NEWS_DISCOVERED_VIA
 from app.services.playlist_service import refresh_cached_playlist_items
 from app.services.tiered_feed_service import invalidate_tiered_feed_cache
 
@@ -114,7 +115,11 @@ def _run_article_quality_gate_backfill(db, options: dict[str, Any]) -> dict[str,
     if not dry_run:
         db.commit()
         invalidate_tiered_feed_cache()
-        cache_refresh = refresh_cached_playlist_items(db, content_ids=touched_ids) if touched_ids else {}
+        cache_refresh = (
+            refresh_cached_playlist_items(db, content_ids=touched_ids)
+            if touched_ids
+            else {}
+        )
     else:
         cache_refresh = {}
 
@@ -128,6 +133,71 @@ def _run_article_quality_gate_backfill(db, options: dict[str, Any]) -> dict[str,
         "reclassified": reclassified,
         "reclassified_non_tech": reclassified_non_tech,
         "classification_errors": classification_errors,
+        "resynced": resynced,
+        "touched_ids": touched_ids[:200],
+        "cache_busted": not dry_run,
+        "playlist_cache_refresh": cache_refresh,
+    }
+
+
+def _run_major_news_stale_probe_cleanup(db, options: dict[str, Any]) -> dict[str, Any]:
+    max_age_hours = max(1, int(options.get("max_age_hours", 48)))
+    limit = max(1, int(options.get("limit", 200)))
+    dry_run = bool(options.get("dry_run", False))
+    cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
+
+    items = (
+        db.query(ContentItem)
+        .filter(
+            ContentItem.type == ContentType.ARTICLE,
+            ContentItem.curation_status == ContentStatus.CANDIDATE,
+            ContentItem.readiness_status == ContentReadinessStatus.PENDING.value,
+            ContentItem.readiness_reason == "awaiting_promotion",
+            ContentItem.published_at < cutoff,
+            ContentItem.is_suppressed.is_(False),
+            (
+                (ContentItem.discovered_via == MAJOR_NEWS_DISCOVERED_VIA)
+                | (ContentItem.is_major_tech_news.is_(True))
+            ),
+        )
+        .order_by(ContentItem.published_at.asc(), ContentItem.id.asc())
+        .limit(limit)
+        .all()
+    )
+
+    touched_ids: list[int] = []
+    resynced = 0
+    for item in items:
+        if item.id is not None:
+            touched_ids.append(int(item.id))
+        if dry_run:
+            continue
+
+        item.is_major_tech_news = False
+        item.major_tech_news_reason = "stale_major_news_probe_item: outside promotion window"
+        item.promotion_reason = _append_block_reason(
+            item.promotion_reason,
+            "stale_major_news_probe_item",
+        )
+        before = getattr(item, "readiness_reason", None)
+        sync_content_readiness(db, item)
+        if before != getattr(item, "readiness_reason", None):
+            resynced += 1
+
+    if not dry_run:
+        db.commit()
+        invalidate_tiered_feed_cache()
+        cache_refresh = refresh_cached_playlist_items(db, content_ids=touched_ids) if touched_ids else {}
+    else:
+        cache_refresh = {}
+
+    return {
+        "job": "major_news_stale_probe_cleanup",
+        "max_age_hours": max_age_hours,
+        "limit": limit,
+        "dry_run": dry_run,
+        "scanned": len(items),
+        "cleared_major_news_count": 0 if dry_run else len(items),
         "resynced": resynced,
         "touched_ids": touched_ids[:200],
         "cache_busted": not dry_run,
@@ -155,6 +225,9 @@ def run(payload: dict[str, Any] | None = None) -> dict[str, Any]:
 
         if job == "article_quality_gate_backfill":
             return _run_article_quality_gate_backfill(db, options)
+
+        if job == "major_news_stale_probe_cleanup":
+            return _run_major_news_stale_probe_cleanup(db, options)
 
         all_statuses = bool(options.get("all_statuses", False))
         all_reasons = bool(options.get("all_reasons", False))

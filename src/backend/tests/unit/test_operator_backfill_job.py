@@ -138,3 +138,37 @@ def test_operator_backfill_job_can_run_article_quality_gate_backfill(monkeypatch
     assert captured["options"]["lookback_days"] == 14
     assert captured["options"]["limit"] == 100
     assert captured["closed"] is True
+
+
+def test_operator_backfill_job_can_run_major_news_stale_cleanup(monkeypatch):
+    captured = {}
+
+    class _FakeSession:
+        def close(self):
+            captured["closed"] = True
+
+    monkeypatch.setattr(operator_backfill_job, "SessionLocal", lambda: _FakeSession())
+
+    def _fake_cleanup(db, options):
+        captured["db"] = db
+        captured["options"] = options
+        return {"job": "major_news_stale_probe_cleanup", "cleared_major_news_count": 7}
+
+    monkeypatch.setattr(
+        operator_backfill_job,
+        "_run_major_news_stale_probe_cleanup",
+        _fake_cleanup,
+    )
+
+    result = operator_backfill_job.run(
+        {
+            "job": "major_news_stale_probe_cleanup",
+            "max_age_hours": 48,
+            "limit": 100,
+        }
+    )
+
+    assert result == {"job": "major_news_stale_probe_cleanup", "cleared_major_news_count": 7}
+    assert captured["options"]["max_age_hours"] == 48
+    assert captured["options"]["limit"] == 100
+    assert captured["closed"] is True

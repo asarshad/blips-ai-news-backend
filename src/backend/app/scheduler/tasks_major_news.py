@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import update
@@ -186,12 +186,33 @@ def _entry_to_value(
     return value
 
 
+def _datetime_utc_naive(value: Any) -> datetime | None:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _is_stale_for_major_news_probe(
+    value: dict[str, Any],
+    *,
+    now: datetime,
+    max_age_hours: int,
+) -> bool:
+    published_at = _datetime_utc_naive(value.get("published_at"))
+    if published_at is None:
+        return False
+    return published_at < now - timedelta(hours=max_age_hours)
+
+
 def run_major_news_probe_job() -> dict[str, Any]:
     """Probe validated major-news feeds within strict feed/item/time bounds."""
     max_seconds = _int_env("MAJOR_NEWS_PROBE_MAX_SECONDS", 60)
     max_feeds = _int_env("MAJOR_NEWS_PROBE_MAX_FEEDS", 5)
     max_inserted = _int_env("MAJOR_NEWS_PROBE_MAX_INSERTED", 20)
     max_entries_per_feed = _int_env("MAJOR_NEWS_PROBE_ENTRIES_PER_FEED", 12)
+    max_entry_age_hours = _int_env("MAJOR_NEWS_PROBE_MAX_ENTRY_AGE_HOURS", 48)
 
     if memory_over_soft_limit():
         result = {
@@ -223,6 +244,7 @@ def run_major_news_probe_job() -> dict[str, Any]:
     inserted_ids: list[int] = []
     fetched_feeds = 0
     skipped_cooldown = 0
+    skipped_stale = 0
     attempted_entries = 0
     errors: list[str] = []
 
@@ -280,6 +302,13 @@ def run_major_news_probe_job() -> dict[str, Any]:
                         article_hydrator=article_hydrator,
                     )
                     if value is not None:
+                        if _is_stale_for_major_news_probe(
+                            value,
+                            now=now,
+                            max_age_hours=max_entry_age_hours,
+                        ):
+                            skipped_stale += 1
+                            continue
                         _maybe_classify_major_news_value(value, llm_client=llm_client)
                         values.append(value)
 
@@ -308,6 +337,8 @@ def run_major_news_probe_job() -> dict[str, Any]:
             "feeds": len(feeds),
             "fetched_feeds": fetched_feeds,
             "skipped_cooldown": skipped_cooldown,
+            "skipped_stale": skipped_stale,
+            "max_entry_age_hours": max_entry_age_hours,
             "attempted_entries": attempted_entries,
             "inserted": len(inserted_ids),
             "inserted_ids": inserted_ids[:20],

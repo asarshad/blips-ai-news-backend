@@ -136,6 +136,89 @@ def test_major_news_probe_respects_insert_limit(monkeypatch):
     assert len(inserted_batches[0]) == 2
 
 
+def test_major_news_probe_skips_entries_older_than_promotion_window(monkeypatch):
+    inserted_batches: list[list[dict]] = []
+
+    class _FakeDB:
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    class _FakeStateRepo:
+        def __init__(self, _db):
+            pass
+
+        def get_active_cooldown(self, **_kwargs):
+            return None
+
+        def record_outcome(self, **_kwargs):
+            return None
+
+    class _FakeRSSClient:
+        def __init__(self, feed_configs):
+            self.feed_configs = feed_configs
+
+        def fetch_feed(self, _url, max_entries):
+            return [
+                SimpleNamespace(
+                    title="Old Apple earnings story",
+                    url="https://example.com/old",
+                    published_at=datetime.utcnow() - timedelta(hours=72),
+                ),
+                SimpleNamespace(
+                    title="Fresh Apple earnings story",
+                    url="https://example.com/fresh",
+                    published_at=datetime.utcnow() - timedelta(hours=2),
+                ),
+            ]
+
+        def get_last_fetch_outcome(self, _url):
+            return None
+
+    monkeypatch.setattr(tasks_major_news, "memory_over_soft_limit", lambda: False)
+    monkeypatch.setattr(tasks_major_news, "_ingestion_lane_recently_running", lambda: False)
+    monkeypatch.setattr(tasks_major_news, "SessionLocal", lambda: _FakeDB())
+    monkeypatch.setattr(tasks_major_news, "SourceFetchStateRepository", _FakeStateRepo)
+    monkeypatch.setattr(tasks_major_news, "RSSClient", _FakeRSSClient)
+    monkeypatch.setattr(tasks_major_news, "get_feeds_by_role", lambda _role: [_major_feed()])
+    monkeypatch.setattr(
+        tasks_major_news,
+        "_entry_to_value",
+        lambda entry, **_kwargs: {
+            "title": entry.title,
+            "source_url": entry.url,
+            "published_at": entry.published_at,
+        },
+    )
+    monkeypatch.setattr(
+        tasks_major_news,
+        "_maybe_classify_major_news_value",
+        lambda value, **_kwargs: value.update({"is_major_tech_news": True}) or True,
+    )
+
+    def _fake_insert(_db, *, values):
+        inserted_batches.append(values)
+        return list(range(1, len(values) + 1))
+
+    monkeypatch.setattr(tasks_major_news, "_insert_content_items_postgres", _fake_insert)
+    monkeypatch.setattr(
+        tasks_major_news, "_queue_followup_events_for_inserted_ids", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(tasks_major_news, "_fast_track_major_news_events", lambda *_a, **_k: 0)
+    monkeypatch.setenv("MAJOR_NEWS_PROBE_MAX_ENTRY_AGE_HOURS", "48")
+
+    result = tasks_major_news.run_major_news_probe_job()
+
+    assert result["inserted"] == 1
+    assert result["skipped_stale"] == 1
+    assert inserted_batches[0][0]["source_url"] == "https://example.com/fresh"
+
+
 def test_major_news_probe_marks_only_confirmed_items_for_fast_track(monkeypatch):
     fast_tracked: list[int] = []
 
