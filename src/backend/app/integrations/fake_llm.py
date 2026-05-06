@@ -249,6 +249,25 @@ TAGS: technology, innovation, ai, software, testing"""
         if any(
             keyword in combined
             for keyword in (
+                "nyt connections",
+                "nyt strands",
+                "wordle hints",
+                "wordle answers",
+                "mini crossword",
+                "dnssec debugger",
+                "dnssec-analyzer.verisignlabs.com",
+            )
+        ):
+            payload = {
+                "is_blips_tech_relevant": "no",
+                "confidence": 0.96,
+                "reason": "Help/tool content with no meaningful tech-news angle.",
+            }
+            return json.dumps(payload)
+
+        if any(
+            keyword in combined
+            for keyword in (
                 "apple",
                 "google",
                 "microsoft",
@@ -265,6 +284,10 @@ TAGS: technology, innovation, ai, software, testing"""
                 "privacy",
                 "tiktok",
                 "social media",
+                "cybersecurity",
+                "vulnerability",
+                "dnssec vulnerability",
+                "internet infrastructure",
             )
         ):
             payload = {

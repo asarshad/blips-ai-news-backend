@@ -312,6 +312,35 @@ def test_fake_llm_blips_relevance_uses_actual_input_not_prompt_examples():
     assert result.is_blips_tech_relevant == "no"
 
 
+def test_fake_llm_blips_relevance_rejects_daily_puzzle_help():
+    from app.integrations.llm_client import LLMClient
+
+    client = LLMClient(provider="fake")
+
+    result = client.classify_blips_tech_relevance(
+        title="Today's NYT Connections Hints, Answers for May 6",
+        summary="The article lists daily puzzle hints and answer groups.",
+        source="CNET",
+        url="https://www.cnet.com/tech/gaming/todays-nyt-connections-hints-and-answers",
+    )
+
+    assert result.is_blips_tech_relevant == "no"
+
+
+def test_fake_llm_blips_relevance_allows_dnssec_security_news():
+    from app.integrations.llm_client import LLMClient
+
+    client = LLMClient(provider="fake")
+
+    result = client.classify_blips_tech_relevance(
+        title="New DNSSEC vulnerability lets attackers bypass domain validation",
+        summary="Researchers disclosed a flaw affecting DNSSEC resolvers and internet infrastructure.",
+        source="Ars Technica",
+    )
+
+    assert result.is_blips_tech_relevant == "yes"
+
+
 def test_openai_chat_passes_previous_response_id_to_responses_api():
     from app.integrations.llm_client import ChatMessage, OpenAILLMClient
 

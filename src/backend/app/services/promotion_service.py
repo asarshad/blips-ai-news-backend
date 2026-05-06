@@ -51,6 +51,7 @@ from app.models.content import ContentItem, ContentReadinessStatus, ContentStatu
 from app.models.video_source import VideoSourceProfile
 from app.ranking.quality import compute_source_weight
 from app.repositories.video_source_repo import VideoSourceProfileRepository
+from app.services.article_quality_policy import classify_article_quality_block
 from app.services.content_readiness import sync_content_readiness
 from app.services.major_news_constants import (
     MAJOR_NEWS_CLASSIFIER_MIN_CONFIDENCE,
@@ -692,6 +693,11 @@ def classify_promotion_block(
         if story_importance < 0.20 and tech_score < 0.38:
             return "weak_tech_signal_video"
 
+    if content_type == ContentType.ARTICLE:
+        deterministic_block = classify_article_quality_block(item)
+        if deterministic_block is not None:
+            return deterministic_block.reason
+
     if content_type == ContentType.ARTICLE and settings.ARTICLE_TECH_CLASSIFIER_ENABLED:
         tech_relevance = _safe_text(getattr(item, "tech_relevance", None))
         confidence = _safe_float(getattr(item, "tech_relevance_confidence", None), default=-1.0)
@@ -1300,6 +1306,8 @@ class PromotionService:
             "low_story_discovery_reel",
             "low_signal_official_reel",
             "llm_non_tech_article",
+            "article_non_news_puzzle_help",
+            "article_utility_tool_page",
         }
         for item in promoted_items:
             item.promotion_score = score_candidate(

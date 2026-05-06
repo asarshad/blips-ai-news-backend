@@ -71,6 +71,77 @@ def test_article_unskimmable_retry_has_specific_reason():
     assert decision.reason == "article_unskimmable_retry"
 
 
+def test_non_tech_article_is_not_ready_even_with_summary_and_image():
+    article = SimpleNamespace(
+        id=24,
+        type=ContentType.ARTICLE,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        promotion_reason=None,
+        source_url="https://example.com/local-politics",
+        canonical_url="https://example.com/local-politics",
+        image_url="https://cdn.example.com/article.jpg",
+        article_image_status="VERIFIED",
+        ai_processed=True,
+        summary="A complete summary that would otherwise satisfy article delivery readiness.",
+        tech_relevance="no",
+        tech_relevance_confidence=0.95,
+    )
+
+    decision = evaluate_content_readiness(article)
+
+    assert decision.status == ContentReadinessStatus.PENDING
+    assert decision.reason == "article_non_tech"
+
+
+def test_article_quality_gate_blocks_daily_puzzle_help():
+    article = SimpleNamespace(
+        id=25,
+        type=ContentType.ARTICLE,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        promotion_reason=None,
+        source_url="https://www.cnet.com/tech/gaming/todays-nyt-connections-hints-and-answers",
+        canonical_url="https://www.cnet.com/tech/gaming/todays-nyt-connections-hints-and-answers",
+        title="Today's NYT Connections Hints, Answers for May 6",
+        image_url="https://cdn.example.com/article.jpg",
+        article_image_status="VERIFIED",
+        ai_processed=True,
+        summary="Daily puzzle hints and answers.",
+        tech_relevance="yes",
+        tech_relevance_confidence=0.95,
+    )
+
+    decision = evaluate_content_readiness(article)
+
+    assert decision.status == ContentReadinessStatus.PENDING
+    assert decision.reason == "article_non_news_puzzle_help"
+
+
+def test_article_quality_gate_blocks_dnssec_debugger_tool_page():
+    article = SimpleNamespace(
+        id=26,
+        type=ContentType.ARTICLE,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        promotion_reason=None,
+        source_url="https://dnssec-analyzer.verisignlabs.com/nic.de",
+        canonical_url="https://dnssec-analyzer.verisignlabs.com/nic.de",
+        title="DNSSEC Debugger - nic.de",
+        image_url="https://dnssec-analyzer.verisignlabs.com/green.png",
+        article_image_status="VERIFIED",
+        ai_processed=True,
+        summary="Debugger output for DNSSEC validation.",
+        tech_relevance="yes",
+        tech_relevance_confidence=0.95,
+    )
+
+    decision = evaluate_content_readiness(article)
+
+    assert decision.status == ContentReadinessStatus.PENDING
+    assert decision.reason == "article_utility_tool_page"
+
+
 def test_video_requires_ai_summary_to_be_ready():
     video = SimpleNamespace(
         id=2,
@@ -233,12 +304,62 @@ def test_ready_content_filter_excludes_ready_articles_with_blank_image_url():
         readiness_status=ContentReadinessStatus.READY.value,
         published_at=datetime(2026, 4, 20, 12, 5, 0),
     )
-    db.add_all([stale_ready, healthy_ready])
+    non_tech_ready = ContentItem(
+        id=103,
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/non-tech",
+        canonical_url="https://example.com/non-tech",
+        title="General politics story",
+        summary="A valid summary for a non-tech article.",
+        image_url="https://cdn.example.com/non-tech.jpg",
+        article_image_status="VERIFIED",
+        ai_processed=True,
+        tech_relevance="no",
+        tech_relevance_confidence=0.95,
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status=ContentReadinessStatus.READY.value,
+        published_at=datetime(2026, 4, 20, 12, 10, 0),
+    )
+    puzzle_ready = ContentItem(
+        id=104,
+        type=ContentType.ARTICLE,
+        source="CNET",
+        source_url="https://www.cnet.com/tech/gaming/todays-nyt-wordle-hints-answer-and-help",
+        canonical_url="https://www.cnet.com/tech/gaming/todays-nyt-wordle-hints-answer-and-help",
+        title="Today's NYT Wordle Hints, Answer and Help",
+        summary="A valid summary for a puzzle help page.",
+        image_url="https://cdn.example.com/puzzle.jpg",
+        article_image_status="VERIFIED",
+        ai_processed=True,
+        tech_relevance="yes",
+        tech_relevance_confidence=0.95,
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status=ContentReadinessStatus.READY.value,
+        published_at=datetime(2026, 4, 20, 12, 15, 0),
+    )
+    manual_puzzle_ready = ContentItem(
+        id=105,
+        type=ContentType.ARTICLE,
+        source="CNET",
+        source_url="https://www.cnet.com/tech/gaming/todays-nyt-wordle-hints-answer-and-help-manual",
+        canonical_url="https://www.cnet.com/tech/gaming/todays-nyt-wordle-hints-answer-and-help-manual",
+        title="Today's NYT Wordle Hints, Answer and Help",
+        summary="A manually-added puzzle item should only be delivered when explicitly curated.",
+        image_url="https://cdn.example.com/manual-puzzle.jpg",
+        article_image_status="VERIFIED",
+        ai_processed=True,
+        manual_added=True,
+        curation_status=ContentStatus.PROMOTED,
+        readiness_status=ContentReadinessStatus.READY.value,
+        published_at=datetime(2026, 4, 20, 12, 20, 0),
+    )
+    db.add_all([stale_ready, healthy_ready, non_tech_ready, puzzle_ready, manual_puzzle_ready])
     db.commit()
 
     rows = db.query(ContentItem).filter(ready_content_filter("articles")).all()
 
-    assert [row.id for row in rows] == [102]
+    assert [row.id for row in rows] == [102, 105]
 
 
 def test_sync_content_readiness_enqueues_ready_event_once():

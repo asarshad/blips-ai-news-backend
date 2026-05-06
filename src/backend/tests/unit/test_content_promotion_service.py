@@ -221,6 +221,54 @@ def test_classify_promotion_block_blocks_non_tech_article_at_confidence_threshol
     assert reason == "llm_non_tech_article"
 
 
+def test_classify_promotion_block_blocks_daily_puzzle_help_article():
+    from app.services.promotion_service import classify_promotion_block
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="CNET",
+        source_url="https://www.cnet.com/tech/gaming/todays-nyt-strands-hints-answers-and-help",
+        published_at=_recent_dt(hours_ago=1),
+        title="Today's NYT Strands Hints, Answer and Help for May 6",
+        tech_relevance="yes",
+        tech_relevance_confidence=0.95,
+        curation_status=ContentStatus.PROMOTED,
+    )
+
+    reason = classify_promotion_block(
+        item,
+        ContentType.ARTICLE,
+        story_topic_counts={},
+        story_entity_counts={},
+    )
+
+    assert reason == "article_non_news_puzzle_help"
+
+
+def test_classify_promotion_block_allows_dnssec_security_news():
+    from app.services.promotion_service import classify_promotion_block
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Ars Technica",
+        source_url="https://arstechnica.com/security/dnssec-vulnerability",
+        published_at=_recent_dt(hours_ago=1),
+        title="New DNSSEC vulnerability lets attackers bypass domain validation",
+        tech_relevance="yes",
+        tech_relevance_confidence=0.95,
+        curation_status=ContentStatus.PROMOTED,
+    )
+
+    reason = classify_promotion_block(
+        item,
+        ContentType.ARTICLE,
+        story_topic_counts={},
+        story_entity_counts={},
+    )
+
+    assert reason is None
+
+
 def test_classify_promotion_block_does_not_block_article_with_null_tech_relevance():
     from app.services.promotion_service import classify_promotion_block
 

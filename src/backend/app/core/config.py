@@ -346,6 +346,14 @@ class Settings(BaseSettings):
     FIREBASE_SERVICE_ACCOUNT_JSON: str = ""
     FIREBASE_SERVICE_ACCOUNT_FILE: str = ""
 
+    # App update nudge — set MIN_RECOMMENDED_VERSION to a semver string (e.g.
+    # "1.0.5") to prompt clients below that version to update.  Empty string
+    # disables the nudge entirely.  Store URLs are optional; when empty the
+    # dialog shows without an "Update" button.
+    MIN_RECOMMENDED_VERSION: str = ""
+    IOS_APP_STORE_URL: str = ""
+    ANDROID_PLAY_STORE_URL: str = ""
+
     # Top-up controls
     TOPUP_LOCK_TTL_SECONDS: int = 120
     TOPUP_MAX_RUNTIME_SECONDS: int = 300

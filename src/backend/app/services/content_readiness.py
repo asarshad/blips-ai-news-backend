@@ -15,6 +15,10 @@ from app.services.ai_retry_state import (
     is_article_retry_summary,
     is_video_summary_retry_summary,
 )
+from app.services.article_quality_policy import (
+    article_quality_sql_allow_filter,
+    classify_article_quality_block,
+)
 from app.video_surface_rules import (
     effective_content_type,
     surface_content_filter,
@@ -27,6 +31,9 @@ _READINESS_REASON_DESCRIPTIONS = {
     "suppressed": "Suppressed items are hidden from all client delivery paths.",
     "awaiting_promotion": "Promote this item before it can be delivered to users.",
     "blocked_promotion": "This item is blocked by promotion policy and is not client-visible.",
+    "article_non_tech": "This article was classified as not relevant to the Blips tech-news audience.",
+    "article_non_news_puzzle_help": "Puzzle hints and answer pages are help content, not tech news.",
+    "article_utility_tool_page": "Tool/debugger/analyzer pages are not editorial news articles.",
     "missing_article_source": "This article is missing a canonical source URL.",
     "awaiting_article_image_verification": (
         "This article is still waiting for the post-ingest image verification pass."
@@ -123,6 +130,8 @@ def ready_content_filter(surface_name: str):
                 _sql_non_empty(ContentItem.image_url),
                 ContentItem.ai_processed.is_(True),
                 _sql_non_empty(ContentItem.summary),
+                article_quality_sql_allow_filter(),
+                _article_tech_relevance_sql_allow_filter(),
             ]
         )
 
@@ -177,6 +186,15 @@ def evaluate_content_readiness(item: Any) -> ContentReadinessDecision:
         )
 
     if effective_type == ContentType.ARTICLE:
+        deterministic_block = classify_article_quality_block(item)
+        if deterministic_block is not None:
+            return ContentReadinessDecision(
+                status=ContentReadinessStatus.PENDING,
+                reason=deterministic_block.reason,
+                effective_type=effective_type,
+                surfaces=surfaces,
+            )
+
         source_url = _trimmed(getattr(item, "source_url", None)) or _trimmed(
             getattr(item, "canonical_url", None)
         )
@@ -228,6 +246,14 @@ def evaluate_content_readiness(item: Any) -> ContentReadinessDecision:
             return ContentReadinessDecision(
                 status=ContentReadinessStatus.PENDING,
                 reason="missing_article_summary",
+                effective_type=effective_type,
+                surfaces=surfaces,
+            )
+
+        if _article_tech_relevance_blocked(item):
+            return ContentReadinessDecision(
+                status=ContentReadinessStatus.PENDING,
+                reason="article_non_tech",
                 effective_type=effective_type,
                 surfaces=surfaces,
             )
@@ -460,6 +486,37 @@ def _normalize_status(value: Any) -> ContentReadinessStatus:
 def _sql_non_empty(value):
     """Return a SQL predicate that rejects null, blank, and whitespace-only text."""
     return func.nullif(func.trim(func.coalesce(value, "")), "").isnot(None)
+
+
+def _article_tech_relevance_sql_allow_filter():
+    threshold = 0.85
+    try:
+        from app.core.config import settings
+
+        threshold = max(min(1.0, float(settings.ARTICLE_TECH_NONE_BLOCK_CONFIDENCE)), 0.50)
+    except Exception:
+        pass
+    return ~and_(
+        func.lower(func.coalesce(ContentItem.tech_relevance, "")) == "no",
+        func.coalesce(ContentItem.tech_relevance_confidence, 0.0) >= threshold,
+    )
+
+
+def _article_tech_relevance_blocked(item: Any) -> bool:
+    tech_relevance = _trimmed(getattr(item, "tech_relevance", None)).lower()
+    if tech_relevance != "no":
+        return False
+    try:
+        confidence = float(getattr(item, "tech_relevance_confidence", None) or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    try:
+        from app.core.config import settings
+
+        threshold = max(min(1.0, float(settings.ARTICLE_TECH_NONE_BLOCK_CONFIDENCE)), 0.50)
+    except Exception:
+        threshold = 0.85
+    return confidence >= threshold
 
 
 def _surfaces_for_type(content_type: ContentType) -> tuple[str, ...]:

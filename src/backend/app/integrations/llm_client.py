@@ -1157,6 +1157,7 @@ Exclude stories when the connection to tech is weak, incidental, or nonexistent,
 - general world news with no meaningful tech angle
 - politics, crime, war, protests, sports, entertainment, or celebrity news with no direct impact on tech companies, platforms, products, infrastructure, or regulation
 - business news unrelated to technology or tech-adjacent industries
+- recurring help/reference content with no news development, including NYT/Wordle/Connections/Strands/Crossword hints or answers, game walkthroughs, calculators, debuggers, analyzers, status pages, docs, event pages, and raw tools
 
 Important rule:
 If a reasonable tech-news reader would likely care because the story affects tech companies, platforms, AI, chips, software, hardware, privacy, or internet regulation, classify it as yes.
@@ -1169,6 +1170,7 @@ Be especially careful not to reject:
 - business or financial stories centered on major tech companies
 
 Only classify as no when the tech relevance is clearly weak or absent.
+Classify raw tools or reference outputs as no unless the item is an editorial news story about the tool or about a security/product/policy development.
 
 Input:
 Title: {title}
@@ -1187,6 +1189,22 @@ Reason requirements:
 - Keep it brief and concrete
 - Mention the tech angle if yes
 - Mention why the tech connection is weak/absent if no
+
+Examples:
+Title: Today's NYT Connections Hints and Answers
+Summary: The article gives daily puzzle hints and the answer groups.
+Output:
+{{"is_blips_tech_relevant":"no","confidence":0.99,"reason":"Daily puzzle help content with no meaningful tech-news angle."}}
+
+Title: DNSSEC Debugger - nic.de
+Summary: The page lists DNSSEC validation records, key tags, algorithms, and timestamps for a domain.
+Output:
+{{"is_blips_tech_relevant":"no","confidence":0.96,"reason":"Raw debugger/tool output, not an editorial tech-news story."}}
+
+Title: New DNSSEC vulnerability lets attackers bypass domain validation
+Summary: Researchers disclosed a flaw affecting DNSSEC resolvers and domain validation infrastructure.
+Output:
+{{"is_blips_tech_relevant":"yes","confidence":0.98,"reason":"Security vulnerability directly affects internet infrastructure."}}
 
 Return JSON only. Do not wrap it in markdown.
 """

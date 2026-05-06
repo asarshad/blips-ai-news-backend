@@ -104,3 +104,37 @@ def test_operator_backfill_job_can_enqueue_pending_content_events(monkeypatch):
         "pending_only": False,
     }
     assert captured["closed"] is True
+
+
+def test_operator_backfill_job_can_run_article_quality_gate_backfill(monkeypatch):
+    captured = {}
+
+    class _FakeSession:
+        def close(self):
+            captured["closed"] = True
+
+    monkeypatch.setattr(operator_backfill_job, "SessionLocal", lambda: _FakeSession())
+
+    def _fake_quality_backfill(db, options):
+        captured["db"] = db
+        captured["options"] = options
+        return {"job": "article_quality_gate_backfill", "deterministic_blocked": 4}
+
+    monkeypatch.setattr(
+        operator_backfill_job,
+        "_run_article_quality_gate_backfill",
+        _fake_quality_backfill,
+    )
+
+    result = operator_backfill_job.run(
+        {
+            "job": "article_quality_gate_backfill",
+            "lookback_days": 14,
+            "limit": 100,
+        }
+    )
+
+    assert result == {"job": "article_quality_gate_backfill", "deterministic_blocked": 4}
+    assert captured["options"]["lookback_days"] == 14
+    assert captured["options"]["limit"] == 100
+    assert captured["closed"] is True

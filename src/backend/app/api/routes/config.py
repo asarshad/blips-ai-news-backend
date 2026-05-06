@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends
 
+from app.core.config import settings
 from app.core.dependencies import get_redis
 from app.core.session_auth import AuthenticatedSession, require_session_token
 from app.schemas.ads import AppConfigResponse
@@ -43,4 +44,7 @@ def get_app_config(
         push=push_config_service.get_public_config(
             provider_ready=push_messaging_client.is_available,
         ),
+        min_recommended_version=settings.MIN_RECOMMENDED_VERSION,
+        ios_app_store_url=settings.IOS_APP_STORE_URL,
+        android_play_store_url=settings.ANDROID_PLAY_STORE_URL,
     )

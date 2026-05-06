@@ -66,6 +66,14 @@ class ContentItemSummary(BaseModel):
     cluster_id: Optional[str] = None
     freshness_tier: Optional[str] = None
     global_score: Optional[float] = None
+    curation_status: Optional[str] = None
+    readiness_status: Optional[str] = None
+    readiness_reason: Optional[str] = None
+    promotion_score: Optional[float] = None
+    promotion_reason: Optional[str] = None
+    tech_relevance: Optional[str] = None
+    tech_relevance_confidence: Optional[float] = None
+    tech_relevance_reason: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -85,7 +93,6 @@ class CandidateQueueItem(ContentItemSummary):
     curation_status: str
     discovered_via: Optional[str] = None
     signal_hits: int = 0
-    promotion_score: Optional[float] = None
     candidate_first_seen_at: Optional[datetime] = None
     candidate_signal_source: Optional[str] = None
     candidate_raw_title: Optional[str] = None

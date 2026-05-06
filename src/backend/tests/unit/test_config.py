@@ -65,3 +65,11 @@ def test_admin_share_token_defaults_disabled():
     settings = Settings()
 
     assert settings.ADMIN_SHARE_TOKEN == ""
+
+
+def test_update_nudge_defaults_disabled():
+    settings = Settings()
+
+    assert settings.MIN_RECOMMENDED_VERSION == ""
+    assert settings.IOS_APP_STORE_URL == ""
+    assert settings.ANDROID_PLAY_STORE_URL == ""

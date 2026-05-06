@@ -249,6 +249,29 @@ def compute_strategic_content_health(
         .scalar()
         or 0
     )
+    stuck_major_rows = (
+        db.query(
+            ContentItem.id,
+            ContentItem.title,
+            ContentItem.source,
+            ContentItem.readiness_reason,
+            ContentItem.created_at,
+        )
+        .filter(
+            ContentItem.type == ContentType.ARTICLE,
+            ContentItem.is_major_tech_news.is_(True),
+            ContentItem.readiness_status == ContentReadinessStatus.PENDING.value,
+            ContentItem.created_at
+            <= (
+                current
+                - timedelta(minutes=int(settings.STRATEGIC_ALERT_MAJOR_NEWS_STUCK_MINUTES))
+            ).replace(tzinfo=None),
+            ContentItem.is_suppressed.is_(False),
+        )
+        .order_by(ContentItem.created_at.asc())
+        .limit(10)
+        .all()
+    )
     major_news = {
         "feed_count": len(probe_states),
         "latest_probe_at": latest_probe_at.isoformat() if latest_probe_at else None,
@@ -260,6 +283,16 @@ def compute_strategic_content_health(
         "probe_insert_count_window_hours": int(settings.STRATEGIC_ALERT_MAJOR_NEWS_NO_INSERT_HOURS),
         "probe_insert_count": major_probe_insert_count,
         "stuck_confirmed_major_count": stuck_major,
+        "stuck_items": [
+            {
+                "id": int(row.id),
+                "title": row.title,
+                "source": row.source,
+                "readiness_reason": row.readiness_reason,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in stuck_major_rows
+        ],
     }
     if latest_probe_at is None or (
         _hours_since(current, latest_probe_at) or 0

@@ -151,3 +151,6 @@ class AppConfigResponse(BaseModel):
 
     ads: AdsClientConfig = Field(default_factory=AdsClientConfig)
     push: PushClientConfig = Field(default_factory=PushClientConfig)
+    min_recommended_version: str = ""
+    ios_app_store_url: str = ""
+    android_play_store_url: str = ""

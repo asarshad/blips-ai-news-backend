@@ -27,6 +27,7 @@ from app.services.article_unskimmable_service import (
     is_terminal_unskimmable_article,
     reject_terminal_unskimmable_article,
 )
+from app.services.article_quality_policy import classify_article_quality_block
 from app.services.content_readiness import seed_content_readiness, sync_content_readiness
 from app.services.major_news_constants import MAJOR_NEWS_DISCOVERED_VIA
 from app.services.playlist_service import refresh_cached_playlist_items
@@ -334,25 +335,31 @@ def _process_article_summary(
     is_major_tech_news = None
     major_tech_news_confidence = None
     major_tech_news_reason = None
+    deterministic_block = classify_article_quality_block(item)
+    if deterministic_block is not None:
+        tech_relevance = "no"
+        tech_relevance_confidence = 1.0
+        tech_relevance_reason = deterministic_block.detail
     if settings.ARTICLE_TECH_CLASSIFIER_ENABLED:
         try:
-            tech = llm_client.classify_blips_tech_relevance(
-                title=item.title or "",
-                summary=summary,
-                source=item.source or "",
-                url=item.source_url or None,
-            )
-            tech_relevance = tech.is_blips_tech_relevant
-            tech_relevance_confidence = tech.confidence
-            tech_relevance_reason = tech.reason
-            logger.info(
-                "[content_ai] article tech relevance content_id=%s relevant=%s confidence=%.2f",
-                item.id,
-                tech.is_blips_tech_relevant,
-                tech.confidence,
-            )
+            if deterministic_block is None:
+                tech = llm_client.classify_blips_tech_relevance(
+                    title=item.title or "",
+                    summary=summary,
+                    source=item.source or "",
+                    url=item.source_url or None,
+                )
+                tech_relevance = tech.is_blips_tech_relevant
+                tech_relevance_confidence = tech.confidence
+                tech_relevance_reason = tech.reason
+                logger.info(
+                    "[content_ai] article tech relevance content_id=%s relevant=%s confidence=%.2f",
+                    item.id,
+                    tech.is_blips_tech_relevant,
+                    tech.confidence,
+                )
             if (
-                tech.is_blips_tech_relevant == "yes"
+                tech_relevance == "yes"
                 and (getattr(item, "discovered_via", None) or "") == MAJOR_NEWS_DISCOVERED_VIA
                 and getattr(item, "is_major_tech_news", None) is None
             ):
