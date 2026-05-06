@@ -21,6 +21,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, desc, func, or_
 from sqlalchemy.orm import Session
@@ -53,7 +54,8 @@ logger = get_logger(__name__)
 
 # Cache TTL for tiered feed (seconds)
 TIERED_FEED_CACHE_TTL = 45  # 45 seconds - balance freshness vs DB load
-TIERED_FEED_ORDER_VERSION = "v2day_score"
+TIERED_FEED_ORDER_VERSION = "v3local_day_score"
+FEED_DAY_TIMEZONE = ZoneInfo("America/Vancouver")
 CONSUMED_SUPPRESSION_HOURS = 24
 EXPOSED_DEMOTION_HOURS = 6
 NEGATIVE_ITEM_SUPPRESSION_HOURS = 24
@@ -91,7 +93,12 @@ def _numeric_score(value: Any) -> float:
 def _day_score_order_key(item: ContentItem) -> Tuple[int, float, float, float]:
     """Serve by published day first, then score within the day."""
     published_at = getattr(item, "published_at", None)
-    day = published_at.date().toordinal() if isinstance(published_at, datetime) else 0
+    if isinstance(published_at, datetime):
+        if published_at.tzinfo is None:
+            published_at = published_at.replace(tzinfo=timezone.utc)
+        day = published_at.astimezone(FEED_DAY_TIMEZONE).date().toordinal()
+    else:
+        day = 0
     return (
         day,
         _numeric_score(getattr(item, "promotion_score", None)),

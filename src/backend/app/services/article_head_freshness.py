@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from typing import Any, Sequence, TypeVar
+from zoneinfo import ZoneInfo
 
 ARTICLE_FRESH_HEAD_SIZE = 10
+FEED_DAY_TIMEZONE = ZoneInfo("America/Vancouver")
 
 T = TypeVar("T")
 
@@ -38,7 +40,7 @@ def prioritize_recent_head(
         if published_at is None:
             undated_items.append((index, item))
             continue
-        dated_items.append((index, item, published_at.astimezone(timezone.utc)))
+        dated_items.append((index, item, published_at.astimezone(FEED_DAY_TIMEZONE)))
 
     ordered_dated_items = sorted(
         dated_items,
@@ -104,7 +106,7 @@ def _published_day_bucket(
     published_at = _coerce_datetime(_published_at(item))
     if published_at is None:
         return None
-    published_day = published_at.astimezone(timezone.utc).date()
+    published_day = published_at.astimezone(FEED_DAY_TIMEZONE).date()
     if published_day == today:
         return 0
     if published_day == yesterday:

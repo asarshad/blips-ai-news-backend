@@ -156,6 +156,27 @@ def test_day_score_order_key_sorts_by_day_then_score_then_publish_time():
     assert [item.id for item in ordered] == [3, 2, 4, 1]
 
 
+def test_day_score_order_key_uses_vancouver_day_boundary():
+    items = [
+        SimpleNamespace(
+            id=1,
+            published_at=datetime(2026, 5, 6, 6, 7),  # May 5 in Vancouver
+            promotion_score=0.99,
+            global_score=0.99,
+        ),
+        SimpleNamespace(
+            id=2,
+            published_at=datetime(2026, 5, 6, 15, 37),  # May 6 in Vancouver
+            promotion_score=0.4,
+            global_score=0.4,
+        ),
+    ]
+
+    ordered = sorted(items, key=_day_score_order_key, reverse=True)
+
+    assert [item.id for item in ordered] == [2, 1]
+
+
 def test_get_tiered_feed_applies_hybrid_rerank_to_reels_when_enabled(monkeypatch):
     now = datetime(2026, 3, 20, 12, 0, 0)
     items = [

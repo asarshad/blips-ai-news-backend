@@ -99,3 +99,25 @@ def test_prioritize_article_head_orders_all_days_by_recency_then_score():
     )
 
     assert [item["id"] for item in prioritized] == [4, 2, 3, 1]
+
+
+def test_prioritize_article_head_uses_vancouver_day_boundary():
+    items = [
+        {
+            "id": 1,
+            # 11:07pm May 5 in Vancouver, even though it is May 6 in UTC.
+            "published_at": "2026-05-06T06:07:26Z",
+            "promotion_score": 0.99,
+            "global_score": 0.99,
+        },
+        {
+            "id": 2,
+            "published_at": "2026-05-06T15:37:08Z",
+            "promotion_score": 0.40,
+            "global_score": 0.40,
+        },
+    ]
+
+    prioritized = prioritize_article_head(items, head_size=2)
+
+    assert [item["id"] for item in prioritized] == [2, 1]
