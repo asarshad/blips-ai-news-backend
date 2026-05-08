@@ -156,6 +156,15 @@ def _lane_recently_running(lane_name: str, *, max_age_seconds: int = 180) -> boo
 
 def _defer_seconds_for_task(task: LaneTask) -> int | None:
     if memory_over_soft_limit():
+        if task.name in {"major_news_probe", "strategic_content_health"}:
+            logger.info(
+                "[maintenance_lane] allowing lightweight task=%s during worker memory pressure "
+                "worker_memory_mb=%s soft_limit_mb=%s",
+                task.name,
+                current_worker_memory_mb(),
+                memory_soft_limit_mb(),
+            )
+            return None
         logger.warning(
             "[maintenance_lane] deferring task=%s due to worker memory "
             "worker_memory_mb=%s soft_limit_mb=%s",
@@ -241,11 +250,18 @@ def main() -> int:
                 current_status["details"] = {
                     "task": task.name,
                     "defer_seconds": defer_seconds,
+                    "reason": "memory_pressure" if memory_over_soft_limit() else "ingestion_running",
                 }
                 record_lane_heartbeat(
                     "maintenance",
                     status="deferred",
-                    details={"task": task.name, "defer_seconds": defer_seconds},
+                    details={
+                        "task": task.name,
+                        "defer_seconds": defer_seconds,
+                        "reason": "memory_pressure"
+                        if memory_over_soft_limit()
+                        else "ingestion_running",
+                    },
                 )
                 continue
             started = time.monotonic()

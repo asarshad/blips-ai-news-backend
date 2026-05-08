@@ -18,11 +18,17 @@ from app.models.content import ContentItem, ContentReadinessStatus, ContentStatu
 from app.models.content_event import ContentEventOutbox
 from app.models.source_fetch_state import SourceFetchState
 from app.services.major_news_constants import MAJOR_NEWS_DISCOVERED_VIA, MAJOR_NEWS_SOURCE_TYPE
+from app.services.worker_lane_metrics import read_lane_heartbeats
 
 
-def _as_utc(value: datetime | None) -> datetime | None:
+def _as_utc(value: datetime | str | None) -> datetime | None:
     if value is None:
         return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return None
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
@@ -77,6 +83,56 @@ def _pending_reason_counts(rows: list[tuple[str | None, int]]) -> dict[str, int]
     return dict(counts.most_common(6))
 
 
+def _worker_memory_pressure(now: datetime) -> dict[str, Any]:
+    snapshot = read_lane_heartbeats()
+    lanes = snapshot.get("lanes", []) if snapshot.get("available") else []
+    throttled = [
+        row
+        for row in lanes
+        if isinstance(row, dict)
+        and (
+            row.get("is_memory_throttled") is True
+            or str(row.get("status") or "").lower() == "throttled"
+        )
+    ]
+    throttled_lanes = [
+        {
+            "lane": str(row.get("lane") or "unknown"),
+            "status": row.get("status"),
+            "memory_mb": row.get("memory_mb"),
+            "soft_limit_mb": row.get("soft_limit_mb"),
+            "last_throttle_reason": row.get("last_throttle_reason"),
+            "throttle_started_at": row.get("throttle_started_at"),
+            "throttled_minutes": (
+                round((now - started).total_seconds() / 60, 1)
+                if (started := _as_utc(row.get("throttle_started_at"))) is not None
+                else None
+            ),
+            "updated_at": row.get("updated_at"),
+            "last_processed_at": row.get("last_processed_at"),
+        }
+        for row in throttled
+    ]
+    sustained_minutes = [
+        float(row["throttled_minutes"])
+        for row in throttled_lanes
+        if row.get("throttled_minutes") is not None
+    ]
+    sustained_threshold_minutes = int(
+        getattr(settings, "STRATEGIC_ALERT_WORKER_MEMORY_THROTTLED_MINUTES", 20)
+    )
+    sustained_lane_count = sum(
+        1 for minutes in sustained_minutes if minutes >= sustained_threshold_minutes
+    )
+    return {
+        "available": bool(snapshot.get("available")),
+        "throttled_lane_count": len(throttled),
+        "sustained_throttled_lane_count": sustained_lane_count,
+        "max_throttled_minutes": max(sustained_minutes, default=0.0),
+        "memory_throttled_lanes": throttled_lanes,
+    }
+
+
 def compute_strategic_content_health(
     db: Session,
     *,
@@ -92,6 +148,20 @@ def compute_strategic_content_health(
     issues: list[dict[str, Any]] = []
     surfaces: dict[str, Any] = {}
     total_ready_recent = 0
+    worker_memory_pressure = _worker_memory_pressure(current)
+    if worker_memory_pressure["throttled_lane_count"] >= int(
+        getattr(settings, "STRATEGIC_ALERT_WORKER_MEMORY_THROTTLED_LANES", 4)
+    ) and worker_memory_pressure["sustained_throttled_lane_count"] >= int(
+        getattr(settings, "STRATEGIC_ALERT_WORKER_MEMORY_THROTTLED_LANES", 4)
+    ):
+        issues.append(
+            {
+                "key": "worker_memory_pressure",
+                "severity": "critical",
+                "message": "Worker lanes are throttled by memory pressure",
+                "context": worker_memory_pressure,
+            }
+        )
 
     for content_type in (ContentType.ARTICLE, ContentType.VIDEO, ContentType.REEL):
         surface = _surface_value(content_type)
@@ -213,6 +283,11 @@ def compute_strategic_content_health(
         .all()
     )
     latest_probe_at = max((_as_utc(row.updated_at) for row in probe_states), default=None)
+    latest_probe_state = max(
+        probe_states,
+        key=lambda row: _as_utc(row.updated_at) or datetime.min.replace(tzinfo=timezone.utc),
+        default=None,
+    )
     cooldown_states = [
         row
         for row in probe_states
@@ -280,6 +355,14 @@ def compute_strategic_content_health(
         ),
         "cooldown_feed_count": len(cooldown_states),
         "degraded_feed_count": len(degraded_states),
+        "major_news_probe_status": getattr(latest_probe_state, "last_action", None),
+        "major_news_probe_skip_reason": (
+            getattr(latest_probe_state, "last_error", None)
+            if str(getattr(latest_probe_state, "last_action", "") or "").startswith(
+                ("skipped_", "deferred_")
+            )
+            else None
+        ),
         "probe_insert_count_window_hours": int(settings.STRATEGIC_ALERT_MAJOR_NEWS_NO_INSERT_HOURS),
         "probe_insert_count": major_probe_insert_count,
         "stuck_confirmed_major_count": stuck_major,
@@ -349,7 +432,11 @@ def compute_strategic_content_health(
         "surfaces": surfaces,
         "event_backlog": event_backlog,
         "promoted_pending": promoted_pending,
+        "worker_memory_pressure": worker_memory_pressure,
+        "memory_throttled_lanes": worker_memory_pressure["memory_throttled_lanes"],
         "major_news": major_news,
+        "major_news_probe_status": major_news["major_news_probe_status"],
+        "major_news_probe_skip_reason": major_news["major_news_probe_skip_reason"],
         "thresholds": {
             "ready_stall_hours": ready_stall_hours,
             "surface_stall_hours": surface_stall_hours,
@@ -370,6 +457,7 @@ _STRATEGIC_ALERT_KEYS: tuple[str, ...] = (
     "all_surfaces_ready_stalled",
     "content_event_backlog",
     "promoted_pending_backlog",
+    "worker_memory_pressure",
     "major_news_probe_stale",
     "major_news_all_feeds_cooling_down",
     "major_news_no_recent_inserts",

@@ -405,6 +405,95 @@ def test_run_launcher_watchdog_exits_when_lane_flaps_repeatedly(monkeypatch):
     launcher.STOP_EVENT.clear()
 
 
+def test_run_launcher_exits_after_sustained_memory_throttle(monkeypatch):
+    monkeypatch.setenv("SCHEDULER_ENABLED", "true")
+    launcher.STOP_EVENT.clear()
+
+    class _FakeLock:
+        refresh_interval_seconds = 1000
+
+        def acquire_with_retry(self, stop_event):  # noqa: ARG002
+            return True
+
+        def refresh(self):
+            return True
+
+        def release(self):
+            return True
+
+    class _FakeProcess:
+        pid = 1
+        returncode = None
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def wait(self, timeout=None):  # noqa: ARG002
+            self.returncode = 0
+            return 0
+
+    monotonic_values = iter([0, 0, 0, 0, 301])
+    monkeypatch.setattr(launcher.signal, "signal", lambda *a, **k: None)
+    monkeypatch.setattr(launcher, "WorkerLeaderLock", _FakeLock)
+    monkeypatch.setattr(launcher, "_start_lanes", lambda lanes: {"ingestion": _FakeProcess()})
+    monkeypatch.setattr(launcher, "record_lane_heartbeat", lambda *a, **k: None)
+    monkeypatch.setattr(launcher, "_memory_throttled_lanes", lambda **_kwargs: ["ai_summary", "promotion"])
+    monkeypatch.setattr(launcher, "_stale_lanes", lambda *a, **k: [])
+    monkeypatch.setattr(launcher.time, "monotonic", lambda: next(monotonic_values, 301))
+
+    class _FakeDateTime:
+        @staticmethod
+        def now(tz=None):
+            from datetime import datetime
+
+            return datetime(2026, 5, 2, 10, 0, 0, tzinfo=tz)
+
+    monkeypatch.setattr(launcher, "datetime", _FakeDateTime)
+
+    def _int_env(name, default, minimum=1):
+        if "GRACE" in name:
+            return 0
+        if "INTERVAL" in name:
+            return 0
+        if name == "WORKER_MEMORY_THROTTLE_EXIT_MINUTES":
+            return 5
+        if name == "WORKER_MEMORY_THROTTLE_EXIT_MIN_LANES":
+            return 2
+        return default
+
+    monkeypatch.setattr(launcher, "_int_env", _int_env)
+
+    assert launcher.run_launcher() == 1
+    launcher.STOP_EVENT.clear()
+
+
+def test_memory_throttled_lanes_ignores_launcher_heartbeat(monkeypatch):
+    monkeypatch.setattr(
+        launcher,
+        "read_lane_heartbeats",
+        lambda: {
+            "available": True,
+            "lanes": [
+                {"lane": "launcher", "status": "throttled", "is_memory_throttled": True},
+                {"lane": "ai_summary", "status": "throttled"},
+                {"lane": "promotion", "is_memory_throttled": True},
+            ],
+        },
+    )
+
+    assert launcher._memory_throttled_lanes(
+        expected_lanes={"ai_summary", "promotion"},
+        min_lanes=2,
+    ) == ["ai_summary", "promotion"]
+    assert launcher._memory_throttled_lanes(
+        expected_lanes={"ai_summary", "promotion"},
+        min_lanes=3,
+    ) == []
+
+
 def test_run_launcher_watchdog_exits_when_lane_process_is_dead(monkeypatch):
     """Stale heartbeat AND a dead lane process is the only case where we
     bail out for a Render restart."""

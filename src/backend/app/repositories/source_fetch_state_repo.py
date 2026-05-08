@@ -92,3 +92,33 @@ class SourceFetchStateRepository:
 
         self.db.commit()
         return row
+
+    def record_skip(
+        self,
+        *,
+        source_type: str,
+        feed_name: str,
+        source_url: str,
+        action: str,
+        message: str,
+        now: Optional[datetime] = None,
+    ) -> SourceFetchState:
+        """Record a successful scheduler/probe heartbeat when fetch work is intentionally skipped."""
+        current = now or datetime.utcnow()
+        row = self.get(source_type=source_type, feed_name=feed_name)
+        if row is None:
+            row = SourceFetchState(
+                source_type=source_type,
+                feed_name=feed_name,
+                source_url=source_url,
+                created_at=current,
+            )
+            self.db.add(row)
+            self.db.flush()
+
+        row.source_url = source_url
+        row.last_action = action
+        row.last_error = message
+        row.updated_at = current
+        self.db.commit()
+        return row

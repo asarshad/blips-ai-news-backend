@@ -187,6 +187,24 @@ def _stale_lanes(
     return stale
 
 
+def _memory_throttled_lanes(*, expected_lanes: set[str], min_lanes: int) -> list[str]:
+    """Return lanes reporting memory throttle/pressure in recent heartbeats."""
+    snapshot = read_lane_heartbeats()
+    if not snapshot.get("available"):
+        return []
+    throttled = [
+        str(row.get("lane"))
+        for row in snapshot.get("lanes", [])
+        if isinstance(row, dict)
+        and row.get("lane") in expected_lanes
+        and (
+            row.get("is_memory_throttled") is True
+            or str(row.get("status") or "").strip().lower() == "throttled"
+        )
+    ]
+    return sorted(throttled) if len(throttled) >= min_lanes else []
+
+
 def _restart_lane(
     processes: dict[str, subprocess.Popen],
     lane_name: str,
@@ -277,11 +295,22 @@ def run_launcher() -> int:
     watchdog_interval_seconds = _int_env("WORKER_LANE_WATCHDOG_INTERVAL_SECONDS", 30)
     watchdog_stale_seconds = _int_env("WORKER_LANE_STALE_SECONDS", 900)
     watchdog_startup_grace_seconds = _int_env("WORKER_LANE_STARTUP_GRACE_SECONDS", 120)
+    memory_throttle_exit_minutes = _int_env(
+        "WORKER_MEMORY_THROTTLE_EXIT_MINUTES",
+        25,
+        minimum=5,
+    )
+    memory_throttle_exit_min_lanes = _int_env(
+        "WORKER_MEMORY_THROTTLE_EXIT_MIN_LANES",
+        5,
+        minimum=1,
+    )
     # Flap protection: if a lane keeps going stale we still want Render to
     # restart the whole worker rather than restart-loop forever in silence.
     flap_window_seconds = _int_env("WORKER_LANE_FLAP_WINDOW_SECONDS", 1800)
     flap_max_restarts = _int_env("WORKER_LANE_FLAP_MAX_RESTARTS", 5)
     lane_restart_history: dict[str, list[float]] = {}
+    memory_throttle_started_at: float | None = None
     watchdog_grace_until = datetime.now(timezone.utc) + timedelta(
         seconds=watchdog_startup_grace_seconds
     )
@@ -311,6 +340,36 @@ def run_launcher() -> int:
                 and not STOP_EVENT.is_set()
                 and datetime.now(timezone.utc) >= watchdog_grace_until
             ):
+                memory_throttled = _memory_throttled_lanes(
+                    expected_lanes=set(processes.keys()),
+                    min_lanes=memory_throttle_exit_min_lanes
+                )
+                if memory_throttled:
+                    if memory_throttle_started_at is None:
+                        memory_throttle_started_at = now
+                    sustained_seconds = now - memory_throttle_started_at
+                    if sustained_seconds >= memory_throttle_exit_minutes * 60:
+                        logger.error(
+                            "Worker lanes memory-throttled for %.1fs lanes=%s; "
+                            "stopping for Render restart",
+                            sustained_seconds,
+                            memory_throttled,
+                        )
+                        record_lane_heartbeat(
+                            "launcher",
+                            status="memory_throttle_exit",
+                            details={
+                                "memory_throttled_lanes": memory_throttled,
+                                "sustained_seconds": round(sustained_seconds, 1),
+                            },
+                        )
+                        exit_code = 1
+                        STOP_EVENT.set()
+                        next_watchdog_check = now + watchdog_interval_seconds
+                        continue
+                else:
+                    memory_throttle_started_at = None
+
                 stale = _stale_lanes(
                     set(processes.keys()),
                     stale_after_seconds=watchdog_stale_seconds,

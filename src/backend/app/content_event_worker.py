@@ -126,7 +126,7 @@ def run_content_event_worker(
             record_lane_heartbeat(
                 heartbeat_name,
                 status="throttled",
-                details={"event_types": event_type_tuple},
+                details={"event_types": event_type_tuple, "reason": "memory_pressure"},
             )
             continue
 

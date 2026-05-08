@@ -61,13 +61,21 @@ def test_checkpoint_defaults_exclude_major_news_from_normal_rss(monkeypatch):
 
 
 def test_major_news_probe_skips_under_memory_pressure(monkeypatch):
+    skips: list[dict] = []
     monkeypatch.setattr(tasks_major_news, "memory_over_soft_limit", lambda: True)
     monkeypatch.setattr(tasks_major_news, "current_worker_memory_mb", lambda: 1500.0)
     monkeypatch.setattr(tasks_major_news, "memory_soft_limit_mb", lambda: 1400)
+    monkeypatch.setattr(
+        tasks_major_news,
+        "_record_major_news_probe_skip",
+        lambda **kwargs: skips.append(kwargs),
+    )
 
     result = tasks_major_news.run_major_news_probe_job()
 
     assert result["status"] == "skipped_memory"
+    assert result["skip_reason"] == "memory_pressure"
+    assert skips[0]["status"] == "skipped_memory"
 
 
 def test_major_news_probe_respects_insert_limit(monkeypatch):

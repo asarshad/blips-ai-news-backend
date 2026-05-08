@@ -53,6 +53,10 @@ def test_strategic_health_flags_ready_stall_and_major_news_stuck(monkeypatch):
         "app.services.strategic_content_health_service.settings.STRATEGIC_ALERT_MAJOR_NEWS_STUCK_MINUTES",
         45,
     )
+    monkeypatch.setattr(
+        "app.services.strategic_content_health_service.settings.STRATEGIC_ALERT_MAJOR_NEWS_STUCK_MIN_COUNT",
+        1,
+    )
 
     db.add(
         ContentItem(
@@ -127,6 +131,91 @@ def test_strategic_health_reports_large_event_backlog(monkeypatch):
     assert health["event_backlog"]["due_count"] == 2
 
 
+def test_strategic_health_reports_worker_memory_pressure(monkeypatch):
+    db = _session()
+    now = datetime(2026, 5, 3, 20, 0, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        "app.services.strategic_content_health_service.settings.STRATEGIC_ALERT_WORKER_MEMORY_THROTTLED_LANES",
+        2,
+    )
+    monkeypatch.setattr(
+        "app.services.strategic_content_health_service.settings.STRATEGIC_ALERT_WORKER_MEMORY_THROTTLED_MINUTES",
+        20,
+    )
+    monkeypatch.setattr(
+        "app.services.strategic_content_health_service.read_lane_heartbeats",
+        lambda: {
+            "available": True,
+            "lanes": [
+                {
+                    "lane": "ai_summary",
+                    "status": "throttled",
+                    "memory_mb": 1500.0,
+                    "soft_limit_mb": 1400,
+                    "last_throttle_reason": "memory_pressure",
+                    "throttle_started_at": (now - timedelta(minutes=25)).isoformat(),
+                    "updated_at": now.isoformat(),
+                },
+                {
+                    "lane": "article_images",
+                    "status": "idle",
+                    "is_memory_throttled": True,
+                    "memory_mb": 1500.0,
+                    "soft_limit_mb": 1400,
+                    "throttle_started_at": (now - timedelta(minutes=21)).isoformat(),
+                    "updated_at": now.isoformat(),
+                },
+            ],
+        },
+    )
+
+    health = compute_strategic_content_health(db, now=now)
+
+    assert "worker_memory_pressure" in {issue["key"] for issue in health["issues"]}
+    assert health["worker_memory_pressure"]["throttled_lane_count"] == 2
+    assert health["worker_memory_pressure"]["sustained_throttled_lane_count"] == 2
+    assert [row["lane"] for row in health["memory_throttled_lanes"]] == [
+        "ai_summary",
+        "article_images",
+    ]
+
+
+def test_strategic_health_does_not_alert_for_unsustained_memory_pressure(monkeypatch):
+    db = _session()
+    now = datetime(2026, 5, 3, 20, 0, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        "app.services.strategic_content_health_service.settings.STRATEGIC_ALERT_WORKER_MEMORY_THROTTLED_LANES",
+        2,
+    )
+    monkeypatch.setattr(
+        "app.services.strategic_content_health_service.settings.STRATEGIC_ALERT_WORKER_MEMORY_THROTTLED_MINUTES",
+        20,
+    )
+    monkeypatch.setattr(
+        "app.services.strategic_content_health_service.read_lane_heartbeats",
+        lambda: {
+            "available": True,
+            "lanes": [
+                {
+                    "lane": "ai_summary",
+                    "status": "throttled",
+                    "throttle_started_at": (now - timedelta(minutes=25)).isoformat(),
+                },
+                {
+                    "lane": "article_images",
+                    "status": "throttled",
+                    "throttle_started_at": (now - timedelta(minutes=3)).isoformat(),
+                },
+            ],
+        },
+    )
+
+    health = compute_strategic_content_health(db, now=now)
+
+    assert "worker_memory_pressure" not in {issue["key"] for issue in health["issues"]}
+    assert health["worker_memory_pressure"]["sustained_throttled_lane_count"] == 1
+
+
 def test_emit_strategic_content_alerts_sends_deduped_issue(monkeypatch):
     calls = []
     monkeypatch.setattr(
@@ -170,7 +259,7 @@ def test_discord_alert_payload_uses_native_discord_shape(monkeypatch):
     monkeypatch.setattr(alerting_service.settings, "ALERT_ENABLED", True)
     monkeypatch.setattr(alerting_service.settings, "ALERT_DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/test")
     monkeypatch.setattr(alerting_service.requests, "post", _post)
-    monkeypatch.setattr(alerting_service, "_check_rate_limit", lambda _key: True)
+    monkeypatch.setattr(alerting_service, "_check_rate_limit", lambda *_args: True)
 
     sent = alerting_service.send_alert(
         alerting_service.AlertSeverity.CRITICAL,

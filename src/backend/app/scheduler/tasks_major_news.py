@@ -206,6 +206,27 @@ def _is_stale_for_major_news_probe(
     return published_at < now - timedelta(hours=max_age_hours)
 
 
+def _record_major_news_probe_skip(*, status: str, reason: str, now: datetime | None = None) -> None:
+    """Record a lightweight major-news probe heartbeat even when fetch work is skipped."""
+    current = now or datetime.utcnow()
+    db = SessionLocal()
+    try:
+        state_repo = SourceFetchStateRepository(db)
+        for feed in get_feeds_by_role(FeedRole.MAJOR_NEWS):
+            state_repo.record_skip(
+                source_type=MAJOR_NEWS_SOURCE_TYPE,
+                feed_name=feed.name,
+                source_url=feed.url,
+                action=status,
+                message=reason,
+                now=current,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[major_news_probe] failed to record skip telemetry: %s", exc)
+    finally:
+        db.close()
+
+
 def run_major_news_probe_job() -> dict[str, Any]:
     """Probe validated major-news feeds within strict feed/item/time bounds."""
     max_seconds = _int_env("MAJOR_NEWS_PROBE_MAX_SECONDS", 60)
@@ -215,8 +236,13 @@ def run_major_news_probe_job() -> dict[str, Any]:
     max_entry_age_hours = _int_env("MAJOR_NEWS_PROBE_MAX_ENTRY_AGE_HOURS", 48)
 
     if memory_over_soft_limit():
+        _record_major_news_probe_skip(
+            status="skipped_memory",
+            reason="worker memory is above soft limit",
+        )
         result = {
             "status": "skipped_memory",
+            "skip_reason": "memory_pressure",
             "worker_memory_mb": current_worker_memory_mb(),
             "soft_limit_mb": memory_soft_limit_mb(),
         }
@@ -224,7 +250,14 @@ def run_major_news_probe_job() -> dict[str, Any]:
         return result
 
     if _ingestion_lane_recently_running():
-        result = {"status": "deferred_ingestion_running"}
+        _record_major_news_probe_skip(
+            status="deferred_ingestion_running",
+            reason="ingestion lane is currently running",
+        )
+        result = {
+            "status": "deferred_ingestion_running",
+            "skip_reason": "ingestion_running",
+        }
         logger.info("[major_news_probe] %s", result)
         return result
 
