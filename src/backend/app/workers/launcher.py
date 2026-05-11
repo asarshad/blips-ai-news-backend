@@ -305,11 +305,17 @@ def run_launcher() -> int:
         5,
         minimum=1,
     )
+    memory_throttle_recycle_max = _int_env(
+        "WORKER_MEMORY_THROTTLE_RECYCLE_MAX",
+        3,
+        minimum=1,
+    )
     # Flap protection: if a lane keeps going stale we still want Render to
     # restart the whole worker rather than restart-loop forever in silence.
     flap_window_seconds = _int_env("WORKER_LANE_FLAP_WINDOW_SECONDS", 1800)
     flap_max_restarts = _int_env("WORKER_LANE_FLAP_MAX_RESTARTS", 5)
     lane_restart_history: dict[str, list[float]] = {}
+    memory_throttle_recycle_history: list[float] = []
     memory_throttle_started_at: float | None = None
     watchdog_grace_until = datetime.now(timezone.utc) + timedelta(
         seconds=watchdog_startup_grace_seconds
@@ -349,22 +355,71 @@ def run_launcher() -> int:
                         memory_throttle_started_at = now
                     sustained_seconds = now - memory_throttle_started_at
                     if sustained_seconds >= memory_throttle_exit_minutes * 60:
-                        logger.error(
+                        cutoff = now - flap_window_seconds
+                        memory_throttle_recycle_history[:] = [
+                            t for t in memory_throttle_recycle_history if t >= cutoff
+                        ]
+                        if len(memory_throttle_recycle_history) >= memory_throttle_recycle_max:
+                            logger.error(
+                                "Worker lanes memory-throttled after %s recycle attempts in %ss; "
+                                "stopping for Render restart lanes=%s",
+                                memory_throttle_recycle_max,
+                                flap_window_seconds,
+                                memory_throttled,
+                            )
+                            record_lane_heartbeat(
+                                "launcher",
+                                status="memory_throttle_exit",
+                                details={
+                                    "memory_throttled_lanes": memory_throttled,
+                                    "recycle_attempts": len(memory_throttle_recycle_history),
+                                    "restart_window_seconds": flap_window_seconds,
+                                },
+                            )
+                            exit_code = 1
+                            STOP_EVENT.set()
+                            next_watchdog_check = now + watchdog_interval_seconds
+                            continue
+
+                        logger.warning(
                             "Worker lanes memory-throttled for %.1fs lanes=%s; "
-                            "stopping for Render restart",
+                            "recycling affected lanes in-place",
                             sustained_seconds,
                             memory_throttled,
                         )
                         record_lane_heartbeat(
                             "launcher",
-                            status="memory_throttle_exit",
+                            status="memory_throttle_recycle",
                             details={
                                 "memory_throttled_lanes": memory_throttled,
                                 "sustained_seconds": round(sustained_seconds, 1),
                             },
                         )
-                        exit_code = 1
-                        STOP_EVENT.set()
+                        failed_restarts = [
+                            lane_name
+                            for lane_name in memory_throttled
+                            if not _restart_lane(processes, lane_name)
+                        ]
+                        if failed_restarts:
+                            logger.error(
+                                "Failed to recycle memory-throttled lanes=%s; "
+                                "stopping for Render restart",
+                                failed_restarts,
+                            )
+                            record_lane_heartbeat(
+                                "launcher",
+                                status="memory_throttle_recycle_failed",
+                                details={"failed_lanes": failed_restarts},
+                            )
+                            exit_code = 1
+                            STOP_EVENT.set()
+                            next_watchdog_check = now + watchdog_interval_seconds
+                            continue
+                        memory_throttle_recycle_history.append(now)
+                        memory_throttle_started_at = None
+                        watchdog_grace_until = datetime.now(timezone.utc) + timedelta(
+                            seconds=watchdog_startup_grace_seconds
+                        )
                         next_watchdog_check = now + watchdog_interval_seconds
                         continue
                 else:

@@ -405,7 +405,7 @@ def test_run_launcher_watchdog_exits_when_lane_flaps_repeatedly(monkeypatch):
     launcher.STOP_EVENT.clear()
 
 
-def test_run_launcher_exits_after_sustained_memory_throttle(monkeypatch):
+def test_run_launcher_recycles_lanes_after_sustained_memory_throttle(monkeypatch):
     monkeypatch.setenv("SCHEDULER_ENABLED", "true")
     launcher.STOP_EVENT.clear()
 
@@ -440,7 +440,15 @@ def test_run_launcher_exits_after_sustained_memory_throttle(monkeypatch):
     monkeypatch.setattr(launcher, "WorkerLeaderLock", _FakeLock)
     monkeypatch.setattr(launcher, "_start_lanes", lambda lanes: {"ingestion": _FakeProcess()})
     monkeypatch.setattr(launcher, "record_lane_heartbeat", lambda *a, **k: None)
-    monkeypatch.setattr(launcher, "_memory_throttled_lanes", lambda **_kwargs: ["ai_summary", "promotion"])
+    recycled: list[str] = []
+
+    def _fake_restart_lane(processes, lane_name, **_kwargs):
+        recycled.append(lane_name)
+        launcher.STOP_EVENT.set()
+        return True
+
+    monkeypatch.setattr(launcher, "_memory_throttled_lanes", lambda **_kwargs: ["ingestion"])
+    monkeypatch.setattr(launcher, "_restart_lane", _fake_restart_lane)
     monkeypatch.setattr(launcher, "_stale_lanes", lambda *a, **k: [])
     monkeypatch.setattr(launcher.time, "monotonic", lambda: next(monotonic_values, 301))
 
@@ -461,12 +469,13 @@ def test_run_launcher_exits_after_sustained_memory_throttle(monkeypatch):
         if name == "WORKER_MEMORY_THROTTLE_EXIT_MINUTES":
             return 5
         if name == "WORKER_MEMORY_THROTTLE_EXIT_MIN_LANES":
-            return 2
+            return 1
         return default
 
     monkeypatch.setattr(launcher, "_int_env", _int_env)
 
-    assert launcher.run_launcher() == 1
+    assert launcher.run_launcher() == 0
+    assert recycled == ["ingestion"]
     launcher.STOP_EVENT.clear()
 
 
