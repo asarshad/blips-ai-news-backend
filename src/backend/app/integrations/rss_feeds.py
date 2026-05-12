@@ -805,8 +805,7 @@ FEED_REGISTRY: List[FeedConfig] = [
         daily_cap=2,
         decay_profile=DecayProfile.NORMAL,
         base_quality_weight=0.70,
-        enabled=False,
-        notes="Press releases, covered faster by 9to5Mac/MacRumors",
+        notes="Official Apple announcements — CEO changes, product launches, earnings, policy. daily_cap=2 guards against promo floods on event days. Tech-relevance classifier filters Apple Arcade/TV+ promos.",
     ),
     # =========================================================================
     # MOBILE & CONSUMER TECH (NEW)
