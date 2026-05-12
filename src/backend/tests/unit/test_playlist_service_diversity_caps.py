@@ -4,6 +4,7 @@ from unittest.mock import Mock
 from app.models.content import ContentItem, ContentType
 from app.services.playlist_service import (
     CATEGORY_CAP_WINDOW_SIZE,
+    MAX_PER_SOURCE_PER_PLAYLIST,
     MAX_SOURCE_PER_WINDOW,
     SOURCE_CAP_WINDOW_SIZE,
     PlaylistService,
@@ -78,3 +79,59 @@ def test_select_diverse_items_enforces_category_cap():
     for index in range(max(0, len(topics) - CATEGORY_CAP_WINDOW_SIZE + 1)):
         window = topics[index : index + CATEGORY_CAP_WINDOW_SIZE]
         assert window.count("ai") <= 2
+
+
+def test_global_source_cap_hard_limit():
+    """No source should appear more than MAX_PER_SOURCE_PER_PLAYLIST times."""
+    service = _service()
+    # 10 items from source-a, each with distinct cluster and topic
+    scored_candidates = [
+        (_item(item_id=i, source="source-a", topic=f"topic-{i}"), 1.0 - i * 0.01)
+        for i in range(1, 11)
+    ] + [
+        (_item(item_id=100 + i, source="source-b", topic=f"topic-b-{i}"), 0.5 - i * 0.01)
+        for i in range(1, 6)
+    ]
+
+    selected = service._select_diverse_items(scored_candidates, size=15)
+
+    source_a_count = sum(1 for item in selected if item.source.lower() == "source-a")
+    assert source_a_count <= MAX_PER_SOURCE_PER_PLAYLIST
+
+
+def test_global_source_cap_allows_multiple_sources_up_to_limit():
+    """Each of N sources should be allowed up to the cap."""
+    service = _service()
+    # 5 items from each of 4 sources
+    scored_candidates = []
+    for src_idx in range(4):
+        for item_idx in range(5):
+            iid = src_idx * 10 + item_idx + 1
+            scored_candidates.append(
+                (_item(item_id=iid, source=f"source-{src_idx}", topic=f"topic-{iid}"), 1.0 / iid)
+            )
+
+    selected = service._select_diverse_items(scored_candidates, size=20)
+
+    from collections import Counter
+
+    counts = Counter(item.source.lower() for item in selected)
+    for source, count in counts.items():
+        assert count <= MAX_PER_SOURCE_PER_PLAYLIST, f"{source} appeared {count} times"
+
+
+def test_global_source_cap_does_not_prevent_filling_playlist():
+    """Playlist fills to requested size when enough distinct sources exist."""
+    service = _service()
+    # 20 sources × 4 items each = 80 candidates; playlist of 20 should fill
+    scored_candidates = []
+    for src_idx in range(20):
+        for item_idx in range(4):
+            iid = src_idx * 10 + item_idx + 1
+            scored_candidates.append(
+                (_item(item_id=iid, source=f"source-{src_idx}", topic=f"topic-{iid}"), 1.0 / iid)
+            )
+
+    selected = service._select_diverse_items(scored_candidates, size=20)
+
+    assert len(selected) == 20

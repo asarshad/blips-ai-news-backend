@@ -24,8 +24,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from sqlalchemy.orm import Session
 
 from app.article_hydration import display_article_title
-from app.core.feature_flags import FeatureFlags
 from app.core.config import settings
+from app.core.feature_flags import FeatureFlags
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentType
 from app.ranking.feed_score import rerank_feed
@@ -65,6 +65,7 @@ MAX_TOPIC_DOMINANCE = 0.40  # 40% max for any single topic
 MAX_CONSECUTIVE_SAME_SOURCE = 3
 SOURCE_CAP_WINDOW_SIZE = 5
 MAX_SOURCE_PER_WINDOW = 2
+MAX_PER_SOURCE_PER_PLAYLIST = 3
 CATEGORY_CAP_WINDOW_SIZE = 5
 MAX_CATEGORY_SHARE_PER_WINDOW = 0.40
 MIN_UNIQUE_SOURCES = 3
@@ -1309,6 +1310,7 @@ class PlaylistService:
         used_clusters: Set[int] = set()
         topic_counts: Dict[str, int] = defaultdict(int)
         source_streak: List[str] = []
+        source_total_counts: Dict[str, int] = defaultdict(int)
 
         for item, _score in scored_candidates:
             if len(selected) >= size:
@@ -1320,6 +1322,11 @@ class PlaylistService:
 
             # Check topic dominance
             if not self._check_topic_diversity(item, topic_counts, len(selected)):
+                continue
+
+            # Check global per-source playlist cap
+            source_key = (item.source or "").lower()
+            if source_key and source_total_counts[source_key] >= MAX_PER_SOURCE_PER_PLAYLIST:
                 continue
 
             # Check source cap in rolling window
@@ -1345,10 +1352,12 @@ class PlaylistService:
                 for topic in item.topics:
                     topic_counts[topic.lower()] += 1
 
-            # Update source streak
+            # Update source streak and global source count
             source_streak.append(item.source.lower())
             if len(source_streak) > MAX_CONSECUTIVE_SAME_SOURCE:
                 source_streak.pop(0)
+            if source_key:
+                source_total_counts[source_key] += 1
 
         return selected
 
