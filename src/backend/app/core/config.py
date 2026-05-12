@@ -296,6 +296,7 @@ class Settings(BaseSettings):
     VIDEO_TECH_MIXED_ROUNDUP_BLOCK_CONFIDENCE: float = 0.80
     ARTICLE_TECH_CLASSIFIER_ENABLED: bool = True
     ARTICLE_TECH_NONE_BLOCK_CONFIDENCE: float = 0.85
+    ARTICLE_DEAL_SUPPRESSION_ENABLED: bool = True
     SOURCE_HEALTH_DEGRADED_THRESHOLD: float = 0.3  # below this, mark source degraded
 
     # Minimum fresh counts per surface (triggers top-up if below)

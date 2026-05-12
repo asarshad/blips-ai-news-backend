@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from sqlalchemy import func, not_, or_
 
+from app.core.config import settings
 from app.models.content import ContentItem
 
 
@@ -44,6 +45,34 @@ _UTILITY_TOOL_HOSTS = {
     "dnssec-analyzer.verisignlabs.com",
 }
 
+# Affiliate/deals suppression — patterns from P0-1 backtest (FP rate <2%).
+# Deliberately excludes bare "deal"/"lifetime" which match business news.
+_AFFILIATE_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\b\d+%\s*off\b",  # "65% off", "49% off"
+        r"\bgift\s+card\b",  # "Amazon gift card"
+        r"\blifetime\s+(?:plan|deal|license|sub)\b",  # "lifetime plan" not "lifetime career"
+        r"\bcoupon\b",
+        r"\bexclusive\s+deal\b",
+        r"\bapp\s+deals?\b",  # "Android app deals"
+        r"^deals?\s*[:—]",  # title starts with "Deals:" / "Deal:"
+        r"^(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday).{0,20}best.{0,20}deal",
+        r"^best\s+\w+\s+deals?\b",  # "Best gaming deals"
+        r"\bfreebies\b",  # "deals and freebies"
+        r"\bpromo\s+code\b",
+    )
+)
+
+# Sources that publish exclusively deals/affiliate content.
+_DEALS_SOURCE_BLOCKLIST: frozenset[str] = frozenset(
+    {
+        "9to5toys",
+        "9To5Toys",
+    }
+)
+
+
 def classify_article_quality_block(item: Any) -> ArticleQualityBlock | None:
     """Return a deterministic block for known article feed pollution."""
     if bool(getattr(item, "manual_added", False)):
@@ -69,6 +98,19 @@ def classify_article_quality_block(item: Any) -> ArticleQualityBlock | None:
             reason="article_utility_tool_page",
             detail="Utility/debugger output page is not an editorial news article.",
         )
+
+    if settings.ARTICLE_DEAL_SUPPRESSION_ENABLED:
+        source = _safe_text(getattr(item, "source", None))
+        if source.lower() in {s.lower() for s in _DEALS_SOURCE_BLOCKLIST}:
+            return ArticleQualityBlock(
+                reason="affiliate_or_deal_title",
+                detail=f"Source '{source}' publishes exclusively deals/affiliate content.",
+            )
+        if any(pattern.search(title) for pattern in _AFFILIATE_PATTERNS):
+            return ArticleQualityBlock(
+                reason="affiliate_or_deal_title",
+                detail="Title matches affiliate/deals pattern.",
+            )
 
     return None
 
@@ -101,6 +143,25 @@ def article_quality_sql_allow_filter():
         url.like("%dnssec-analyzer.verisignlabs.com%"),
         source == "dnssec-analyzer",
     )
+    deal_terms = or_(
+        source.in_(["9to5toys"]),  # source is already func.lower()
+        title.like("%gift card%"),
+        title.like("%lifetime plan%"),
+        title.like("%lifetime deal%"),
+        title.like("%lifetime license%"),
+        title.like("%lifetime sub%"),
+        title.like("%coupon%"),
+        title.like("%exclusive deal%"),
+        title.like("%app deal%"),
+        title.like("%app deals%"),
+        title.like("%freebies%"),
+        title.like("%promo code%"),
+    )
+    if settings.ARTICLE_DEAL_SUPPRESSION_ENABLED:
+        return or_(
+            ContentItem.manual_added.is_(True),
+            not_(or_(puzzle_terms, utility_terms, deal_terms)),
+        )
     return or_(ContentItem.manual_added.is_(True), not_(or_(puzzle_terms, utility_terms)))
 
 
