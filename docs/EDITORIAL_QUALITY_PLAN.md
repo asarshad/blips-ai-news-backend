@@ -94,31 +94,35 @@ Goal: confirm the diagnosis with data before changing any pipeline code. Each sc
 
 ### Post-deploy repair run order (run after deploy confirms working)
 
+Use `POST /api/v1/admin/trigger-scripted-maintenance` — no local setup or DATABASE_URL needed.
+
 1,054 qualifying items across 90 days. Run in order, highest-value first:
 
 ```bash
-cd src/backend
+export HOST="https://blips-api.onrender.com"
+export ADMIN_KEY="your-admin-api-key"
 
 # Step 1 — dry run all sources to verify counts
-./.venv/bin/python scripts/repair_unskimmable_with_description.py --dry-run
+curl -s -X POST "$HOST/api/v1/admin/trigger-scripted-maintenance" \
+  -H "X-Admin-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+  -d '{"payload": {"job": "repair_unskimmable_with_description", "dry_run": true}}'
 
-# Step 2 — high-value news sources first
-./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "CNBC Technology"
-./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "Bleepingcomputer"
-./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "Openai"
-./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "Infoq"
-./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "Darkreading"
-./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "TechCrunch"
-./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "Wired"
-./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "The Verge"
-./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "Simonwillison"
-./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "Bigtechnology"
+# Step 2 — high-value news sources first (run each; confirm repaired > 0 before next)
+for SOURCE in "CNBC Technology" "Bleepingcomputer" "Openai" "Infoq" "Darkreading" \
+              "TechCrunch" "Wired" "The Verge" "Simonwillison" "Bigtechnology"; do
+  curl -s -X POST "$HOST/api/v1/admin/trigger-scripted-maintenance" \
+    -H "X-Admin-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+    -d "{\"payload\": {\"job\": \"repair_unskimmable_with_description\", \"source\": \"$SOURCE\"}}"
+  echo ""
+done
 
-# Step 3 — broader consumer sources (optional, run next day)
-./.venv/bin/python scripts/repair_unskimmable_with_description.py --limit 200
+# Step 3 — broader sweep (optional, run next day)
+curl -s -X POST "$HOST/api/v1/admin/trigger-scripted-maintenance" \
+  -H "X-Admin-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+  -d '{"payload": {"job": "repair_unskimmable_with_description", "limit": 500}}'
 ```
 
-Note: the script requires `DATABASE_URL` env var pointing to production DB.
+Supported options in the `payload` object: `source` (string), `dry_run` (bool), `limit` (int, default 500), `min_desc_words` (int, default 20), `lookback_days` (int, default 90).
 
 ---
 

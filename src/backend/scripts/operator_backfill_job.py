@@ -20,8 +20,9 @@ from app.integrations.llm_client import LLMClient
 from app.models.content import ContentItem, ContentReadinessStatus, ContentStatus, ContentType
 from app.services.article_image_service import repair_article_image_metadata
 from app.services.article_quality_policy import classify_article_quality_block
-from app.services.content_readiness import sync_content_readiness
+from app.services.article_unskimmable_service import ARTICLE_UNSKIMMABLE_TERMINAL_REASON
 from app.services.content_event_backfill_service import enqueue_pending_content_events
+from app.services.content_readiness import seed_content_readiness, sync_content_readiness
 from app.services.major_news_constants import MAJOR_NEWS_DISCOVERED_VIA
 from app.services.playlist_service import refresh_cached_playlist_items
 from app.services.tiered_feed_service import invalidate_tiered_feed_cache
@@ -116,9 +117,7 @@ def _run_article_quality_gate_backfill(db, options: dict[str, Any]) -> dict[str,
         db.commit()
         invalidate_tiered_feed_cache()
         cache_refresh = (
-            refresh_cached_playlist_items(db, content_ids=touched_ids)
-            if touched_ids
-            else {}
+            refresh_cached_playlist_items(db, content_ids=touched_ids) if touched_ids else {}
         )
     else:
         cache_refresh = {}
@@ -188,9 +187,7 @@ def _run_major_news_stale_probe_cleanup(db, options: dict[str, Any]) -> dict[str
         db.commit()
         invalidate_tiered_feed_cache()
         cache_refresh = (
-            refresh_cached_playlist_items(db, content_ids=touched_ids)
-            if touched_ids
-            else {}
+            refresh_cached_playlist_items(db, content_ids=touched_ids) if touched_ids else {}
         )
     else:
         cache_refresh = {}
@@ -206,6 +203,64 @@ def _run_major_news_stale_probe_cleanup(db, options: dict[str, Any]) -> dict[str
         "touched_ids": touched_ids[:200],
         "cache_busted": not dry_run,
         "playlist_cache_refresh": cache_refresh,
+    }
+
+
+def _run_repair_unskimmable_with_description(db, options: dict[str, Any]) -> dict[str, Any]:
+    """Re-queue articles that were terminally rejected as unskimmable but have a usable RSS description."""
+    min_desc_words = max(1, int(options.get("min_desc_words", 20)))
+    lookback_days = max(1, int(options.get("lookback_days", 90)))
+    limit = max(1, int(options.get("limit", 500)))
+    source = options.get("source") or None
+    dry_run = bool(options.get("dry_run", False))
+
+    cutoff = datetime.utcnow() - timedelta(days=lookback_days)
+    terminal_prefix = f"{ARTICLE_UNSKIMMABLE_TERMINAL_REASON}:max_unskimmable_attempts"
+
+    query = db.query(ContentItem).filter(
+        ContentItem.type == ContentType.ARTICLE,
+        ContentItem.is_suppressed.is_(True),
+        ContentItem.curation_status == ContentStatus.CANDIDATE,
+        ContentItem.tech_relevance_reason.like(f"{terminal_prefix}%"),
+        ContentItem.published_at >= cutoff,
+    )
+    if source:
+        query = query.filter(ContentItem.source == source)
+
+    candidates = query.order_by(ContentItem.published_at.desc()).limit(limit * 5).all()
+
+    qualified = [
+        item
+        for item in candidates
+        if len((item.description or "").strip().split()) >= min_desc_words
+    ]
+
+    repaired_ids: list[int] = []
+    if not dry_run:
+        for item in qualified[:limit]:
+            item.is_suppressed = False
+            item.ai_processed = False
+            item.summary = None
+            item.promotion_score = None
+            item.tech_relevance_reason = None
+            item.promotion_reason = None
+            item.updated_at = datetime.utcnow()
+            seed_content_readiness(item)
+            if item.id is not None:
+                repaired_ids.append(int(item.id))
+        db.commit()
+
+    return {
+        "job": "repair_unskimmable_with_description",
+        "dry_run": dry_run,
+        "min_desc_words": min_desc_words,
+        "lookback_days": lookback_days,
+        "limit": limit,
+        "source": source,
+        "scanned": len(candidates),
+        "qualified": len(qualified),
+        "repaired": 0 if dry_run else len(repaired_ids),
+        "repaired_ids": repaired_ids[:200],
     }
 
 
@@ -232,6 +287,9 @@ def run(payload: dict[str, Any] | None = None) -> dict[str, Any]:
 
         if job == "major_news_stale_probe_cleanup":
             return _run_major_news_stale_probe_cleanup(db, options)
+
+        if job == "repair_unskimmable_with_description":
+            return _run_repair_unskimmable_with_description(db, options)
 
         all_statuses = bool(options.get("all_statuses", False))
         all_reasons = bool(options.get("all_reasons", False))

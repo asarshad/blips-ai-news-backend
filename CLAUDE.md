@@ -64,7 +64,28 @@ Key endpoints:
 | `GET /api/v1/metrics/sources` | X-Admin-Key | Feed ingestion health |
 | `POST /api/v1/admin/trigger-fetch` | X-Admin-Key | Manual ingestion trigger |
 | `POST /api/v1/admin/trigger-summarize` | X-Admin-Key | Manual AI retry |
+| `POST /api/v1/admin/trigger-scripted-maintenance` | X-Admin-Key | One-off backfill / repair jobs (see below) |
 | `GET /api/v1/admin/ui/` | browser login | Operator dashboard |
+
+### One-off backfill / repair jobs (`trigger-scripted-maintenance`)
+
+All one-off data repairs run through a single endpoint backed by `scripts/operator_backfill_job.py`. Add new jobs there — **do not create standalone scripts that require a local DATABASE_URL**.
+
+```bash
+curl -s -X POST https://blips-api.onrender.com/api/v1/admin/trigger-scripted-maintenance \
+  -H "X-Admin-Key: $ADMIN_KEY" -H "Content-Type: application/json" \
+  -d '{"payload": {"job": "<job_name>", ...options}}'
+```
+
+| Job name | Purpose | Key options |
+|---|---|---|
+| `article_image_backfill` *(default)* | Re-verify missing article images | `lookback_days`, `limit`, `all_statuses` |
+| `article_quality_gate_backfill` | Re-run quality classifier on recent unsuppressed items | `lookback_days`, `limit`, `dry_run` |
+| `major_news_stale_probe_cleanup` | Clear stale `is_major_tech_news=true` flags | `max_age_hours`, `limit`, `dry_run` |
+| `content_event_backfill` | Re-enqueue pending content events | `lookback_days`, `limit`, `pending_only` |
+| `repair_unskimmable_with_description` | Un-suppress paywalled articles that have usable RSS descriptions | `source`, `dry_run`, `limit`, `min_desc_words`, `lookback_days` |
+
+To add a new job: implement `_run_<job_name>(db, options)` in `scripts/operator_backfill_job.py` and register it in the `run()` dispatcher.
 
 ---
 
