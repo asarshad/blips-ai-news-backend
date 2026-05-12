@@ -41,7 +41,7 @@ class ClusteringConfig(BaseSettings):
         default=0.4, ge=0.0, le=1.0, description="Min topic overlap to consider"
     )
     combined_threshold: float = Field(
-        default=0.5, ge=0.0, le=1.0, description="Combined score threshold for clustering"
+        default=0.4, ge=0.0, le=1.0, description="Combined score threshold for clustering"
     )
 
     # Similarity weights (should sum to 1.0)
