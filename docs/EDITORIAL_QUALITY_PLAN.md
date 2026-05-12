@@ -84,7 +84,41 @@ Goal: confirm the diagnosis with data before changing any pipeline code. Each sc
 
 **Acceptance criterion:** Within 24h of deploy, ≥5 CNBC Technology items reach `readiness_status=READY`. The Musk v. Altman and Apple/Intel stories currently at CANDIDATE should surface.
 
-**Status: todo**
+**Status: done — deployed in commit c440014**
+
+### What was done
+
+- **Root cause**: `article_unskimmable_service` was permanently suppressing paywalled articles (`CNBC Technology`, `BleepingComputer`, `OpenAI`, etc.) after max extraction retries, even when `item.description` had 20-50 words of usable content.
+- **Fix**: Added description-fallback path in `content_ai_service.py` (~line 283). If `len(description.split()) >= 20` after the tech-relevance check, use the description as `summary_input` and fall through to the normal LLM summarization path instead of retrying/terminating.
+- **Repair script**: `scripts/repair_unskimmable_with_description.py` — un-suppresses qualifying items so they re-enter the promotion pipeline.
+
+### Post-deploy repair run order (run after deploy confirms working)
+
+1,054 qualifying items across 90 days. Run in order, highest-value first:
+
+```bash
+cd src/backend
+
+# Step 1 — dry run all sources to verify counts
+./.venv/bin/python scripts/repair_unskimmable_with_description.py --dry-run
+
+# Step 2 — high-value news sources first
+./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "CNBC Technology"
+./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "Bleepingcomputer"
+./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "Openai"
+./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "Infoq"
+./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "Darkreading"
+./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "TechCrunch"
+./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "Wired"
+./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "The Verge"
+./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "Simonwillison"
+./.venv/bin/python scripts/repair_unskimmable_with_description.py --source "Bigtechnology"
+
+# Step 3 — broader consumer sources (optional, run next day)
+./.venv/bin/python scripts/repair_unskimmable_with_description.py --limit 200
+```
+
+Note: the script requires `DATABASE_URL` env var pointing to production DB.
 
 ---
 
@@ -143,3 +177,4 @@ After Phase 1 (and any of Phase 2/3) ships, repeat the original editorial audit:
 
 - 2026-05-11 — Initial plan created from editorial audit + backend code deep-dive.
 - 2026-05-11 — Phase 0 complete. All 5 reports written to `docs/reports/`. Key discovery: CNBC Technology pipeline blockage (P0-BUG-1 added, marked urgent). P1-5 regex revised to avoid business-deal FPs. P1-7 unblocked (safe to ship). P2-3/P2-4 re-blocked on P0-BUG-1.
+- 2026-05-12 — P0-BUG-1 complete. Root cause: `ARTICLE_SUMMARY_MIN_WORDS=120` threshold caused paywalled RSS items to fail `bounded_article_summary_text` and get permanently suppressed. Fix adds description-fallback (≥20 words) in `content_ai_service.py`. Repair script added. Deployed: commit c440014. Repair run required after deploy confirmed.
