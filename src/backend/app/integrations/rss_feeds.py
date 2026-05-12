@@ -768,14 +768,14 @@ FEED_REGISTRY: List[FeedConfig] = [
     # =========================================================================
     FeedConfig(
         url="https://openai.com/blog/rss.xml",
-        name="OpenAI Blog",
+        name="OpenAI Blog (legacy)",
         role=FeedRole.PRIMARY,
         quality_tier=QualityTier.SUPPLEMENTAL,
         daily_cap=2,
         decay_profile=DecayProfile.NORMAL,
         base_quality_weight=0.70,
         enabled=False,
-        notes="Covered by TechCrunch/Verge, feed often breaks",
+        notes="Redundant: /blog/rss.xml 307-redirects to /news/rss.xml, which is already enabled in the AI role as 'OpenAI Blog'. Keep disabled to avoid duplicate ingestion.",
     ),
     FeedConfig(
         url="https://blog.google/technology/ai/rss/",
@@ -972,15 +972,14 @@ FEED_REGISTRY: List[FeedConfig] = [
         notes="xAI / Grok model news. Via 0xSMW/rss-feeds.",
     ),
     FeedConfig(
-        url="https://ai.meta.com/blog/rss/",
-        name="Meta AI Blog",
+        url="https://engineering.fb.com/feed/",
+        name="Meta Engineering Blog",
         role=FeedRole.AI,
-        quality_tier=QualityTier.PREMIUM,
+        quality_tier=QualityTier.STANDARD,
         daily_cap=2,
         decay_profile=DecayProfile.NORMAL,
-        enabled=False,
-        base_quality_weight=0.85,
-        notes="Disabled March 28, 2026: feed URL returns 404 from both local checks and Render",
+        base_quality_weight=0.80,
+        notes="Meta's engineering blog — covers AI agents, infrastructure, cryptography, WebRTC. Original ai.meta.com/blog/rss/ was 404; this is the live equivalent with strong AI/infra overlap.",
     ),
     FeedConfig(
         url="https://blogs.microsoft.com/ai/feed/",
