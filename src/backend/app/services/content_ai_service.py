@@ -23,11 +23,11 @@ from app.services.ai_retry_state import (
     record_article_retry_deferral,
     record_video_summary_failure,
 )
+from app.services.article_quality_policy import classify_article_quality_block
 from app.services.article_unskimmable_service import (
     is_terminal_unskimmable_article,
     reject_terminal_unskimmable_article,
 )
-from app.services.article_quality_policy import classify_article_quality_block
 from app.services.content_readiness import seed_content_readiness, sync_content_readiness
 from app.services.major_news_constants import MAJOR_NEWS_DISCOVERED_VIA
 from app.services.playlist_service import refresh_cached_playlist_items
@@ -280,34 +280,47 @@ def _process_article_summary(
                     exc,
                 )
 
-        if _is_recent_article_for_maintenance(item):
-            item.summary = previous_summary
-            attempt = record_article_retry_deferral(item)
-            if attempt >= int(settings.ARTICLE_UNSKIMMABLE_RETRY_MAX_ATTEMPTS):
-                reject_terminal_unskimmable_article(
-                    db,
-                    item,
-                    reason="max_unskimmable_attempts",
+        # Paywalled / thin-body sources (e.g. CNBC, Reuters) often have a useful
+        # RSS description even when full extraction fails.  Use it as summary
+        # input rather than marking the article unskimmable.
+        _DESC_FALLBACK_MIN_WORDS = 20
+        _desc = (item.description or "").strip()
+        if len(_desc.split()) >= _DESC_FALLBACK_MIN_WORDS:
+            summary_input = _desc
+            logger.info(
+                "[content_ai] description-fallback content_id=%s desc_words=%d",
+                item.id,
+                len(_desc.split()),
+            )
+        else:
+            if _is_recent_article_for_maintenance(item):
+                item.summary = previous_summary
+                attempt = record_article_retry_deferral(item)
+                if attempt >= int(settings.ARTICLE_UNSKIMMABLE_RETRY_MAX_ATTEMPTS):
+                    reject_terminal_unskimmable_article(
+                        db,
+                        item,
+                        reason="max_unskimmable_attempts",
+                    )
+                    return True
+                seed_content_readiness(item)
+                logger.info(
+                    "[content_ai] deferred unskimmable article content_id=%s attempt=%s",
+                    item.id,
+                    attempt,
                 )
                 return True
-            seed_content_readiness(item)
+
+            reject_terminal_unskimmable_article(
+                db,
+                item,
+                reason="outside_retry_lookback",
+            )
             logger.info(
-                "[content_ai] deferred unskimmable article content_id=%s attempt=%s",
+                "[content_ai] terminally rejected older unskimmable article content_id=%s",
                 item.id,
-                attempt,
             )
             return True
-
-        reject_terminal_unskimmable_article(
-            db,
-            item,
-            reason="outside_retry_lookback",
-        )
-        logger.info(
-            "[content_ai] terminally rejected older unskimmable article content_id=%s",
-            item.id,
-        )
-        return True
 
     if not llm_client.is_configured():
         raise RuntimeError(
