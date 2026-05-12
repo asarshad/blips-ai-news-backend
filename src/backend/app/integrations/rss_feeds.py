@@ -1203,7 +1203,7 @@ FEED_REGISTRY: List[FeedConfig] = [
         decay_profile=DecayProfile.SLOW,
         enabled=False,
         base_quality_weight=0.95,
-        notes="Disabled March 28, 2026: feed returns 403 from Render despite public availability elsewhere",
+        notes="Disabled 2026-03-28: Render egress IPs are IP-blocked by CDN (returns 403 from cloud, 200 from residential). Feed provides FULL article HTML — extremely high-value if accessible. Fix requires a fetch-proxy layer outside Render.",
     ),
 ]
 
