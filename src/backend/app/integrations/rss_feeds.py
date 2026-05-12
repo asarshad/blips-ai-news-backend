@@ -192,6 +192,16 @@ FEED_REGISTRY: List[FeedConfig] = [
         base_quality_weight=0.88,
         notes="Macro tech strategy and market structure",
     ),
+    FeedConfig(
+        url="https://www.techmeme.com/feed.xml",
+        name="Techmeme",
+        role=FeedRole.MAJOR_NEWS,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=5,
+        decay_profile=DecayProfile.FAST,
+        base_quality_weight=0.90,
+        notes="Aggregator: surfaces Bloomberg/Reuters/FT/WSJ/AP tech headlines; best single proxy for missing premium-outlet coverage. NOTE: RSS <link> is always a Techmeme anchor page (techmeme.com/YYMMDD/p##), not the original article URL — source_url will point to Techmeme. Users land on Techmeme discussion page when they tap Read More. Follow-up: extract original article URL from description HTML.",
+    ),
     # =========================================================================
     # BREAKING NEWS
     # Fast-moving tech news, product launches, industry updates
