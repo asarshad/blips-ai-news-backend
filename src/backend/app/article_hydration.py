@@ -919,6 +919,7 @@ class ArticleHydrationService:
                 not validated.image_url
                 and not allow_logo_fallback
                 and validated.reason in {"llm_returned_none", "candidate_rejected"}
+                and getattr(settings, "ARTICLE_IMAGE_LLM_LOGO_FALLBACK_ENABLED", False)
             ):
                 return self.extract_article_image_with_llm_diagnostics(
                     article_url=fetch.url or normalized_article_url,

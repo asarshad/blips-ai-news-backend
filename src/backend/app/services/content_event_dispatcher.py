@@ -50,6 +50,9 @@ _EVENT_LOCK_TIMEOUT_OVERRIDES: dict[str, timedelta] = {
 DEFAULT_MAX_ATTEMPTS = 10
 _EVENT_MAX_ATTEMPTS_OVERRIDES: dict[str, int] = {
     CONTENT_CLUSTERING_REQUESTED_EVENT_TYPE: 5,
+    # Image extraction failures are almost always structural (paywalled, no image exists).
+    # 3 attempts is enough to cover transient fetch errors; beyond that it's pure waste.
+    ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE: 3,
 }
 
 
@@ -177,9 +180,7 @@ class ContentEventDispatcher:
             if event is None:
                 return False
             attempt_count = int(event.attempt_count or 0)
-            max_attempts = _EVENT_MAX_ATTEMPTS_OVERRIDES.get(
-                event.event_type, DEFAULT_MAX_ATTEMPTS
-            )
+            max_attempts = _EVENT_MAX_ATTEMPTS_OVERRIDES.get(event.event_type, DEFAULT_MAX_ATTEMPTS)
             now_dt = datetime.utcnow()
             if attempt_count >= max_attempts:
                 # Stop retrying — this is almost certainly a code bug rather

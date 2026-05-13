@@ -256,6 +256,9 @@ class Settings(BaseSettings):
     ARTICLE_SUMMARY_FALLBACK_MODEL: str = "gpt-5.4-mini"
     ARTICLE_SUMMARY_RESCUE_MODEL: str = "gpt-5.4"
     ARTICLE_IMAGE_LLM_FALLBACK_ENABLED: bool = True
+    # Second recursive LLM call with logo fallback — almost never improves quality,
+    # doubles per-article cost on failure. Default off.
+    ARTICLE_IMAGE_LLM_LOGO_FALLBACK_ENABLED: bool = False
     ARTICLE_IMAGE_LLM_MAX_INPUT_CHARS: int = 12000
     ARTICLE_RECENT_POOL_DAYS: int = 7
     ARTICLE_MAINTENANCE_LOOKBACK_DAYS: int = 7

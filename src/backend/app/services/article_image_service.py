@@ -69,7 +69,7 @@ def queue_article_image_verification_request(
         .filter(
             ContentEventOutbox.content_item_id == int(item.id),
             ContentEventOutbox.event_type == ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE,
-            ContentEventOutbox.status.in_(("pending", "processing")),
+            ContentEventOutbox.status.in_(("pending", "processing", "failed")),
         )
         .first()
     )
@@ -139,8 +139,10 @@ def repair_article_image_metadata(
         is_verified_placeholder = (not needs_second_pass) and is_placeholder_image_url(
             getattr(item, "image_url", None) or ""
         )
-        if needs_second_pass or is_verified_placeholder or hydrator.needs_article_metadata_repair(
-            item, include_generic=include_generic
+        if (
+            needs_second_pass
+            or is_verified_placeholder
+            or hydrator.needs_article_metadata_repair(item, include_generic=include_generic)
         ):
             items.append(item)
         if len(items) >= limit:

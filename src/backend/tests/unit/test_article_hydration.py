@@ -462,8 +462,49 @@ def test_extract_article_image_with_llm_diagnostics_reports_validation_reason(mo
     assert result.raw_candidate_url == "https://cdn.example.com/invented.jpg"
 
 
-def test_extract_article_image_with_llm_uses_logo_fallback_after_strict_attempt(monkeypatch):
+def test_extract_article_image_with_llm_logo_fallback_disabled_by_default(monkeypatch):
+    """Logo fallback second LLM call is off by default (ARTICLE_IMAGE_LLM_LOGO_FALLBACK_ENABLED=False)."""
     from app.extraction.fetcher import FetchResult
+
+    llm_client = MagicMock()
+    llm_client.extract_article_image_url.return_value = "/images/company-logo.png"
+    hydrator = ArticleHydrationService(llm_client=llm_client)
+
+    def fake_fetch(url):
+        if url == "https://example.com/story":
+            return FetchResult(
+                url=url,
+                status_code=200,
+                html=(
+                    "<html><body><article>"
+                    '<img src="/images/company-logo.png" alt="Example company logo" />'
+                    "</article></body></html>"
+                ),
+                content_type="text/html",
+            )
+        if url == "https://example.com/images/company-logo.png":
+            return FetchResult(url=url, status_code=200, html="", content_type="image/png")
+        raise AssertionError(f"unexpected fetch: {url}")
+
+    monkeypatch.setattr("app.extraction.fetcher.fetch_url", fake_fetch)
+
+    result = hydrator.extract_article_image_with_llm_diagnostics(
+        article_url="https://example.com/story",
+        title="Story",
+    )
+
+    # With logo fallback disabled, the first rejected candidate ends the call — no second LLM hit.
+    assert result.image_url is None
+    assert result.reason == "candidate_rejected"
+    assert llm_client.extract_article_image_url.call_count == 1
+
+
+def test_extract_article_image_with_llm_uses_logo_fallback_when_enabled(monkeypatch):
+    """Logo fallback second LLM call fires when ARTICLE_IMAGE_LLM_LOGO_FALLBACK_ENABLED=True."""
+    from app.core.config import get_settings
+    from app.extraction.fetcher import FetchResult
+
+    monkeypatch.setattr(get_settings(), "ARTICLE_IMAGE_LLM_LOGO_FALLBACK_ENABLED", True)
 
     llm_client = MagicMock()
     llm_client.extract_article_image_url.side_effect = [
@@ -485,12 +526,7 @@ def test_extract_article_image_with_llm_uses_logo_fallback_after_strict_attempt(
                 content_type="text/html",
             )
         if url == "https://example.com/images/company-logo.png":
-            return FetchResult(
-                url=url,
-                status_code=200,
-                html="",
-                content_type="image/png",
-            )
+            return FetchResult(url=url, status_code=200, html="", content_type="image/png")
         raise AssertionError(f"unexpected fetch: {url}")
 
     monkeypatch.setattr("app.extraction.fetcher.fetch_url", fake_fetch)
