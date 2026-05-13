@@ -602,7 +602,10 @@ FEED_REGISTRY: List[FeedConfig] = [
         daily_cap=1,
         decay_profile=DecayProfile.NORMAL,
         base_quality_weight=0.86,
-        notes="Biotech and health tech reporting with strong editorial rigor",
+        enabled=False,
+        notes="Disabled 2026-05-13: Health/medical publication — live audit found PCOS renaming, "
+        "Medicaid work requirements, pharma policy in READY pool. Biotech tech coverage is "
+        "incidental; not appropriate for a tech news app.",
     ),
     FeedConfig(
         url="https://www.technologyreview.com/topic/biomedicine/feed/",
@@ -728,7 +731,10 @@ FEED_REGISTRY: List[FeedConfig] = [
         daily_cap=3,
         decay_profile=DecayProfile.FAST,
         base_quality_weight=0.70,
-        notes="Community-driven, variable quality, high signal",
+        enabled=False,
+        notes="Disabled 2026-05-13: HN RSS links to arbitrary personal blogs, mailing lists, "
+        "game demos, and retro-computing sites. Tech classifier accepts these as tech-relevant "
+        "but they are not tech news. Pool pollution outweighs occasional high-signal items.",
     ),
     FeedConfig(
         url="https://www.smashingmagazine.com/feed/",
