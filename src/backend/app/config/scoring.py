@@ -32,10 +32,10 @@ class ScoringWeights(BaseSettings):
     """
 
     quality: float = Field(
-        default=0.40, ge=0.0, le=1.0, description="Weight for source quality and completeness"
+        default=0.50, ge=0.0, le=1.0, description="Weight for source quality and completeness"
     )
     trend: float = Field(
-        default=0.30, ge=0.0, le=1.0, description="Weight for trending/engagement signals"
+        default=0.20, ge=0.0, le=1.0, description="Weight for trending/engagement signals"
     )
     recency: float = Field(default=0.20, ge=0.0, le=1.0, description="Weight for content freshness")
     diversity: float = Field(
@@ -134,6 +134,11 @@ SOURCE_QUALITY_WEIGHTS: Dict[str, float] = {
     "big technology": 0.88,
     "fabricated knowledge": 0.90,
     "benedict evans": 0.88,
+    "the information": 0.92,
+    "bloomberg": 0.92,
+    "reuters": 0.90,
+    "bbc": 0.85,
+    "financial times": 0.92,
     # Company official blogs (0.70-0.95 - down-ranked for primary sources)
     "google": 0.70,
     "microsoft": 0.70,
@@ -156,6 +161,21 @@ SOURCE_QUALITY_WEIGHTS: Dict[str, float] = {
     "dark reading": 0.75,
     "hacker news": 0.70,
     "mashable": 0.70,
+    "android authority": 0.74,
+    "the register": 0.85,
+    "bleeping computer": 0.82,
+    "digital trends": 0.73,
+    "xda developers": 0.73,
+    "techradar": 0.74,
+    "infoworld": 0.78,
+    "404 media": 0.84,
+    "tom's guide": 0.74,
+    "tom's hardware": 0.80,
+    "9to5mac": 0.78,
+    "9to5google": 0.76,
+    "android central": 0.76,
+    "anandtech": 0.88,
+    "macrumors": 0.78,
     # YouTube creators (quality varies, 0.70-0.90)
     "mkbhd": 0.90,
     "dave2d": 0.85,
@@ -163,7 +183,7 @@ SOURCE_QUALITY_WEIGHTS: Dict[str, float] = {
     "austin evans": 0.75,
     "unbox therapy": 0.70,
     # Default for unknown sources
-    "default": 0.50,
+    "default": 0.35,
 }
 
 

@@ -121,6 +121,7 @@ def compute_quality_score(
     image_url: Optional[str] = None,
     topics: Optional[list] = None,
     entities: Optional[list] = None,
+    tech_relevance_confidence: Optional[float] = None,
 ) -> float:
     """
     Compute overall quality score for content.
@@ -135,6 +136,11 @@ def compute_quality_score(
         image_url: Preview image URL
         topics: Extracted topics
         entities: Extracted entities
+        tech_relevance_confidence: AI classifier confidence (0.0–1.0). Items
+            with confidence below 0.80 are scaled down proportionally.
+            At confidence=0.65: factor=0.8125 (−19%).
+            At confidence=0.50: factor=0.625 (−38%).
+            None means no confidence stored — no penalty applied.
 
     Returns:
         Quality score between 0.0 and 1.0
@@ -146,6 +152,14 @@ def compute_quality_score(
 
     # Source weight is more important than completeness
     quality_score = (source_weight * 0.70) + (completeness * 0.30)
+
+    # Soft confidence multiplier: content below 0.80 confidence is scaled down.
+    # At confidence=0.80+: factor=1.0 (no change)
+    # At confidence=0.65: factor = 0.65/0.80 = 0.8125 (−19%)
+    # At confidence=0.50: factor = 0.50/0.80 = 0.625 (−38%)
+    # None (no confidence stored): factor=1.0 (no change)
+    if tech_relevance_confidence is not None and tech_relevance_confidence < 0.80:
+        quality_score *= tech_relevance_confidence / 0.80
 
     quality_score += listicle_penalty(title)
 

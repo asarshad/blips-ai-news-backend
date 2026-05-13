@@ -35,6 +35,16 @@ DOMAIN_TO_SOURCE = {
     "bloomberg.com": "Bloomberg",
     "reuters.com": "Reuters",
     "bbc.com": "BBC",
+    "androidauthority.com": "Android Authority",
+    "theregister.com": "The Register",
+    "theregister.co.uk": "The Register",
+    "bleepingcomputer.com": "Bleeping Computer",
+    "digitaltrends.com": "Digital Trends",
+    "xda-developers.com": "XDA Developers",
+    "techradar.com": "TechRadar",
+    "ft.com": "Financial Times",
+    "404media.co": "404 Media",
+    "infoworld.com": "InfoWorld",
 }
 
 

@@ -137,6 +137,7 @@ class ScoringService:
             image_url=item.image_url,
             topics=item.topics,
             entities=item.entities,
+            tech_relevance_confidence=getattr(item, "tech_relevance_confidence", None),
         )
 
         # Recency score
@@ -187,6 +188,7 @@ class ScoringService:
             image_url=item.image_url,
             topics=item.topics,
             entities=item.entities,
+            tech_relevance_confidence=getattr(item, "tech_relevance_confidence", None),
         )
 
     def _compute_recency_score(self, item: ContentItem) -> float:
