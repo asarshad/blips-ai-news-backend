@@ -15,9 +15,23 @@ Where:
     - completeness_score: How complete the content metadata is (0-1)
 """
 
+import re
 from typing import Optional
 
 from app.config.scoring import get_source_quality
+
+_LISTICLE_RE = re.compile(
+    r"^\d+\s+(?:best|top|reasons|tips|gadgets|fitness)\b",
+    re.IGNORECASE,
+)
+LISTICLE_PENALTY = 0.15
+
+
+def listicle_penalty(title: str) -> float:
+    """Return -LISTICLE_PENALTY for listicle titles, else 0.0."""
+    if title and _LISTICLE_RE.match(title.strip()):
+        return -LISTICLE_PENALTY
+    return 0.0
 
 
 def compute_source_weight(source: str) -> float:
@@ -132,5 +146,7 @@ def compute_quality_score(
 
     # Source weight is more important than completeness
     quality_score = (source_weight * 0.70) + (completeness * 0.30)
+
+    quality_score += listicle_penalty(title)
 
     return min(1.0, max(0.0, quality_score))
