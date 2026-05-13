@@ -25,6 +25,12 @@ from app.config.scoring import scoring_weights
 # At the default 0.05 a max-boost (3) adds 0.15 to the [0-1] score.
 EDITORIAL_BOOST_WEIGHT: float = float(os.getenv("EDITORIAL_BOOST_WEIGHT", "0.05"))
 
+# Additive bonus applied to items the major-news LLM classifier confirmed
+# as significant tech news (is_major_tech_news=True). Sized to lift confirmed
+# major stories (~0.61 baseline) above typical filler (~0.55 ceiling) without
+# crowding out all organic signals.
+MAJOR_NEWS_SCORE_BOOST: float = float(os.getenv("MAJOR_NEWS_SCORE_BOOST", "0.12"))
+
 
 def compute_global_score(
     quality_score: float,
@@ -32,6 +38,7 @@ def compute_global_score(
     recency_score: float,
     diversity_boost: float = 0.0,
     editorial_boost: int = 0,
+    is_major_tech_news: bool = False,
     quality_weight: Optional[float] = None,
     trend_weight: Optional[float] = None,
     recency_weight: Optional[float] = None,
@@ -48,13 +55,14 @@ def compute_global_score(
         recency_score: Freshness signal (0-1)
         diversity_boost: Diversity modifier (typically -0.5 to 0)
         editorial_boost: Manual editorial importance (0-3)
+        is_major_tech_news: LLM-confirmed significant tech-news item
         quality_weight: Override quality weight
         trend_weight: Override trend weight
         recency_weight: Override recency weight
         diversity_weight: Override diversity weight
 
     Returns:
-        Global score (typically 0-1, can exceed 1.0 with editorial boost)
+        Global score (typically 0-1, can exceed 1.0 with editorial/major-news boost)
     """
     # Use config defaults if not overridden
     if quality_weight is None:
@@ -76,10 +84,13 @@ def compute_global_score(
     # Editorial boost is additive – it nudges but does not dominate.
     editorial_addition = editorial_boost * EDITORIAL_BOOST_WEIGHT
 
-    global_score = base_score + editorial_addition
+    # Major-news boost: LLM-confirmed significant stories surface above filler.
+    major_news_addition = MAJOR_NEWS_SCORE_BOOST if is_major_tech_news else 0.0
 
-    # Clamp to reasonable range (allow up to 1.15 for max editorial boost)
-    return max(0.0, min(1.0 + 3 * EDITORIAL_BOOST_WEIGHT, global_score))
+    global_score = base_score + editorial_addition + major_news_addition
+
+    # Clamp to reasonable range (allow headroom for both boosts at max)
+    return max(0.0, min(1.0 + 3 * EDITORIAL_BOOST_WEIGHT + MAJOR_NEWS_SCORE_BOOST, global_score))
 
 
 def explain_global_score(
@@ -88,6 +99,7 @@ def explain_global_score(
     recency_score: float,
     diversity_boost: float = 0.0,
     editorial_boost: int = 0,
+    is_major_tech_news: bool = False,
 ) -> dict:
     """
     Return a breakdown of global score computation.
@@ -101,6 +113,7 @@ def explain_global_score(
         recency_score: Freshness signal (0-1)
         diversity_boost: Diversity modifier
         editorial_boost: Manual editorial importance (0-3)
+        is_major_tech_news: LLM-confirmed significant tech-news item
 
     Returns:
         Dictionary with component breakdown
@@ -110,6 +123,7 @@ def explain_global_score(
     recency_contrib = scoring_weights.recency * recency_score
     diversity_contrib = scoring_weights.diversity * diversity_boost
     editorial_contrib = editorial_boost * EDITORIAL_BOOST_WEIGHT
+    major_news_contrib = MAJOR_NEWS_SCORE_BOOST if is_major_tech_news else 0.0
 
     global_score = compute_global_score(
         quality_score,
@@ -117,6 +131,7 @@ def explain_global_score(
         recency_score,
         diversity_boost,
         editorial_boost=editorial_boost,
+        is_major_tech_news=is_major_tech_news,
     )
 
     return {
@@ -146,6 +161,11 @@ def explain_global_score(
                 "boost_level": editorial_boost,
                 "weight": EDITORIAL_BOOST_WEIGHT,
                 "contribution": round(editorial_contrib, 4),
+            },
+            "major_news": {
+                "is_major": is_major_tech_news,
+                "boost": MAJOR_NEWS_SCORE_BOOST,
+                "contribution": round(major_news_contrib, 4),
             },
         },
     }

@@ -168,6 +168,7 @@ class ScoringService:
             recency_score=recency,
             diversity_boost=diversity,
             editorial_boost=getattr(item, "editorial_boost", 0) or 0,
+            is_major_tech_news=bool(getattr(item, "is_major_tech_news", False)),
         )
 
         return {

@@ -957,6 +957,60 @@ class TestEditorialBoostScoring:
 
 
 # ---------------------------------------------------------------------------
+# 4b. Major-news boost affects global_score
+# ---------------------------------------------------------------------------
+
+
+class TestMajorNewsScoring:
+    def test_major_news_flag_increases_score(self):
+        base = compute_global_score(0.7, 0.3, 0.8, is_major_tech_news=False)
+        boosted = compute_global_score(0.7, 0.3, 0.8, is_major_tech_news=True)
+        from app.ranking.global_score import MAJOR_NEWS_SCORE_BOOST
+
+        assert boosted > base
+        assert boosted - base == pytest.approx(MAJOR_NEWS_SCORE_BOOST, abs=1e-6)
+
+    def test_major_news_false_no_effect(self):
+        """is_major_tech_news=False (or default) should not change score."""
+        score_default = compute_global_score(0.6, 0.2, 0.7)
+        score_false = compute_global_score(0.6, 0.2, 0.7, is_major_tech_news=False)
+        assert score_default == score_false
+
+    def test_major_news_boost_stacks_with_editorial_boost(self):
+        from app.ranking.global_score import MAJOR_NEWS_SCORE_BOOST
+
+        base = compute_global_score(0.7, 0.3, 0.8, editorial_boost=0, is_major_tech_news=False)
+        both = compute_global_score(0.7, 0.3, 0.8, editorial_boost=2, is_major_tech_news=True)
+        expected_addition = 2 * EDITORIAL_BOOST_WEIGHT + MAJOR_NEWS_SCORE_BOOST
+        assert both - base == pytest.approx(expected_addition, abs=1e-6)
+
+    def test_major_news_score_does_not_exceed_ceiling(self):
+        from app.ranking.global_score import MAJOR_NEWS_SCORE_BOOST
+
+        score = compute_global_score(1.0, 1.0, 1.0, editorial_boost=3, is_major_tech_news=True)
+        ceiling = 1.0 + 3 * EDITORIAL_BOOST_WEIGHT + MAJOR_NEWS_SCORE_BOOST
+        assert score <= ceiling + 1e-9
+
+    def test_explain_global_score_includes_major_news_component(self):
+        explanation = explain_global_score(0.7, 0.3, 0.8, is_major_tech_news=True)
+        assert "major_news" in explanation["components"]
+        assert explanation["components"]["major_news"]["is_major"] is True
+        assert explanation["components"]["major_news"]["contribution"] > 0
+
+    def test_explain_global_score_major_news_false_zero_contribution(self):
+        explanation = explain_global_score(0.7, 0.3, 0.8, is_major_tech_news=False)
+        assert explanation["components"]["major_news"]["contribution"] == 0.0
+
+    def test_major_news_boost_is_meaningful(self):
+        """Boost should be large enough to surface major news above typical filler."""
+        from app.ranking.global_score import MAJOR_NEWS_SCORE_BOOST
+
+        # Major news boost should move score by more than the max editorial boost
+        # (3 * 0.05 = 0.15) is not a hard constraint, but boost should be non-trivial
+        assert MAJOR_NEWS_SCORE_BOOST >= 0.05
+
+
+# ---------------------------------------------------------------------------
 # 5. Admin auth enforcement
 # ---------------------------------------------------------------------------
 
@@ -1056,5 +1110,5 @@ class TestExplainGlobalScore:
 
     def test_all_components_present(self):
         breakdown = explain_global_score(0.8, 0.5, 0.9, editorial_boost=1)
-        expected_keys = {"quality", "trend", "recency", "diversity", "editorial"}
+        expected_keys = {"quality", "trend", "recency", "diversity", "editorial", "major_news"}
         assert set(breakdown["components"].keys()) == expected_keys
