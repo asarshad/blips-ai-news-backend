@@ -27,7 +27,7 @@ from app.ingestion.url_normalizer import normalize_url
 from app.integrations import LLMClient
 from app.integrations.rss_client import RSSClient
 from app.integrations.rss_feeds import FeedRole, get_feeds_by_role
-from app.models.content import ContentItem, ContentType
+from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.content_event import ContentEventOutbox
 from app.repositories.source_fetch_state_repo import SourceFetchStateRepository
 from app.scheduler.runtime import (
@@ -41,6 +41,7 @@ from app.services.content_promotion_service import CONTENT_PROMOTION_EVAL_REQUES
 from app.services.major_news_constants import (
     MAJOR_NEWS_CLASSIFIER_MIN_CONFIDENCE,
     MAJOR_NEWS_DISCOVERED_VIA,
+    MAJOR_NEWS_RETRO_CLASSIFY_SOURCES,
     MAJOR_NEWS_SOURCE_TYPE,
 )
 from app.services.worker_lane_metrics import read_lane_heartbeats
@@ -227,6 +228,98 @@ def _record_major_news_probe_skip(*, status: str, reason: str, now: datetime | N
         db.close()
 
 
+def _retro_classify_premium_breaking(
+    db,
+    llm_client: Any | None,
+    *,
+    sources: list[str],
+    max_items: int,
+    lookback_hours: int,
+    now: datetime,
+) -> dict[str, int]:
+    """Classify recent BREAKING-path items from premium sources that lack the major-news flag.
+
+    Items ingested via the normal checkpoint path are never seen by the probe's
+    insert loop, so ``is_major_tech_news`` stays NULL on them. This pass fills
+    that gap by querying recently ingested items from trusted sources and running
+    the same two-stage classifier used in the probe.
+    """
+    if not sources:
+        return {"classified": 0, "major": 0}
+
+    cutoff = now - timedelta(hours=lookback_hours)
+    candidates = (
+        db.query(ContentItem)
+        .filter(
+            ContentItem.type == ContentType.ARTICLE,
+            ContentItem.source.in_(sources),
+            ContentItem.is_major_tech_news.is_(None),
+            ContentItem.published_at >= cutoff,
+            ContentItem.curation_status.in_([ContentStatus.CANDIDATE, ContentStatus.PROMOTED]),
+        )
+        .order_by(ContentItem.published_at.desc())
+        .limit(max_items)
+        .all()
+    )
+
+    if not candidates:
+        return {"classified": 0, "major": 0}
+
+    classified = 0
+    major_ids: list[int] = []
+
+    for item in candidates:
+        value: dict[str, Any] = {
+            "title": item.title or "",
+            "description": item.description or item.summary or "",
+            "content_text": item.content_text or "",
+            "source": item.source or "",
+            "source_url": item.source_url or "",
+        }
+        is_major = _maybe_classify_major_news_value(value, llm_client=llm_client)
+
+        item.is_major_tech_news = value.get("is_major_tech_news", False)
+        item.major_tech_news_confidence = value.get("major_tech_news_confidence")
+        item.major_tech_news_reason = value.get("major_tech_news_reason")
+        # Backfill tech-relevance fields if missing
+        if item.tech_relevance is None and value.get("tech_relevance") is not None:
+            item.tech_relevance = value.get("tech_relevance")
+        if (
+            item.tech_relevance_confidence is None
+            and value.get("tech_relevance_confidence") is not None
+        ):
+            item.tech_relevance_confidence = value.get("tech_relevance_confidence")
+
+        classified += 1
+        if is_major:
+            major_ids.append(int(item.id))
+
+    try:
+        db.commit()
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        logger.warning("[major_news_probe] retro_classify commit failed: %s", exc)
+        return {"classified": 0, "major": 0}
+
+    if major_ids:
+        _fast_track_major_news_events(
+            db, content_item_ids=major_ids, now=datetime.now(timezone.utc)
+        )
+        try:
+            db.commit()
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            logger.warning("[major_news_probe] retro_classify fast-track commit failed: %s", exc)
+
+    logger.info(
+        "[major_news_probe] retro_classify sources=%s classified=%d major=%d",
+        sources,
+        classified,
+        len(major_ids),
+    )
+    return {"classified": classified, "major": len(major_ids)}
+
+
 def run_major_news_probe_job() -> dict[str, Any]:
     """Probe validated major-news feeds within strict feed/item/time bounds."""
     max_seconds = _int_env("MAJOR_NEWS_PROBE_MAX_SECONDS", 60)
@@ -365,6 +458,20 @@ def run_major_news_probe_job() -> dict[str, Any]:
                 errors.append(f"{feed.name}: {exc}")
                 logger.warning("[major_news_probe] feed=%s failed: %s", feed.name, exc)
 
+        # Retroactively classify items from premium BREAKING sources that the
+        # probe's insert path cannot reach (on_conflict_do_nothing means the
+        # is_major_tech_news flag is never set for pre-existing items).
+        retro_max = _int_env("MAJOR_NEWS_RETRO_CLASSIFY_MAX", 15)
+        retro_lookback = _int_env("MAJOR_NEWS_RETRO_CLASSIFY_HOURS", 24)
+        retro_stats = _retro_classify_premium_breaking(
+            db,
+            llm_client,
+            sources=MAJOR_NEWS_RETRO_CLASSIFY_SOURCES,
+            max_items=retro_max,
+            lookback_hours=retro_lookback,
+            now=now,
+        )
+
         result = {
             "status": "ok" if not errors else "partial",
             "feeds": len(feeds),
@@ -375,6 +482,8 @@ def run_major_news_probe_job() -> dict[str, Any]:
             "attempted_entries": attempted_entries,
             "inserted": len(inserted_ids),
             "inserted_ids": inserted_ids[:20],
+            "retro_classified": retro_stats["classified"],
+            "retro_major": retro_stats["major"],
             "duration_seconds": round(time.monotonic() - started, 2),
             "errors": errors[:5],
         }

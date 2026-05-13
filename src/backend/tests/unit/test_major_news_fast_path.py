@@ -135,6 +135,11 @@ def test_major_news_probe_respects_insert_limit(monkeypatch):
         tasks_major_news, "_queue_followup_events_for_inserted_ids", lambda *_a, **_k: None
     )
     monkeypatch.setattr(tasks_major_news, "_fast_track_major_news_events", lambda *_a, **_k: 0)
+    monkeypatch.setattr(
+        tasks_major_news,
+        "_retro_classify_premium_breaking",
+        lambda *_a, **_k: {"classified": 0, "major": 0},
+    )
     monkeypatch.setenv("MAJOR_NEWS_PROBE_MAX_INSERTED", "2")
     monkeypatch.setenv("MAJOR_NEWS_PROBE_ENTRIES_PER_FEED", "5")
 
@@ -218,6 +223,11 @@ def test_major_news_probe_skips_entries_older_than_promotion_window(monkeypatch)
         tasks_major_news, "_queue_followup_events_for_inserted_ids", lambda *_a, **_k: None
     )
     monkeypatch.setattr(tasks_major_news, "_fast_track_major_news_events", lambda *_a, **_k: 0)
+    monkeypatch.setattr(
+        tasks_major_news,
+        "_retro_classify_premium_breaking",
+        lambda *_a, **_k: {"classified": 0, "major": 0},
+    )
     monkeypatch.setenv("MAJOR_NEWS_PROBE_MAX_ENTRY_AGE_HOURS", "48")
 
     result = tasks_major_news.run_major_news_probe_job()
@@ -331,6 +341,11 @@ def test_major_news_probe_marks_only_confirmed_items_for_fast_track(monkeypatch)
             fast_tracked.extend(content_item_ids) or len(content_item_ids)
         ),
     )
+    monkeypatch.setattr(
+        tasks_major_news,
+        "_retro_classify_premium_breaking",
+        lambda *_a, **_k: {"classified": 0, "major": 0},
+    )
     monkeypatch.setenv("MAJOR_NEWS_PROBE_MAX_INSERTED", "2")
     monkeypatch.setenv("MAJOR_NEWS_PROBE_ENTRIES_PER_FEED", "2")
 
@@ -377,3 +392,363 @@ def test_fake_llm_major_news_classifier_returns_structured_json():
 
     assert result.is_major_tech_news == "yes"
     assert result.confidence > 0.8
+
+
+# ---------------------------------------------------------------------------
+# _retro_classify_premium_breaking tests
+# ---------------------------------------------------------------------------
+
+
+def _make_candidate(
+    item_id: int,
+    source: str = "TechCrunch",
+    *,
+    is_major_tech_news=None,
+    tech_relevance=None,
+    tech_relevance_confidence=None,
+) -> SimpleNamespace:
+    """Create a minimal ContentItem-like namespace for retro-classify tests."""
+    return SimpleNamespace(
+        id=item_id,
+        title=f"Story {item_id} from {source}",
+        description=f"Description {item_id}",
+        summary=None,
+        content_text=None,
+        source=source,
+        source_url=f"https://example.com/{item_id}",
+        is_major_tech_news=is_major_tech_news,
+        major_tech_news_confidence=None,
+        major_tech_news_reason=None,
+        tech_relevance=tech_relevance,
+        tech_relevance_confidence=tech_relevance_confidence,
+    )
+
+
+class _FakeQueryChain:
+    """Supports the SQLAlchemy .filter().order_by().limit().all() chain."""
+
+    def __init__(self, items):
+        self._items = items
+
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def order_by(self, *_args):
+        return self
+
+    def limit(self, _n):
+        return self
+
+    def all(self):
+        return list(self._items)
+
+
+def _fake_db_with_candidates(candidates):
+    """Return a minimal DB stub whose .query(ContentItem) returns candidates."""
+    committed = []
+    rolled_back = []
+
+    class _FakeDB:
+        def query(self, _model):
+            return _FakeQueryChain(candidates)
+
+        def commit(self):
+            committed.append(True)
+
+        def rollback(self):
+            rolled_back.append(True)
+
+        def close(self):
+            pass
+
+    db = _FakeDB()
+    db._committed = committed
+    db._rolled_back = rolled_back
+    return db
+
+
+def _make_llm(*, major: bool = True, tech_relevant: bool = True):
+    """Return a fake LLMClient that classifies as major (or not)."""
+
+    class _FakeLLM:
+        def is_configured(self):
+            return True
+
+        def classify_blips_tech_relevance(self, **_kwargs):
+            return SimpleNamespace(
+                is_blips_tech_relevant="yes" if tech_relevant else "no",
+                confidence=0.9,
+                reason="tech_relevant",
+            )
+
+        def classify_major_tech_news(self, **_kwargs):
+            return SimpleNamespace(
+                is_major_tech_news="yes" if major else "no",
+                confidence=0.88,
+                reason="major" if major else "not_major",
+            )
+
+    return _FakeLLM()
+
+
+def test_retro_classify_empty_sources_returns_zeros():
+    """Empty sources list → fast exit, no DB interaction."""
+    db = _fake_db_with_candidates([])
+    result = tasks_major_news._retro_classify_premium_breaking(
+        db,
+        _make_llm(),
+        sources=[],
+        max_items=10,
+        lookback_hours=24,
+        now=datetime.utcnow(),
+    )
+    assert result == {"classified": 0, "major": 0}
+
+
+def test_retro_classify_no_candidates_returns_zeros():
+    """No matching DB rows → returns zeros without committing."""
+    db = _fake_db_with_candidates([])
+    result = tasks_major_news._retro_classify_premium_breaking(
+        db,
+        _make_llm(),
+        sources=["TechCrunch"],
+        max_items=10,
+        lookback_hours=24,
+        now=datetime.utcnow(),
+    )
+    assert result == {"classified": 0, "major": 0}
+    assert not db._committed
+
+
+def test_retro_classify_marks_major_items(monkeypatch):
+    """Items classified as major get is_major_tech_news=True and are fast-tracked."""
+    fast_tracked: list[int] = []
+    monkeypatch.setattr(
+        tasks_major_news,
+        "_fast_track_major_news_events",
+        lambda db, *, content_item_ids, now: (
+            fast_tracked.extend(content_item_ids) or len(content_item_ids)
+        ),
+    )
+
+    item = _make_candidate(42, "TechCrunch")
+    db = _fake_db_with_candidates([item])
+
+    result = tasks_major_news._retro_classify_premium_breaking(
+        db,
+        _make_llm(major=True),
+        sources=["TechCrunch"],
+        max_items=10,
+        lookback_hours=24,
+        now=datetime.utcnow(),
+    )
+
+    assert result["classified"] == 1
+    assert result["major"] == 1
+    assert item.is_major_tech_news is True
+    assert 42 in fast_tracked
+    assert db._committed
+
+
+def test_retro_classify_non_major_items_not_fast_tracked(monkeypatch):
+    """Items classified as non-major get is_major_tech_news=False and no fast-track."""
+    fast_tracked: list[int] = []
+    monkeypatch.setattr(
+        tasks_major_news,
+        "_fast_track_major_news_events",
+        lambda db, *, content_item_ids, now: (
+            fast_tracked.extend(content_item_ids) or len(content_item_ids)
+        ),
+    )
+
+    item = _make_candidate(7, "The Verge")
+    db = _fake_db_with_candidates([item])
+
+    result = tasks_major_news._retro_classify_premium_breaking(
+        db,
+        _make_llm(major=False),
+        sources=["The Verge"],
+        max_items=10,
+        lookback_hours=24,
+        now=datetime.utcnow(),
+    )
+
+    assert result["classified"] == 1
+    assert result["major"] == 0
+    assert item.is_major_tech_news is False
+    assert fast_tracked == []
+
+
+def test_retro_classify_backfills_tech_relevance_when_missing(monkeypatch):
+    """tech_relevance fields are backfilled when item doesn't have them yet."""
+    monkeypatch.setattr(tasks_major_news, "_fast_track_major_news_events", lambda *_a, **_k: 0)
+
+    item = _make_candidate(99, "Ars Technica", tech_relevance=None, tech_relevance_confidence=None)
+    db = _fake_db_with_candidates([item])
+
+    tasks_major_news._retro_classify_premium_breaking(
+        db,
+        _make_llm(major=True, tech_relevant=True),
+        sources=["Ars Technica"],
+        max_items=10,
+        lookback_hours=24,
+        now=datetime.utcnow(),
+    )
+
+    assert item.tech_relevance == "yes"
+    assert item.tech_relevance_confidence == 0.9
+
+
+def test_retro_classify_does_not_overwrite_existing_tech_relevance(monkeypatch):
+    """Existing tech_relevance values are preserved (not overwritten by retro pass)."""
+    monkeypatch.setattr(tasks_major_news, "_fast_track_major_news_events", lambda *_a, **_k: 0)
+
+    item = _make_candidate(55, "TechCrunch", tech_relevance="yes", tech_relevance_confidence=0.77)
+    db = _fake_db_with_candidates([item])
+
+    tasks_major_news._retro_classify_premium_breaking(
+        db,
+        _make_llm(major=True, tech_relevant=True),
+        sources=["TechCrunch"],
+        max_items=10,
+        lookback_hours=24,
+        now=datetime.utcnow(),
+    )
+
+    # Should remain unchanged (0.77, not overwritten with 0.9)
+    assert item.tech_relevance_confidence == 0.77
+
+
+def test_retro_classify_handles_commit_failure_gracefully(monkeypatch):
+    """First DB commit failure → rollback, returns zeros, no crash."""
+    monkeypatch.setattr(tasks_major_news, "_fast_track_major_news_events", lambda *_a, **_k: 0)
+
+    item = _make_candidate(1, "TechCrunch")
+
+    class _FailDB:
+        def __init__(self):
+            self.rolled_back = False
+
+        def query(self, _model):
+            return _FakeQueryChain([item])
+
+        def commit(self):
+            raise RuntimeError("DB offline")
+
+        def rollback(self):
+            self.rolled_back = True
+
+        def close(self):
+            pass
+
+    db = _FailDB()
+
+    result = tasks_major_news._retro_classify_premium_breaking(
+        db,
+        _make_llm(major=True),
+        sources=["TechCrunch"],
+        max_items=10,
+        lookback_hours=24,
+        now=datetime.utcnow(),
+    )
+
+    assert result == {"classified": 0, "major": 0}
+    assert db.rolled_back
+
+
+def test_retro_classify_handles_fast_track_commit_failure_gracefully(monkeypatch):
+    """Second commit (post-fast-track) failure → rollback + log, still returns classified count."""
+    commit_calls = []
+
+    item = _make_candidate(10, "TechCrunch")
+
+    class _PartialFailDB:
+        def __init__(self):
+            self.rolled_back = False
+
+        def query(self, _model):
+            return _FakeQueryChain([item])
+
+        def commit(self):
+            commit_calls.append(True)
+            if len(commit_calls) == 2:
+                raise RuntimeError("second commit failed")
+
+        def rollback(self):
+            self.rolled_back = True
+
+        def close(self):
+            pass
+
+    db = _PartialFailDB()
+    monkeypatch.setattr(
+        tasks_major_news,
+        "_fast_track_major_news_events",
+        lambda _db, *, content_item_ids, now: len(content_item_ids),
+    )
+
+    result = tasks_major_news._retro_classify_premium_breaking(
+        db,
+        _make_llm(major=True),
+        sources=["TechCrunch"],
+        max_items=10,
+        lookback_hours=24,
+        now=datetime.utcnow(),
+    )
+
+    # Classification was committed (first commit succeeded), result is valid
+    assert result["classified"] == 1
+    assert result["major"] == 1
+    # Second commit failed and was rolled back — no crash
+    assert db.rolled_back
+
+
+def test_run_major_news_probe_job_includes_retro_stats(monkeypatch):
+    """run_major_news_probe_job() result dict includes retro_classified and retro_major."""
+
+    class _FakeDB:
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    class _FakeStateRepo:
+        def __init__(self, _db):
+            pass
+
+        def get_active_cooldown(self, **_):
+            return None
+
+        def record_outcome(self, **_):
+            return None
+
+    class _FakeRSSClient:
+        def __init__(self, feed_configs):
+            pass
+
+        def fetch_feed(self, _url, max_entries):
+            return []
+
+        def get_last_fetch_outcome(self, _url):
+            return None
+
+    monkeypatch.setattr(tasks_major_news, "memory_over_soft_limit", lambda: False)
+    monkeypatch.setattr(tasks_major_news, "_ingestion_lane_recently_running", lambda: False)
+    monkeypatch.setattr(tasks_major_news, "SessionLocal", lambda: _FakeDB())
+    monkeypatch.setattr(tasks_major_news, "SourceFetchStateRepository", _FakeStateRepo)
+    monkeypatch.setattr(tasks_major_news, "RSSClient", _FakeRSSClient)
+    monkeypatch.setattr(tasks_major_news, "get_feeds_by_role", lambda _role: [_major_feed()])
+    monkeypatch.setattr(
+        tasks_major_news,
+        "_retro_classify_premium_breaking",
+        lambda *_a, **_k: {"classified": 3, "major": 1},
+    )
+
+    result = tasks_major_news.run_major_news_probe_job()
+
+    assert result["retro_classified"] == 3
+    assert result["retro_major"] == 1
