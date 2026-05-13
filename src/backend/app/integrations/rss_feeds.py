@@ -242,10 +242,12 @@ FEED_REGISTRY: List[FeedConfig] = [
         name="CNET",
         role=FeedRole.BREAKING,
         quality_tier=QualityTier.STANDARD,
-        daily_cap=2,
+        daily_cap=1,
         decay_profile=DecayProfile.FAST,
         base_quality_weight=0.75,
-        notes="Consumer tech news and reviews",
+        notes="Consumer tech news and reviews. daily_cap reduced 2→1 (2026-05-13): no RSS "
+        "endpoint isolates tech content from entertainment (TV/film/music). Remaining "
+        "entertainment leakage to be addressed by score calibration (P5-4).",
     ),
     FeedConfig(
         url="https://www.zdnet.com/news/rss.xml",
@@ -577,7 +579,10 @@ FEED_REGISTRY: List[FeedConfig] = [
         daily_cap=1,
         decay_profile=DecayProfile.NORMAL,
         base_quality_weight=0.76,
-        notes="Clean energy, battery, and sustainability technology coverage",
+        enabled=False,
+        notes="Disabled 2026-05-13: EV/climate policy advocacy blog, not tech news. Live audit "
+        "sample: EU zero-emission proposals, airport CO2 comparisons, oil price shock policy, "
+        "Florida farmers. No technology news angle.",
     ),
     FeedConfig(
         url="https://electrek.co/feed/",
