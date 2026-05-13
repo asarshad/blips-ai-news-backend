@@ -178,8 +178,37 @@ After Phase 1 (and any of Phase 2/3) ships, repeat the original editorial audit:
 
 ---
 
+---
+
+## Phase 5 — Feed registry audit + score calibration (from 2026-05-13 live audit)
+
+Live audit of 100 most recent READY articles revealed systemic issues with both feed selection and score compression that Phase 1–2 changes don't fully address.
+
+### Findings
+
+| Problem | Evidence | Root cause |
+|---|---|---|
+| Hacker News RSS polluting pool with hobbyist/niche content | `[Lists]`, `[Bogomolov]`, `[Liquidream]`, `[Zxbasic]`, `[Os2Museum]`, `[Computer]`, `[Typewritten]` all in top-100 READY | HN surfaces mailing lists, game demos, retro computing, personal blogs. Tech classifier correctly scores them as tech-relevant (dnsmasq CVE = 0.94 confidence) but they're **not tech news** | 
+| STAT News is a health/medical publication | 3/100 READY items were PCOS name change, Medicaid work requirements, pharma industry editorial | Feed notes say "Biotech and health tech" but feed covers general health policy |
+| CNET surfacing entertainment | "Fourth Wing TV Series Ordered by Prime Video" scored 0.662 — highest in sample | CNET covers entertainment alongside tech; classifier doesn't distinguish |
+| Android Authority at 15% of READY pool | 15/100 articles from AA | High-volume consumer Android blog; P1-6 playlist cap helps at delivery but pool itself is noisy |
+| Score compression — max 0.69, no item > 0.70 | Google zero-day (0.638) ≈ Linux distro comparison (0.634) ≈ OS/2 Museum blog (0.375) | Global scoring formula components all produce similar-range values; no strong signal multiplier |
+| Premium sources absent | Zero Bloomberg, Reuters, WSJ, FT originals in 100-item sample | Known gap from original audit; Techmeme source_url limitation (P1-1b) delays fix |
+
+### Tasks
+
+| ID | Task | Files to touch | Acceptance criterion | Status |
+|---|---|---|---|---|
+| P5-1 | **Disable Hacker News RSS.** Set `enabled=False` on the HN FeedConfig. HN surfaces niche/hobbyist content that passes tech classification but is not tech news. Biggest single quality improvement available. | `app/integrations/rss_feeds.py` | After deploy, `[Liquidream]`, `[Zxbasic]`, `[Os2Museum]`, `[Lists]`-class sources no longer appear in READY. | todo |
+| P5-2 | **Disable STAT News.** Health/medical publication; biotech tech coverage is incidental and low-volume. | `app/integrations/rss_feeds.py` | STAT News items no longer appear in READY. | todo |
+| P5-3 | **Review CNET and CleanTechnica for entertainment/non-tech leakage.** CNET: add source-level note, optionally cut `daily_cap` to 1 or disable; entertainment and consumer-retail content dominates. CleanTechnica: EV policy coverage is marginal tech; 3/100 items were EV subsidy politics. | `app/integrations/rss_feeds.py` | No entertainment (TV/film/music) items from CNET in READY after 7 days. | todo |
+| P5-4 | **Score calibration — break compression in 0.37–0.69 band.** Audit `app/ranking/global_score.py` formula. Goal: source quality tier and tech_relevance_confidence should produce meaningful spread (0.30–0.90 range). Likely fix: multiply components rather than add, or add a `source_quality_multiplier` that scales PREMIUM sources up and SUPPLEMENTAL down. | `app/ranking/global_score.py`; `app/config/scoring.py` | After deploy, top-20 scored items contain ≥3 stories that a human editor would rate as major tech news; score range widens to ≥0.40 spread. | todo |
+
+---
+
 ## Change log
 
 - 2026-05-11 — Initial plan created from editorial audit + backend code deep-dive.
 - 2026-05-11 — Phase 0 complete. All 5 reports written to `docs/reports/`. Key discovery: CNBC Technology pipeline blockage (P0-BUG-1 added, marked urgent). P1-5 regex revised to avoid business-deal FPs. P1-7 unblocked (safe to ship). P2-3/P2-4 re-blocked on P0-BUG-1.
 - 2026-05-12 — P0-BUG-1 complete. Root cause: `ARTICLE_SUMMARY_MIN_WORDS=120` threshold caused paywalled RSS items to fail `bounded_article_summary_text` and get permanently suppressed. Fix adds description-fallback (≥20 words) in `content_ai_service.py`. Repair script added. Deployed: commit c440014. Repair run required after deploy confirmed.
+- 2026-05-13 — Phase 5 added from live production audit of 100 READY articles. Key findings: HN RSS is primary source of hobbyist/niche pollution; STAT News is health publication not tech; CNET surfaces entertainment; score band compressed to 0.37–0.69 with no differentiating signal.
