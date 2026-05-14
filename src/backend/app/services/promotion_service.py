@@ -285,6 +285,69 @@ _BROAD_NEWS_LEAK_PATTERNS: list[re.Pattern[str]] = [
 ]
 
 
+# ── Cross-source title dedup ──────────────────────────────────────────────────
+
+# Minimum Jaccard token similarity before checking entity overlap.
+_CROSS_SOURCE_DEDUP_SIMILARITY_THRESHOLD: float = 0.75
+
+
+def _title_token_similarity(a: str, b: str) -> float:
+    """Jaccard similarity over word tokens (case-insensitive).
+
+    Returns 0.0 if either string is empty.
+    """
+    tokens_a = frozenset(re.findall(r"\w+", a.lower()))
+    tokens_b = frozenset(re.findall(r"\w+", b.lower()))
+    if not tokens_a or not tokens_b:
+        return 0.0
+    intersection = tokens_a & tokens_b
+    union = tokens_a | tokens_b
+    return len(intersection) / len(union)
+
+
+def _normalize_entities_for_dedup(entities: object) -> frozenset[str]:
+    """Return a frozenset of normalised entity name strings for set intersection."""
+    return frozenset(_normalize_metadata_terms(entities))
+
+
+def _is_cross_source_duplicate(
+    title: str | None,
+    entities: object,
+    seen_pairs: list[tuple[frozenset[str], frozenset[str]]],
+    *,
+    threshold: float = _CROSS_SOURCE_DEDUP_SIMILARITY_THRESHOLD,
+) -> bool:
+    """Return True if *title* + *entities* closely match any entry in *seen_pairs*.
+
+    A match requires BOTH:
+    - Jaccard token similarity ≥ threshold
+    - At least one shared normalised entity name
+
+    Short-circuits as soon as a match is found.
+    """
+    if not title or not seen_pairs:
+        return False
+    candidate_tokens = frozenset(re.findall(r"\w+", title.lower()))
+    candidate_entities = _normalize_entities_for_dedup(entities)
+    if not candidate_entities:
+        # Cannot verify entity overlap — skip dedup for entity-less items.
+        return False
+    for seen_tokens, seen_entities in seen_pairs:
+        if not seen_entities:
+            continue
+        # Fast-reject: if no entity overlap, similarity check is unnecessary.
+        if not (candidate_entities & seen_entities):
+            continue
+        # Entity overlap confirmed — check title similarity.
+        union = candidate_tokens | seen_tokens
+        if not union:
+            continue
+        similarity = len(candidate_tokens & seen_tokens) / len(union)
+        if similarity >= threshold:
+            return True
+    return False
+
+
 def compute_clickbait_penalty(title: str) -> float:
     """Return a penalty [0.0, 1.0] based on clickbait signals in the title.
 
@@ -473,18 +536,14 @@ def _llm_broad_news_block_reason(item: ContentItem, *, suffix: str) -> str | Non
     confidence = _safe_float(getattr(item, "tech_relevance_confidence", None), default=-1.0)
     is_mixed_roundup = getattr(item, "is_mixed_roundup", None) is True
 
-    if (
-        is_mixed_roundup
-        and confidence >= max(0.0, float(settings.VIDEO_TECH_MIXED_ROUNDUP_BLOCK_CONFIDENCE))
+    if is_mixed_roundup and confidence >= max(
+        0.0, float(settings.VIDEO_TECH_MIXED_ROUNDUP_BLOCK_CONFIDENCE)
     ):
         return f"llm_mixed_roundup_broad_news_{suffix}"
 
-    if (
-        tech_relevance == "none"
-        and confidence >= max(
-            0.50,
-            min(1.0, float(settings.VIDEO_TECH_NONE_BLOCK_CONFIDENCE), 0.55),
-        )
+    if tech_relevance == "none" and confidence >= max(
+        0.50,
+        min(1.0, float(settings.VIDEO_TECH_NONE_BLOCK_CONFIDENCE), 0.55),
     ):
         return f"llm_non_tech_broad_news_{suffix}"
 
@@ -701,9 +760,8 @@ def classify_promotion_block(
     if content_type == ContentType.ARTICLE and settings.ARTICLE_TECH_CLASSIFIER_ENABLED:
         tech_relevance = _safe_text(getattr(item, "tech_relevance", None))
         confidence = _safe_float(getattr(item, "tech_relevance_confidence", None), default=-1.0)
-        if (
-            tech_relevance == "no"
-            and confidence >= max(min(1.0, float(settings.ARTICLE_TECH_NONE_BLOCK_CONFIDENCE)), 0.50)
+        if tech_relevance == "no" and confidence >= max(
+            min(1.0, float(settings.ARTICLE_TECH_NONE_BLOCK_CONFIDENCE)), 0.50
         ):
             return "llm_non_tech_article"
 
@@ -848,6 +906,35 @@ class PromotionService:
             .all()
         )
         return {row[0]: row[1] for row in rows if row[0]}
+
+    def _get_recently_promoted_dedup_set(
+        self, hours_back: int
+    ) -> list[tuple[frozenset[str], frozenset[str]]]:
+        """Return (title_tokens, entity_names) pairs for recently-promoted articles.
+
+        Used by the cross-source dedup check to suppress near-duplicate stories
+        that slip past clustering from different sources.
+        """
+        cutoff = datetime.utcnow() - timedelta(hours=hours_back)
+        rows = (
+            self.db.query(ContentItem.title, ContentItem.entities)
+            .filter(
+                ContentItem.type == ContentType.ARTICLE,
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.published_at >= cutoff,
+                ContentItem.is_suppressed.is_(False),
+            )
+            .all()
+        )
+        result: list[tuple[frozenset[str], frozenset[str]]] = []
+        for title, entities in rows:
+            if not title:
+                continue
+            tokens = frozenset(re.findall(r"\w+", title.lower()))
+            entity_set = _normalize_entities_for_dedup(entities)
+            if tokens and entity_set:
+                result.append((tokens, entity_set))
+        return result
 
     # ── Candidate fetch ───────────────────────────────────────────────────
 
@@ -1075,7 +1162,9 @@ class PromotionService:
             if tech_relevance != "yes" or tech_confidence < MAJOR_NEWS_CLASSIFIER_MIN_CONFIDENCE:
                 item.is_major_tech_news = False
                 item.major_tech_news_confidence = tech_confidence if tech_confidence >= 0 else None
-                item.major_tech_news_reason = "Not eligible: Blips tech relevance was not confirmed."
+                item.major_tech_news_reason = (
+                    "Not eligible: Blips tech relevance was not confirmed."
+                )
                 return
 
             major = llm_client.classify_major_tech_news(
@@ -1448,7 +1537,14 @@ class PromotionService:
 
         promoted = 0
         promoted_ids: List[int] = []
+        skipped_dedup = 0
         min_score = self._min_promotion_score(content_type, config)
+
+        # Pre-load recently-promoted articles for cross-source dedup checks.
+        seen_dedup_pairs: list[tuple[frozenset[str], frozenset[str]]] = []
+        if content_type == ContentType.ARTICLE and settings.CROSS_SOURCE_DEDUP_ENABLED:
+            seen_dedup_pairs = self._get_recently_promoted_dedup_set(hours_back=config.window_hours)
+
         for scored_candidate in scored:
             s = scored_candidate.score
             item = scored_candidate.item
@@ -1472,11 +1568,40 @@ class PromotionService:
                 if promoted_channel_counts.get(channel_key, 0) >= cap:
                     item.promotion_reason = f"{item.promotion_reason}|blocked=daily_reel_cap"
                     continue
+
+            # Cross-source title dedup: skip near-identical stories from
+            # different sources that clustering missed. Item stays CANDIDATE —
+            # no hard suppression so threshold miscalibration is recoverable.
+            # The check re-fires each run until the original ages out of the
+            # window (config.window_hours), at which point the item promotes
+            # normally.
+            if content_type == ContentType.ARTICLE and settings.CROSS_SOURCE_DEDUP_ENABLED:
+                if _is_cross_source_duplicate(item.title, item.entities, seen_dedup_pairs):
+                    item.promotion_reason = (
+                        f"{item.promotion_reason}|blocked=cross_source_duplicate"
+                    )
+                    skipped_dedup += 1
+                    logger.info(
+                        "[promotion] cross_source_dedup skipped content_id=%s title=%r source=%s",
+                        item.id,
+                        (item.title or "")[:80],
+                        item.source or "",
+                    )
+                    continue
+
             item.curation_status = ContentStatus.PROMOTED
             sync_content_readiness(self.db, item)
             promoted += 1
             promoted_ids.append(int(item.id))
             promoted_channel_counts[channel_key] = promoted_channel_counts.get(channel_key, 0) + 1
+
+            # Register newly-promoted item so later candidates in this run
+            # can be deduped against it too.
+            if content_type == ContentType.ARTICLE and settings.CROSS_SOURCE_DEDUP_ENABLED:
+                new_tokens = frozenset(re.findall(r"\w+", (item.title or "").lower()))
+                new_entities = _normalize_entities_for_dedup(item.entities)
+                if new_tokens and new_entities:
+                    seen_dedup_pairs.append((new_tokens, new_entities))
 
         rescored = self._rescore_promoted(
             content_type,
@@ -1489,10 +1614,11 @@ class PromotionService:
         )
 
         logger.info(
-            "[promotion] %s: evaluated=%d promoted=%d (threshold=%.2f)",
+            "[promotion] %s: evaluated=%d promoted=%d skipped_dedup=%d (threshold=%.2f)",
             content_type.value,
             evaluated,
             promoted,
+            skipped_dedup,
             min_score,
         )
         return promoted, evaluated, rescored, promoted_ids
