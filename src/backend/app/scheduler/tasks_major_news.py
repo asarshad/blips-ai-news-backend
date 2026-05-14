@@ -320,6 +320,127 @@ def _retro_classify_premium_breaking(
     return {"classified": classified, "major": len(major_ids)}
 
 
+def run_major_news_classify_sweep_job() -> dict[str, Any]:
+    """Sweep recently-promoted articles that still lack the major-tech-news flag.
+
+    The probe and retro-classify pass only cover a small subset of sources (MAJOR_NEWS
+    feeds + 3 BREAKING sources). Everything else — Wired, VentureBeat, The Register,
+    security feeds, business feeds — arrives at PROMOTED with ``is_major_tech_news=NULL``
+    and never gets the +0.12 ranking boost.
+
+    This job closes that gap by sweeping ALL ARTICLE items in PROMOTED status that still
+    have ``is_major_tech_news IS NULL``, ordered newest-first.  It runs independently of
+    the probe on a 30-minute cadence so that it cannot extend the probe's time budget.
+
+    Bounds (all env-configurable):
+    - ``MAJOR_NEWS_SWEEP_MAX_ITEMS`` (default 30): items per run
+    - ``MAJOR_NEWS_SWEEP_MAX_SECONDS`` (default 120): wall-clock budget
+    - ``MAJOR_NEWS_SWEEP_LOOKBACK_HOURS`` (default 48): how far back to look
+    """
+    max_items = _int_env("MAJOR_NEWS_SWEEP_MAX_ITEMS", 30)
+    max_seconds = _int_env("MAJOR_NEWS_SWEEP_MAX_SECONDS", 120, minimum=0)
+    lookback_hours = _int_env("MAJOR_NEWS_SWEEP_LOOKBACK_HOURS", 48)
+
+    started = time.monotonic()
+    deadline = started + max_seconds
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=lookback_hours)
+
+    db = SessionLocal()
+    llm_client = LLMClient()
+
+    try:
+        candidates = (
+            db.query(ContentItem)
+            .filter(
+                ContentItem.type == ContentType.ARTICLE,
+                ContentItem.curation_status == ContentStatus.PROMOTED,
+                ContentItem.is_major_tech_news.is_(None),
+                ContentItem.published_at >= cutoff,
+            )
+            .order_by(ContentItem.published_at.desc())
+            .limit(max_items)
+            .all()
+        )
+
+        if not candidates:
+            logger.info("[major_news_sweep] no unclassified PROMOTED articles found")
+            return {"status": "ok", "classified": 0, "major": 0, "duration_seconds": 0.0}
+
+        classified = 0
+        major_ids: list[int] = []
+
+        for item in candidates:
+            if time.monotonic() >= deadline:
+                logger.info(
+                    "[major_news_sweep] time budget exhausted after %d/%d items",
+                    classified,
+                    len(candidates),
+                )
+                break
+
+            value: dict[str, Any] = {
+                "title": item.title or "",
+                "description": item.description or item.summary or "",
+                "content_text": item.content_text or "",
+                "source": item.source or "",
+                "source_url": item.source_url or "",
+            }
+            is_major = _maybe_classify_major_news_value(value, llm_client=llm_client)
+
+            item.is_major_tech_news = value.get("is_major_tech_news", False)
+            item.major_tech_news_confidence = value.get("major_tech_news_confidence")
+            item.major_tech_news_reason = value.get("major_tech_news_reason")
+            # Backfill tech-relevance fields if not yet set
+            if item.tech_relevance is None and value.get("tech_relevance") is not None:
+                item.tech_relevance = value.get("tech_relevance")
+            if (
+                item.tech_relevance_confidence is None
+                and value.get("tech_relevance_confidence") is not None
+            ):
+                item.tech_relevance_confidence = value.get("tech_relevance_confidence")
+
+            classified += 1
+            if is_major:
+                major_ids.append(int(item.id))
+
+        try:
+            db.commit()
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            logger.warning("[major_news_sweep] commit failed: %s", exc)
+            return {
+                "status": "error",
+                "error": str(exc)[:200],
+                "classified": 0,
+                "major": 0,
+                "duration_seconds": round(time.monotonic() - started, 2),
+            }
+
+        if major_ids:
+            _fast_track_major_news_events(
+                db, content_item_ids=major_ids, now=datetime.now(timezone.utc)
+            )
+            try:
+                db.commit()
+            except Exception as exc:  # noqa: BLE001
+                db.rollback()
+                logger.warning("[major_news_sweep] fast-track commit failed: %s", exc)
+
+        duration = round(time.monotonic() - started, 2)
+        result = {
+            "status": "ok",
+            "classified": classified,
+            "major": len(major_ids),
+            "duration_seconds": duration,
+        }
+        logger.info("[major_news_sweep] %s", result)
+        return result
+
+    finally:
+        db.close()
+
+
 def run_major_news_probe_job() -> dict[str, Any]:
     """Probe validated major-news feeds within strict feed/item/time bounds."""
     max_seconds = _int_env("MAJOR_NEWS_PROBE_MAX_SECONDS", 60)
