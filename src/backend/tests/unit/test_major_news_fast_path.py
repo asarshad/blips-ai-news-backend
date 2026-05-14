@@ -105,7 +105,7 @@ def test_major_news_probe_respects_insert_limit(monkeypatch):
         def __init__(self, feed_configs):
             self.feed_configs = feed_configs
 
-        def fetch_feed(self, _url, max_entries):
+        def fetch_feed(self, _url, max_entries, **_kwargs):
             return [
                 SimpleNamespace(title=f"Apple story {idx}", url=f"https://example.com/{idx}")
                 for idx in range(max_entries)
@@ -176,7 +176,7 @@ def test_major_news_probe_skips_entries_older_than_promotion_window(monkeypatch)
         def __init__(self, feed_configs):
             self.feed_configs = feed_configs
 
-        def fetch_feed(self, _url, max_entries):
+        def fetch_feed(self, _url, max_entries, **_kwargs):
             return [
                 SimpleNamespace(
                     title="Old Apple earnings story",
@@ -280,7 +280,7 @@ def test_major_news_probe_marks_only_confirmed_items_for_fast_track(monkeypatch)
         def __init__(self, feed_configs):
             self.feed_configs = feed_configs
 
-        def fetch_feed(self, _url, max_entries):
+        def fetch_feed(self, _url, max_entries, **_kwargs):
             return [
                 SimpleNamespace(title=f"Story {idx}", url=f"https://example.com/{idx}")
                 for idx in range(max_entries)
@@ -730,7 +730,7 @@ def test_run_major_news_probe_job_includes_retro_stats(monkeypatch):
         def __init__(self, feed_configs):
             pass
 
-        def fetch_feed(self, _url, max_entries):
+        def fetch_feed(self, _url, max_entries, **_kwargs):
             return []
 
         def get_last_fetch_outcome(self, _url):
@@ -752,3 +752,74 @@ def test_run_major_news_probe_job_includes_retro_stats(monkeypatch):
 
     assert result["retro_classified"] == 3
     assert result["retro_major"] == 1
+
+
+def test_probe_passes_primary_link_flag_to_fetch_feed(monkeypatch):
+    """The probe must forward feed.primary_link_from_description to fetch_feed().
+
+    Regression test for the P1-1b bug: Techmeme source_urls stayed as
+    techmeme.com/* because the probe called fetch_feed() without the flag.
+    """
+    fetch_kwargs_seen: list[dict] = []
+
+    class _FakeDB:
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    class _FakeStateRepo:
+        def __init__(self, _db):
+            pass
+
+        def get_active_cooldown(self, **_):
+            return None
+
+        def record_outcome(self, **_):
+            return None
+
+    class _FakeRSSClient:
+        def __init__(self, feed_configs):
+            pass
+
+        def fetch_feed(self, _url, max_entries, **kwargs):
+            fetch_kwargs_seen.append(kwargs)
+            return []
+
+        def get_last_fetch_outcome(self, _url):
+            return None
+
+    # Feed with primary_link_from_description=True (e.g. Techmeme)
+    techmeme_feed = FeedConfig(
+        url="https://www.techmeme.com/feed.xml",
+        name="Techmeme",
+        role=FeedRole.MAJOR_NEWS,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=5,
+        decay_profile=DecayProfile.FAST,
+        primary_link_from_description=True,
+    )
+
+    monkeypatch.setattr(tasks_major_news, "memory_over_soft_limit", lambda: False)
+    monkeypatch.setattr(tasks_major_news, "_ingestion_lane_recently_running", lambda: False)
+    monkeypatch.setattr(tasks_major_news, "SessionLocal", lambda: _FakeDB())
+    monkeypatch.setattr(tasks_major_news, "SourceFetchStateRepository", _FakeStateRepo)
+    monkeypatch.setattr(tasks_major_news, "RSSClient", _FakeRSSClient)
+    monkeypatch.setattr(tasks_major_news, "get_feeds_by_role", lambda _role: [techmeme_feed])
+    monkeypatch.setattr(
+        tasks_major_news,
+        "_retro_classify_premium_breaking",
+        lambda *_a, **_k: {"classified": 0, "major": 0},
+    )
+
+    tasks_major_news.run_major_news_probe_job()
+
+    assert fetch_kwargs_seen, "fetch_feed was never called"
+    assert fetch_kwargs_seen[0].get("primary_link_from_description") is True, (
+        "probe did not forward primary_link_from_description=True to fetch_feed(); "
+        "Techmeme source_urls will remain techmeme.com/* instead of the real article URL"
+    )

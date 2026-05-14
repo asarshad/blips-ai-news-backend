@@ -515,7 +515,11 @@ def run_major_news_probe_job() -> dict[str, Any]:
                 continue
 
             try:
-                entries = rss_client.fetch_feed(feed.url, max_entries=max_entries_per_feed)
+                entries = rss_client.fetch_feed(
+                    feed.url,
+                    max_entries=max_entries_per_feed,
+                    primary_link_from_description=feed.primary_link_from_description,
+                )
                 outcome = rss_client.get_last_fetch_outcome(feed.url)
                 if outcome is not None:
                     state_repo.record_outcome(
