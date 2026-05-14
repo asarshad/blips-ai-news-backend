@@ -65,6 +65,49 @@ class FeedEntry:
     base_quality_weight: Optional[float] = None
 
 
+def _extract_primary_link_from_description(entry, exclude_host: str) -> Optional[str]:
+    """Return the first external ``<a href>`` URL from an RSS entry's description HTML.
+
+    Used for aggregator feeds (e.g. Techmeme) where ``entry.link`` points to the
+    aggregator's own discussion page rather than the original article.  The actual
+    source URL is embedded as the first non-aggregator ``<a href>`` in the
+    ``<description>`` field.
+
+    Args:
+        entry: A feedparser entry object.
+        exclude_host: Domain to skip (e.g. ``"techmeme.com"``).  Both bare and
+            ``www.``-prefixed variants are excluded automatically.
+
+    Returns:
+        The first qualifying absolute ``http``/``https`` URL, or ``None`` if none
+        is found (caller should fall back to ``entry.link``).
+    """
+    raw_html = getattr(entry, "summary", "") or getattr(entry, "description", "")
+    if not raw_html:
+        return None
+
+    exclude_host_norm = exclude_host.lower().removeprefix("www.")
+
+    try:
+        soup = BeautifulSoup(raw_html, "html.parser")
+        for tag in soup.find_all("a", href=True):
+            href = str(tag["href"]).strip()
+            if not href.startswith(("http://", "https://")):
+                continue
+            try:
+                parsed = urlparse(href)
+                host = parsed.netloc.lower().removeprefix("www.")
+                if host == exclude_host_norm:
+                    continue
+            except Exception:
+                continue
+            return href
+    except Exception:
+        pass
+
+    return None
+
+
 def decode_html_entities(text: str) -> str:
     """Decode HTML entities in text."""
     if not text:
@@ -150,7 +193,11 @@ class RSSClient:
             try:
                 max_entries = min(entries_per_feed, feed_config.daily_cap * _FETCH_HEADROOM)
 
-                feed_entries = self.fetch_feed(feed_config.url, max_entries)
+                feed_entries = self.fetch_feed(
+                    feed_config.url,
+                    max_entries,
+                    primary_link_from_description=feed_config.primary_link_from_description,
+                )
 
                 # Attach role metadata to entries
                 for entry in feed_entries:
@@ -182,13 +229,24 @@ class RSSClient:
     def _record_fetch_outcome(self, feed_url: str, outcome: FetchOutcome) -> None:
         self._last_fetch_outcomes[feed_url] = outcome
 
-    def fetch_feed(self, feed_url: str, max_entries: int = 10) -> List[FeedEntry]:
+    def fetch_feed(
+        self,
+        feed_url: str,
+        max_entries: int = 10,
+        *,
+        primary_link_from_description: bool = False,
+    ) -> List[FeedEntry]:
         """
         Fetch entries from a single RSS feed.
 
         Args:
             feed_url: URL of the RSS feed
             max_entries: Maximum entries to return
+            primary_link_from_description: When True, replace ``entry.link`` with
+                the first external ``<a href>`` found in the entry description
+                HTML.  Intended for aggregator feeds (e.g. Techmeme) where the
+                ``<link>`` element points to a discussion page rather than the
+                original article.
 
         Returns:
             List of FeedEntry objects
@@ -228,6 +286,27 @@ class RSSClient:
                     # Decode HTML entities in title
                     title = decode_html_entities(entry.title)
                     url = entry.link
+
+                    # For aggregator feeds (e.g. Techmeme), replace the
+                    # aggregator discussion-page URL with the first external
+                    # article link found in the description HTML.
+                    if primary_link_from_description:
+                        try:
+                            parsed_link = urlparse(url or "")
+                            exclude_host = parsed_link.netloc.removeprefix("www.")
+                        except Exception:
+                            exclude_host = ""
+                        extracted = _extract_primary_link_from_description(
+                            entry, exclude_host=exclude_host
+                        )
+                        if extracted:
+                            logger.debug("[rss] primary_link override: %r → %r", url, extracted)
+                            url = extracted
+                        else:
+                            logger.warning(
+                                "[rss] primary_link extraction failed — keeping aggregator URL: %r",
+                                url,
+                            )
 
                     # Use RSS feed content only (no full-page scraping)
                     content = self._get_rss_description(entry)

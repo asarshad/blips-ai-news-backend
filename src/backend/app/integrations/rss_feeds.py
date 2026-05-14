@@ -126,6 +126,7 @@ class FeedConfig:
     enabled: bool = True
     base_quality_weight: Optional[float] = None
     notes: str = ""
+    primary_link_from_description: bool = False
 
 
 # =============================================================================
@@ -200,7 +201,8 @@ FEED_REGISTRY: List[FeedConfig] = [
         daily_cap=5,
         decay_profile=DecayProfile.FAST,
         base_quality_weight=0.90,
-        notes="Aggregator: surfaces Bloomberg/Reuters/FT/WSJ/AP tech headlines; best single proxy for missing premium-outlet coverage. NOTE: RSS <link> is always a Techmeme anchor page (techmeme.com/YYMMDD/p##), not the original article URL — source_url will point to Techmeme. Users land on Techmeme discussion page when they tap Read More. Follow-up: extract original article URL from description HTML.",
+        primary_link_from_description=True,
+        notes="Aggregator: surfaces Bloomberg/Reuters/FT/WSJ/AP tech headlines; best single proxy for missing premium-outlet coverage. RSS <link> is always a Techmeme anchor page; primary_link_from_description=True extracts the first external <a href> from description HTML to use as source_url instead.",
     ),
     # =========================================================================
     # BREAKING NEWS
