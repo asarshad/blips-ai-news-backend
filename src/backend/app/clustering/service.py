@@ -14,6 +14,7 @@ from app.clustering.similarity import (
     compute_similarity,
     compute_title_similarity,
 )
+from app.clustering.url_normalize import canonical_cluster_url
 from app.config.clustering import clustering_config
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentType
@@ -79,6 +80,55 @@ class ClusteringService:
 
         if not candidates:
             return None
+
+        # ------------------------------------------------------------------
+        # URL fast-path (articles only): if any candidate shares the same
+        # canonical URL key (host + path, no query params), treat them as the
+        # same article and cluster immediately without running the heavier
+        # similarity scorer.  This catches cross-source syndication where
+        # tracking params differ but the underlying article path is identical.
+        #
+        # Videos are intentionally excluded: YouTube watch URLs canonicalize
+        # to the same key when query params are dropped, which would
+        # incorrectly cluster unrelated videos.
+        # ------------------------------------------------------------------
+        item_url_key = (
+            canonical_cluster_url(getattr(item, "source_url", None))
+            if item.type == ContentType.ARTICLE
+            else None
+        )
+        if item_url_key:
+            url_matches = [
+                c
+                for c in candidates
+                if canonical_cluster_url(getattr(c, "source_url", None)) == item_url_key
+            ]
+            if url_matches:
+                # Prefer a match that already belongs to a cluster so we join
+                # an existing group rather than creating a redundant new one.
+                clustered_match = next((c for c in url_matches if c.cluster_id), None)
+                url_match = clustered_match or url_matches[0]
+
+                if url_match.cluster_id:
+                    self._add_to_cluster(item, url_match.cluster_id)
+                    logger.info(
+                        "[clustering] url_fast_path: item %s → existing cluster %s (url_key=%r)",
+                        item.id,
+                        url_match.cluster_id,
+                        item_url_key,
+                    )
+                    return url_match.cluster_id
+                else:
+                    cluster_id = self._create_cluster([item, url_match])
+                    logger.info(
+                        "[clustering] url_fast_path: created cluster %s for items "
+                        "%s, %s (url_key=%r)",
+                        cluster_id,
+                        item.id,
+                        url_match.id,
+                        item_url_key,
+                    )
+                    return cluster_id
 
         # Find best matching cluster
         best_cluster_id = None
