@@ -72,7 +72,7 @@ def queue_content_ai_summary_request(
         .filter(
             ContentEventOutbox.content_item_id == int(item.id),
             ContentEventOutbox.event_type == CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE,
-            ContentEventOutbox.status.in_(("pending", "processing")),
+            ContentEventOutbox.status.in_(("pending", "processing", "failed")),
         )
         .first()
     )

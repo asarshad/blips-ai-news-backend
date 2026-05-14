@@ -53,6 +53,9 @@ _EVENT_MAX_ATTEMPTS_OVERRIDES: dict[str, int] = {
     # Image extraction failures are almost always structural (paywalled, no image exists).
     # 3 attempts is enough to cover transient fetch errors; beyond that it's pure waste.
     ARTICLE_IMAGE_VERIFY_REQUESTED_EVENT_TYPE: 3,
+    # AI summary failures for paywalled/thin-content articles are also structural.
+    # 3 attempts covers transient LLM errors; beyond that the article is unskimmable.
+    CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE: 3,
 }
 
 
