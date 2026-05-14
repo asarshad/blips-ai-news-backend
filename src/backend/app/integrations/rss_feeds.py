@@ -1088,7 +1088,8 @@ FEED_REGISTRY: List[FeedConfig] = [
         daily_cap=2,
         decay_profile=DecayProfile.NORMAL,
         base_quality_weight=0.75,
-        notes="SageMaker, Bedrock, cloud ML tooling",
+        enabled=False,
+        notes="Disabled 2026-05-14: vendor marketing/tutorials (SageMaker, Bedrock how-tos). Newsworthy AWS ML announcements are covered by TechCrunch/Verge independently. General AWS Blog already disabled for same reason.",
     ),
     FeedConfig(
         url="https://www.semianalysis.com/feed",
