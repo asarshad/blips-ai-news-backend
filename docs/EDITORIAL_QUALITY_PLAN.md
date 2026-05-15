@@ -235,6 +235,36 @@ P4 audit of top-50 READY articles confirmed Phase 1–5 made meaningful progress
 
 ---
 
+## Phase 7 — Source quality / dead-weight removal (from 2026-05-15 AI cost investigation)
+
+AI cost spike investigation (2026-05-15) revealed that several ingested sources contribute **zero READY articles** over 30 days, burning ingestion quota and AI pipeline slots for nothing. Two root causes:
+
+1. **Hard paywall** — article body extracts to <120 words (paywall interstitial); `bounded_article_summary_text` returns None; item gets terminal-rejected.
+2. **Indirect sources via Techmeme** — Bloomberg, Reuters, WSJ URLs flow in via Techmeme's `primary_link_from_description` extraction and are also paywalled.
+
+### 30-day source readiness data (pulled 2026-05-15)
+
+| Source | Ingested | READY | Ready% | Root cause |
+|---|---|---|---|---|
+| CNBC Technology | 116 | 0 | 0% | Hard paywall |
+| Bloomberg | 12 | 0 | 0% | Hard paywall (via Techmeme) |
+| Reuters | 9 | 0 | 0% | Hard paywall (via Techmeme) |
+| WSJ | 6 | 0 | 0% | Hard paywall (via Techmeme) |
+| Digital Trends | 44 | 2 | 4.5% | Thin extraction + partial paywall |
+| 9to5Google | 336 | 34 | 10.1% | Mix of paywalled Premium+ and thin content |
+| 9to5Mac | 506 | 53 | 10.5% | Same as 9to5Google |
+| Android Authority | 109 | 38 | 34.9% | Acceptable — open web content |
+
+### Tasks
+
+| ID | Task | Files to touch | Acceptance criterion | Status |
+|---|---|---|---|---|
+| P7-1 | **Remove CNBC Technology feed.** Hard paywall, 0 READY in 30 days. Existing DB rows stay; we stop ingesting new ones. Note in code pointing to Techmeme as the proxy for premium news coverage. | `app/integrations/rss_feeds.py` | CNBC Technology no longer appears in `source_fetch_states` after next worker restart. | **done** — Removed `FeedConfig` entry; replaced with explanatory comment. Commit pending. |
+| P7-2 | **Domain blocklist for paywalled sources arriving via Techmeme.** Bloomberg, Reuters, WSJ arrive as `source_url` values extracted from Techmeme description HTML. They can't be removed from `rss_feeds.py` (no direct feed). Need a promotion-time or ingestion-time domain filter that rejects known-paywalled domains before they reach the AI pipeline. | `app/services/promotion_service.py` or `app/ingestion/checkpoint_worker.py`; `app/core/config.py` (`PAYWALLED_DOMAIN_BLOCKLIST`). | After deploy, no new bloomberg.com / reuters.com / wsj.com / ft.com items appear in `content_items` with `curation_status=PROMOTED`. | **todo** |
+| P7-3 | **Investigate 9to5Mac / 9to5Google 10% ready rate.** 10% is low but may be acceptable if the 90% failure is correct rejection (paywalled Premium+, non-tech-relevant, duplicate). Spot-check 20 suppressed items from each source to confirm the rejections are correct before considering any action. | `render psql` diagnostic only. | If ≥80% of spot-checked rejections are correctly rejected: mark acceptable, no action. If structural extraction failure: consider description-fallback or source removal. | **todo** |
+
+---
+
 ## Change log
 
 - 2026-05-11 — Initial plan created from editorial audit + backend code deep-dive.
@@ -245,3 +275,4 @@ P4 audit of top-50 READY articles confirmed Phase 1–5 made meaningful progress
 - 2026-05-15 — P4-1 and P4-2 re-audit complete (post Phase 1–5 improvements). P4-1: 4/5 criteria met — Filler+Weak collapsed to 8%, `is_major_tech_news` 94% of top-50, all three major-company targets met, but duplicate clusters increased to 4 (criterion required ≤1, not met). P4-2: 13% READY coverage, 53% any-status DB coverage; same-morning methodology inflates miss rate; 7/15 stories entirely absent (funding/startup gap, policy stories). Recommend P6-4 for semantic story dedup; re-run P4-2 with 24h-lagged Techmeme snapshot.
 - 2026-05-15 — Phase 6 tasks complete. P6-1 (major-news classify sweep): new 30-min maintenance task classifying all PROMOTED ARTICLEs with `is_major_tech_news IS NULL`; two bugs fixed (datetime timezone, `minimum=0` for test budget). P6-2 (how-to suppression): source-gated suppression for ZDNet/CNET/TechRadar/Tom's Guide/Digital Trends; 21-test suite. P6-3 (Techmeme diagnostic): confirmed Outcome B — probe not forwarding `primary_link_from_description`; patched probe, cancelled 17 stale AI events. P1-1b marked done. P3-1 (co-mention boost) complete. P3-3 (three targeted feeds): TechCrunch Funding + Axios added, Crunchbase cap bumped; deployed commit c1d1f4c.
 - 2026-05-15 — Backlog cleared. P6-4 (semantic story dedup): entity-Jaccard gate catches same-story different-vocabulary duplicates (Musk/Altman cluster, OpenAI Codex cluster); 19 tests. P3-2 (entity floors): Apple/MSFT/Meta floor swaps weakest window item when category absent; 19 tests. P2-5 marked done (already implemented in `clustering/url_normalize.py`, wired into service). All editorial quality backlog tasks now complete.
+- 2026-05-15 — Phase 7 added from AI cost spike investigation. Root cause: paywalled sources burn pipeline capacity for zero READY output. P7-1 done: CNBC Technology feed removed (116 ingested / 0 READY in 30 days). P7-2 and P7-3 tracked as todo: Bloomberg/Reuters/WSJ domain blocklist (arrive via Techmeme, not direct feeds); 9to5Mac/9to5Google 10% rate spot-check.

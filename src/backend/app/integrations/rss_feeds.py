@@ -143,16 +143,11 @@ FEED_REGISTRY: List[FeedConfig] = [
     # These are excluded from normal checkpointed RSS defaults to avoid double
     # counting and keep the fast path operationally isolated.
     # =========================================================================
-    FeedConfig(
-        url="https://www.cnbc.com/id/19854910/device/rss/rss.html",
-        name="CNBC Technology",
-        role=FeedRole.MAJOR_NEWS,
-        quality_tier=QualityTier.PREMIUM,
-        daily_cap=5,
-        decay_profile=DecayProfile.FAST,
-        base_quality_weight=0.88,
-        notes="Fast major-company, market, and policy coverage",
-    ),
+    # CNBC Technology removed 2026-05-15: hard paywall — 116 articles ingested
+    # over 30 days, 0 READY. Article extraction consistently returns <120 words
+    # (paywall interstitial); zero AI pipeline value. Bloomberg/WSJ/Reuters
+    # coverage is proxied via Techmeme (P1-1). If CNBC adds a free RSS tier,
+    # re-add with role=MAJOR_NEWS and implement description-fallback summary.
     FeedConfig(
         url="https://www.platformer.news/rss/",
         name="Platformer",
