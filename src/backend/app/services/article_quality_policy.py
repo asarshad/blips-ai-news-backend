@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from sqlalchemy import func, not_, or_
+from sqlalchemy import and_, func, not_, or_
 
 from app.core.config import settings
 from app.models.content import ContentItem
@@ -72,6 +72,33 @@ _DEALS_SOURCE_BLOCKLIST: frozenset[str] = frozenset(
     }
 )
 
+# How-to / consumer-tutorial suppression.
+# Patterns are anchored to title start and intentionally tight to minimise FPs.
+# They ONLY fire when source is in _HOWTO_SUPPRESSION_SOURCES — outlets like
+# The Verge and TechCrunch that occasionally run "How to" explainers are not
+# affected, and "How Google/OpenAI/Anthropic..." news headlines don't match
+# because they lack "to" after "how".
+_HOWTO_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"^how\s+to\b",  # "How to enable 5G on your iPhone"
+        r"^what\s+is\b",  # "What Is a VPN?", "What Is Wi-Fi 7?"
+        r"^\d+\s+(?:best|top)\s+",  # "10 Best Wireless Earbuds of 2025"
+    )
+)
+
+# Consumer-tech outlets that regularly publish evergreen how-to/tutorial content.
+# Sources NOT in this set are unaffected even if their titles match a pattern.
+_HOWTO_SUPPRESSION_SOURCES: frozenset[str] = frozenset(
+    {
+        "zdnet",
+        "cnet",
+        "techradar",
+        "tom's guide",
+        "digital trends",
+    }
+)
+
 
 def classify_article_quality_block(item: Any) -> ArticleQualityBlock | None:
     """Return a deterministic block for known article feed pollution."""
@@ -99,8 +126,9 @@ def classify_article_quality_block(item: Any) -> ArticleQualityBlock | None:
             detail="Utility/debugger output page is not an editorial news article.",
         )
 
+    source = _safe_text(getattr(item, "source", None))
+
     if settings.ARTICLE_DEAL_SUPPRESSION_ENABLED:
-        source = _safe_text(getattr(item, "source", None))
         if source.lower() in {s.lower() for s in _DEALS_SOURCE_BLOCKLIST}:
             return ArticleQualityBlock(
                 reason="affiliate_or_deal_title",
@@ -111,6 +139,14 @@ def classify_article_quality_block(item: Any) -> ArticleQualityBlock | None:
                 reason="affiliate_or_deal_title",
                 detail="Title matches affiliate/deals pattern.",
             )
+
+    if settings.ARTICLE_HOWTO_SUPPRESSION_ENABLED:
+        if source.lower() in _HOWTO_SUPPRESSION_SOURCES:
+            if any(pattern.match(title) for pattern in _HOWTO_PATTERNS):
+                return ArticleQualityBlock(
+                    reason="consumer_howto_article",
+                    detail=f"Source '{source}' consumer how-to/tutorial content not appropriate for Blips.",
+                )
 
     return None
 
@@ -157,12 +193,22 @@ def article_quality_sql_allow_filter():
         title.like("%freebies%"),
         title.like("%promo code%"),
     )
+    howto_terms = and_(
+        source.in_(["zdnet", "cnet", "techradar", "tom's guide", "digital trends"]),
+        or_(
+            # title is already lowercased via func.lower() above
+            title.op("~")(r"^how to "),
+            title.op("~")(r"^what is "),
+            title.op("~")(r"^\d+ (best|top) "),
+        ),
+    )
+
+    active_blocks: list = [puzzle_terms, utility_terms]
     if settings.ARTICLE_DEAL_SUPPRESSION_ENABLED:
-        return or_(
-            ContentItem.manual_added.is_(True),
-            not_(or_(puzzle_terms, utility_terms, deal_terms)),
-        )
-    return or_(ContentItem.manual_added.is_(True), not_(or_(puzzle_terms, utility_terms)))
+        active_blocks.append(deal_terms)
+    if settings.ARTICLE_HOWTO_SUPPRESSION_ENABLED:
+        active_blocks.append(howto_terms)
+    return or_(ContentItem.manual_added.is_(True), not_(or_(*active_blocks)))
 
 
 def _safe_text(value: Any) -> str:

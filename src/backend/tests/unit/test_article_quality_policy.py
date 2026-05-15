@@ -192,3 +192,133 @@ def test_deal_suppression_flag_disabled_skips_source_blocklist():
         mock_settings.ARTICLE_DEAL_SUPPRESSION_ENABLED = False
         result = _block(source="9To5Toys", title="Apple Watch sale")
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# How-to / consumer tutorial suppression — true positives (should block)
+# ---------------------------------------------------------------------------
+
+
+def test_zdnet_how_to_blocked():
+    result = _block(source="ZDNet", title="How to enable 5G on your Android phone")
+    assert result is not None
+    assert result.reason == "consumer_howto_article"
+
+
+def test_cnet_how_to_blocked():
+    assert _block(source="CNET", title="How to cancel your Netflix subscription") is not None
+
+
+def test_techradar_how_to_blocked():
+    assert _block(source="TechRadar", title="How to use AirDrop on iPhone") is not None
+
+
+def test_toms_guide_how_to_blocked():
+    assert _block(source="Tom's Guide", title="How to factory reset your iPad") is not None
+
+
+def test_digital_trends_how_to_blocked():
+    assert (
+        _block(source="Digital Trends", title="How to download YouTube videos offline") is not None
+    )
+
+
+def test_zdnet_what_is_blocked():
+    assert _block(source="ZDNet", title="What is a VPN and do you need one?") is not None
+
+
+def test_cnet_what_is_blocked():
+    assert _block(source="CNET", title="What is Wi-Fi 7?") is not None
+
+
+def test_toms_guide_numbered_best_blocked():
+    assert _block(source="Tom's Guide", title="10 best wireless earbuds in 2025") is not None
+
+
+def test_digital_trends_numbered_top_blocked():
+    assert _block(source="Digital Trends", title="5 top laptops for students this year") is not None
+
+
+# ---------------------------------------------------------------------------
+# How-to suppression — false positives (MUST NOT block)
+# ---------------------------------------------------------------------------
+
+
+def test_verge_how_to_not_blocked():
+    """The Verge is not in the suppression list — 'How to' explainers are fine."""
+    assert _block(source="The Verge", title="How to read Anthropic's new model spec") is None
+
+
+def test_techcrunch_how_to_not_blocked():
+    assert _block(source="TechCrunch", title="How to build a RAG pipeline in 2025") is None
+
+
+def test_zdnet_how_google_not_blocked():
+    """'How Google...' doesn't match ^how\\s+to\\b — no 'to' after 'how'."""
+    assert _block(source="ZDNet", title="How Google plans to challenge OpenAI this year") is None
+
+
+def test_zdnet_how_openai_not_blocked():
+    assert (
+        _block(source="ZDNet", title="How OpenAI's new model spec changes developer tools") is None
+    )
+
+
+def test_zdnet_news_headline_not_blocked():
+    """Genuine news from ZDNet must pass."""
+    assert _block(source="ZDNet", title="ZDNet reports Google is acquiring Wiz for $23B") is None
+
+
+def test_zdnet_layoffs_not_blocked():
+    assert (
+        _block(source="ZDNet", title="Google announces 12,000 layoffs amid AI restructuring")
+        is None
+    )
+
+
+def test_cnet_earnings_not_blocked():
+    assert _block(source="CNET", title="Apple posts record $120B quarterly revenue") is None
+
+
+def test_what_is_from_non_suppressed_source_not_blocked():
+    """'What is...' from a non-suppressed source (e.g. Wired) must pass."""
+    assert _block(source="Wired", title="What is the EU AI Act and why does it matter?") is None
+
+
+def test_numbered_best_from_techcrunch_not_blocked():
+    """Listicle from non-suppressed source must pass (listicle penalty handles score)."""
+    assert _block(source="TechCrunch", title="5 best AI coding tools we tested this year") is None
+
+
+# ---------------------------------------------------------------------------
+# How-to suppression feature flag disabled
+# ---------------------------------------------------------------------------
+
+
+def test_howto_suppression_flag_disabled_skips_how_to():
+    with patch("app.services.article_quality_policy.settings") as mock_settings:
+        mock_settings.ARTICLE_DEAL_SUPPRESSION_ENABLED = True
+        mock_settings.ARTICLE_HOWTO_SUPPRESSION_ENABLED = False
+        result = _block(source="ZDNet", title="How to enable 5G on your Android phone")
+    assert result is None
+
+
+def test_howto_suppression_flag_disabled_skips_what_is():
+    with patch("app.services.article_quality_policy.settings") as mock_settings:
+        mock_settings.ARTICLE_DEAL_SUPPRESSION_ENABLED = True
+        mock_settings.ARTICLE_HOWTO_SUPPRESSION_ENABLED = False
+        result = _block(source="CNET", title="What is Wi-Fi 7?")
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# manual_added bypasses how-to block
+# ---------------------------------------------------------------------------
+
+
+def test_manual_added_bypasses_howto_block():
+    from app.services.article_quality_policy import classify_article_quality_block
+
+    item = _item(source="ZDNet", title="How to set up a VPN on your router")
+    item.manual_added = True
+    assert classify_article_quality_block(item) is None
