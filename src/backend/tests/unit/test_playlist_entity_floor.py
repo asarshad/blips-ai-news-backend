@@ -339,6 +339,148 @@ class TestApplyEntityFloor_Window:
 
 
 # ---------------------------------------------------------------------------
+# Collision regression: all three floor entities simultaneously absent
+# (Critical fix verified: each floor item lands at a distinct window index)
+# ---------------------------------------------------------------------------
+
+
+class TestApplyEntityFloor_CollisionFix:
+    def test_three_missing_entities_all_injected_distinct_slots(self):
+        """When all 3 floor entities are absent AND injected items score below
+        existing window items, each lands at a different slot — no collision."""
+        svc = _service()
+        # 3 items, all scoring high
+        selected = [
+            _item(1, entities=["openai"], global_score=0.80),
+            _item(2, entities=["google"], global_score=0.79),
+            _item(3, entities=["nvidia"], global_score=0.78),
+        ]
+        # Floor candidates score just above min_score (0.31–0.33)
+        # Each is lower than all window items, so naively the same minimum
+        # index would be chosen every iteration.
+        apple_item = _item(91, entities=["apple"], global_score=0.33)
+        msft_item = _item(92, entities=["microsoft"], global_score=0.32)
+        meta_item = _item(93, entities=["meta"], global_score=0.31)
+        candidates = selected + [apple_item, msft_item, meta_item]
+
+        result = svc._apply_entity_floor(
+            selected,
+            candidates,
+            floor_entities=frozenset({"apple", "microsoft", "meta"}),
+            check_window=3,
+        )
+
+        assert len(result) == 3
+        result_ids = {item.id for item in result}
+        # All three floor entities must survive — no item should overwrite another.
+        assert 91 in result_ids, "Apple floor item must be present"
+        assert 92 in result_ids, "Microsoft floor item must be present"
+        assert 93 in result_ids, "Meta floor item must be present"
+        # Original items were all displaced
+        assert 1 not in result_ids
+        assert 2 not in result_ids
+        assert 3 not in result_ids
+
+    def test_two_missing_with_low_score_floor_items_both_survive(self):
+        """Two missing floor entities with floor items scoring below window minimum."""
+        svc = _service()
+        selected = [
+            _item(1, entities=["openai"], global_score=0.80),
+            _item(2, entities=["google"], global_score=0.79),
+        ]
+        apple_item = _item(91, entities=["apple"], global_score=0.31)
+        msft_item = _item(92, entities=["microsoft"], global_score=0.30)
+        candidates = selected + [apple_item, msft_item]
+
+        result = svc._apply_entity_floor(
+            selected,
+            candidates,
+            floor_entities=frozenset({"apple", "microsoft"}),
+            check_window=2,
+            min_score=0.30,
+        )
+
+        assert len(result) == 2
+        result_ids = {item.id for item in result}
+        assert 91 in result_ids
+        assert 92 in result_ids
+
+
+# ---------------------------------------------------------------------------
+# Dict items (tiered path): _item_id, _item_global_score, _item_entity_names
+# ---------------------------------------------------------------------------
+
+
+def _dict_item(item_id: int, *, entities=None, global_score: float = 0.50) -> dict:
+    return {"id": item_id, "entities": entities or [], "global_score": global_score}
+
+
+class TestHelpers_DictFormat:
+    def test_item_id_from_dict(self):
+        assert PlaylistService._item_id({"id": 42}) == 42
+
+    def test_item_id_from_content_item(self):
+        assert PlaylistService._item_id(_item(7)) == 7
+
+    def test_item_global_score_from_dict(self):
+        assert PlaylistService._item_global_score({"global_score": 0.65}) == 0.65
+
+    def test_item_global_score_none_returns_zero(self):
+        assert PlaylistService._item_global_score({"global_score": None}) == 0.0
+
+    def test_item_entity_names_from_dict(self):
+        d = {"entities": ["Apple", "OpenAI"]}
+        assert PlaylistService._item_entity_names(d) == {"apple", "openai"}
+
+    def test_item_entity_names_from_content_item(self):
+        item = _item(1, entities=["Microsoft"])
+        assert PlaylistService._item_entity_names(item) == {"microsoft"}
+
+
+class TestApplyEntityFloor_DictItems:
+    def test_floor_fires_for_dict_items(self):
+        """Floor works when items are plain dicts (tiered-path format)."""
+        svc = _service()
+        selected = [
+            _dict_item(1, entities=["openai"], global_score=0.70),
+            _dict_item(2, entities=["google"], global_score=0.65),
+        ]
+        apple_dict = _dict_item(99, entities=["apple"], global_score=0.55)
+        # candidates = tail items (not in selected)
+        candidates = [apple_dict]
+
+        result = svc._apply_entity_floor(
+            selected,
+            candidates,
+            floor_entities=frozenset({"apple"}),
+            check_window=2,
+        )
+
+        assert len(result) == 2
+        result_ids = {d["id"] for d in result}
+        assert 99 in result_ids
+
+    def test_floor_no_op_when_dict_entity_present(self):
+        """No swap when floor entity already present in dict items."""
+        svc = _service()
+        selected = [
+            _dict_item(1, entities=["apple"], global_score=0.80),
+            _dict_item(2, entities=["openai"], global_score=0.70),
+        ]
+        apple_extra = _dict_item(99, entities=["apple"], global_score=0.55)
+        candidates = [apple_extra]
+
+        result = svc._apply_entity_floor(
+            selected,
+            candidates,
+            floor_entities=frozenset({"apple"}),
+            check_window=2,
+        )
+
+        assert result == selected
+
+
+# ---------------------------------------------------------------------------
 # Module-level constant sanity checks
 # ---------------------------------------------------------------------------
 

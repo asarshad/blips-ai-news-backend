@@ -369,9 +369,9 @@ def _is_semantic_story_duplicate(
         shared = candidate_entities & seen_entities
         if len(shared) < min_shared_entities:
             continue
+        # union is guaranteed non-empty: candidate_entities has ≥min_shared_entities
+        # members and seen_entities is non-empty (checked above).
         union = candidate_entities | seen_entities
-        if not union:
-            continue
         if len(shared) / len(union) >= entity_jaccard_threshold:
             return True
 

@@ -685,6 +685,25 @@ class PlaylistService:
         if content_type in (ContentType.ARTICLE, ContentType.VIDEO, ContentType.REEL):
             items = prioritize_recent_head(items)
 
+        # P3-2: entity floor — ensure Apple/MSFT/Meta coverage in top-N positions.
+        # For the tiered path, items are dicts. The floor candidates come from items
+        # beyond the check window; the injected item is moved up, keeping total count
+        # stable.
+        if content_type == ContentType.ARTICLE and settings.ENTITY_FLOOR_ENABLED and items:
+            win = ENTITY_FLOOR_CHECK_WINDOW
+            window_items = items[:win]
+            tail_items = items[win:]
+            if tail_items:
+                original_window_ids = {self._item_id(it) for it in window_items}
+                floored_window = self._apply_entity_floor(window_items, tail_items)
+                injected_ids = {
+                    self._item_id(it)
+                    for it in floored_window
+                    if self._item_id(it) not in original_window_ids
+                }
+                remaining_tail = [it for it in tail_items if self._item_id(it) not in injected_ids]
+                items = floored_window + remaining_tail
+
         return self._snapshot_from_items(
             items,
             generated_at=meta.generated_at,
@@ -1379,28 +1398,51 @@ class PlaylistService:
     # ── Entity category floor (P3-2) ─────────────────────────────────────────
 
     @staticmethod
-    def _item_entity_names(item: ContentItem) -> frozenset[str]:
-        """Return lowercased entity name strings for an item."""
-        return frozenset(e.lower() for e in _string_terms(getattr(item, "entities", None) or []))
+    def _item_id(item: Any) -> Any:
+        """Return the ID of an item — handles both ContentItem and dict formats."""
+        if isinstance(item, dict):
+            return item.get("id")
+        return getattr(item, "id", None)
+
+    @staticmethod
+    def _item_global_score(item: Any) -> float:
+        """Return global_score — handles both ContentItem and dict formats."""
+        if isinstance(item, dict):
+            return float(item.get("global_score", 0.0) or 0.0)
+        return float(getattr(item, "global_score", 0.0) or 0.0)
+
+    @staticmethod
+    def _item_entity_names(item: Any) -> frozenset[str]:
+        """Return lowercased entity names — handles both ContentItem and dict formats."""
+        if isinstance(item, dict):
+            entities = item.get("entities")
+        else:
+            entities = getattr(item, "entities", None)
+        return frozenset(e.lower() for e in _string_terms(entities or []))
 
     def _apply_entity_floor(
         self,
-        selected: List[ContentItem],
-        candidates: List[ContentItem],
+        selected: List[Any],
+        candidates: List[Any],
         *,
         floor_entities: frozenset[str] = ENTITY_FLOOR_ENTITIES,
         check_window: int = ENTITY_FLOOR_CHECK_WINDOW,
         min_score: float = ENTITY_FLOOR_MIN_SCORE,
-    ) -> List[ContentItem]:
+    ) -> List[Any]:
         """Ensure each floor entity has ≥1 representative in the first check_window items.
 
         If a floor entity is missing from the window AND a qualifying candidate
-        exists (global_score ≥ min_score), the lowest-scored item in the window
-        is swapped for the best-scored floor candidate. The list length is preserved.
+        exists (global_score ≥ min_score), the lowest-scored *unused* window slot is
+        swapped for the best-scored floor candidate. Each window index is used at most
+        once, preventing multiple floor items from colliding at the same position when
+        all floor entities are simultaneously absent. List length is preserved.
+
+        Works with both ``ContentItem`` ORM objects and plain dicts (tiered-path items).
 
         Args:
             selected: Current playlist items, ordered by score descending.
-            candidates: Full candidate pool used to source floor items.
+            candidates: Candidate pool to source floor items from (must not overlap
+                with selected when called from the tiered path).
             floor_entities: Entity names that must appear in the window.
             check_window: Number of top positions to audit.
             min_score: Minimum global_score for a floor candidate to be injected.
@@ -1423,19 +1465,17 @@ class PlaylistService:
             return selected  # All floor categories already covered — nothing to do.
 
         # Build a map entity → best candidate (highest global_score) not already selected.
-        selected_ids = {item.id for item in selected}
-        best_for_entity: dict[str, ContentItem] = {}
+        selected_ids = {self._item_id(item) for item in selected}
+        best_for_entity: dict[str, Any] = {}
         for item in candidates:
-            if item.id in selected_ids:
+            if self._item_id(item) in selected_ids:
                 continue
-            item_score = float(getattr(item, "global_score", 0.0) or 0.0)
+            item_score = self._item_global_score(item)
             if item_score < min_score:
                 continue
             for entity in self._item_entity_names(item) & missing:
                 existing = best_for_entity.get(entity)
-                existing_score = (
-                    float(getattr(existing, "global_score", 0.0) or 0.0) if existing else -1.0
-                )
+                existing_score = self._item_global_score(existing) if existing is not None else -1.0
                 if item_score > existing_score:
                     best_for_entity[entity] = item
 
@@ -1443,24 +1483,27 @@ class PlaylistService:
             return selected  # No qualifying floor candidate found — leave as-is.
 
         result = list(selected)
-        injected: set[int] = set()
+        injected_ids: set[Any] = set()
+        used_window_indices: set[int] = set()  # Prevent two floor items colliding at same slot
 
         for entity, floor_item in best_for_entity.items():
-            if floor_item.id in injected:
-                continue  # Already swapped in for a different entity this pass.
-            # Find the lowest-scored item in the window (excluding previously swapped items).
-            window_slice = result[:window]
-            min_idx = min(
-                range(len(window_slice)),
-                key=lambda i: float(getattr(window_slice[i], "global_score", 0.0) or 0.0),
-            )
+            floor_item_id = self._item_id(floor_item)
+            if floor_item_id in injected_ids:
+                continue  # Already swapped in for a different floor entity this pass.
+            # Find the lowest-scored *available* index in the window.
+            available = [i for i in range(window) if i not in used_window_indices]
+            if not available:
+                break  # All window slots have been used — stop injecting.
+            min_idx = min(available, key=lambda i: self._item_global_score(result[i]))
+            displaced_id = self._item_id(result[min_idx])
             result[min_idx] = floor_item
-            injected.add(floor_item.id)
+            injected_ids.add(floor_item_id)
+            used_window_indices.add(min_idx)
             logger.info(
                 "[playlist] entity_floor injected content_id=%s entity=%r replacing content_id=%s",
-                floor_item.id,
+                floor_item_id,
                 entity,
-                selected[min_idx].id,
+                displaced_id,
             )
 
         return result

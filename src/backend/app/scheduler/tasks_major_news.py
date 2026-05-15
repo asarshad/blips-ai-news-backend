@@ -444,7 +444,7 @@ def run_major_news_classify_sweep_job() -> dict[str, Any]:
 def run_major_news_probe_job() -> dict[str, Any]:
     """Probe validated major-news feeds within strict feed/item/time bounds."""
     max_seconds = _int_env("MAJOR_NEWS_PROBE_MAX_SECONDS", 60)
-    max_feeds = _int_env("MAJOR_NEWS_PROBE_MAX_FEEDS", 6)
+    max_feeds = _int_env("MAJOR_NEWS_PROBE_MAX_FEEDS", 7)  # bumped 6→7 for Axios (P3-3)
     max_inserted = _int_env("MAJOR_NEWS_PROBE_MAX_INSERTED", 20)
     max_entries_per_feed = _int_env("MAJOR_NEWS_PROBE_ENTRIES_PER_FEED", 12)
     max_entry_age_hours = _int_env("MAJOR_NEWS_PROBE_MAX_ENTRY_AGE_HOURS", 48)
