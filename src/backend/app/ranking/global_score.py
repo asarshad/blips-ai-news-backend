@@ -31,6 +31,11 @@ EDITORIAL_BOOST_WEIGHT: float = float(os.getenv("EDITORIAL_BOOST_WEIGHT", "0.05"
 # crowding out all organic signals.
 MAJOR_NEWS_SCORE_BOOST: float = float(os.getenv("MAJOR_NEWS_SCORE_BOOST", "0.12"))
 
+# Additive bonus applied when ≥2 distinct PREMIUM-tier sources cover the same
+# cluster. Signals cross-source editorial agreement on story importance.
+# Env-override: CO_MENTION_SCORE_BOOST (default 0.15).
+CO_MENTION_SCORE_BOOST: float = float(os.getenv("CO_MENTION_SCORE_BOOST", "0.15"))
+
 
 def compute_global_score(
     quality_score: float,
@@ -39,6 +44,7 @@ def compute_global_score(
     diversity_boost: float = 0.0,
     editorial_boost: int = 0,
     is_major_tech_news: bool = False,
+    co_mention_boost: float = 0.0,
     quality_weight: Optional[float] = None,
     trend_weight: Optional[float] = None,
     recency_weight: Optional[float] = None,
@@ -56,6 +62,7 @@ def compute_global_score(
         diversity_boost: Diversity modifier (typically -0.5 to 0)
         editorial_boost: Manual editorial importance (0-3)
         is_major_tech_news: LLM-confirmed significant tech-news item
+        co_mention_boost: +0.15 when ≥2 PREMIUM sources cover the same cluster
         quality_weight: Override quality weight
         trend_weight: Override trend weight
         recency_weight: Override recency weight
@@ -87,10 +94,14 @@ def compute_global_score(
     # Major-news boost: LLM-confirmed significant stories surface above filler.
     major_news_addition = MAJOR_NEWS_SCORE_BOOST if is_major_tech_news else 0.0
 
-    global_score = base_score + editorial_addition + major_news_addition
+    # Co-mention boost: cross-source editorial agreement signals importance.
+    co_mention_addition = float(co_mention_boost)
 
-    # Clamp to reasonable range (allow headroom for both boosts at max)
-    return max(0.0, min(1.0 + 3 * EDITORIAL_BOOST_WEIGHT + MAJOR_NEWS_SCORE_BOOST, global_score))
+    global_score = base_score + editorial_addition + major_news_addition + co_mention_addition
+
+    # Clamp to reasonable range (allow headroom for all boosts at max)
+    _max = 1.0 + 3 * EDITORIAL_BOOST_WEIGHT + MAJOR_NEWS_SCORE_BOOST + CO_MENTION_SCORE_BOOST
+    return max(0.0, min(_max, global_score))
 
 
 def explain_global_score(
@@ -100,6 +111,7 @@ def explain_global_score(
     diversity_boost: float = 0.0,
     editorial_boost: int = 0,
     is_major_tech_news: bool = False,
+    co_mention_boost: float = 0.0,
 ) -> dict:
     """
     Return a breakdown of global score computation.
@@ -124,6 +136,7 @@ def explain_global_score(
     diversity_contrib = scoring_weights.diversity * diversity_boost
     editorial_contrib = editorial_boost * EDITORIAL_BOOST_WEIGHT
     major_news_contrib = MAJOR_NEWS_SCORE_BOOST if is_major_tech_news else 0.0
+    co_mention_contrib = float(co_mention_boost)
 
     global_score = compute_global_score(
         quality_score,
@@ -132,6 +145,7 @@ def explain_global_score(
         diversity_boost,
         editorial_boost=editorial_boost,
         is_major_tech_news=is_major_tech_news,
+        co_mention_boost=co_mention_boost,
     )
 
     return {
@@ -166,6 +180,10 @@ def explain_global_score(
                 "is_major": is_major_tech_news,
                 "boost": MAJOR_NEWS_SCORE_BOOST,
                 "contribution": round(major_news_contrib, 4),
+            },
+            "co_mention": {
+                "boost": co_mention_boost,
+                "contribution": round(co_mention_contrib, 4),
             },
         },
     }

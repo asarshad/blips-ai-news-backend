@@ -12,7 +12,7 @@ from app.config.scoring import get_engagement_weight
 from app.core.logging import get_logger
 from app.models.content import ContentItem, ContentType
 from app.ranking.diversity import compute_diversity_boost, compute_topic_distribution
-from app.ranking.global_score import compute_global_score
+from app.ranking.global_score import CO_MENTION_SCORE_BOOST, compute_global_score
 from app.ranking.quality import compute_quality_score
 from app.ranking.recency import compute_recency_score
 from app.ranking.trend import compute_trend_score
@@ -72,12 +72,25 @@ class ScoringService:
         # Pre-compute topic distribution for diversity
         topic_distributions = self._compute_topic_distributions(hours_back)
 
+        # Pre-compute co-mention data: which clusters have ≥2 PREMIUM sources
+        premium_sources = self._build_premium_source_names()
+        cluster_source_map = self._build_cluster_source_map(items)
+
         # Score each item
+        co_mention_boosted = 0
         for item in items:
             try:
                 stats["processed"] += 1
 
-                scores = self._compute_item_scores(item, topic_distributions)
+                co_mention = self._co_mention_boost_for_item(
+                    item, cluster_source_map, premium_sources
+                )
+                if co_mention > 0:
+                    co_mention_boosted += 1
+
+                scores = self._compute_item_scores(
+                    item, topic_distributions, co_mention_boost=co_mention
+                )
 
                 success = self.content_repo.update_scores(
                     item.id,
@@ -95,6 +108,7 @@ class ScoringService:
                 logger.error(f"Error scoring item {item.id}: {e}")
                 stats["errors"] += 1
 
+        stats["co_mention_boosted"] = co_mention_boosted
         logger.info(f"Scoring complete: {stats}")
         return stats
 
@@ -117,6 +131,7 @@ class ScoringService:
         self,
         item: ContentItem,
         topic_distributions: Dict[ContentType, Dict[str, float]],
+        co_mention_boost: float = 0.0,
     ) -> Dict[str, float]:
         """
         Compute all scores for a content item.
@@ -169,6 +184,7 @@ class ScoringService:
             diversity_boost=diversity,
             editorial_boost=getattr(item, "editorial_boost", 0) or 0,
             is_major_tech_news=bool(getattr(item, "is_major_tech_news", False)),
+            co_mention_boost=co_mention_boost,
         )
 
         return {
@@ -178,6 +194,46 @@ class ScoringService:
             "diversity": diversity,
             "global": global_score,
         }
+
+    # ------------------------------------------------------------------
+    # Co-mention boost helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_premium_source_names() -> frozenset:
+        """Return the set of source names that have PREMIUM quality tier."""
+        try:
+            from app.integrations.rss_feeds import QualityTier, get_enabled_feeds
+
+            return frozenset(
+                f.name for f in get_enabled_feeds() if f.quality_tier == QualityTier.PREMIUM
+            )
+        except Exception:
+            return frozenset()
+
+    @staticmethod
+    def _build_cluster_source_map(items: List[ContentItem]) -> Dict[str, set]:
+        """Build a mapping of cluster_id → set of source names from a list of items."""
+        result: Dict[str, set] = {}
+        for item in items:
+            if item.cluster_id and item.source:
+                result.setdefault(item.cluster_id, set()).add(item.source)
+        return result
+
+    @staticmethod
+    def _co_mention_boost_for_item(
+        item: ContentItem,
+        cluster_source_map: Dict[str, set],
+        premium_source_names: frozenset,
+        *,
+        min_premium_sources: int = 2,
+    ) -> float:
+        """Return CO_MENTION_SCORE_BOOST if item's cluster has ≥min_premium_sources PREMIUM sources."""
+        if not item.cluster_id:
+            return 0.0
+        sources_in_cluster = cluster_source_map.get(item.cluster_id, set())
+        premium_count = sum(1 for s in sources_in_cluster if s in premium_source_names)
+        return CO_MENTION_SCORE_BOOST if premium_count >= min_premium_sources else 0.0
 
     def _compute_quality_score(self, item: ContentItem) -> float:
         """Backward-compatible wrapper for unit tests and legacy callers."""
