@@ -354,7 +354,28 @@ def _process_article_summary(
 
     if not bool(summary and len(summary.strip()) > 50):
         logger.warning("[content_ai] invalid article summary content_id=%s", item.id)
-        return False
+        # Summary generation ran but produced nothing usable.  Treat as unskimmable
+        # rather than returning False — False leaves ai_processed=False which causes
+        # sync_content_readiness to immediately re-enqueue and loop forever.
+        if _is_recent_article_for_maintenance(item):
+            item.summary = previous_summary
+            attempt = record_article_retry_deferral(item)
+            if attempt >= int(settings.ARTICLE_UNSKIMMABLE_RETRY_MAX_ATTEMPTS):
+                reject_terminal_unskimmable_article(db, item, reason="max_unskimmable_attempts")
+                return True
+            seed_content_readiness(item)
+            logger.info(
+                "[content_ai] deferred bad-summary article content_id=%s attempt=%s",
+                item.id,
+                attempt,
+            )
+            return True
+        reject_terminal_unskimmable_article(db, item, reason="outside_retry_lookback")
+        logger.info(
+            "[content_ai] terminally rejected bad-summary article content_id=%s",
+            item.id,
+        )
+        return True
 
     tech_relevance = None
     tech_relevance_confidence = None
