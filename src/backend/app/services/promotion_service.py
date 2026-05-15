@@ -310,6 +310,74 @@ def _normalize_entities_for_dedup(entities: object) -> frozenset[str]:
     return frozenset(_normalize_metadata_terms(entities))
 
 
+# ── Semantic story dedup ──────────────────────────────────────────────────────
+
+# Minimum number of shared entity names required for a semantic-dedup match.
+# Raising this lowers recall but tightens FP safety.
+_SEMANTIC_DEDUP_MIN_SHARED_ENTITIES: int = 2
+
+# Minimum entity Jaccard — shared / union — required once shared-entity count
+# passes the floor. At 0.5 a 2-entity article {openai, codex} matches only
+# another article whose entity set is exactly or almost exactly the same.
+# A broader story (3 entities overlapping 2 from 5) scores 2/5 = 0.40 and
+# safely misses, reducing cross-story false positives.
+_SEMANTIC_DEDUP_ENTITY_JACCARD_THRESHOLD: float = 0.50
+
+
+def _is_semantic_story_duplicate(
+    entities: object,
+    seen_pairs: list[tuple[frozenset[str], frozenset[str]]],
+    *,
+    min_shared_entities: int = _SEMANTIC_DEDUP_MIN_SHARED_ENTITIES,
+    entity_jaccard_threshold: float = _SEMANTIC_DEDUP_ENTITY_JACCARD_THRESHOLD,
+) -> bool:
+    """Detect same-story duplicates via entity-set overlap — no title similarity required.
+
+    Catches semantically-equivalent articles with different vocabulary that slip
+    past the P2-1 Jaccard title threshold (e.g. "Musk sues Altman" vs
+    "Altman responds to Musk lawsuit").
+
+    A match requires BOTH:
+    - ``len(shared_entities) >= min_shared_entities`` (specificity floor)
+    - ``entity_jaccard(candidate, seen) >= entity_jaccard_threshold``
+
+    The combined condition means: the two articles are "about the same things"
+    (dense entity overlap), not merely tangentially related through one shared
+    name.
+
+    Args:
+        entities: Entity list for the incoming candidate (strings or dicts).
+        seen_pairs: List of (title_tokens, entity_names) tuples from recently
+            promoted items. The title_tokens entry is unused here — the same
+            data structure is shared with ``_is_cross_source_duplicate``.
+        min_shared_entities: Hard minimum of shared entity names.
+        entity_jaccard_threshold: Minimum entity-Jaccard ratio.
+
+    Returns:
+        True if a duplicate-story match is found.
+    """
+    candidate_entities = _normalize_entities_for_dedup(entities)
+    if len(candidate_entities) < min_shared_entities:
+        # Candidate doesn't have enough entities to satisfy the floor — skip.
+        return False
+    if not seen_pairs:
+        return False
+
+    for _seen_tokens, seen_entities in seen_pairs:
+        if not seen_entities:
+            continue
+        shared = candidate_entities & seen_entities
+        if len(shared) < min_shared_entities:
+            continue
+        union = candidate_entities | seen_entities
+        if not union:
+            continue
+        if len(shared) / len(union) >= entity_jaccard_threshold:
+            return True
+
+    return False
+
+
 def _is_cross_source_duplicate(
     title: str | None,
     entities: object,
@@ -1540,9 +1608,14 @@ class PromotionService:
         skipped_dedup = 0
         min_score = self._min_promotion_score(content_type, config)
 
-        # Pre-load recently-promoted articles for cross-source dedup checks.
+        # Pre-load recently-promoted articles for cross-source and semantic
+        # dedup checks. Both P2-1 (Jaccard) and P6-4 (entity-Jaccard) share
+        # the same seen_pairs data structure.
         seen_dedup_pairs: list[tuple[frozenset[str], frozenset[str]]] = []
-        if content_type == ContentType.ARTICLE and settings.CROSS_SOURCE_DEDUP_ENABLED:
+        _needs_dedup_set = content_type == ContentType.ARTICLE and (
+            settings.CROSS_SOURCE_DEDUP_ENABLED or settings.SEMANTIC_STORY_DEDUP_ENABLED
+        )
+        if _needs_dedup_set:
             seen_dedup_pairs = self._get_recently_promoted_dedup_set(hours_back=config.window_hours)
 
         for scored_candidate in scored:
@@ -1589,6 +1662,23 @@ class PromotionService:
                     )
                     continue
 
+            # Semantic story dedup (P6-4): entity-Jaccard gate catches
+            # same-story articles with different vocabulary that slip through
+            # the Jaccard title threshold above. Fires independently of P2-1.
+            if content_type == ContentType.ARTICLE and settings.SEMANTIC_STORY_DEDUP_ENABLED:
+                if _is_semantic_story_duplicate(item.entities, seen_dedup_pairs):
+                    item.promotion_reason = (
+                        f"{item.promotion_reason}|blocked=semantic_story_duplicate"
+                    )
+                    skipped_dedup += 1
+                    logger.info(
+                        "[promotion] semantic_dedup skipped content_id=%s title=%r source=%s",
+                        item.id,
+                        (item.title or "")[:80],
+                        item.source or "",
+                    )
+                    continue
+
             item.curation_status = ContentStatus.PROMOTED
             sync_content_readiness(self.db, item)
             promoted += 1
@@ -1596,8 +1686,8 @@ class PromotionService:
             promoted_channel_counts[channel_key] = promoted_channel_counts.get(channel_key, 0) + 1
 
             # Register newly-promoted item so later candidates in this run
-            # can be deduped against it too.
-            if content_type == ContentType.ARTICLE and settings.CROSS_SOURCE_DEDUP_ENABLED:
+            # can be deduped against it too (both P2-1 and P6-4 share the set).
+            if content_type == ContentType.ARTICLE and _needs_dedup_set:
                 new_tokens = frozenset(re.findall(r"\w+", (item.title or "").lower()))
                 new_entities = _normalize_entities_for_dedup(item.entities)
                 if new_tokens and new_entities:

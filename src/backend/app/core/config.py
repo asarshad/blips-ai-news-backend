@@ -302,6 +302,9 @@ class Settings(BaseSettings):
     ARTICLE_DEAL_SUPPRESSION_ENABLED: bool = True
     ARTICLE_HOWTO_SUPPRESSION_ENABLED: bool = True
     CROSS_SOURCE_DEDUP_ENABLED: bool = True
+    # P6-4: entity-Jaccard semantic story dedup (catches same-story
+    # different-vocabulary duplicates that slip past CROSS_SOURCE_DEDUP).
+    SEMANTIC_STORY_DEDUP_ENABLED: bool = True
     SOURCE_HEALTH_DEGRADED_THRESHOLD: float = 0.3  # below this, mark source degraded
 
     # Minimum fresh counts per surface (triggers top-up if below)
