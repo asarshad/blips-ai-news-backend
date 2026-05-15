@@ -80,6 +80,15 @@ EXPOSED_ONLY_DEMOTION_MULTIPLIER = 0.65
 NEGATIVE_ITEM_SUPPRESSION_HOURS = 24
 NEGATIVE_CREATOR_SUPPRESSION_HOURS = 168
 
+# P3-2: Entity category floors — ensure major-company coverage in top-N positions.
+# If none of these entities appears in the first ENTITY_FLOOR_CHECK_WINDOW items
+# and a qualifying candidate exists (global_score ≥ ENTITY_FLOOR_MIN_SCORE), the
+# weakest item in the window is swapped for the best floor candidate.
+# Only applies to ARTICLE playlists.
+ENTITY_FLOOR_ENTITIES: frozenset[str] = frozenset({"apple", "microsoft", "meta"})
+ENTITY_FLOOR_CHECK_WINDOW: int = 15
+ENTITY_FLOOR_MIN_SCORE: float = 0.30
+
 # Cache configuration
 PLAYLIST_CACHE_TTL_SECONDS = 300  # 5 minutes
 PLAYLIST_CACHE_PREFIX = "playlist:"
@@ -1040,12 +1049,18 @@ class PlaylistService:
             logger.warning(f"No candidates found for {content_type}")
             return []
 
-        return self._select_fresh_session_items(
+        selected = self._select_fresh_session_items(
             device_id=device_id,
             candidates=candidates,
             size=size,
             exposed_ids=exposed_ids,
         )
+
+        # P3-2: Apply entity category floors for ARTICLE playlists.
+        if content_type == ContentType.ARTICLE and settings.ENTITY_FLOOR_ENABLED:
+            selected = self._apply_entity_floor(selected, candidates)
+
+        return selected
 
     def _relaxed_fill_items(
         self,
@@ -1360,6 +1375,95 @@ class PlaylistService:
                 source_total_counts[source_key] += 1
 
         return selected
+
+    # ── Entity category floor (P3-2) ─────────────────────────────────────────
+
+    @staticmethod
+    def _item_entity_names(item: ContentItem) -> frozenset[str]:
+        """Return lowercased entity name strings for an item."""
+        return frozenset(e.lower() for e in _string_terms(getattr(item, "entities", None) or []))
+
+    def _apply_entity_floor(
+        self,
+        selected: List[ContentItem],
+        candidates: List[ContentItem],
+        *,
+        floor_entities: frozenset[str] = ENTITY_FLOOR_ENTITIES,
+        check_window: int = ENTITY_FLOOR_CHECK_WINDOW,
+        min_score: float = ENTITY_FLOOR_MIN_SCORE,
+    ) -> List[ContentItem]:
+        """Ensure each floor entity has ≥1 representative in the first check_window items.
+
+        If a floor entity is missing from the window AND a qualifying candidate
+        exists (global_score ≥ min_score), the lowest-scored item in the window
+        is swapped for the best-scored floor candidate. The list length is preserved.
+
+        Args:
+            selected: Current playlist items, ordered by score descending.
+            candidates: Full candidate pool used to source floor items.
+            floor_entities: Entity names that must appear in the window.
+            check_window: Number of top positions to audit.
+            min_score: Minimum global_score for a floor candidate to be injected.
+
+        Returns:
+            Updated list (same length) with floor items swapped in where needed.
+        """
+        if not selected or not candidates:
+            return selected
+
+        window = min(len(selected), check_window)
+
+        # Collect entities already covered in the window.
+        covered: set[str] = set()
+        for item in selected[:window]:
+            covered |= self._item_entity_names(item) & floor_entities
+
+        missing = floor_entities - covered
+        if not missing:
+            return selected  # All floor categories already covered — nothing to do.
+
+        # Build a map entity → best candidate (highest global_score) not already selected.
+        selected_ids = {item.id for item in selected}
+        best_for_entity: dict[str, ContentItem] = {}
+        for item in candidates:
+            if item.id in selected_ids:
+                continue
+            item_score = float(getattr(item, "global_score", 0.0) or 0.0)
+            if item_score < min_score:
+                continue
+            for entity in self._item_entity_names(item) & missing:
+                existing = best_for_entity.get(entity)
+                existing_score = (
+                    float(getattr(existing, "global_score", 0.0) or 0.0) if existing else -1.0
+                )
+                if item_score > existing_score:
+                    best_for_entity[entity] = item
+
+        if not best_for_entity:
+            return selected  # No qualifying floor candidate found — leave as-is.
+
+        result = list(selected)
+        injected: set[int] = set()
+
+        for entity, floor_item in best_for_entity.items():
+            if floor_item.id in injected:
+                continue  # Already swapped in for a different entity this pass.
+            # Find the lowest-scored item in the window (excluding previously swapped items).
+            window_slice = result[:window]
+            min_idx = min(
+                range(len(window_slice)),
+                key=lambda i: float(getattr(window_slice[i], "global_score", 0.0) or 0.0),
+            )
+            result[min_idx] = floor_item
+            injected.add(floor_item.id)
+            logger.info(
+                "[playlist] entity_floor injected content_id=%s entity=%r replacing content_id=%s",
+                floor_item.id,
+                entity,
+                selected[min_idx].id,
+            )
+
+        return result
 
     def _check_topic_diversity(
         self, item: ContentItem, topic_counts: Dict[str, int], current_size: int

@@ -305,6 +305,9 @@ class Settings(BaseSettings):
     # P6-4: entity-Jaccard semantic story dedup (catches same-story
     # different-vocabulary duplicates that slip past CROSS_SOURCE_DEDUP).
     SEMANTIC_STORY_DEDUP_ENABLED: bool = True
+    # P3-2: entity category floor — injects Apple/MSFT/Meta coverage into
+    # top-15 playlist positions when inventory exists.
+    ENTITY_FLOOR_ENABLED: bool = True
     SOURCE_HEALTH_DEGRADED_THRESHOLD: float = 0.3  # below this, mark source degraded
 
     # Minimum fresh counts per surface (triggers top-up if below)
