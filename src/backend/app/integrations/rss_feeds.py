@@ -204,6 +204,16 @@ FEED_REGISTRY: List[FeedConfig] = [
         primary_link_from_description=True,
         notes="Aggregator: surfaces Bloomberg/Reuters/FT/WSJ/AP tech headlines; best single proxy for missing premium-outlet coverage. RSS <link> is always a Techmeme anchor page; primary_link_from_description=True extracts the first external <a href> from description HTML to use as source_url instead.",
     ),
+    FeedConfig(
+        url="https://api.axios.com/feed/",
+        name="Axios",
+        role=FeedRole.MAJOR_NEWS,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=3,
+        decay_profile=DecayProfile.FAST,
+        base_quality_weight=0.85,
+        notes="P3-3: broad-beat outlet covering tech deals, policy, AI, and major company news. Covers story types absent from current registry (HMRC/Quantexa-class policy, McConaughey/AI, Ofcom). General feed — tech relevance classifier filters non-tech. Canonical URL is api.axios.com/feed/ (www.axios.com/feeds/feed.rss 301-redirects here).",
+    ),
     # =========================================================================
     # BREAKING NEWS
     # Fast-moving tech news, product launches, industry updates
@@ -493,10 +503,10 @@ FEED_REGISTRY: List[FeedConfig] = [
         name="Crunchbase News",
         role=FeedRole.BUSINESS,
         quality_tier=QualityTier.STANDARD,
-        daily_cap=2,
+        daily_cap=3,
         decay_profile=DecayProfile.NORMAL,
         base_quality_weight=0.75,
-        notes="Startup funding, valuations, M&A",
+        notes="Startup funding, valuations, M&A. Cap raised 2→3 (P3-3: funding coverage gap)",
     ),
     FeedConfig(
         url="https://strictlyvc.com/feed/",
@@ -517,6 +527,16 @@ FEED_REGISTRY: List[FeedConfig] = [
         decay_profile=DecayProfile.FAST,
         base_quality_weight=0.85,
         notes="Startup-specific lane from TechCrunch for funding and launch coverage",
+    ),
+    FeedConfig(
+        url="https://techcrunch.com/tag/funding/feed/",
+        name="TechCrunch Funding",
+        role=FeedRole.BUSINESS,
+        quality_tier=QualityTier.PREMIUM,
+        daily_cap=3,
+        decay_profile=DecayProfile.FAST,
+        base_quality_weight=0.90,
+        notes="P3-3: funding/VC sub-feed. Covers Series A–C rounds, growth raises, and major funding announcements. /category/funding/ 404s; correct path is /tag/funding/feed/.",
     ),
     # =========================================================================
     # FINTECH
