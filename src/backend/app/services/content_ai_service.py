@@ -67,26 +67,16 @@ def queue_content_ai_summary_request(
     if not should_queue_content_ai_summary(item):
         return None
 
-    ts = now or datetime.utcnow()
-    # Block on any active, failed, or recently-processed event.  The "recently
-    # processed" check is critical: the pipeline may exit gracefully (status=
-    # processed) without setting ai_processed=True (e.g. unskimmable retry-
-    # deferral path), which would otherwise let sync_content_readiness
-    # immediately re-enqueue the same article in an infinite loop.
-    _AI_SUMMARY_REQUEUE_COOLDOWN_MINUTES = 60
-    recent_cutoff = ts - timedelta(minutes=_AI_SUMMARY_REQUEUE_COOLDOWN_MINUTES)
+    # Block on any active or failed event.  Bad-summary outcomes now
+    # immediately terminal-reject (ai_processed=True), so a processed event
+    # that completes without setting ai_processed can no longer happen — the
+    # 60-min "recently processed" cooldown guard is no longer needed.
     existing = (
         db.query(ContentEventOutbox.id)
         .filter(
             ContentEventOutbox.content_item_id == int(item.id),
             ContentEventOutbox.event_type == CONTENT_AI_SUMMARY_REQUESTED_EVENT_TYPE,
-            (
-                ContentEventOutbox.status.in_(("pending", "processing", "failed"))
-                | (
-                    (ContentEventOutbox.status == "processed")
-                    & (ContentEventOutbox.processed_at >= recent_cutoff)
-                )
-            ),
+            ContentEventOutbox.status.in_(("pending", "processing", "failed")),
         )
         .first()
     )
