@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from sqlalchemy import and_, func, not_, or_
 
+from app.config.scoring import get_source_quality
 from app.core.config import settings
 from app.models.content import ContentItem
 
@@ -100,6 +101,42 @@ _HOWTO_SUPPRESSION_SOURCES: frozenset[str] = frozenset(
 )
 
 
+# Niche programming language suppression.
+# These languages have tiny mainstream audiences. Articles about them from non-mainstream
+# sources are not appropriate for a broad tech-news feed.
+# Guard: only fires when source quality < threshold (mainstream outlets like Ars Technica
+# covering "Haskell at Jane Street" are exempt — their source weight ≥ 0.80).
+_NICHE_PROGRAMMING_LANGUAGES: frozenset[str] = frozenset(
+    {
+        "prolog",
+        "clojure",
+        "clojurescript",
+        "haskell",
+        "erlang",
+        "ocaml",
+        "fortran",
+        "cobol",
+        "smalltalk",
+        "ada",
+        "racket",
+        "scheme",
+        "forth",
+        "brainfuck",
+    }
+)
+
+# Longest alternatives first so the alternation short-circuits correctly.
+_NICHE_LANG_TITLE_RE: re.Pattern[str] = re.compile(
+    r"\b(" + "|".join(sorted(_NICHE_PROGRAMMING_LANGUAGES, key=len, reverse=True)) + r")\b",
+    re.IGNORECASE,
+)
+
+# Sources below this quality threshold are subject to niche-language suppression.
+# Mainstream publications (Ars Technica, Wired, TechCrunch, etc.) score ≥ 0.80
+# and are exempt — their coverage of niche languages is likely notable news.
+_NICHE_LANG_MAINSTREAM_THRESHOLD: float = 0.80
+
+
 def classify_article_quality_block(item: Any) -> ArticleQualityBlock | None:
     """Return a deterministic block for known article feed pollution."""
     if bool(getattr(item, "manual_added", False)):
@@ -146,6 +183,21 @@ def classify_article_quality_block(item: Any) -> ArticleQualityBlock | None:
                 return ArticleQualityBlock(
                     reason="consumer_howto_article",
                     detail=f"Source '{source}' consumer how-to/tutorial content not appropriate for Blips.",
+                )
+
+    if settings.NICHE_LANGUAGE_TOPIC_SUPPRESSION_ENABLED:
+        if _NICHE_LANG_TITLE_RE.search(title):
+            source_quality = get_source_quality(source)
+            if source_quality < _NICHE_LANG_MAINSTREAM_THRESHOLD:
+                matched = _NICHE_LANG_TITLE_RE.search(title)
+                lang = matched.group(1).lower() if matched else "unknown"
+                return ArticleQualityBlock(
+                    reason="niche_language_topic",
+                    detail=(
+                        f"Title references niche programming language '{lang}' "
+                        f"from non-mainstream source '{source}' (quality={source_quality:.2f}). "
+                        "Not appropriate for a broad tech-news audience."
+                    ),
                 )
 
     return None

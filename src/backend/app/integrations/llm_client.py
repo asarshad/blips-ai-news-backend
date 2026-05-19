@@ -5,6 +5,7 @@ Supports multiple LLM providers (OpenAI, Mistral) with a unified interface.
 Switch providers via LLM_PROVIDER environment variable.
 Includes retry logic, request timeouts, and daily cost tracking.
 """
+
 import json
 import re
 from abc import ABC, abstractmethod
@@ -814,9 +815,7 @@ class LLMClient:
                     tag_part, starter_part = tag_section.split("STARTERS:", 1)
                     tags = [t.strip().lower() for t in tag_part.split(",") if t.strip()]
                     raw_starters = [s.strip() for s in starter_part.split("|") if s.strip()]
-                    raw_starters = [
-                        s[:117] + "..." if len(s) > 120 else s for s in raw_starters
-                    ]
+                    raw_starters = [s[:117] + "..." if len(s) > 120 else s for s in raw_starters]
                     if raw_starters:
                         starters = {
                             "starters": raw_starters[:5],
@@ -968,13 +967,12 @@ STARTERS: question1 | question2 | question3
             if "SUMMARY:" in text:
                 if "STARTERS:" in text:
                     parts = text.split("STARTERS:", 1)
-                    normalized_summary = normalize_video_summary_output(
-                        parts[0].replace("SUMMARY:", "").strip()
-                    ) or ""
+                    normalized_summary = (
+                        normalize_video_summary_output(parts[0].replace("SUMMARY:", "").strip())
+                        or ""
+                    )
                     raw_starters = [s.strip() for s in parts[1].split("|") if s.strip()]
-                    raw_starters = [
-                        s[:117] + "..." if len(s) > 120 else s for s in raw_starters
-                    ]
+                    raw_starters = [s[:117] + "..." if len(s) > 120 else s for s in raw_starters]
                     if raw_starters:
                         starters = {
                             "starters": raw_starters[:3],
@@ -985,9 +983,9 @@ STARTERS: question1 | question2 | question3
                             ],
                         }
                 else:
-                    normalized_summary = normalize_video_summary_output(
-                        text.replace("SUMMARY:", "").strip()
-                    ) or ""
+                    normalized_summary = (
+                        normalize_video_summary_output(text.replace("SUMMARY:", "").strip()) or ""
+                    )
             else:
                 normalized_summary = normalize_video_summary_output(text) or ""
 
@@ -1142,22 +1140,23 @@ Classification target:
 - is_blips_tech_relevant: yes | no
 
 Decision standard:
-Be permissive, not strict.
+Be permissive about tech relevance, but require that the story is relevant to a *broad* tech-news audience — not just a narrow specialist community.
 
-Include stories that are directly about technology OR meaningfully relevant to a tech-news audience, including:
+Include stories that are directly about technology OR meaningfully relevant to a general tech-news audience, including:
 - major tech companies
 - AI companies, models, chips, cloud, software, hardware
 - social platforms, app stores, devices, internet infrastructure
-- cybersecurity, privacy, developer ecosystems, open source
+- cybersecurity, privacy, widely-used developer ecosystems, open source projects with broad adoption
 - regulation, litigation, antitrust, policy, bans, export controls, labor actions, or legislation affecting tech companies, platforms, AI, semiconductors, privacy, or internet services
 - geopolitics or business news when it materially affects semiconductors, supply chains, cloud providers, platforms, telecom, or major tech firms
 - earnings, M&A, leadership changes, strategy shifts, or market moves involving major technology companies
 
-Exclude stories when the connection to tech is weak, incidental, or nonexistent, including:
+Exclude stories when the connection to tech is weak, incidental, or nonexistent, OR when the story only serves a tiny specialist niche, including:
 - general world news with no meaningful tech angle
 - politics, crime, war, protests, sports, entertainment, or celebrity news with no direct impact on tech companies, platforms, products, infrastructure, or regulation
 - business news unrelated to technology or tech-adjacent industries
 - recurring help/reference content with no news development, including NYT/Wordle/Connections/Strands/Crossword hints or answers, game walkthroughs, calculators, debuggers, analyzers, status pages, docs, event pages, and raw tools
+- deep-dive tutorials or ecosystem gossip about niche/obscure programming languages (Prolog, Clojure, Haskell, Erlang, COBOL, OCaml, Smalltalk, Forth, Racket, etc.) from personal blogs or specialist sources — unless the story is notable news that would interest engineers beyond that language's users (e.g., a major CVE, a major company adopting it, a language shutdown)
 
 Important rule:
 If a reasonable tech-news reader would likely care because the story affects tech companies, platforms, AI, chips, software, hardware, privacy, or internet regulation, classify it as yes.
@@ -1169,7 +1168,7 @@ Be especially careful not to reject:
 - geopolitics that materially affects the tech supply chain
 - business or financial stories centered on major tech companies
 
-Only classify as no when the tech relevance is clearly weak or absent.
+Only classify as no when the tech relevance is clearly weak or absent, or the audience is so narrow that a general tech-news reader would not find it relevant.
 Classify raw tools or reference outputs as no unless the item is an editorial news story about the tool or about a security/product/policy development.
 
 Input:
@@ -1215,8 +1214,8 @@ Return JSON only. Do not wrap it in markdown.
                     ChatMessage(
                         role="system",
                         content=(
-                            "You classify whether a news item is relevant to a tech-news audience. "
-                            "Be permissive and return JSON only."
+                            "You classify whether a news item is relevant to a broad tech-news audience. "
+                            "Be permissive about tech relevance but reject narrow niche content. Return JSON only."
                         ),
                     ),
                     ChatMessage(role="user", content=prompt),

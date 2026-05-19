@@ -302,6 +302,10 @@ class Settings(BaseSettings):
     ARTICLE_TECH_NONE_BLOCK_CONFIDENCE: float = 0.85
     ARTICLE_DEAL_SUPPRESSION_ENABLED: bool = True
     ARTICLE_HOWTO_SUPPRESSION_ENABLED: bool = True
+    # Suppress articles whose title references a niche programming language
+    # (Prolog, Clojure, Haskell, Erlang, etc.) from non-mainstream sources.
+    # Mainstream outlets (Ars, TechCrunch, Wired…) are exempt.
+    NICHE_LANGUAGE_TOPIC_SUPPRESSION_ENABLED: bool = True
     CROSS_SOURCE_DEDUP_ENABLED: bool = True
     # P6-4: entity-Jaccard semantic story dedup (catches same-story
     # different-vocabulary duplicates that slip past CROSS_SOURCE_DEDUP).

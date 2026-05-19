@@ -322,3 +322,107 @@ def test_manual_added_bypasses_howto_block():
     item = _item(source="ZDNet", title="How to set up a VPN on your router")
     item.manual_added = True
     assert classify_article_quality_block(item) is None
+
+
+# ---------------------------------------------------------------------------
+# Niche language suppression — true positives (should block)
+# ---------------------------------------------------------------------------
+
+
+def test_prolog_from_personal_blog_blocked():
+    """'Prolog Coding Horror' from a personal blog should be blocked."""
+    result = _block(title="Prolog Coding Horror", source="metalevel.at")
+    assert result is not None
+    assert result.reason == "niche_language_topic"
+    assert "prolog" in result.detail
+
+
+def test_haskell_from_unknown_source_blocked():
+    """Haskell deep-dive from an unknown source is niche."""
+    result = _block(title="Haskell Performance Tips You Should Know", source="some-blog.io")
+    assert result is not None
+    assert result.reason == "niche_language_topic"
+
+
+def test_clojure_from_infoq_blocked():
+    """InfoQ is now demoted to 0.72, below the 0.80 mainstream threshold."""
+    result = _block(title="Building Production Systems with Clojure", source="InfoQ")
+    assert result is not None
+    assert result.reason == "niche_language_topic"
+
+
+def test_erlang_from_default_source_blocked():
+    result = _block(title="Erlang Actors vs Go Goroutines: A Deep Dive", source="unknown-blog")
+    assert result is not None
+    assert result.reason == "niche_language_topic"
+
+
+def test_cobol_from_non_mainstream_blocked():
+    result = _block(title="COBOL Still Powers Banking — Here's Why", source="some-tech-blog")
+    assert result is not None
+    assert result.reason == "niche_language_topic"
+
+
+def test_ocaml_from_default_source_blocked():
+    result = _block(title="Why OCaml Is Perfect for Compilers", source="compiler-nerd.com")
+    assert result is not None
+    assert result.reason == "niche_language_topic"
+
+
+def test_clojurescript_blocked():
+    result = _block(title="ClojureScript vs TypeScript for Frontend Apps", source="cljs-blog.dev")
+    assert result is not None
+    assert result.reason == "niche_language_topic"
+
+
+# ---------------------------------------------------------------------------
+# Niche language suppression — false positives (MUST NOT block)
+# ---------------------------------------------------------------------------
+
+
+def test_prolog_from_ars_technica_not_blocked():
+    """Ars Technica (quality 0.90) is above the 0.80 threshold — exempt."""
+    result = _block(title="Jane Street Bets on Prolog for Internal Tooling", source="Ars Technica")
+    assert result is None
+
+
+def test_erlang_cve_from_mainstream_not_blocked():
+    """A mainstream source covering an Erlang CVE is legitimate security news."""
+    result = _block(
+        title="Critical Erlang/OTP SSH Vulnerability Allows RCE", source="Bleeping Computer"
+    )
+    assert result is None
+
+
+def test_haskell_from_techcrunch_not_blocked():
+    result = _block(title="Haskell Startup Raises $10M to Build AI Compilers", source="TechCrunch")
+    assert result is None
+
+
+def test_mainstream_article_without_niche_lang_not_blocked():
+    """Completely unrelated article must not be affected."""
+    result = _block(title="OpenAI Releases GPT-5 with Extended Context", source="The Verge")
+    assert result is None
+
+
+def test_fortran_word_in_non_language_context():
+    """'fortran' appears in title but from a mainstream source — exempt."""
+    result = _block(title="Legacy Fortran Code Still Running Missiles", source="Wired")
+    assert result is None
+
+
+def test_niche_language_flag_disabled_skips_block():
+    with patch("app.services.article_quality_policy.settings") as mock_settings:
+        mock_settings.ARTICLE_DEAL_SUPPRESSION_ENABLED = True
+        mock_settings.ARTICLE_HOWTO_SUPPRESSION_ENABLED = True
+        mock_settings.NICHE_LANGUAGE_TOPIC_SUPPRESSION_ENABLED = False
+        result = _block(title="Prolog Coding Horror", source="metalevel.at")
+    assert result is None
+
+
+def test_manual_added_bypasses_niche_language_block():
+    from app.services.article_quality_policy import classify_article_quality_block
+
+    item = _item(title="Prolog Coding Horror", source="metalevel.at")
+    item.manual_added = True
+    assert classify_article_quality_block(item) is None

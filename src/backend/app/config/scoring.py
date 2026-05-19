@@ -128,7 +128,7 @@ SOURCE_QUALITY_WEIGHTS: Dict[str, float] = {
     "the atlantic": 0.88,
     "wired": 0.85,
     "the new stack": 0.85,
-    "infoq": 0.85,
+    "infoq": 0.72,  # demoted: broad INFRA coverage but too much niche-language content
     "cnbc technology": 0.88,
     "platformer": 0.90,
     "big technology": 0.88,
