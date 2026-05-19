@@ -24,8 +24,18 @@ def test_domain_tier_rotation_for_tldr_shortlist_domains():
 
 
 def test_domain_tier_discovery_for_curated_long_tail():
+    """Explicitly listed DISCOVERY_DOMAINS are still allowed."""
     assert get_domain_tier("https://speedrun.substack.com/p/issue") == DomainTier.DISCOVERY
-    assert get_domain_tier("https://example.com/post") == DomainTier.DISCOVERY
+    assert get_domain_tier("https://latent.space/episode/123") == DomainTier.DISCOVERY
+
+
+def test_domain_tier_unknown_for_arbitrary_domains():
+    """Domains not in any curated list fall to UNKNOWN, not DISCOVERY."""
+    assert get_domain_tier("https://example.com/post") == DomainTier.UNKNOWN
+    assert get_domain_tier("https://metalevel.at/blog/prolog-coding-horror") == DomainTier.UNKNOWN
+    assert get_domain_tier("https://jank-lang.org/blog/custom-ir") == DomainTier.UNKNOWN
+    # Tech-hint domain names still get UNKNOWN — "dev" in domain doesn't mean curated
+    assert get_domain_tier("https://some-dev-blog.io/post") == DomainTier.UNKNOWN
 
 
 def test_domain_tier_blocked_for_non_editorial_sources():
@@ -42,6 +52,19 @@ def test_policy_channel_rules():
     assert is_allowed_domain("https://speedrun.substack.com/p/issue", channel="signal") is True
     assert is_allowed_domain("https://speedrun.substack.com/p/issue", channel="direct") is False
     assert is_allowed_domain("https://x.com/some/post", channel="signal") is False
+
+
+def test_unknown_domains_blocked_from_signal_ingestion():
+    """The fix for HN signal-path ingestion of personal blogs (metalevel.at, jank-lang.org)."""
+    assert (
+        is_allowed_domain("https://metalevel.at/blog/prolog-coding-horror", channel="signal")
+        is False
+    )
+    assert is_allowed_domain("https://jank-lang.org/blog/custom-ir", channel="signal") is False
+    assert is_allowed_domain("https://some-random-blog.com/post", channel="signal") is False
+    # Curated CORE/ROTATION/DISCOVERY still pass
+    assert is_allowed_domain("https://techcrunch.com/article", channel="signal") is True
+    assert is_allowed_domain("https://latent.space/episode/123", channel="signal") is True
 
 
 def test_normalization_helpers():

@@ -21,6 +21,7 @@ class DomainTier(str, Enum):
     CORE = "core"
     ROTATION = "rotation"
     DISCOVERY = "discovery"
+    UNKNOWN = "unknown"  # Not in any curated list — signal ingestion blocked
     BLOCKED = "blocked"
 
 
@@ -53,6 +54,13 @@ _POLICIES: Dict[DomainTier, DomainPolicy] = {
         quality_weight=0.62,
         daily_cap=1,
         allow_signal_ingest=True,
+        allow_direct_ingest=False,
+    ),
+    DomainTier.UNKNOWN: DomainPolicy(
+        tier=DomainTier.UNKNOWN,
+        quality_weight=0.0,
+        daily_cap=0,
+        allow_signal_ingest=False,  # Not in any curated list → never enter via HN signal
         allow_direct_ingest=False,
     ),
     DomainTier.BLOCKED: DomainPolicy(
@@ -282,11 +290,11 @@ def get_domain_tier(domain_or_url: str) -> DomainTier:
     if is_shortlisted_source(domain):
         return DomainTier.ROTATION
 
-    # Unknown domains default to discovery, with low trust/cap.
-    if _looks_like_tech_domain(domain):
-        return DomainTier.DISCOVERY
-
-    return DomainTier.DISCOVERY
+    # Domain is not in any curated list — block from signal ingestion.
+    # This prevents arbitrary personal blogs that trend on HN (e.g. metalevel.at,
+    # jank-lang.org) from entering the pipeline just because HN upvoted them.
+    # To allow a new long-tail source, add it to DISCOVERY_DOMAINS above.
+    return DomainTier.UNKNOWN
 
 
 def get_domain_policy(domain_or_url: str) -> DomainPolicy:
@@ -315,4 +323,5 @@ __all__ = [
     "get_domain_tier",
     "get_domain_policy",
     "is_allowed_domain",
+    "_looks_like_tech_domain",
 ]
