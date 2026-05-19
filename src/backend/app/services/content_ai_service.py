@@ -69,8 +69,9 @@ def queue_content_ai_summary_request(
 
     # Block on any active or failed event.  Bad-summary outcomes now
     # immediately terminal-reject (ai_processed=True), so a processed event
-    # that completes without setting ai_processed can no longer happen — the
-    # 60-min "recently processed" cooldown guard is no longer needed.
+    # that completes without setting ai_processed can no longer happen.
+    # The article_unskimmable_retry backlog (items from the old retry-deferral
+    # path) is handled by the bulk terminal-reject repair job — no cooldown needed.
     existing = (
         db.query(ContentEventOutbox.id)
         .filter(

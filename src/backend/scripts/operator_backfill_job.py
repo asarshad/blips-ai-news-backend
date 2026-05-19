@@ -264,6 +264,55 @@ def _run_repair_unskimmable_with_description(db, options: dict[str, Any]) -> dic
     }
 
 
+def _run_terminal_reject_stale_unskimmable_retry(db, options: dict[str, Any]) -> dict[str, Any]:
+    """Terminal-reject articles stuck in article_unskimmable_retry that are too old to recover.
+
+    These accumulated under the old retry-deferral path (ai_processed=False, not suppressed).
+    Any article older than max_age_days with readiness_reason='article_unskimmable_retry'
+    will never become extractable — reject them directly rather than letting the AI pipeline
+    retry them indefinitely and spike memory.
+    """
+    from app.services.article_unskimmable_service import reject_terminal_unskimmable_article
+
+    max_age_days = max(1, int(options.get("max_age_days", 7)))
+    limit = max(1, int(options.get("limit", 2000)))
+    dry_run = bool(options.get("dry_run", False))
+    cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+
+    items = (
+        db.query(ContentItem)
+        .filter(
+            ContentItem.type == ContentType.ARTICLE,
+            ContentItem.is_suppressed.is_(False),
+            ContentItem.ai_processed.is_(False),
+            ContentItem.curation_status == ContentStatus.PROMOTED,
+            ContentItem.readiness_reason == "article_unskimmable_retry",
+            ContentItem.published_at < cutoff,
+        )
+        .order_by(ContentItem.published_at.asc())
+        .limit(limit)
+        .all()
+    )
+
+    rejected_ids: list[int] = []
+    if not dry_run:
+        for item in items:
+            reject_terminal_unskimmable_article(db, item, reason="stale_unskimmable_retry")
+            if item.id is not None:
+                rejected_ids.append(int(item.id))
+        db.commit()
+
+    return {
+        "job": "terminal_reject_stale_unskimmable_retry",
+        "max_age_days": max_age_days,
+        "limit": limit,
+        "dry_run": dry_run,
+        "scanned": len(items),
+        "rejected": 0 if dry_run else len(rejected_ids),
+        "rejected_ids": rejected_ids[:200],
+    }
+
+
 def run(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """Execute the current operator maintenance job and return its result."""
     options = dict(payload or {})
@@ -290,6 +339,9 @@ def run(payload: dict[str, Any] | None = None) -> dict[str, Any]:
 
         if job == "repair_unskimmable_with_description":
             return _run_repair_unskimmable_with_description(db, options)
+
+        if job == "terminal_reject_stale_unskimmable_retry":
+            return _run_terminal_reject_stale_unskimmable_retry(db, options)
 
         all_statuses = bool(options.get("all_statuses", False))
         all_reasons = bool(options.get("all_reasons", False))
