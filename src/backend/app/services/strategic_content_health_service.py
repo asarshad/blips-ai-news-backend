@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.content import ContentItem, ContentReadinessStatus, ContentStatus, ContentType
 from app.models.content_event import ContentEventOutbox
+from app.models.push import PushSendLog, PushSubscription
 from app.models.source_fetch_state import SourceFetchState
 from app.services.major_news_constants import MAJOR_NEWS_DISCOVERED_VIA, MAJOR_NEWS_SOURCE_TYPE
 from app.services.worker_lane_metrics import read_lane_heartbeats
@@ -206,6 +207,68 @@ def compute_strategic_content_health(
                     "window_hours": ready_stall_hours,
                     "latest_ready_at": latest_any_ready.isoformat() if latest_any_ready else "never",
                 },
+            }
+        )
+
+    push_stall_hours = max(1, int(getattr(settings, "STRATEGIC_ALERT_PUSH_STALL_HOURS", 6)))
+    push_since = current - timedelta(hours=push_stall_hours)
+    active_push_subscriptions = int(
+        db.query(func.count(PushSubscription.id))
+        .filter(PushSubscription.active.is_(True))
+        .scalar()
+        or 0
+    )
+    ready_events_since_push_window = int(
+        db.query(func.count(ContentEventOutbox.id))
+        .filter(
+            ContentEventOutbox.event_type == "content.ready",
+            ContentEventOutbox.status == "processed",
+            ContentEventOutbox.processed_at >= push_since.replace(tzinfo=None),
+        )
+        .scalar()
+        or 0
+    )
+    latest_push_send_at = (
+        db.query(func.max(PushSendLog.created_at))
+        .filter(PushSendLog.mode == "auto_all")
+        .scalar()
+    )
+    latest_ready_event_at = (
+        db.query(func.max(ContentEventOutbox.processed_at))
+        .filter(
+            ContentEventOutbox.event_type == "content.ready",
+            ContentEventOutbox.status == "processed",
+        )
+        .scalar()
+    )
+    push_delivery = {
+        "active_subscriptions": active_push_subscriptions,
+        "ready_events_last_window": ready_events_since_push_window,
+        "window_hours": push_stall_hours,
+        "latest_auto_push_send_at": (
+            latest_push_send_at.isoformat() if latest_push_send_at else None
+        ),
+        "hours_since_latest_auto_push_send": (
+            round(_hours_since(current, latest_push_send_at), 2) if latest_push_send_at else None
+        ),
+        "latest_ready_event_at": (
+            latest_ready_event_at.isoformat() if latest_ready_event_at else None
+        ),
+    }
+    if (
+        active_push_subscriptions > 0
+        and ready_events_since_push_window > 0
+        and (
+            latest_push_send_at is None
+            or latest_push_send_at < push_since.replace(tzinfo=None)
+        )
+    ):
+        issues.append(
+            {
+                "key": "push_delivery_stalled",
+                "severity": "critical",
+                "message": "Ready content is being produced but automatic push delivery is stale",
+                "context": push_delivery,
             }
         )
 
@@ -432,6 +495,7 @@ def compute_strategic_content_health(
         "surfaces": surfaces,
         "event_backlog": event_backlog,
         "promoted_pending": promoted_pending,
+        "push_delivery": push_delivery,
         "worker_memory_pressure": worker_memory_pressure,
         "memory_throttled_lanes": worker_memory_pressure["memory_throttled_lanes"],
         "major_news": major_news,
@@ -457,6 +521,7 @@ _STRATEGIC_ALERT_KEYS: tuple[str, ...] = (
     "all_surfaces_ready_stalled",
     "content_event_backlog",
     "promoted_pending_backlog",
+    "push_delivery_stalled",
     "worker_memory_pressure",
     "major_news_probe_stale",
     "major_news_all_feeds_cooling_down",

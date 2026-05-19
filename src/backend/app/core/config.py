@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     STRATEGIC_ALERT_MAJOR_NEWS_STUCK_MIN_COUNT: int = 5
     STRATEGIC_ALERT_WORKER_MEMORY_THROTTLED_LANES: int = 4
     STRATEGIC_ALERT_WORKER_MEMORY_THROTTLED_MINUTES: int = 20
+    STRATEGIC_ALERT_PUSH_STALL_HOURS: int = 6
 
     # Discord notifications
     DISCORD_REPORTS_WEBHOOK_URL: str = "https://discord.com/api/webhooks/REDACTED"

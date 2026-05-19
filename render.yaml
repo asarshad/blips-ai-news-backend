@@ -111,7 +111,7 @@ projects:
               - key: PUSH_RUNTIME_ENABLED
                 value: "true"
               - key: PUSH_MODE
-                value: "manual"
+                value: "auto_all"
               - key: PUSH_CONFIG_TTL_SECONDS
                 value: "300"
 
@@ -220,7 +220,7 @@ projects:
               - key: PUSH_RUNTIME_ENABLED
                 value: "true"
               - key: PUSH_MODE
-                value: "manual"
+                value: "auto_all"
               - key: PUSH_CONFIG_TTL_SECONDS
                 value: "300"
               - key: MAX_ITEMS_PER_RUN

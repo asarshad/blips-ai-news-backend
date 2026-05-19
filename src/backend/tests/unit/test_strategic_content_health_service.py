@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models.content import ContentItem
 from app.models.content_event import ContentEventOutbox
+from app.models.push import PushSendLog, PushSubscription
 from app.models.source_fetch_state import SourceFetchState
 from app.services import alerting_service
 from app.services.major_news_constants import MAJOR_NEWS_DISCOVERED_VIA, MAJOR_NEWS_SOURCE_TYPE
@@ -31,7 +32,13 @@ def _compile_enum_sqlite(_type, _compiler, **_kwargs):
 
 def _session():
     engine = create_engine("sqlite:///:memory:")
-    for table in (ContentItem.__table__, ContentEventOutbox.__table__, SourceFetchState.__table__):
+    for table in (
+        ContentItem.__table__,
+        ContentEventOutbox.__table__,
+        SourceFetchState.__table__,
+        PushSubscription.__table__,
+        PushSendLog.__table__,
+    ):
         table.create(bind=engine)
     return sessionmaker(bind=engine)()
 
@@ -129,6 +136,78 @@ def test_strategic_health_reports_large_event_backlog(monkeypatch):
 
     assert "content_event_backlog" in {issue["key"] for issue in health["issues"]}
     assert health["event_backlog"]["due_count"] == 2
+
+
+def test_strategic_health_reports_push_delivery_stall(monkeypatch):
+    db = _session()
+    now = datetime(2026, 5, 3, 20, 0, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        "app.services.strategic_content_health_service.settings.STRATEGIC_ALERT_PUSH_STALL_HOURS",
+        6,
+    )
+    db.add(
+        PushSubscription(
+            device_id="device-1",
+            token="token-1",
+            platform="ios",
+            active=True,
+            last_seen_at=(now - timedelta(minutes=10)).replace(tzinfo=None),
+        )
+    )
+    db.add(
+        ContentEventOutbox(
+            content_item_id=1,
+            event_type="content.ready",
+            payload={"content_id": 1},
+            status="processed",
+            available_at=(now - timedelta(minutes=30)).replace(tzinfo=None),
+            processed_at=(now - timedelta(minutes=20)).replace(tzinfo=None),
+        )
+    )
+    db.add(
+        PushSendLog(
+            content_item_id=2,
+            mode="auto_all",
+            actor="event:content.ready",
+            title="Old",
+            body="Old notification",
+            audience_count=1,
+            success_count=1,
+            failure_count=0,
+            created_at=(now - timedelta(hours=8)).replace(tzinfo=None),
+        )
+    )
+    db.commit()
+
+    health = compute_strategic_content_health(db, now=now)
+
+    assert "push_delivery_stalled" in {issue["key"] for issue in health["issues"]}
+    assert health["push_delivery"]["active_subscriptions"] == 1
+    assert health["push_delivery"]["ready_events_last_window"] == 1
+
+
+def test_strategic_health_does_not_report_push_stall_without_ready_events(monkeypatch):
+    db = _session()
+    now = datetime(2026, 5, 3, 20, 0, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        "app.services.strategic_content_health_service.settings.STRATEGIC_ALERT_PUSH_STALL_HOURS",
+        6,
+    )
+    db.add(
+        PushSubscription(
+            device_id="device-1",
+            token="token-1",
+            platform="android",
+            active=True,
+            last_seen_at=(now - timedelta(minutes=10)).replace(tzinfo=None),
+        )
+    )
+    db.commit()
+
+    health = compute_strategic_content_health(db, now=now)
+
+    assert "push_delivery_stalled" not in {issue["key"] for issue in health["issues"]}
+    assert health["push_delivery"]["ready_events_last_window"] == 0
 
 
 def test_strategic_health_reports_worker_memory_pressure(monkeypatch):
