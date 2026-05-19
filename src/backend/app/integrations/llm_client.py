@@ -275,6 +275,15 @@ class MajorTechNewsResult:
     reason: str
 
 
+@dataclass
+class AudienceLaneResult:
+    """Result from audience-lane classification (GENERAL_PUBLIC vs TECHIES)."""
+
+    lane: str  # "GENERAL_PUBLIC" | "TECHIES"
+    confidence: float
+    reason: str
+
+
 class BaseLLMClient(ABC):
     """Abstract base class for LLM clients."""
 
@@ -1349,6 +1358,155 @@ Return JSON only. Do not wrap it in markdown.
             )
         except (RuntimeError, ValueError) as e:
             logger.error(f"Major tech-news classification error: {str(e)}")
+            raise
+
+    def classify_audience_lane(
+        self,
+        *,
+        title: str,
+        summary: str,
+        source: str,
+    ) -> AudienceLaneResult:
+        """Classify whether a content item is suitable for a general-public audience.
+
+        All Blips content is relevant to techies. This classifier identifies the
+        subset that is *also* accessible and interesting to non-technical readers
+        (mainstream tech-news consumers who use iPhones/Android, follow Apple/
+        Google news, but are not software engineers).
+
+        Returns lane="GENERAL_PUBLIC" when the story would resonate with that
+        broader audience; "TECHIES" when it primarily requires technical context
+        to appreciate.
+        """
+        if not self.is_configured():
+            raise RuntimeError(f"{self.get_provider()} API key is not configured")
+
+        prompt = f"""
+You are classifying a tech-news article for Blips, a curated tech-news app.
+
+All Blips content is already confirmed to be tech-relevant. Your job is to decide
+whether this specific article is ALSO accessible and interesting to a *general-public*
+tech-news reader, or whether it primarily serves a technical specialist audience.
+
+Target reader profile for GENERAL_PUBLIC:
+- Uses an iPhone or Android phone, follows Apple/Google/Meta/Samsung news
+- Reads mainstream tech coverage (The Verge, Mashable, Engadget)
+- NOT a software engineer, developer, or IT professional
+- Cares about consumer products, AI assistants, social media, major company news,
+  data privacy stories, regulatory actions affecting everyday tech, and tech industry drama
+
+Classify as GENERAL_PUBLIC when the story would naturally appeal to this reader:
+- Consumer device launches (iPhone, Galaxy, Vision Pro, wearables)
+- Major AI product releases and features aimed at consumers (ChatGPT, Gemini, Copilot)
+- Social media platform news (TikTok, Instagram, X/Twitter, YouTube policy changes)
+- Big tech company actions: layoffs, acquisitions, CEO changes, antitrust rulings
+- Consumer data breaches or privacy incidents affecting millions of users
+- Streaming, gaming, or subscription service changes (Netflix, Spotify, Apple TV+)
+- Regulation or legislation that directly affects consumer tech products or platforms
+- Major funding rounds or IPOs that are mainstream news (OpenAI, SpaceX, Anthropic)
+
+Classify as TECHIES when the story primarily requires technical expertise to appreciate:
+- Programming language or runtime releases (Python 3.14, Node.js 24, Rust 2024)
+- Framework, library, or developer tool updates (React 19, Next.js 15, Vite 7)
+- Infrastructure and cloud service launches (new EC2 instance type, GKE autopilot update)
+- CVE disclosures and security vulnerability details (unless a massive consumer breach)
+- Developer platform and API changes (GitHub Actions update, npm registry, Kubernetes)
+- Database, storage, or networking internals (Postgres vacuum, eBPF, TCP congestion)
+- Enterprise DevOps, CI/CD, and platform engineering tooling
+- Low-level systems: kernel, compiler, linker, hardware microarchitecture deep-dives
+- niche open-source project releases with no consumer-facing product angle
+
+When in doubt, prefer GENERAL_PUBLIC for stories about major tech companies or AI,
+and TECHIES for stories whose significance requires developer/sysadmin context.
+
+Input:
+Title: {title}
+Summary: {summary}
+Source: {source}
+
+Output:
+Return JSON only in this exact format:
+{{
+  "lane": "GENERAL_PUBLIC" | "TECHIES",
+  "confidence": 0.0-1.0,
+  "reason": "one short sentence explaining the call"
+}}
+
+Examples:
+Title: Apple announces iPhone 17 with new camera system and A19 chip
+Summary: Apple unveiled the iPhone 17 lineup at its September event...
+Output:
+{{"lane":"GENERAL_PUBLIC","confidence":0.98,"reason":"Major consumer device launch relevant to every smartphone owner."}}
+
+Title: Rust 2024 Edition stabilises new async-fn-in-trait syntax
+Summary: The Rust 2024 Edition is now stable, bringing async-fn-in-trait...
+Output:
+{{"lane":"TECHIES","confidence":0.97,"reason":"Rust language edition update relevant to Rust developers only."}}
+
+Title: OpenAI launches free ChatGPT tier with GPT-4o access
+Summary: OpenAI announced it is removing the paywall from ChatGPT...
+Output:
+{{"lane":"GENERAL_PUBLIC","confidence":0.95,"reason":"Consumer AI product change that affects millions of everyday ChatGPT users."}}
+
+Title: PostgreSQL 17 improves autovacuum and buffer manager performance
+Summary: PostgreSQL 17 ships with significant improvements to autovacuum...
+Output:
+{{"lane":"TECHIES","confidence":0.96,"reason":"Database internals improvement primarily relevant to DBAs and backend engineers."}}
+
+Title: Google lays off 12,000 employees across multiple divisions
+Summary: Alphabet announced it will cut 12,000 jobs globally...
+Output:
+{{"lane":"GENERAL_PUBLIC","confidence":0.93,"reason":"Major tech company layoff is mainstream business and tech news."}}
+
+Return JSON only. Do not wrap in markdown.
+"""
+
+        try:
+            response = self.chat(
+                messages=[
+                    ChatMessage(
+                        role="system",
+                        content=(
+                            "You classify tech-news articles into audience lanes. Return JSON only."
+                        ),
+                    ),
+                    ChatMessage(role="user", content=prompt),
+                ],
+                max_tokens=120,
+                temperature=0.1,
+                usage_context="classification.audience_lane",
+            )
+
+            text = response.content.strip()
+            if not text:
+                raise ValueError("Empty response from LLM for audience-lane classification")
+
+            try:
+                payload = json.loads(_strip_json_fence(text))
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "Malformed JSON from LLM for audience-lane classification"
+                ) from exc
+
+            if not isinstance(payload, dict):
+                raise ValueError("Audience-lane classifier returned a non-object payload")
+
+            lane_raw = str(payload.get("lane", "")).strip().upper()
+            if lane_raw not in {"GENERAL_PUBLIC", "TECHIES"}:
+                raise ValueError(f"Unexpected audience lane value: {lane_raw!r}")
+
+            try:
+                confidence = float(payload.get("confidence", 0.0))
+                confidence = min(max(confidence, 0.0), 1.0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+
+            reason = normalize_blips_tech_reason(payload.get("reason"))
+
+            return AudienceLaneResult(lane=lane_raw, confidence=confidence, reason=reason)
+
+        except (RuntimeError, ValueError) as e:
+            logger.error("Audience-lane classification error: %s", e)
             raise
 
     def extract_article_image_url(

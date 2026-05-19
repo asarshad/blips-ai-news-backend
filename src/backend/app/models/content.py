@@ -191,6 +191,11 @@ class ContentItem(Base):
     major_tech_news_confidence = Column(Float, nullable=True)
     major_tech_news_reason = Column(String(255), nullable=True)
     is_mixed_roundup = Column(Boolean, nullable=True, index=True)
+    # Audience lane: "GENERAL_PUBLIC" (accessible to non-technical readers) or
+    # "TECHIES" (primarily for developers / engineers).  NULL = not yet classified.
+    audience_lane = Column(String(16), nullable=True, index=True)
+    audience_lane_confidence = Column(Float, nullable=True)
+    audience_lane_reason = Column(String(255), nullable=True)
 
     # Candidate provenance fields (set by signal ingestion when created as CANDIDATE).
     candidate_first_seen_at = Column(DateTime, nullable=True, index=True)

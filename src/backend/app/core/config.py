@@ -302,6 +302,10 @@ class Settings(BaseSettings):
     ARTICLE_TECH_NONE_BLOCK_CONFIDENCE: float = 0.85
     ARTICLE_DEAL_SUPPRESSION_ENABLED: bool = True
     ARTICLE_HOWTO_SUPPRESSION_ENABLED: bool = True
+    # Classify content into audience lanes: GENERAL_PUBLIC (accessible to
+    # non-technical readers) or TECHIES (developer/engineer audience).
+    # Runs after tech-relevance check in the AI pipeline.  NULL = not yet classified.
+    AUDIENCE_LANE_CLASSIFICATION_ENABLED: bool = True
     # Suppress articles whose title references a niche programming language
     # (Prolog, Clojure, Haskell, Erlang, etc.) from non-mainstream sources.
     # Mainstream outlets (Ars, TechCrunch, Wired…) are exempt.

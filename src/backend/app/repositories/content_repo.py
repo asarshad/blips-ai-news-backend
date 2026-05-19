@@ -329,6 +329,9 @@ class ContentItemRepository(BaseRepository[ContentItem]):
         is_major_tech_news: Optional[bool] = None,
         major_tech_news_confidence: Optional[float] = None,
         major_tech_news_reason: Optional[str] = None,
+        audience_lane: Optional[str] = None,
+        audience_lane_confidence: Optional[float] = None,
+        audience_lane_reason: Optional[str] = None,
         commit: bool = True,
     ) -> bool:
         """
@@ -366,6 +369,12 @@ class ContentItemRepository(BaseRepository[ContentItem]):
             item.major_tech_news_confidence = major_tech_news_confidence
         if major_tech_news_reason is not None:
             item.major_tech_news_reason = major_tech_news_reason
+        if audience_lane is not None:
+            item.audience_lane = audience_lane
+        if audience_lane_confidence is not None:
+            item.audience_lane_confidence = audience_lane_confidence
+        if audience_lane_reason is not None:
+            item.audience_lane_reason = audience_lane_reason
         sync_content_readiness(self.db, item)
         if commit:
             self.db.commit()

@@ -360,6 +360,9 @@ def _process_article_summary(
     is_major_tech_news = None
     major_tech_news_confidence = None
     major_tech_news_reason = None
+    audience_lane = None
+    audience_lane_confidence = None
+    audience_lane_reason = None
     deterministic_block = classify_article_quality_block(item)
     if deterministic_block is not None:
         tech_relevance = "no"
@@ -410,6 +413,36 @@ def _process_article_summary(
                 exc,
             )
 
+    # Audience-lane classification: runs on all tech-relevant articles.
+    # Deterministically-blocked items (tech_relevance="no") are skipped —
+    # they won't be delivered, so classifying them wastes tokens.
+    if (
+        settings.AUDIENCE_LANE_CLASSIFICATION_ENABLED
+        and tech_relevance != "no"
+        and llm_client.is_configured()
+    ):
+        try:
+            lane_result = llm_client.classify_audience_lane(
+                title=item.title or "",
+                summary=summary,
+                source=item.source or "",
+            )
+            audience_lane = lane_result.lane
+            audience_lane_confidence = lane_result.confidence
+            audience_lane_reason = lane_result.reason
+            logger.info(
+                "[content_ai] audience lane content_id=%s lane=%s confidence=%.2f",
+                item.id,
+                audience_lane,
+                audience_lane_confidence,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[content_ai] audience-lane classification failed content_id=%s: %s",
+                item.id,
+                exc,
+            )
+
     content_repo.mark_ai_processed(
         item.id,
         summary=summary,
@@ -420,6 +453,9 @@ def _process_article_summary(
         is_major_tech_news=is_major_tech_news,
         major_tech_news_confidence=major_tech_news_confidence,
         major_tech_news_reason=major_tech_news_reason,
+        audience_lane=audience_lane,
+        audience_lane_confidence=audience_lane_confidence,
+        audience_lane_reason=audience_lane_reason,
         commit=False,
     )
 
