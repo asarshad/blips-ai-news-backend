@@ -16,7 +16,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "audience_lane_001"
-down_revision = "x_signal_source_001"
+down_revision = "major_news_fast_path_001"
 branch_labels = None
 depends_on = None
 
@@ -24,7 +24,7 @@ depends_on = None
 def upgrade() -> None:
     op.add_column(
         "content_items",
-        sa.Column("audience_lane", sa.String(16), nullable=True),
+        sa.Column("audience_lane", sa.String(32), nullable=True),
     )
     op.add_column(
         "content_items",

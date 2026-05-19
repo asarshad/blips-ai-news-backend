@@ -245,8 +245,14 @@ projects:
                 value: "240"
               - key: DAILY_TARGET_ARTICLES
                 value: "200"
+              - key: YOUTUBE_API_DAILY_BUDGET_UNITS
+                value: "15000"
+              - key: YOUTUBE_API_SEARCH_DAILY_BUDGET_UNITS
+                value: "12000"
+              - key: YOUTUBE_API_DURATION_DAILY_BUDGET_UNITS
+                value: "2000"
               - key: YOUTUBE_VIDEO_SEARCH_MIN_INTERVAL_MINUTES
-                value: "90"
+                value: "60"
               - key: YOUTUBE_REEL_SEARCH_MIN_INTERVAL_MINUTES
                 value: "30"
               - key: YOUTUBE_DISCOVERY_REELS_LOOKBACK_DAYS

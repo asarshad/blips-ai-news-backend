@@ -116,6 +116,10 @@ class FakeLLMClient(BaseLLMClient):
         if '"is_major_tech_news"' in combined:
             return self._generate_major_tech_news_response(user_message)
 
+        # Must come before the summary fallback — the audience-lane prompt contains "summary"
+        if '"lane"' in combined and "general_public" in combined:
+            return self._generate_audience_lane_response(user_message)
+
         # Detect summarization request
         if "summary" in combined or "summarize" in combined:
             return self._generate_summary_response(user_message)
@@ -149,7 +153,10 @@ class FakeLLMClient(BaseLLMClient):
 
     def _generate_summary_response(self, user_message: str) -> str:
         """Generate article/video summary (with starters when requested)."""
-        if '"tech_relevance"' in user_message.lower() and '"is_mixed_roundup"' in user_message.lower():
+        if (
+            '"tech_relevance"' in user_message.lower()
+            and '"is_mixed_roundup"' in user_message.lower()
+        ):
             title_match = re.search(
                 r"video title:\s*(.+?)(?:\n|$)",
                 user_message,
@@ -234,6 +241,7 @@ TAGS: technology, innovation, ai, software, testing"""
 
     def _generate_blips_tech_relevance_response(self, user_message: str) -> str:
         """Generate deterministic Blips news relevance classification JSON."""
+
         def _extract(label: str) -> str:
             match = re.search(rf"^{label}:\s*(.+)$", user_message, re.IGNORECASE | re.MULTILINE)
             return match.group(1).strip() if match else ""
@@ -348,6 +356,40 @@ TAGS: technology, innovation, ai, software, testing"""
                 "is_major_tech_news": "no",
                 "confidence": 0.86,
                 "reason": "Tech-relevant but too narrow for the major-news fast path.",
+            }
+        return json.dumps(payload)
+
+    def _generate_audience_lane_response(self, user_message: str) -> str:
+        """Generate deterministic audience-lane classification JSON."""
+        combined = user_message.lower()
+        # Consumer signals → GENERAL_PUBLIC
+        consumer_signals = (
+            "iphone",
+            "android",
+            "tiktok",
+            "instagram",
+            "netflix",
+            "spotify",
+            "samsung",
+            "layoffs",
+            "chatgpt",
+            "openai",
+            "apple",
+            "google",
+            "meta",
+            "microsoft",
+        )
+        if any(kw in combined for kw in consumer_signals):
+            payload = {
+                "lane": "GENERAL_PUBLIC",
+                "confidence": 0.88,
+                "reason": "Consumer-facing topic with broad mainstream appeal.",
+            }
+        else:
+            payload = {
+                "lane": "TECHIES",
+                "confidence": 0.87,
+                "reason": "Technical content primarily for developers or engineers.",
             }
         return json.dumps(payload)
 

@@ -74,6 +74,9 @@ class ContentItemSummary(BaseModel):
     tech_relevance: Optional[str] = None
     tech_relevance_confidence: Optional[float] = None
     tech_relevance_reason: Optional[str] = None
+    audience_lane: Optional[str] = None
+    audience_lane_confidence: Optional[float] = None
+    audience_lane_reason: Optional[str] = None
 
     class Config:
         from_attributes = True

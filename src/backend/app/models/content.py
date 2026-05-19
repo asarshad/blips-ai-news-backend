@@ -193,7 +193,7 @@ class ContentItem(Base):
     is_mixed_roundup = Column(Boolean, nullable=True, index=True)
     # Audience lane: "GENERAL_PUBLIC" (accessible to non-technical readers) or
     # "TECHIES" (primarily for developers / engineers).  NULL = not yet classified.
-    audience_lane = Column(String(16), nullable=True, index=True)
+    audience_lane = Column(String(32), nullable=True, index=True)
     audience_lane_confidence = Column(Float, nullable=True)
     audience_lane_reason = Column(String(255), nullable=True)
 

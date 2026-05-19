@@ -298,7 +298,9 @@ def test_process_content_ai_summary_request_rechecks_text_before_terminal_reject
         canonical_url="https://example.com/story",
         published_at=_recent_dt(hours_ago=2),
         title="Retry exhausted article now skimmable",
-        content_text=("Recovered article text about AI infrastructure and worker queues. " * 40).strip(),
+        content_text=(
+            "Recovered article text about AI infrastructure and worker queues. " * 40
+        ).strip(),
         summary=f"__blips_article_retry__:v1:3:{_recent_dt(hours_ago=1).isoformat()}",
         ai_processed=False,
         image_url="https://cdn.example.com/hero.jpg",
@@ -661,6 +663,11 @@ def test_process_article_summary_persists_tech_relevance_via_mark_ai_processed(m
         is_blips_tech_relevant="yes",
         confidence=0.97,
         reason="Directly about a major tech company product launch.",
+    )
+    fake_llm.classify_audience_lane.return_value = SimpleNamespace(
+        lane="GENERAL_PUBLIC",
+        confidence=0.91,
+        reason="Major consumer product launch.",
     )
 
     mark_calls = []

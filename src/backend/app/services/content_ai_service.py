@@ -413,12 +413,14 @@ def _process_article_summary(
                 exc,
             )
 
-    # Audience-lane classification: runs on all tech-relevant articles.
-    # Deterministically-blocked items (tech_relevance="no") are skipped —
-    # they won't be delivered, so classifying them wastes tokens.
+    # Audience-lane classification: only runs when tech relevance is positively
+    # confirmed ("yes").  This skips items blocked by deterministic rules
+    # (tech_relevance="no"), items where the tech-relevance flag is disabled
+    # (tech_relevance stays None), and items where the tech-relevance classifier
+    # threw an exception (also None).  Avoids wasting tokens on non-tech content.
     if (
         settings.AUDIENCE_LANE_CLASSIFICATION_ENABLED
-        and tech_relevance != "no"
+        and tech_relevance == "yes"
         and llm_client.is_configured()
     ):
         try:
