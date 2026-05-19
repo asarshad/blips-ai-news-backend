@@ -202,17 +202,17 @@ projects:
               - key: WORKER_LANE_STARTUP_GRACE_SECONDS
                 value: "120"
               - key: WORKER_MEMORY_SOFT_LIMIT_MB
-                value: "1400"
+                value: "1200"
               - key: WORKER_MEMORY_HARD_LIMIT_MB
-                value: "1700"
+                value: "1500"
               - key: CONTENT_PROMOTION_QUEUE_DELAY_SECONDS
                 value: "60"
               - key: CONTENT_PROMOTION_FETCH_DEFERRAL_SECONDS
                 value: "60"
               - key: INGESTION_MAX_WORKERS
-                value: "2"
+                value: "1"
               - key: INGESTION_BATCH_SIZE
-                value: "5"
+                value: "2"
               - key: INGESTION_SCHEDULER_MINUTES
                 value: "15"
               - key: NEWS_FETCH_INTERVAL_MINUTES
@@ -242,7 +242,7 @@ projects:
               - key: INGEST_UNTIL_TARGETS
                 value: "true"
               - key: INGEST_CATCHUP_MAX_SECONDS
-                value: "600"
+                value: "240"
               - key: DAILY_TARGET_ARTICLES
                 value: "200"
               - key: YOUTUBE_VIDEO_SEARCH_MIN_INTERVAL_MINUTES

@@ -20,6 +20,13 @@ from typing import Deque, Dict, Iterable, List, Optional
 
 from app.core.logging import get_logger
 from app.ingestion.leases import lease_key
+from app.scheduler.runtime import (
+    current_worker_memory_mb,
+    memory_hard_limit_mb,
+    memory_over_hard_limit,
+    memory_over_soft_limit,
+    memory_soft_limit_mb,
+)
 
 logger = get_logger(__name__)
 
@@ -300,6 +307,15 @@ class IngestionScheduler:
                     self._last_cycle_status = "budget_exhausted"
                     break
 
+                if memory_over_hard_limit():
+                    logger.warning(
+                        "ingestion.scheduler_stop: hard memory pressure memory_mb=%s hard_limit_mb=%s",
+                        current_worker_memory_mb(),
+                        memory_hard_limit_mb(),
+                    )
+                    self._last_cycle_status = "memory_hard_limit"
+                    break
+
                 # Refresh only when the queue is drained.
                 #
                 # Rebuilding the queue on every cycle when a worker slot is
@@ -314,6 +330,13 @@ class IngestionScheduler:
 
                 # Dispatch into available worker slots.
                 while len(self._active) < self.config.max_workers:
+                    if memory_over_soft_limit():
+                        logger.warning(
+                            "ingestion.dispatch_paused: memory pressure memory_mb=%s soft_limit_mb=%s",
+                            current_worker_memory_mb(),
+                            memory_soft_limit_mb(),
+                        )
+                        break
                     task = self.pop_next_dispatchable()
                     if task is None:
                         break

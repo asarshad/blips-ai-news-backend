@@ -175,6 +175,64 @@ def test_scheduler_run_rotates_rows_instead_of_restarting_queue_each_cycle():
     assert seen_order[:3] == [1, 2, 3]
 
 
+def test_scheduler_run_pauses_dispatch_under_soft_memory_pressure(monkeypatch):
+    cfg = SchedulerConfig(
+        max_workers=1,
+        max_workers_article=1,
+        max_workers_video=0,
+        max_workers_reel=0,
+        share_video_slot_with_reels=False,
+        batch_size=1,
+        loop_sleep_seconds=0.001,
+    )
+    scheduler = IngestionScheduler(day_utc=date(2026, 1, 29), redis_client=None, config=cfg)
+
+    monkeypatch.setattr("app.ingestion.scheduler.memory_over_soft_limit", lambda: True)
+    monkeypatch.setattr("app.ingestion.scheduler.memory_over_hard_limit", lambda: False)
+    monkeypatch.setattr("app.ingestion.scheduler.current_worker_memory_mb", lambda: 1300)
+    monkeypatch.setattr("app.ingestion.scheduler.memory_soft_limit_mb", lambda: 1200)
+
+    processed: list[int] = []
+
+    result = scheduler.run(
+        fetch_tasks=lambda: [TaskRef(1, "rss", "a")],
+        process_task_batch=lambda row_id, _batch_size: processed.append(row_id),
+        stop_event=threading.Event(),
+        max_seconds=0.01,
+        sleep_seconds=0.001,
+    )
+
+    assert result["status"] == "budget_exhausted"
+    assert processed == []
+
+
+def test_scheduler_run_stops_under_hard_memory_pressure(monkeypatch):
+    cfg = SchedulerConfig(
+        max_workers=1,
+        max_workers_article=1,
+        max_workers_video=0,
+        max_workers_reel=0,
+        share_video_slot_with_reels=False,
+        batch_size=1,
+        loop_sleep_seconds=0.001,
+    )
+    scheduler = IngestionScheduler(day_utc=date(2026, 1, 29), redis_client=None, config=cfg)
+
+    monkeypatch.setattr("app.ingestion.scheduler.memory_over_hard_limit", lambda: True)
+    monkeypatch.setattr("app.ingestion.scheduler.current_worker_memory_mb", lambda: 1600)
+    monkeypatch.setattr("app.ingestion.scheduler.memory_hard_limit_mb", lambda: 1500)
+
+    result = scheduler.run(
+        fetch_tasks=lambda: [TaskRef(1, "rss", "a")],
+        process_task_batch=lambda _row_id, _batch_size: {"status": "ok"},
+        stop_event=threading.Event(),
+        max_seconds=5,
+        sleep_seconds=0.001,
+    )
+
+    assert result["status"] == "memory_hard_limit"
+
+
 def test_scheduler_allows_reels_to_share_video_capacity_when_reel_cap_is_zero():
     cfg = SchedulerConfig(
         max_workers=2,
