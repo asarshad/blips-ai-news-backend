@@ -270,12 +270,36 @@ class PushNotificationService:
             raise PushNotificationError("Push token is required")
         if normalized_platform not in {"android", "ios"}:
             raise PushNotificationError("Unsupported push platform")
+        now = datetime.utcnow()
 
         profile = self.db.query(UserProfile).filter(UserProfile.device_id == device_id).first()
         if profile is None:
             profile = UserProfile(device_id=device_id)
             self.db.add(profile)
             self.db.flush()
+
+        self.db.query(PushSubscription).filter(
+            PushSubscription.token == normalized_token,
+            PushSubscription.device_id != device_id,
+            PushSubscription.active.is_(True),
+        ).update(
+            {
+                PushSubscription.active: False,
+                PushSubscription.updated_at: now,
+            },
+            synchronize_session=False,
+        )
+        self.db.query(PushSubscription).filter(
+            PushSubscription.device_id == device_id,
+            PushSubscription.token != normalized_token,
+            PushSubscription.active.is_(True),
+        ).update(
+            {
+                PushSubscription.active: False,
+                PushSubscription.updated_at: now,
+            },
+            synchronize_session=False,
+        )
 
         subscription = (
             self.db.query(PushSubscription)
@@ -285,7 +309,6 @@ class PushNotificationService:
             )
             .first()
         )
-        now = datetime.utcnow()
         if subscription is None:
             subscription = PushSubscription(
                 device_id=device_id,
@@ -503,7 +526,16 @@ class PushNotificationService:
             .order_by(PushSubscription.last_seen_at.desc())
             .all()
         )
-        return [row[0] for row in rows if isinstance(row[0], str) and row[0].strip()]
+        tokens: list[str] = []
+        seen: set[str] = set()
+        for row in rows:
+            token = row[0] if isinstance(row[0], str) else ""
+            normalized = token.strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            tokens.append(normalized)
+        return tokens
 
     def _delete_tokens(self, tokens: list[str]) -> None:
         if not tokens:

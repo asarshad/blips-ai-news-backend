@@ -50,6 +50,28 @@ class _FakeDBForAuto:
         return _SequentialFirstQuery(self._items)
 
 
+class _FakeTokenQuery:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def order_by(self, *_args, **_kwargs):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _FakeDBForTokens:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def query(self, _model):
+        return _FakeTokenQuery(self._rows)
+
+
 def test_send_manual_rejects_when_push_runtime_disabled():
     service = PushNotificationService(
         db=MagicMock(),
@@ -153,6 +175,26 @@ def test_send_auto_deduplicates_ids_and_skips_non_eligible(monkeypatch):
     assert len(results) == 1
     assert results[0].content_id == 1
     assert calls == [(1, "auto_all", "scheduler:promotion", "auto:1")]
+
+
+def test_active_tokens_deduplicates_reused_fcm_tokens():
+    service = PushNotificationService(
+        db=_FakeDBForTokens(
+            [
+                ("token-a",),
+                (" token-a ",),
+                ("token-b",),
+                ("",),
+                (None,),
+            ]
+        ),
+        config_service=_FakeConfigService(
+            PushRuntimeConfig(enabled=True, mode=PushMode.auto_all, config_ttl_seconds=300),
+        ),
+        messaging_client=_FakeMessagingClient(is_available=True),
+    )
+
+    assert service._active_tokens() == ["token-a", "token-b"]
 
 
 def test_evaluate_push_eligibility_rejects_thin_promoted_article():
