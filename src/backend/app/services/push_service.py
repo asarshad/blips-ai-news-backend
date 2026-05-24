@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from sqlalchemy.exc import IntegrityError
@@ -373,7 +373,27 @@ class PushNotificationService:
             return []
 
         results: list[PushSendResponse] = []
+        auto_sent_in_window = self._auto_push_sent_count_in_window()
+        max_auto_sends = max(0, int(settings.PUSH_AUTO_MAX_SENDS_PER_WINDOW))
+        if max_auto_sends <= 0 or auto_sent_in_window >= max_auto_sends:
+            logger.info(
+                "Skipping auto push: window cap reached (%s/%s in %s minutes)",
+                auto_sent_in_window,
+                max_auto_sends,
+                settings.PUSH_AUTO_WINDOW_MINUTES,
+            )
+            return []
+
         for content_id in dict.fromkeys(content_ids):
+            if auto_sent_in_window + len(results) >= max_auto_sends:
+                logger.info(
+                    "Stopping auto push batch: window cap reached (%s/%s in %s minutes)",
+                    auto_sent_in_window + len(results),
+                    max_auto_sends,
+                    settings.PUSH_AUTO_WINDOW_MINUTES,
+                )
+                break
+
             item = self.db.query(ContentItem).filter(ContentItem.id == content_id).first()
             if item is None or not self._is_push_eligible_item(item):
                 continue
@@ -392,6 +412,23 @@ class PushNotificationService:
                 logger.warning("Skipping auto push for content %s: %s", content_id, exc)
 
         return results
+
+    def _auto_push_sent_count_in_window(self) -> int:
+        window_minutes = max(1, int(settings.PUSH_AUTO_WINDOW_MINUTES))
+        cutoff = datetime.utcnow() - timedelta(minutes=window_minutes)
+        try:
+            return int(
+                self.db.query(PushSendLog.id)
+                .filter(
+                    PushSendLog.mode == PushMode.auto_all.value,
+                    PushSendLog.created_at >= cutoff,
+                )
+                .count()
+                or 0
+            )
+        except Exception as exc:  # pragma: no cover - defensive for mocked/admin paths
+            logger.warning("Unable to read auto push window count: %s", exc)
+            return 0
 
     def _send_item(
         self,

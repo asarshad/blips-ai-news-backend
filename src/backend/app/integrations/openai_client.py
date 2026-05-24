@@ -160,7 +160,13 @@ class OpenAIClient:
             
             Article Content: {truncated_content}
             
-            Task 1: Write a concise summary of this tech article in between {settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS} and {settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words. Keep it informative and engaging. If the first draft would be shorter, add concrete factual detail from the article until it reaches at least {settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS} words. Never exceed {settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words.
+            Task 1: Write a concise summary of this tech article in between {settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS} and {settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words.
+            - Write for smart everyday readers who like technology, not only developers or security analysts.
+            - Use clear, coherent, human language. Do not sound like a changelog, vulnerability database, package README, or release note.
+            - Explain what happened, who is affected, and why it matters.
+            - Avoid copying dense strings of package names, version numbers, CLI flags, filenames, CVE IDs, or acronyms unless essential to the story.
+            - If a technical term is essential, briefly explain it in plain language using context from the article.
+            - Keep it informative and engaging. If the first draft would be shorter, add concrete factual detail from the article until it reaches at least {settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS} words. Never exceed {settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words.
             
             Task 2: Generate 5-7 relevant tags for this article, separated by commas.
             
@@ -172,7 +178,10 @@ class OpenAIClient:
             messages = [
                 ChatMessage(
                     role="system",
-                    content="You are a tech journalist assistant that creates concise, informative summaries of tech news articles.",
+                    content=(
+                        "You are a Blips tech-news editor. Write accurate, plain-English "
+                        "summaries that make technical news useful to curious human readers."
+                    ),
                 ),
                 ChatMessage(role="user", content=prompt),
             ]

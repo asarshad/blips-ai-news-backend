@@ -154,6 +154,26 @@ def test_google_deal_acquisition_not_blocked():
     assert _block(title="Google strikes deal to acquire startup for $2B") is None
 
 
+def test_code_token_soup_from_low_quality_source_blocked():
+    result = _block(
+        source="random.blog",
+        title="FooBar-CLI 2.7.1 CVE-2026-1234 Patch Breaks libssl.so for Node.js Packages",
+    )
+
+    assert result is not None
+    assert result.reason == "article_code_token_soup"
+
+
+def test_accessible_npm_security_story_not_blocked():
+    assert (
+        _block(
+            source="The Hacker News",
+            title="npm Adds 2FA-Gated Publishing and Package Install Controls Against Supply Chain Attacks",
+        )
+        is None
+    )
+
+
 # ---------------------------------------------------------------------------
 # Manual override bypasses all blocks
 # ---------------------------------------------------------------------------

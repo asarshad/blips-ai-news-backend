@@ -364,6 +364,8 @@ class Settings(BaseSettings):
     PUSH_RUNTIME_ENABLED: bool = False
     PUSH_MODE: str = "manual"
     PUSH_CONFIG_TTL_SECONDS: int = 300
+    PUSH_AUTO_MAX_SENDS_PER_WINDOW: int = 3
+    PUSH_AUTO_WINDOW_MINUTES: int = 60
 
     # Firebase Admin service account (configure one source only)
     FIREBASE_SERVICE_ACCOUNT_JSON: str = ""

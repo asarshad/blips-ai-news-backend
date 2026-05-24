@@ -69,6 +69,7 @@ MAX_PER_SOURCE_PER_PLAYLIST = 3
 CATEGORY_CAP_WINDOW_SIZE = 5
 MAX_CATEGORY_SHARE_PER_WINDOW = 0.40
 MIN_UNIQUE_SOURCES = 3
+ARTICLE_THUMBNAIL_REPEAT_WINDOW = 12
 
 # Content freshness
 MAX_CONTENT_AGE_HOURS = 72  # 3 days
@@ -164,6 +165,31 @@ def _optional_float(value: Any) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _push_repeated_article_thumbnails_later(
+    items: List[Dict[str, Any]],
+    *,
+    window: int = ARTICLE_THUMBNAIL_REPEAT_WINDOW,
+) -> List[Dict[str, Any]]:
+    """Keep repeated article images from occupying multiple early feed slots."""
+    if len(items) <= 1:
+        return items
+
+    head: List[Dict[str, Any]] = []
+    deferred: List[Dict[str, Any]] = []
+    seen_images: set[str] = set()
+
+    for item in items:
+        image = _optional_text(item.get("thumbnail_url")) or _optional_text(item.get("image_url"))
+        if image and len(head) < window and image in seen_images:
+            deferred.append(item)
+            continue
+        head.append(item)
+        if image and len(head) <= window:
+            seen_images.add(image)
+
+    return head + deferred
 
 
 def _normalize_conversation_starters(value: Any) -> Dict[str, List[str]]:
@@ -521,6 +547,8 @@ class PlaylistService:
                     self._format_item(item, duration_overrides=duration_overrides)
                     for item in playlist_items
                 ]
+                if content_type == ContentType.ARTICLE:
+                    playlist = _push_repeated_article_thumbnails_later(playlist)
                 snapshot = self._snapshot_from_items(
                     playlist,
                     generated_at=datetime.utcnow(),
@@ -670,6 +698,8 @@ class PlaylistService:
             device_id=device_id,
         )
         items = [self._normalize_tiered_item(item, content_type) for item in raw_items]
+        if content_type == ContentType.ARTICLE:
+            items = _push_repeated_article_thumbnails_later(items)
 
         if items and content_type != ContentType.ARTICLE:
             category_repo = UserCategorySelectionRepository(db)
@@ -1041,7 +1071,12 @@ class PlaylistService:
         """Generate a new playlist with diversity constraints."""
         selected = self._generate_playlist_items(device_id, content_type, size)
         duration_overrides = self._hydrate_duration_overrides(selected)
-        return [self._format_item(item, duration_overrides=duration_overrides) for item in selected]
+        playlist = [
+            self._format_item(item, duration_overrides=duration_overrides) for item in selected
+        ]
+        if content_type == ContentType.ARTICLE:
+            playlist = _push_repeated_article_thumbnails_later(playlist)
+        return playlist
 
     def _generate_playlist_items(
         self, device_id: str, content_type: ContentType, size: int

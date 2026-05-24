@@ -34,6 +34,7 @@ _READINESS_REASON_DESCRIPTIONS = {
     "article_non_tech": "This article was classified as not relevant to the Blips tech-news audience.",
     "article_non_news_puzzle_help": "Puzzle hints and answer pages are help content, not tech news.",
     "article_utility_tool_page": "Tool/debugger/analyzer pages are not editorial news articles.",
+    "article_code_token_soup": "This headline is too package/version/code-token heavy for broad delivery.",
     "missing_article_source": "This article is missing a canonical source URL.",
     "awaiting_article_image_verification": (
         "This article is still waiting for the post-ingest image verification pass."

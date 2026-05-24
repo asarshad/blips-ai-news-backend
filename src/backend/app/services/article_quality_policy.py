@@ -135,6 +135,34 @@ _NICHE_LANG_TITLE_RE: re.Pattern[str] = re.compile(
 # Mainstream publications (Ars Technica, Wired, TechCrunch, etc.) score ≥ 0.80
 # and are exempt — their coverage of niche languages is likely notable news.
 _NICHE_LANG_MAINSTREAM_THRESHOLD: float = 0.80
+_CODE_TOKEN_BLOCK_SOURCE_QUALITY_THRESHOLD: float = 0.75
+_CODE_TOKEN_MIN_TOKENS: int = 7
+_CODE_TOKEN_RATIO_THRESHOLD: float = 0.42
+_CODE_TOKEN_COUNT_THRESHOLD: int = 4
+_CODE_TOKEN_ALLOWED: frozenset[str] = frozenset(
+    {
+        "ai",
+        "api",
+        "app",
+        "aws",
+        "ceo",
+        "cto",
+        "eu",
+        "fbi",
+        "gpu",
+        "ios",
+        "ip",
+        "ipo",
+        "llm",
+        "nasa",
+        "npm",
+        "pc",
+        "sec",
+        "uk",
+        "us",
+        "vpn",
+    }
+)
 
 
 def classify_article_quality_block(item: Any) -> ArticleQualityBlock | None:
@@ -199,6 +227,15 @@ def classify_article_quality_block(item: Any) -> ArticleQualityBlock | None:
                         "Not appropriate for a broad tech-news audience."
                     ),
                 )
+
+    if _looks_like_code_token_soup(title, source):
+        return ArticleQualityBlock(
+            reason="article_code_token_soup",
+            detail=(
+                "Title contains too many package/version/code tokens for a broad "
+                "tech-news feed from this source."
+            ),
+        )
 
     return None
 
@@ -272,3 +309,40 @@ def _hostname(url: str) -> str:
         return ""
     parsed = urlparse(url if "://" in url else f"https://{url}")
     return (parsed.hostname or "").lower()
+
+
+def _looks_like_code_token_soup(title: str, source: str) -> bool:
+    """Catch very narrow package/version headlines without blocking known outlets."""
+    if not title:
+        return False
+    if get_source_quality(source) >= _CODE_TOKEN_BLOCK_SOURCE_QUALITY_THRESHOLD:
+        return False
+
+    tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9_./:+-]*", title)
+    if len(tokens) < _CODE_TOKEN_MIN_TOKENS:
+        return False
+
+    noisy = 0
+    for token in tokens:
+        normalized = token.strip("._:+-/").lower()
+        if not normalized or normalized in _CODE_TOKEN_ALLOWED:
+            continue
+        if _is_code_like_token(token):
+            noisy += 1
+
+    return (
+        noisy >= _CODE_TOKEN_COUNT_THRESHOLD and noisy / len(tokens) >= _CODE_TOKEN_RATIO_THRESHOLD
+    )
+
+
+def _is_code_like_token(token: str) -> bool:
+    stripped = token.strip(".,;:!?()[]{}\"'")
+    if not stripped:
+        return False
+    if any(char.isdigit() for char in stripped):
+        return True
+    if any(char in stripped for char in ("-", "_", "/", ".", "+")):
+        return True
+    if len(stripped) >= 3 and stripped.isupper():
+        return True
+    return False

@@ -177,6 +177,69 @@ def test_send_auto_deduplicates_ids_and_skips_non_eligible(monkeypatch):
     assert calls == [(1, "auto_all", "scheduler:promotion", "auto:1")]
 
 
+def test_send_auto_respects_window_cap(monkeypatch):
+    first = SimpleNamespace(
+        id=1,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        type=ContentType.ARTICLE,
+        title="First",
+        source_url="https://example.com/first",
+        canonical_url="https://example.com/first",
+        image_url="https://cdn.example.com/first.jpg",
+        article_image_status="VERIFIED",
+        ai_processed=True,
+        summary="A ready summary that makes this article card-ready.",
+        promotion_reason=None,
+    )
+    second = SimpleNamespace(
+        id=2,
+        curation_status=ContentStatus.PROMOTED,
+        is_suppressed=False,
+        type=ContentType.ARTICLE,
+        title="Second",
+        source_url="https://example.com/second",
+        canonical_url="https://example.com/second",
+        image_url="https://cdn.example.com/second.jpg",
+        article_image_status="VERIFIED",
+        ai_processed=True,
+        summary="A ready summary that makes this article card-ready.",
+        promotion_reason=None,
+    )
+    service = PushNotificationService(
+        db=_FakeDBForAuto([first, second]),
+        config_service=_FakeConfigService(
+            PushRuntimeConfig(enabled=True, mode=PushMode.auto_all, config_ttl_seconds=300),
+        ),
+        messaging_client=_FakeMessagingClient(is_available=True),
+    )
+    calls: list[int] = []
+    monkeypatch.setattr("app.services.push_service.settings.PUSH_AUTO_MAX_SENDS_PER_WINDOW", 1)
+    monkeypatch.setattr(service, "_auto_push_sent_count_in_window", lambda: 0)
+
+    def _fake_send_item(*, item, mode, actor, auto_dedup_key):
+        calls.append(item.id)
+        return PushSendResponse(
+            success=True,
+            skipped=False,
+            content_id=item.id,
+            mode=mode,
+            audience_count=1,
+            success_count=1,
+            failure_count=0,
+            invalid_token_count=0,
+            log_id=99,
+            message="sent",
+        )
+
+    monkeypatch.setattr(service, "_send_item", _fake_send_item)
+
+    results = service.send_auto_for_content_ids([1, 2], actor="scheduler:promotion")
+
+    assert [result.content_id for result in results] == [1]
+    assert calls == [1]
+
+
 def test_active_tokens_deduplicates_reused_fcm_tokens():
     service = PushNotificationService(
         db=_FakeDBForTokens(

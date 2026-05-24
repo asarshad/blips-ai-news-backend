@@ -317,12 +317,19 @@ class TestSummaryLengthPrompting:
 
         client.summarize_article("Title", "Content")
 
-        prompt = client.chat.call_args.kwargs["messages"][0].content
+        messages = client.chat.call_args.kwargs["messages"]
+        assert messages[0].role == "system"
+        assert "plain-English summaries" in messages[0].content
+        prompt = messages[1].content
         assert (
             f"between {settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS} and "
             f"{settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words"
         ) in prompt
         assert f"Never exceed {settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words" in prompt
+        assert "smart everyday readers" in prompt
+        assert "Do not sound like a changelog" in prompt
+        assert "package names, version numbers, CLI flags, filenames, CVE IDs" in prompt
+        assert "why it matters" in prompt
         assert "exactly 85-90 words" not in prompt
 
     def test_llm_client_video_summary_prompt_targets_configured_word_range(self):
@@ -359,7 +366,10 @@ class TestSummaryLengthPrompting:
         ) in prompt
         assert f"Never exceed {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words" in prompt
         assert "Before sending the response, verify that it is valid JSON" in prompt
-        assert "Do not add markdown fences, commentary, or any text before or after the JSON object." in prompt
+        assert (
+            "Do not add markdown fences, commentary, or any text before or after the JSON object."
+            in prompt
+        )
         assert "exactly 85-90 words" not in prompt
 
     def test_legacy_openai_client_article_summary_prompt_targets_60_to_70_words(self):
@@ -380,6 +390,11 @@ class TestSummaryLengthPrompting:
             f"{settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words"
         ) in prompt
         assert f"Never exceed {settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words" in prompt
+        assert "smart everyday readers" in prompt
+        assert "Do not sound like a changelog" in prompt
+        assert "package names, version numbers, CLI flags, filenames, CVE IDs" in prompt
+        assert "why it matters" in prompt
+        assert "plain-English summaries" in client.chat.call_args.args[0][0].content
         assert "exactly 85-90 words" not in prompt
 
     def test_legacy_openai_client_video_summary_prompt_targets_configured_word_range(self):
