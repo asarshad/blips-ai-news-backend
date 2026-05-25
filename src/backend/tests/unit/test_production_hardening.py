@@ -328,6 +328,8 @@ class TestSummaryLengthPrompting:
         assert f"Never exceed {settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words" in prompt
         assert "smart everyday readers" in prompt
         assert "Do not sound like a changelog" in prompt
+        assert "If the article is a roundup" in prompt
+        assert "do not list every secondary item" in prompt
         assert "package names, version numbers, CLI flags, filenames, CVE IDs" in prompt
         assert "why it matters" in prompt
         assert "exactly 85-90 words" not in prompt
@@ -365,11 +367,18 @@ class TestSummaryLengthPrompting:
             f"{settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words"
         ) in prompt
         assert f"Never exceed {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words" in prompt
+        assert "smart everyday readers" in prompt
+        assert "Do not sound like a changelog" in prompt
+        assert "If the video is a roundup" in prompt
+        assert "do not list every secondary item" in prompt
+        assert "model numbers, benchmark specs, version numbers" in prompt
+        assert "why it matters" in prompt
         assert "Before sending the response, verify that it is valid JSON" in prompt
         assert (
             "Do not add markdown fences, commentary, or any text before or after the JSON object."
             in prompt
         )
+        assert "plain-English summaries" in client.chat.call_args.kwargs["messages"][0].content
         assert "exactly 85-90 words" not in prompt
 
     def test_legacy_openai_client_article_summary_prompt_targets_60_to_70_words(self):
@@ -392,6 +401,8 @@ class TestSummaryLengthPrompting:
         assert f"Never exceed {settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words" in prompt
         assert "smart everyday readers" in prompt
         assert "Do not sound like a changelog" in prompt
+        assert "If the article is a roundup" in prompt
+        assert "do not list every secondary item" in prompt
         assert "package names, version numbers, CLI flags, filenames, CVE IDs" in prompt
         assert "why it matters" in prompt
         assert "plain-English summaries" in client.chat.call_args.args[0][0].content
@@ -415,6 +426,13 @@ class TestSummaryLengthPrompting:
             f"{settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words"
         ) in prompt
         assert f"Never exceed {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words" in prompt
+        assert "smart everyday readers" in prompt
+        assert "Do not sound like a changelog" in prompt
+        assert "If the video is a roundup" in prompt
+        assert "do not list every secondary item" in prompt
+        assert "model numbers, benchmark specs, version numbers" in prompt
+        assert "why it matters" in prompt
+        assert "plain-English summaries" in client.chat.call_args.args[0][0].content
         assert "exactly 85-90 words" not in prompt
 
 

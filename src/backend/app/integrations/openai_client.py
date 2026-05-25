@@ -164,6 +164,7 @@ class OpenAIClient:
             - Write for smart everyday readers who like technology, not only developers or security analysts.
             - Use clear, coherent, human language. Do not sound like a changelog, vulnerability database, package README, or release note.
             - Explain what happened, who is affected, and why it matters.
+            - If the article is a roundup, summarize the headline or primary story first and do not list every secondary item.
             - Avoid copying dense strings of package names, version numbers, CLI flags, filenames, CVE IDs, or acronyms unless essential to the story.
             - If a technical term is essential, briefly explain it in plain language using context from the article.
             - Keep it informative and engaging. If the first draft would be shorter, add concrete factual detail from the article until it reaches at least {settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS} words. Never exceed {settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words.
@@ -235,6 +236,12 @@ class OpenAIClient:
             Video Description: {truncated_desc}
             
             Task: Write a concise summary of this video in between {settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS} and {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words based on the description.
+            - Write for smart everyday readers who like technology, not only developers, security analysts, or hardware enthusiasts.
+            - Use clear, coherent, human language. Do not sound like a changelog, spec sheet, vulnerability database, package README, or release note.
+            - Explain what the video is about, who is affected, and why it matters.
+            - If the video is a roundup but still tech-relevant, summarize the main/headline topic first and do not list every secondary item.
+            - Avoid copying dense strings of model numbers, benchmark specs, version numbers, package names, CVE IDs, CLI flags, filenames, or acronyms unless essential to the story.
+            - If a technical term is essential, briefly explain it in plain language using context from the description.
             If the first draft would be shorter, add concrete factual detail from the description until it reaches at least {settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS} words.
             Never exceed {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words.
             Focus on the main topic and key points. Remove any channel promotion, "link in bio", or "subscribe" text.
@@ -245,7 +252,11 @@ class OpenAIClient:
             messages = [
                 ChatMessage(
                     role="system",
-                    content="You are a tech journalist assistant that creates concise, informative summaries of tech videos.",
+                    content=(
+                        "You are a careful Blips tech-news editor. Write accurate "
+                        "plain-English summaries that make tech videos useful to "
+                        "curious human readers."
+                    ),
                 ),
                 ChatMessage(role="user", content=prompt),
             ]

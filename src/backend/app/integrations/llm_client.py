@@ -879,6 +879,7 @@ Task 1: Write a concise summary of this tech article in between {settings.ARTICL
 - Write for smart everyday readers who like technology, not only developers or security analysts.
 - Use clear, coherent, human language. Do not sound like a changelog, vulnerability database, package README, or release note.
 - Explain what happened, who is affected, and why it matters.
+- If the article is a roundup, summarize the headline or primary story first and do not list every secondary item.
 - Avoid copying dense strings of package names, version numbers, CLI flags, filenames, CVE IDs, or acronyms unless essential to the story.
 - If a technical term is essential, briefly explain it in plain language using context from the article.
 - Keep it informative and engaging. If the first draft would be shorter, add concrete factual detail from the article until it reaches at least {settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS} words. Never exceed {settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words.
@@ -1085,6 +1086,12 @@ Classification rules:
 Summary rules:
 - If tech_relevance is "none" OR is_mixed_roundup is true, set "summary" to null and "starters" to [].
 - Otherwise write a concise summary between {settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS} and {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words.
+- Write for smart everyday readers who like technology, not only developers, security analysts, or hardware enthusiasts.
+- Use clear, coherent, human language. Do not sound like a changelog, spec sheet, vulnerability database, package README, or release note.
+- Explain what the video is about, who is affected, and why it matters.
+- If the video is a roundup but still tech-relevant, summarize the main/headline topic first and do not list every secondary item.
+- Avoid copying dense strings of model numbers, benchmark specs, version numbers, package names, CVE IDs, CLI flags, filenames, or acronyms unless essential to the story.
+- If a technical term is essential, briefly explain it in plain language using context from the description.
 - If the first draft would be shorter, add concrete factual detail from the description until it reaches at least {settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS} words.
 - Never exceed {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words.
 - Remove channel promotion, "link in bio", or "subscribe" text.
@@ -1108,8 +1115,9 @@ Return JSON only. Do not wrap it in markdown.
             ChatMessage(
                 role="system",
                 content=(
-                    "You are a careful tech-news editor. "
-                    "Classify how relevant a video is to a tech-news feed and summarize it only when appropriate."
+                    "You are a careful Blips tech-news editor. Classify how relevant "
+                    "a video is to a tech-news feed and, when appropriate, write "
+                    "accurate plain-English summaries for curious human readers."
                 ),
             ),
             ChatMessage(role="user", content=prompt),
