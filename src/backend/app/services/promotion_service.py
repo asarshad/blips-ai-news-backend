@@ -958,6 +958,60 @@ class PromotionService:
         self.db = db
         self.config = config
 
+    def _is_confirmed_major_news_article(self, item: ContentItem) -> bool:
+        """Return True for confirmed major-news rows."""
+        return (
+            getattr(item, "type", None) == ContentType.ARTICLE
+            and bool(getattr(item, "is_major_tech_news", False))
+            and not bool(getattr(item, "is_suppressed", False))
+        )
+
+    def _is_confirmed_major_news_candidate(self, item: ContentItem) -> bool:
+        """Return True for major-news rows that must bypass normal promotion ranking."""
+        return (
+            self._is_confirmed_major_news_article(item)
+            and getattr(item, "curation_status", None) == ContentStatus.CANDIDATE
+        )
+
+    def _mark_forced_major_news_promotion(self, item: ContentItem) -> None:
+        marker = "forced=confirmed_major_news"
+        reason = str(getattr(item, "promotion_reason", None) or "").strip()
+        if marker not in reason:
+            item.promotion_reason = f"{reason}|{marker}" if reason else marker
+
+    def _force_promote_confirmed_major_news(self, item: ContentItem) -> None:
+        """Promote confirmed major-news articles deterministically.
+
+        Major news is a product-critical fast path. Once the classifier has
+        confirmed the flag, ordinary top-N, score-floor, dedup, and rolling
+        candidate-window mechanics should not be able to strand the row in
+        awaiting_promotion.
+        """
+        item.curation_status = ContentStatus.PROMOTED
+        item.promotion_score = max(float(getattr(item, "promotion_score", None) or 0.0), 1.0)
+        self._mark_forced_major_news_promotion(item)
+        sync_content_readiness(self.db, item)
+
+    def promote_confirmed_major_news_candidates(self, *, limit: int = 100) -> list[int]:
+        """Repair confirmed major-news candidates stranded before promotion."""
+        items = (
+            self.db.query(ContentItem)
+            .filter(
+                ContentItem.type == ContentType.ARTICLE,
+                ContentItem.curation_status == ContentStatus.CANDIDATE,
+                ContentItem.is_major_tech_news.is_(True),
+                ContentItem.is_suppressed.is_(False),
+            )
+            .order_by(ContentItem.published_at.desc(), ContentItem.id.desc())
+            .limit(max(1, int(limit)))
+            .all()
+        )
+        promoted_ids: list[int] = []
+        for item in items:
+            self._force_promote_confirmed_major_news(item)
+            promoted_ids.append(int(item.id))
+        return promoted_ids
+
     # ── Cluster catalogue ─────────────────────────────────────────────────
 
     def _get_cluster_sizes(self, hours_back: int) -> Dict[str, int]:
@@ -1320,6 +1374,16 @@ class PromotionService:
         """Evaluate promotion for one candidate while preserving cohort ranking semantics."""
         content_type = item.type
         config = self._config_for_type(content_type)
+        if self._is_confirmed_major_news_candidate(item):
+            self._force_promote_confirmed_major_news(item)
+            return {
+                "promoted": True,
+                "candidate_count": None,
+                "candidate_rank": 1,
+                "reason": "forced_confirmed_major_news",
+                "promotion_score": getattr(item, "promotion_score", None),
+            }
+
         cluster_sizes = self._get_cluster_sizes(hours_back=config.window_hours * 2)
         story_topic_counts, story_entity_counts = self._get_recent_story_context()
         candidates = self._get_candidates(content_type)
@@ -1476,12 +1540,19 @@ class PromotionService:
                 story_topic_counts=story_topic_counts,
                 story_entity_counts=story_entity_counts,
             )
+            if self._is_confirmed_major_news_article(item):
+                item.promotion_score = max(
+                    float(getattr(item, "promotion_score", None) or 0.0),
+                    1.0,
+                )
             item.promotion_reason = self._promotion_reason(
                 item,
                 config,
                 story_topic_counts=story_topic_counts,
                 story_entity_counts=story_entity_counts,
             )
+            if self._is_confirmed_major_news_article(item):
+                self._mark_forced_major_news_promotion(item)
             source_profile = source_profiles.get(getattr(item, "channel_id", None) or "")
             channel_config = _channel_config_for_item(item)
             block_reason = classify_promotion_block(
@@ -1500,7 +1571,11 @@ class PromotionService:
                     )
                 else:
                     item.promotion_reason = f"{item.promotion_reason}|blocked={block_reason}"
-            if block_reason in demote_reasons and not self._has_editorial_override(item):
+            if (
+                block_reason in demote_reasons
+                and not self._has_editorial_override(item)
+                and not self._is_confirmed_major_news_article(item)
+            ):
                 item.curation_status = ContentStatus.CANDIDATE
             sync_content_readiness(self.db, item)
             count += 1
@@ -1608,6 +1683,17 @@ class PromotionService:
         skipped_dedup = 0
         min_score = self._min_promotion_score(content_type, config)
 
+        forced_major_ids: set[int] = set()
+        if content_type == ContentType.ARTICLE:
+            for scored_candidate in scored:
+                item = scored_candidate.item
+                if not self._is_confirmed_major_news_candidate(item):
+                    continue
+                self._force_promote_confirmed_major_news(item)
+                promoted += 1
+                promoted_ids.append(int(item.id))
+                forced_major_ids.add(int(item.id))
+
         # Pre-load recently-promoted articles for cross-source and semantic
         # dedup checks. Both P2-1 (Jaccard) and P6-4 (entity-Jaccard) share
         # the same seen_pairs data structure.
@@ -1621,6 +1707,8 @@ class PromotionService:
         for scored_candidate in scored:
             s = scored_candidate.score
             item = scored_candidate.item
+            if int(item.id) in forced_major_ids:
+                continue
             if promoted >= config.top_n_per_type:
                 break
             if s < min_score:

@@ -11,6 +11,7 @@ from app.ingestion.checkpoint_worker import _queue_followup_events_for_inserted_
 from app.models.content import ContentItem, ContentStatus, ContentType
 from app.models.content_event import ContentEventOutbox
 from app.services import content_promotion_service
+from app.services.promotion_service import PromotionConfig, PromotionService
 
 
 @compiles(JSONB, "sqlite")
@@ -56,7 +57,9 @@ def test_queue_content_promotion_request_dedupes_pending_rows():
     assert first is not None
     assert second is None
     assert len(rows) == 1
-    assert rows[0].event_type == content_promotion_service.CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE
+    assert (
+        rows[0].event_type == content_promotion_service.CONTENT_PROMOTION_EVAL_REQUESTED_EVENT_TYPE
+    )
 
 
 def test_queue_content_promotion_request_applies_initial_delay(monkeypatch):
@@ -163,6 +166,125 @@ def test_process_content_promotion_request_runs_targeted_promotion(monkeypatch):
     assert result["changed"] is True
     assert result["promoted"] is True
     assert refreshed.curation_status == ContentStatus.PROMOTED
+
+
+def test_confirmed_major_news_promotes_even_outside_candidate_window():
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/major",
+        canonical_url="https://example.com/major",
+        published_at=_recent_dt(hours_ago=24 * 20),
+        title="Confirmed major tech story",
+        curation_status=ContentStatus.CANDIDATE,
+        readiness_status="PENDING",
+        readiness_reason="awaiting_promotion",
+        is_major_tech_news=True,
+        promotion_score=0.01,
+        created_at=_recent_dt(hours_ago=24 * 20),
+        updated_at=_recent_dt(hours_ago=24 * 20),
+    )
+    db.add(item)
+    db.commit()
+
+    result = PromotionService(db).evaluate_candidate_item(item)
+    db.commit()
+
+    refreshed = db.get(ContentItem, item.id)
+
+    assert result["promoted"] is True
+    assert result["reason"] == "forced_confirmed_major_news"
+    assert refreshed.curation_status == ContentStatus.PROMOTED
+    assert refreshed.promotion_score == 1.0
+    assert refreshed.readiness_reason != "awaiting_promotion"
+
+
+def test_confirmed_major_news_repair_promotes_stranded_candidates():
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    major = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/major-repair",
+        canonical_url="https://example.com/major-repair",
+        published_at=_recent_dt(hours_ago=24 * 20),
+        title="Stranded major tech story",
+        curation_status=ContentStatus.CANDIDATE,
+        readiness_status="PENDING",
+        readiness_reason="awaiting_promotion",
+        is_major_tech_news=True,
+        created_at=_recent_dt(hours_ago=24 * 20),
+        updated_at=_recent_dt(hours_ago=24 * 20),
+    )
+    ordinary = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/ordinary",
+        canonical_url="https://example.com/ordinary",
+        published_at=_recent_dt(hours_ago=24 * 20),
+        title="Ordinary candidate",
+        curation_status=ContentStatus.CANDIDATE,
+        readiness_status="PENDING",
+        readiness_reason="awaiting_promotion",
+        is_major_tech_news=False,
+        created_at=_recent_dt(hours_ago=24 * 20),
+        updated_at=_recent_dt(hours_ago=24 * 20),
+    )
+    db.add_all([major, ordinary])
+    db.commit()
+
+    promoted_ids = PromotionService(db).promote_confirmed_major_news_candidates()
+    db.commit()
+
+    assert promoted_ids == [major.id]
+    assert db.get(ContentItem, major.id).curation_status == ContentStatus.PROMOTED
+    assert db.get(ContentItem, ordinary.id).curation_status == ContentStatus.CANDIDATE
+
+
+def test_confirmed_major_news_batch_promotion_bypasses_top_n_and_score_floor():
+    engine = create_engine("sqlite:///:memory:")
+    _create_test_tables(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    item = ContentItem(
+        type=ContentType.ARTICLE,
+        source="Example",
+        source_url="https://example.com/major-batch",
+        canonical_url="https://example.com/major-batch",
+        published_at=_recent_dt(hours_ago=1),
+        title="Batch major tech story",
+        curation_status=ContentStatus.CANDIDATE,
+        readiness_status="PENDING",
+        readiness_reason="awaiting_promotion",
+        is_major_tech_news=True,
+        promotion_score=0.01,
+        created_at=_recent_dt(hours_ago=1),
+        updated_at=_recent_dt(hours_ago=1),
+    )
+    db.add(item)
+    db.commit()
+
+    result = PromotionService(
+        db,
+        config=PromotionConfig(min_score=2.0, top_n_per_type=0),
+    ).run_promotion_job(content_types=(ContentType.ARTICLE,))
+    db.commit()
+
+    refreshed = db.get(ContentItem, item.id)
+
+    assert result.promoted_count == 1
+    assert result.promoted_ids == [item.id]
+    assert refreshed.curation_status == ContentStatus.PROMOTED
+    assert "forced=confirmed_major_news" in refreshed.promotion_reason
 
 
 def test_checkpoint_followup_events_always_queue_promotion_for_candidates():

@@ -91,6 +91,7 @@ def _task_catalog() -> list[LaneTask]:
     from app.scheduler.tasks_major_news import (
         run_major_news_classify_sweep_job,
         run_major_news_probe_job,
+        run_major_news_promotion_repair_job,
     )
     from app.scheduler.tasks_promotion import run_promotion_job
     from app.scheduler.tasks_signals import run_signal_ingestion_job
@@ -101,6 +102,12 @@ def _task_catalog() -> list[LaneTask]:
         LaneTask("event_backfill", _run_event_backfill, event_backfill_minutes * 60, now + 15),
         LaneTask("promotion_sweep", run_promotion_job, 5 * 60, now + 2 * 60),
         LaneTask("major_news_probe", run_major_news_probe_job, major_news_minutes * 60, now + 90),
+        LaneTask(
+            "major_news_promotion_repair",
+            run_major_news_promotion_repair_job,
+            15 * 60,
+            now + 3 * 60,
+        ),
         LaneTask("major_news_sweep", run_major_news_classify_sweep_job, 30 * 60, now + 8 * 60),
         LaneTask("scoring", run_scoring_job, 60 * 60, now + 5 * 60),
         LaneTask("signal_ingestion", run_signal_ingestion_job, signal_minutes * 60, now + 6 * 60),
@@ -160,7 +167,12 @@ def _lane_recently_running(lane_name: str, *, max_age_seconds: int = 180) -> boo
 
 def _defer_seconds_for_task(task: LaneTask) -> int | None:
     if memory_over_soft_limit():
-        if task.name in {"major_news_probe", "major_news_sweep", "strategic_content_health"}:
+        if task.name in {
+            "major_news_probe",
+            "major_news_promotion_repair",
+            "major_news_sweep",
+            "strategic_content_health",
+        }:
             logger.info(
                 "[maintenance_lane] allowing lightweight task=%s during worker memory pressure "
                 "worker_memory_mb=%s soft_limit_mb=%s",

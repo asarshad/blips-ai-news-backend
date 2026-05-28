@@ -441,6 +441,39 @@ def run_major_news_classify_sweep_job() -> dict[str, Any]:
         db.close()
 
 
+def run_major_news_promotion_repair_job() -> dict[str, Any]:
+    """Promote confirmed major-news candidates that missed the normal ranking window."""
+    limit = _int_env("MAJOR_NEWS_PROMOTION_REPAIR_LIMIT", 100)
+    db = SessionLocal()
+    try:
+        from app.services.promotion_service import PromotionService
+
+        promoted_ids = PromotionService(db).promote_confirmed_major_news_candidates(
+            limit=limit,
+        )
+        db.commit()
+        result = {
+            "status": "ok",
+            "promoted": len(promoted_ids),
+            "promoted_ids": promoted_ids[:20],
+            "limit": limit,
+        }
+        logger.info("[major_news_promotion_repair] %s", result)
+        return result
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        result = {
+            "status": "error",
+            "promoted": 0,
+            "error": str(exc)[:200],
+            "limit": limit,
+        }
+        logger.warning("[major_news_promotion_repair] %s", result)
+        return result
+    finally:
+        db.close()
+
+
 def run_major_news_probe_job() -> dict[str, Any]:
     """Probe validated major-news feeds within strict feed/item/time bounds."""
     max_seconds = _int_env("MAJOR_NEWS_PROBE_MAX_SECONDS", 60)
