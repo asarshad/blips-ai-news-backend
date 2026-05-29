@@ -877,7 +877,7 @@ Perform ALL three tasks below in a single response.
 
 Task 1: Write a concise summary of this tech article in between {settings.ARTICLE_SUMMARY_MIN_OUTPUT_WORDS} and {settings.ARTICLE_SUMMARY_MAX_OUTPUT_WORDS} words.
 - Write for smart everyday readers who like technology, not only developers or security analysts.
-- Use clear, coherent, human language. Do not sound like a changelog, vulnerability database, package README, or release note.
+- Use clear, coherent, human language. Do not sound like a changelog, vulnerability database, package README, or release note. Do not use em dashes (—); use a comma, period, or reword instead.
 - Explain what happened, who is affected, and why it matters.
 - If the article is a roundup, summarize the headline or primary story first and do not list every secondary item.
 - Avoid copying dense strings of package names, version numbers, CLI flags, filenames, CVE IDs, or acronyms unless essential to the story.
@@ -1087,7 +1087,7 @@ Summary rules:
 - If tech_relevance is "none" OR is_mixed_roundup is true, set "summary" to null and "starters" to [].
 - Otherwise write a concise summary between {settings.VIDEO_SUMMARY_MIN_OUTPUT_WORDS} and {settings.VIDEO_SUMMARY_MAX_OUTPUT_WORDS} words.
 - Write for smart everyday readers who like technology, not only developers, security analysts, or hardware enthusiasts.
-- Use clear, coherent, human language. Do not sound like a changelog, spec sheet, vulnerability database, package README, or release note.
+- Use clear, coherent, human language. Do not sound like a changelog, spec sheet, vulnerability database, package README, or release note. Do not use em dashes (—); use a comma, period, or reword instead.
 - Explain what the video is about, who is affected, and why it matters.
 - If the video is a roundup but still tech-relevant, summarize the main/headline topic first and do not list every secondary item.
 - Avoid copying dense strings of model numbers, benchmark specs, version numbers, package names, CVE IDs, CLI flags, filenames, or acronyms unless essential to the story.
