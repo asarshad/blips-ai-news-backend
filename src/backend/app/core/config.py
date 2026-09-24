@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     STRATEGIC_ALERT_PUSH_STALL_HOURS: int = 6
 
     # Discord notifications
-    DISCORD_REPORTS_WEBHOOK_URL: str = "https://discord.com/api/webhooks/REDACTED"
+    DISCORD_REPORTS_WEBHOOK_URL: str = ""
 
     # Database
     DATABASE_URL: str = "postgresql://postgres:postgres@db:5432/blips"
